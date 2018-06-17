@@ -1,0 +1,19 @@
+{
+  "name": "re64",
+  "version": "1.0.0",
+  "description": "Reverse Engineering for Commodore 64",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lambdafu/re64.git"
+  },
+  "author": "Marcus Brinkmann",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/lambdafu/re64/issues"
+  },
+  "homepage": "https://github.com/lambdafu/re64#readme"
+}
