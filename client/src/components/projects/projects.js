@@ -1,4 +1,5 @@
 import React, { Component } from 'react';
+import { Card, Col, Row } from 'antd';
 import './projects.css';
 
 class Projects extends Component {
@@ -19,9 +20,13 @@ class Projects extends Component {
     return (
       <div>
             <h2>Projects</h2>
-            <ul>
-            {this.state.projects.map(project => <li key={project.id}>{project.user}/{project.name} {project.title} {project.description}</li>)}
-            </ul>
+<Row gutter={16}>
+            {this.state.projects.map(project =>
+                                     <Col key={project.id} span={8}>
+                                     <Card title={project.title} bordered={true}>{project.user}/{project.name} {project.description}</Card>
+                                     </Col>
+)}
+    </Row>
       </div>
     );
   }
