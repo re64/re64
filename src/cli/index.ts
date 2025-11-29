@@ -7,6 +7,9 @@ import {
   MemoryMap,
   BytesLayer,
   FileLayer,
+  findFile,
+  extractFile,
+  listDirectory,
 } from "../core/index.js";
 import { hexDump } from "./hex.js";
 
@@ -56,13 +59,38 @@ function parseHexBytes(hex: string): Uint8Array {
   return new Uint8Array(bytes);
 }
 
-/** Load file and return start address + data */
+/** Load file and return start address + data. Supports d64:filename syntax. */
 function loadFile(
   path: string,
   explicitStart?: number
 ): { start: number; data: Uint8Array } {
-  const rawData = readFileSync(path);
-  const fullData = new Uint8Array(rawData);
+  let fullData: Uint8Array;
+
+  if (path.includes(":")) {
+    // Check if it's a d64 disk image with embedded filename
+    const colonIndex = path.lastIndexOf(":");
+    const possibleD64 = path.substring(0, colonIndex);
+    const innerFilename = path.substring(colonIndex + 1);
+
+    // Only treat as d64:filename if the part before : looks like a d64 file
+    if (possibleD64.toLowerCase().endsWith(".d64")) {
+      const diskImage = new Uint8Array(readFileSync(possibleD64));
+      const entry = findFile(diskImage, innerFilename);
+      if (!entry) {
+        const entries = listDirectory(diskImage);
+        const available = entries.map((e) => e.filename).join(", ");
+        throw new Error(
+          `File "${innerFilename}" not found in ${possibleD64}. Available: ${available}`
+        );
+      }
+      fullData = extractFile(diskImage, entry);
+    } else {
+      // Not a d64, treat the whole thing as a path (might have : on Windows)
+      fullData = new Uint8Array(readFileSync(path));
+    }
+  } else {
+    fullData = new Uint8Array(readFileSync(path));
+  }
 
   if (explicitStart !== undefined) {
     // Raw file at explicit address
@@ -93,6 +121,7 @@ program
 
 const layerHelp = `Add a memory layer (later layers shadow earlier ones):
   <file.prg>                - PRG file (address from header)
+  <image.d64:name>          - PRG from D64 disk image
   <addr>,<file>             - raw file at address
   <range>,<file>            - raw file repeated to fill range
   <addr>,#<hex>             - inline bytes
