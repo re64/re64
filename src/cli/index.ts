@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "node:fs";
 import { Command } from "commander";
 import {
   VERSION,
   MemoryMap,
   BytesLayer,
+  FileLayer,
 } from "../core/index.js";
 import { hexDump } from "./hex.js";
 
@@ -38,6 +40,44 @@ function parseRange(value: string): Range {
   throw new Error(`Invalid range: ${value} (use start+length or start:end)`);
 }
 
+/** Check if string looks like a range (contains + or :) */
+function isRange(value: string): boolean {
+  return value.includes("+") || value.includes(":");
+}
+
+/** Check if string looks like an address (starts with $ or 0x or is numeric) */
+function isAddress(value: string): boolean {
+  return /^(\$|0x)?[0-9a-fA-F]+$/.test(value);
+}
+
+/** Parse hex string to bytes */
+function parseHexBytes(hex: string): Uint8Array {
+  const bytes = hex.match(/.{2}/g)?.map((b) => parseInt(b, 16)) ?? [];
+  return new Uint8Array(bytes);
+}
+
+/** Load file and return start address + data */
+function loadFile(
+  path: string,
+  explicitStart?: number
+): { start: number; data: Uint8Array } {
+  const rawData = readFileSync(path);
+  const fullData = new Uint8Array(rawData);
+
+  if (explicitStart !== undefined) {
+    // Raw file at explicit address
+    return { start: explicitStart, data: fullData };
+  }
+
+  // PRG file: first two bytes are load address (little-endian)
+  if (fullData.length < 3) {
+    throw new Error(`File too small to be a PRG: ${path}`);
+  }
+  const start = fullData[0] | (fullData[1] << 8);
+  const data = fullData.slice(2);
+  return { start, data };
+}
+
 const program = new Command();
 
 program
@@ -52,9 +92,11 @@ program
   });
 
 const layerHelp = `Add a memory layer (later layers shadow earlier ones):
-  bytes,<start>,<hex>         - exact bytes
-  bytes,<range>,<hex>         - bytes repeated/truncated to fill range
-                               (<range>: start+len or start:end)`;
+  <file.prg>                - PRG file (address from header)
+  <addr>,<file>             - raw file at address
+  <range>,<file>            - raw file repeated to fill range
+  <addr>,#<hex>             - inline bytes
+  <range>,#<hex>            - inline bytes repeated to fill range`;
 
 program
   .command("dump")
@@ -63,33 +105,55 @@ program
   .option("-r, --range <range>", "Range to dump (start+len or start:end, default: all layers)")
   .action((options) => {
     const map = new MemoryMap();
-    const counts: Record<string, number> = {};
+    let fileCount = 0;
+    let bytesCount = 0;
 
     if (options.layer) {
       for (const spec of options.layer) {
-        const [type, ...rest] = spec.split(",");
-        counts[type] = (counts[type] ?? 0) + 1;
-        const name = `${type}${counts[type]}`;
+        const parts = spec.split(",");
 
-        switch (type) {
-          case "bytes": {
-            const [addrOrRange, ...hexParts] = rest;
-            const hexBytes = hexParts.join("");
-            const bytes = new Uint8Array(
-              hexBytes.match(/.{2}/g)?.map((b: string) => parseInt(b, 16)) ?? []
-            );
+        if (parts.length === 1) {
+          // Just a file path - PRG file
+          const path = parts[0];
+          fileCount++;
+          const { start, data } = loadFile(path);
+          map.addLayer(new FileLayer(`file${fileCount}`, path, start, data));
+        } else if (parts.length >= 2) {
+          const [addrOrRange, source] = parts;
 
-            // Check if it's a range (has + or :) or just a start address
-            if (addrOrRange.includes("+") || addrOrRange.includes(":")) {
+          if (source.startsWith("#")) {
+            // Inline bytes
+            bytesCount++;
+            const hex = source.slice(1) + parts.slice(2).join("");
+            const bytes = parseHexBytes(hex);
+
+            if (isRange(addrOrRange)) {
               const range = parseRange(addrOrRange);
-              map.addLayer(new BytesLayer(name, range.start, bytes, range.length));
+              map.addLayer(
+                new BytesLayer(`bytes${bytesCount}`, range.start, bytes, range.length)
+              );
             } else {
-              map.addLayer(new BytesLayer(name, parseAddress(addrOrRange), bytes));
+              map.addLayer(
+                new BytesLayer(`bytes${bytesCount}`, parseAddress(addrOrRange), bytes)
+              );
             }
-            break;
+          } else {
+            // File at address or range
+            fileCount++;
+            const path = source;
+
+            if (isRange(addrOrRange)) {
+              const range = parseRange(addrOrRange);
+              const { data } = loadFile(path, range.start);
+              map.addLayer(
+                new FileLayer(`file${fileCount}`, path, range.start, data, range.length)
+              );
+            } else {
+              const start = parseAddress(addrOrRange);
+              const { data } = loadFile(path, start);
+              map.addLayer(new FileLayer(`file${fileCount}`, path, start, data));
+            }
           }
-          default:
-            throw new Error(`Unknown layer type: ${type}`);
         }
       }
     }
