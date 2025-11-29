@@ -13,19 +13,32 @@ export interface Layer {
   readByte(address: number): number | undefined;
 }
 
-export abstract class BaseLayer implements Layer {
+/**
+ * A layer backed by a byte pattern that can be repeated to fill a range.
+ * If length is not specified, the layer is exactly the size of the data.
+ * If length is specified, the data is repeated (or truncated) to fill.
+ */
+export class BytesLayer implements Layer {
+  public readonly length: number;
+
   constructor(
     public readonly name: string,
     public readonly start: number,
-    public readonly length: number
+    public readonly data: Uint8Array,
+    length?: number
   ) {
-    if (length <= 0) {
+    this.length = length ?? data.length;
+
+    if (data.length === 0) {
+      throw new Error("Data must not be empty");
+    }
+    if (this.length <= 0) {
       throw new Error("Layer length must be positive");
     }
     if (start < 0 || start > 0xffff) {
       throw new Error("Start address must be in range 0x0000-0xFFFF");
     }
-    if (start + length > 0x10000) {
+    if (start + this.length > 0x10000) {
       throw new Error("Layer exceeds address space");
     }
   }
@@ -34,44 +47,11 @@ export abstract class BaseLayer implements Layer {
     return this.start + this.length;
   }
 
-  contains(address: number): boolean {
-    return address >= this.start && address < this.end;
-  }
-
-  abstract readByte(address: number): number | undefined;
-}
-
-export class ConstantLayer extends BaseLayer {
-  constructor(
-    name: string,
-    start: number,
-    length: number,
-    public readonly value: number
-  ) {
-    super(name, start, length);
-    if (value < 0 || value > 0xff) {
-      throw new Error("Constant value must be in range 0x00-0xFF");
-    }
-  }
-
   readByte(address: number): number | undefined {
-    return this.contains(address) ? this.value : undefined;
-  }
-}
-
-export class ArrayLayer extends BaseLayer {
-  constructor(
-    name: string,
-    start: number,
-    public readonly data: Uint8Array
-  ) {
-    super(name, start, data.length);
-  }
-
-  readByte(address: number): number | undefined {
-    if (!this.contains(address)) {
+    if (address < this.start || address >= this.end) {
       return undefined;
     }
-    return this.data[address - this.start];
+    const offset = address - this.start;
+    return this.data[offset % this.data.length];
   }
 }

@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { MemoryMap } from "./memory-map.js";
-import { ConstantLayer, ArrayLayer } from "./layer.js";
+import { BytesLayer } from "./layer.js";
+
+/** Helper to create a constant-fill layer */
+function constLayer(name: string, start: number, length: number, value: number) {
+  return new BytesLayer(name, start, new Uint8Array([value]), length);
+}
 
 describe("MemoryMap", () => {
   describe("layer management", () => {
@@ -12,8 +17,8 @@ describe("MemoryMap", () => {
 
     it("adds layers to top by default", () => {
       const map = new MemoryMap();
-      const layer1 = new ConstantLayer("bottom", 0, 0x100, 0x00);
-      const layer2 = new ConstantLayer("top", 0, 0x100, 0xff);
+      const layer1 = constLayer("bottom", 0, 0x100, 0x00);
+      const layer2 = constLayer("top", 0, 0x100, 0xff);
 
       map.addLayer(layer1);
       map.addLayer(layer2);
@@ -25,9 +30,9 @@ describe("MemoryMap", () => {
 
     it("adds layers at specific index", () => {
       const map = new MemoryMap();
-      const layer1 = new ConstantLayer("first", 0, 0x100, 0x01);
-      const layer2 = new ConstantLayer("second", 0, 0x100, 0x02);
-      const layer3 = new ConstantLayer("middle", 0, 0x100, 0x03);
+      const layer1 = constLayer("first", 0, 0x100, 0x01);
+      const layer2 = constLayer("second", 0, 0x100, 0x02);
+      const layer3 = constLayer("middle", 0, 0x100, 0x03);
 
       map.addLayer(layer1);
       map.addLayer(layer2);
@@ -40,8 +45,8 @@ describe("MemoryMap", () => {
 
     it("removes layers by index", () => {
       const map = new MemoryMap();
-      const layer1 = new ConstantLayer("a", 0, 0x100, 0x01);
-      const layer2 = new ConstantLayer("b", 0, 0x100, 0x02);
+      const layer1 = constLayer("a", 0, 0x100, 0x01);
+      const layer2 = constLayer("b", 0, 0x100, 0x02);
 
       map.addLayer(layer1);
       map.addLayer(layer2);
@@ -60,9 +65,9 @@ describe("MemoryMap", () => {
 
     it("moves layers", () => {
       const map = new MemoryMap();
-      const layer1 = new ConstantLayer("a", 0, 0x100, 0x01);
-      const layer2 = new ConstantLayer("b", 0, 0x100, 0x02);
-      const layer3 = new ConstantLayer("c", 0, 0x100, 0x03);
+      const layer1 = constLayer("a", 0, 0x100, 0x01);
+      const layer2 = constLayer("b", 0, 0x100, 0x02);
+      const layer3 = constLayer("c", 0, 0x100, 0x03);
 
       map.addLayer(layer1);
       map.addLayer(layer2);
@@ -87,7 +92,7 @@ describe("MemoryMap", () => {
     it("reads from single layer", () => {
       const map = new MemoryMap();
       const data = new Uint8Array([0xaa, 0xbb, 0xcc]);
-      map.addLayer(new ArrayLayer("data", 0x1000, data));
+      map.addLayer(new BytesLayer("data", 0x1000, data));
 
       expect(map.readByte(0x1000)).toBe(0xaa);
       expect(map.readByte(0x1001)).toBe(0xbb);
@@ -99,10 +104,10 @@ describe("MemoryMap", () => {
       const map = new MemoryMap();
 
       // bottom layer: all zeros at $1000-$10FF
-      map.addLayer(new ConstantLayer("bottom", 0x1000, 0x100, 0x00));
+      map.addLayer(constLayer("bottom", 0x1000, 0x100, 0x00));
 
       // top layer: all ones at $1000-$10FF (same range)
-      map.addLayer(new ConstantLayer("top", 0x1000, 0x100, 0xff));
+      map.addLayer(constLayer("top", 0x1000, 0x100, 0xff));
 
       expect(map.readByte(0x1000)).toBe(0xff);
       expect(map.readByte(0x1050)).toBe(0xff);
@@ -112,10 +117,10 @@ describe("MemoryMap", () => {
       const map = new MemoryMap();
 
       // bottom layer: $1000-$1100
-      map.addLayer(new ConstantLayer("bottom", 0x1000, 0x100, 0x00));
+      map.addLayer(constLayer("bottom", 0x1000, 0x100, 0x00));
 
       // top layer: $1080-$1180 (overlaps second half)
-      map.addLayer(new ConstantLayer("top", 0x1080, 0x100, 0xff));
+      map.addLayer(constLayer("top", 0x1080, 0x100, 0xff));
 
       // first half: from bottom layer
       expect(map.readByte(0x1000)).toBe(0x00);
@@ -137,10 +142,10 @@ describe("MemoryMap", () => {
       const map = new MemoryMap();
 
       // large bottom layer
-      map.addLayer(new ConstantLayer("big", 0x1000, 0x1000, 0xaa));
+      map.addLayer(constLayer("big", 0x1000, 0x1000, 0xaa));
 
       // small top layer in the middle
-      map.addLayer(new ConstantLayer("small", 0x1800, 0x100, 0xbb));
+      map.addLayer(constLayer("small", 0x1800, 0x100, 0xbb));
 
       expect(map.readByte(0x1000)).toBe(0xaa);
       expect(map.readByte(0x17ff)).toBe(0xaa);
@@ -152,8 +157,8 @@ describe("MemoryMap", () => {
 
     it("readByteWithSource returns layer info", () => {
       const map = new MemoryMap();
-      const bottom = new ConstantLayer("bottom", 0x1000, 0x100, 0x00);
-      const top = new ConstantLayer("top", 0x1080, 0x80, 0xff);
+      const bottom = constLayer("bottom", 0x1000, 0x100, 0x00);
+      const top = constLayer("top", 0x1080, 0x80, 0xff);
 
       map.addLayer(bottom);
       map.addLayer(top);
@@ -172,7 +177,7 @@ describe("MemoryMap", () => {
     it("readBytes returns array of values", () => {
       const map = new MemoryMap();
       const data = new Uint8Array([0x01, 0x02, 0x03]);
-      map.addLayer(new ArrayLayer("data", 0x1000, data));
+      map.addLayer(new BytesLayer("data", 0x1000, data));
 
       expect(map.readBytes(0x1000, 3)).toEqual([0x01, 0x02, 0x03]);
       expect(map.readBytes(0x0ffe, 5)).toEqual([
@@ -188,8 +193,8 @@ describe("MemoryMap", () => {
   describe("layer reordering affects shadowing", () => {
     it("moving layer changes visible bytes", () => {
       const map = new MemoryMap();
-      const zeros = new ConstantLayer("zeros", 0x1000, 0x100, 0x00);
-      const ones = new ConstantLayer("ones", 0x1000, 0x100, 0xff);
+      const zeros = constLayer("zeros", 0x1000, 0x100, 0x00);
+      const ones = constLayer("ones", 0x1000, 0x100, 0xff);
 
       map.addLayer(zeros);
       map.addLayer(ones);

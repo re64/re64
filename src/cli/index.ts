@@ -4,8 +4,7 @@ import { Command } from "commander";
 import {
   VERSION,
   MemoryMap,
-  ConstantLayer,
-  ArrayLayer,
+  BytesLayer,
 } from "../core/index.js";
 import { hexDump } from "./hex.js";
 
@@ -17,6 +16,26 @@ function parseAddress(value: string): number {
     throw new Error(`Invalid address: ${value}`);
   }
   return num;
+}
+
+interface Range {
+  start: number;
+  length: number;
+}
+
+/** Parse range: start+length or start:end */
+function parseRange(value: string): Range {
+  if (value.includes("+")) {
+    const [startStr, lengthStr] = value.split("+");
+    return { start: parseAddress(startStr), length: parseAddress(lengthStr) };
+  }
+  if (value.includes(":")) {
+    const [startStr, endStr] = value.split(":");
+    const start = parseAddress(startStr);
+    const end = parseAddress(endStr);
+    return { start, length: end - start };
+  }
+  throw new Error(`Invalid range: ${value} (use start+length or start:end)`);
 }
 
 const program = new Command();
@@ -32,50 +51,65 @@ program
     console.log(VERSION);
   });
 
+const layerHelp = `Add a memory layer (later layers shadow earlier ones):
+  bytes,<start>,<hex>         - exact bytes
+  bytes,<range>,<hex>         - bytes repeated/truncated to fill range
+                               (<range>: start+len or start:end)`;
+
 program
   .command("dump")
   .description("Hex dump memory with defined layers")
-  .option("-c, --const <spec...>", "Add constant layer: name,start,length,value")
-  .option("-a, --array <spec...>", "Add array layer: name,start,hexbytes")
-  .option("-s, --start <addr>", "Start address for dump", "0")
-  .option("-l, --length <len>", "Number of bytes to dump", "256")
+  .option("-l, --layer <spec...>", layerHelp)
+  .option("-r, --range <range>", "Range to dump (start+len or start:end, default: all layers)")
   .action((options) => {
     const map = new MemoryMap();
+    const counts: Record<string, number> = {};
 
-    // Add constant layers (bottom to top as specified)
-    if (options.const) {
-      for (const spec of options.const) {
-        const [name, start, length, value] = spec.split(",");
-        map.addLayer(
-          new ConstantLayer(
-            name,
-            parseAddress(start),
-            parseAddress(length),
-            parseAddress(value)
-          ),
-          map.getLayerCount() // add at bottom
-        );
+    if (options.layer) {
+      for (const spec of options.layer) {
+        const [type, ...rest] = spec.split(",");
+        counts[type] = (counts[type] ?? 0) + 1;
+        const name = `${type}${counts[type]}`;
+
+        switch (type) {
+          case "bytes": {
+            const [addrOrRange, ...hexParts] = rest;
+            const hexBytes = hexParts.join("");
+            const bytes = new Uint8Array(
+              hexBytes.match(/.{2}/g)?.map((b: string) => parseInt(b, 16)) ?? []
+            );
+
+            // Check if it's a range (has + or :) or just a start address
+            if (addrOrRange.includes("+") || addrOrRange.includes(":")) {
+              const range = parseRange(addrOrRange);
+              map.addLayer(new BytesLayer(name, range.start, bytes, range.length));
+            } else {
+              map.addLayer(new BytesLayer(name, parseAddress(addrOrRange), bytes));
+            }
+            break;
+          }
+          default:
+            throw new Error(`Unknown layer type: ${type}`);
+        }
       }
     }
 
-    // Add array layers on top (later options shadow earlier ones)
-    if (options.array) {
-      for (const spec of options.array) {
-        const parts = spec.split(",");
-        const name = parts[0];
-        const start = parseAddress(parts[1]);
-        const hexBytes = parts.slice(2).join("");
-        const bytes = new Uint8Array(
-          hexBytes.match(/.{2}/g)?.map((b: string) => parseInt(b, 16)) ?? []
-        );
-        map.addLayer(new ArrayLayer(name, start, bytes)); // add at top
+    let start: number, length: number;
+    if (options.range) {
+      ({ start, length } = parseRange(options.range));
+    } else {
+      const layers = map.getLayers();
+      if (layers.length === 0) {
+        start = 0;
+        length = 0x100;
+      } else {
+        start = Math.min(...layers.map((l) => l.start));
+        const end = Math.max(...layers.map((l) => l.end));
+        length = end - start;
       }
     }
 
-    const startAddr = parseAddress(options.start);
-    const length = parseInt(options.length, 10);
-
-    console.log(hexDump(map, startAddr, length));
+    console.log(hexDump(map, start, length));
   });
 
 program.parse();
