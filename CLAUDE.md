@@ -32,3 +32,10 @@ Tests live alongside source files with `.test.ts` suffix. Use vitest.
 - Write unit tests for core functionality
 - Keep abstractions simple until complexity is needed
 - TypeScript strict mode is enabled
+
+## Documentation
+
+- Use TSDoc (`/** */`) for public interfaces and classes
+- Document "why", not "what" - let types speak for themselves
+- Keep comments minimal; add them for non-obvious design decisions or C64-specific knowledge
+- Don't restate what the code or types already say
