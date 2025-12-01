@@ -2,6 +2,7 @@ export { AddressingMode, FlowType, OpcodeInfo, OPCODES } from "./opcodes.js";
 export {
   Operand,
   Instruction,
+  LabelResolver,
   formatOperand,
   formatInstruction,
   getTargets,

@@ -34,8 +34,14 @@ export interface Instruction {
   flow: FlowType;
 }
 
-/** Format an operand as a string */
-export function formatOperand(operand: Operand): string {
+/** Label resolver function type */
+export type LabelResolver = (address: number) => string | undefined;
+
+/** Format an operand as a string, optionally resolving labels */
+export function formatOperand(operand: Operand, resolveLabel?: LabelResolver): string {
+  const resolve16 = (addr: number) => resolveLabel?.(addr) ?? `$${hex16(addr)}`;
+  const resolve8 = (addr: number) => resolveLabel?.(addr) ?? `$${hex8(addr)}`;
+
   switch (operand.type) {
     case "implied":
       return "";
@@ -44,32 +50,35 @@ export function formatOperand(operand: Operand): string {
     case "immediate":
       return `#$${hex8(operand.value)}`;
     case "zeroPage":
-      return `$${hex8(operand.address)}`;
+      return resolve8(operand.address);
     case "zeroPageX":
-      return `$${hex8(operand.address)},X`;
+      return `${resolve8(operand.address)},X`;
     case "zeroPageY":
-      return `$${hex8(operand.address)},Y`;
+      return `${resolve8(operand.address)},Y`;
     case "absolute":
-      return `$${hex16(operand.address)}`;
+      return resolve16(operand.address);
     case "absoluteX":
-      return `$${hex16(operand.address)},X`;
+      return `${resolve16(operand.address)},X`;
     case "absoluteY":
-      return `$${hex16(operand.address)},Y`;
+      return `${resolve16(operand.address)},Y`;
     case "indirect":
-      return `($${hex16(operand.address)})`;
+      return `(${resolve16(operand.address)})`;
     case "indexedIndirect":
-      return `($${hex8(operand.address)},X)`;
+      return `(${resolve8(operand.address)},X)`;
     case "indirectIndexed":
-      return `($${hex8(operand.address)}),Y`;
+      return `(${resolve8(operand.address)}),Y`;
     case "relative":
-      return `$${hex16(operand.target)}`;
+      return resolve16(operand.target);
   }
 }
 
 /** Format a full instruction as a string */
-export function formatInstruction(instr: Instruction): string {
+export function formatInstruction(
+  instr: Instruction,
+  resolveLabel?: LabelResolver
+): string {
   const prefix = instr.illegal ? "*" : " ";
-  const operandStr = formatOperand(instr.operand);
+  const operandStr = formatOperand(instr.operand, resolveLabel);
   if (operandStr) {
     return `${prefix}${instr.mnemonic} ${operandStr}`;
   }

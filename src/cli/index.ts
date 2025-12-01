@@ -1,18 +1,24 @@
 #!/usr/bin/env node
 
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { Command } from "commander";
 import {
   VERSION,
   MemoryMap,
   BytesLayer,
   FileLayer,
+  LabelIndex,
   findFile,
   extractFile,
   listDirectory,
   disassemble,
   formatInstruction,
   InstructionIndex,
+  Project,
+  parseProject,
+  parseProjectAddress,
+  projectLabelsToLabels,
 } from "../core/index.js";
 import { hexDump } from "./hex.js";
 
@@ -60,6 +66,65 @@ function isAddress(value: string): boolean {
 function parseHexBytes(hex: string): Uint8Array {
   const bytes = hex.match(/.{2}/g)?.map((b) => parseInt(b, 16)) ?? [];
   return new Uint8Array(bytes);
+}
+
+/** Result of loading layers */
+interface LoadResult {
+  map: MemoryMap;
+  prgEntries: number[];
+  userLabels: LabelIndex;
+}
+
+/** Load a project file and build the memory map */
+function loadProject(projectPath: string): { project: Project; result: LoadResult } {
+  const json = readFileSync(projectPath, "utf-8");
+  const project = parseProject(json);
+  const baseDir = dirname(projectPath);
+
+  const map = new MemoryMap();
+  const prgEntries: number[] = [];
+  const userLabels = new LabelIndex();
+  let layerCount = 0;
+
+  for (const layer of project.layers) {
+    layerCount++;
+    const name = `layer${layerCount}`;
+
+    if (layer.type === "prg") {
+      const fullPath = resolve(baseDir, layer.path!);
+      const { start, data, isPrg } = loadFile(fullPath, layer.address);
+      const suppressEntry = layer.noAutoEntry ?? false;
+      map.addLayer(new FileLayer(name, layer.path!, start, data, undefined, isPrg && !suppressEntry));
+      if (isPrg && !suppressEntry) {
+        prgEntries.push(start);
+      }
+    } else if (layer.type === "raw") {
+      const fullPath = resolve(baseDir, layer.path!);
+      const addr = parseProjectAddress(layer.address!);
+      const { data } = loadFile(fullPath, addr);
+      if (layer.length !== undefined) {
+        map.addLayer(new FileLayer(name, layer.path!, addr, data, layer.length));
+      } else {
+        map.addLayer(new FileLayer(name, layer.path!, addr, data));
+      }
+    } else if (layer.type === "bytes") {
+      const addr = parseProjectAddress(layer.address!);
+      const bytes = parseHexBytes(layer.bytes!);
+      if (layer.length !== undefined) {
+        map.addLayer(new BytesLayer(name, addr, bytes, layer.length));
+      } else {
+        map.addLayer(new BytesLayer(name, addr, bytes));
+      }
+    }
+  }
+
+  // Load user labels
+  if (project.labels) {
+    const labels = projectLabelsToLabels(project.labels);
+    userLabels.addLabels(labels);
+  }
+
+  return { project, result: { map, prgEntries, userLabels } };
 }
 
 /** Load file and return start address + data. Supports d64:filename syntax. */
@@ -211,69 +276,89 @@ program
 program
   .command("disasm")
   .description("Disassemble code from entry points")
+  .option("-p, --project <file>", "Project file (.re64)")
   .option("-l, --layer <spec...>", layerHelp)
   .option("-e, --entry <addr...>", "Entry point addresses (default: use PRG load addresses)")
   .option("-r, --range <range>", "Only show instructions in range")
   .action((options) => {
-    const map = new MemoryMap();
-    let fileCount = 0;
-    let bytesCount = 0;
-    const prgEntries: number[] = [];
+    let map: MemoryMap;
+    let prgEntries: number[] = [];
+    let userLabels = new LabelIndex();
+    let projectEntryPoints: number[] | undefined;
 
-    if (options.layer) {
-      for (const spec of options.layer) {
-        const parts = spec.split(",");
+    if (options.project) {
+      // Load from project file
+      const { project, result } = loadProject(options.project);
+      map = result.map;
+      prgEntries = result.prgEntries;
+      userLabels = result.userLabels;
 
-        if (parts.length === 1) {
-          const path = parts[0];
-          fileCount++;
-          const { start, data, isPrg } = loadFile(path);
-          map.addLayer(new FileLayer(`file${fileCount}`, path, start, data, undefined, isPrg));
-          if (isPrg) {
-            prgEntries.push(start);
-          }
-        } else if (parts.length >= 2) {
-          const [addrOrRange, source] = parts;
+      if (project.entryPoints) {
+        projectEntryPoints = project.entryPoints.map(parseProjectAddress);
+      }
+    } else {
+      // Load from command line options
+      map = new MemoryMap();
+      let fileCount = 0;
+      let bytesCount = 0;
 
-          if (source.startsWith("#")) {
-            bytesCount++;
-            const hex = source.slice(1) + parts.slice(2).join("");
-            const bytes = parseHexBytes(hex);
+      if (options.layer) {
+        for (const spec of options.layer) {
+          const parts = spec.split(",");
 
-            if (isRange(addrOrRange)) {
-              const range = parseRange(addrOrRange);
-              map.addLayer(
-                new BytesLayer(`bytes${bytesCount}`, range.start, bytes, range.length)
-              );
-            } else {
-              map.addLayer(
-                new BytesLayer(`bytes${bytesCount}`, parseAddress(addrOrRange), bytes)
-              );
-            }
-          } else {
+          if (parts.length === 1) {
+            const path = parts[0];
             fileCount++;
-            const path = source;
+            const { start, data, isPrg } = loadFile(path);
+            map.addLayer(new FileLayer(`file${fileCount}`, path, start, data, undefined, isPrg));
+            if (isPrg) {
+              prgEntries.push(start);
+            }
+          } else if (parts.length >= 2) {
+            const [addrOrRange, source] = parts;
 
-            if (isRange(addrOrRange)) {
-              const range = parseRange(addrOrRange);
-              const { data } = loadFile(path, range.start);
-              map.addLayer(
-                new FileLayer(`file${fileCount}`, path, range.start, data, range.length)
-              );
+            if (source.startsWith("#")) {
+              bytesCount++;
+              const hex = source.slice(1) + parts.slice(2).join("");
+              const bytes = parseHexBytes(hex);
+
+              if (isRange(addrOrRange)) {
+                const range = parseRange(addrOrRange);
+                map.addLayer(
+                  new BytesLayer(`bytes${bytesCount}`, range.start, bytes, range.length)
+                );
+              } else {
+                map.addLayer(
+                  new BytesLayer(`bytes${bytesCount}`, parseAddress(addrOrRange), bytes)
+                );
+              }
             } else {
-              const start = parseAddress(addrOrRange);
-              const { data } = loadFile(path, start);
-              map.addLayer(new FileLayer(`file${fileCount}`, path, start, data));
+              fileCount++;
+              const path = source;
+
+              if (isRange(addrOrRange)) {
+                const range = parseRange(addrOrRange);
+                const { data } = loadFile(path, range.start);
+                map.addLayer(
+                  new FileLayer(`file${fileCount}`, path, range.start, data, range.length)
+                );
+              } else {
+                const start = parseAddress(addrOrRange);
+                const { data } = loadFile(path, start);
+                map.addLayer(new FileLayer(`file${fileCount}`, path, start, data));
+              }
             }
           }
         }
       }
     }
 
-    // Determine entry points
+    // Determine entry points (CLI -e overrides project entryPoints)
     let entryPoints: number[];
     if (options.entry) {
       entryPoints = options.entry.map(parseAddress);
+    } else if (projectEntryPoints && projectEntryPoints.length > 0) {
+      entryPoints = projectEntryPoints;
     } else if (prgEntries.length > 0) {
       entryPoints = prgEntries;
     } else {
@@ -296,11 +381,25 @@ program
       instructions = index.range(start, start + length);
     }
 
+    // Merge labels from map and user labels
+    const mapLabels = map.getLabels();
+    const allLabels = new LabelIndex();
+    allLabels.addLabels(mapLabels.getAllLabels());
+    allLabels.addLabels(userLabels.getAllLabels());
+
+    // Create label resolver for operand formatting
+    const resolveLabel = (addr: number): string | undefined => {
+      const labels = allLabels.getLabelsAt(addr);
+      if (labels.length > 0) {
+        return labels[0].name;
+      }
+      return undefined;
+    };
+
     // Output
-    const labels = map.getLabels();
     for (const instr of instructions) {
       // Show any labels at this address
-      const labelsHere = labels.getLabelsAt(instr.address);
+      const labelsHere = allLabels.getLabelsAt(instr.address);
       for (const label of labelsHere) {
         const addrStr = instr.address.toString(16).toUpperCase().padStart(4, "0");
         console.log(`${addrStr} ${label.name}:`);
@@ -311,7 +410,7 @@ program
         .map((b) => b.toString(16).toUpperCase().padStart(2, "0"))
         .join(" ")
         .padEnd(8);
-      console.log(`${addrStr}  ${bytesStr}  ${formatInstruction(instr)}`);
+      console.log(`${addrStr}  ${bytesStr}  ${formatInstruction(instr, resolveLabel)}`);
     }
 
     // Show warnings
