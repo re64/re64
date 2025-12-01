@@ -1,4 +1,5 @@
 import { Layer } from "./layer.js";
+import { Label, LabelIndex, createLayerLabel } from "./label.js";
 
 export interface ReadResult {
   value: number;
@@ -76,5 +77,65 @@ export class MemoryMap {
       result.push(this.readByte(address + i));
     }
     return result;
+  }
+
+  /**
+   * Get all labels from all layers plus auto-generated span labels.
+   * Span labels mark where the effective layer changes in the flattened memory map.
+   */
+  getLabels(): LabelIndex {
+    const index = new LabelIndex();
+
+    // Collect labels from all layers
+    for (const layer of this.layers) {
+      index.addLabels(layer.getLabels());
+    }
+
+    // Generate span labels for layer boundaries in the flattened view
+    const spanLabels = this.generateSpanLabels();
+    index.addLabels(spanLabels);
+
+    return index;
+  }
+
+  /**
+   * Generate labels for each address where the effective layer changes.
+   * This helps identify layer boundaries in hex dumps.
+   */
+  private generateSpanLabels(): Label[] {
+    const labels: Label[] = [];
+
+    // Find the address range covering all layers
+    if (this.layers.length === 0) {
+      return labels;
+    }
+
+    const minStart = Math.min(...this.layers.map((l) => l.start));
+    const maxEnd = Math.max(...this.layers.map((l) => l.end));
+
+    let prevLayer: Layer | undefined;
+    for (let addr = minStart; addr < maxEnd; addr++) {
+      const result = this.readByteWithSource(addr);
+      const currentLayer = result?.layer;
+
+      if (currentLayer !== prevLayer) {
+        if (currentLayer) {
+          // Layer started or changed - create a span label
+          const offset = addr - currentLayer.start;
+          const offsetHex = offset.toString(16).toUpperCase().padStart(4, "0");
+          labels.push(
+            createLayerLabel(
+              addr,
+              `${currentLayer.name}+$${offsetHex}`,
+              "address",
+              currentLayer.name
+            )
+          );
+        }
+        prevLayer = currentLayer;
+      }
+    }
+
+    return labels;
   }
 }

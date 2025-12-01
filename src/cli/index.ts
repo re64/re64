@@ -63,7 +63,7 @@ function parseHexBytes(hex: string): Uint8Array {
 function loadFile(
   path: string,
   explicitStart?: number
-): { start: number; data: Uint8Array } {
+): { start: number; data: Uint8Array; isPrg: boolean } {
   let fullData: Uint8Array;
 
   if (path.includes(":")) {
@@ -93,8 +93,8 @@ function loadFile(
   }
 
   if (explicitStart !== undefined) {
-    // Raw file at explicit address
-    return { start: explicitStart, data: fullData };
+    // Raw file at explicit address - not a PRG
+    return { start: explicitStart, data: fullData, isPrg: false };
   }
 
   // PRG file: first two bytes are load address (little-endian)
@@ -103,7 +103,7 @@ function loadFile(
   }
   const start = fullData[0] | (fullData[1] << 8);
   const data = fullData.slice(2);
-  return { start, data };
+  return { start, data, isPrg: true };
 }
 
 const program = new Command();
@@ -145,8 +145,8 @@ program
           // Just a file path - PRG file
           const path = parts[0];
           fileCount++;
-          const { start, data } = loadFile(path);
-          map.addLayer(new FileLayer(`file${fileCount}`, path, start, data));
+          const { start, data, isPrg } = loadFile(path);
+          map.addLayer(new FileLayer(`file${fileCount}`, path, start, data, undefined, isPrg));
         } else if (parts.length >= 2) {
           const [addrOrRange, source] = parts;
 

@@ -1,4 +1,5 @@
 import { Layer } from "./layer.js";
+import { Label, createLayerLabel } from "./label.js";
 
 /**
  * A layer backed by file data. Preserves the file path for serialization/display.
@@ -6,14 +7,18 @@ import { Layer } from "./layer.js";
  */
 export class FileLayer implements Layer {
   public readonly length: number;
+  /** Whether this file is a PRG (has entry point) */
+  public readonly isPrg: boolean;
 
   constructor(
     public readonly name: string,
     public readonly path: string,
     public readonly start: number,
     public readonly data: Uint8Array,
-    length?: number
+    length?: number,
+    isPrg: boolean = false
   ) {
+    this.isPrg = isPrg;
     this.length = length ?? data.length;
 
     if (data.length === 0) {
@@ -40,5 +45,14 @@ export class FileLayer implements Layer {
     }
     const offset = address - this.start;
     return this.data[offset % this.data.length];
+  }
+
+  getLabels(): readonly Label[] {
+    if (!this.isPrg) {
+      return [];
+    }
+    // PRG files have an entry point at the start address
+    const basename = this.path.split("/").pop()?.replace(/\.[^.]+$/, "") ?? this.name;
+    return [createLayerLabel(this.start, basename, "entry", this.name)];
   }
 }
