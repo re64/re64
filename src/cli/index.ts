@@ -10,6 +10,9 @@ import {
   findFile,
   extractFile,
   listDirectory,
+  disassemble,
+  formatInstruction,
+  InstructionIndex,
 } from "../core/index.js";
 import { hexDump } from "./hex.js";
 
@@ -203,6 +206,134 @@ program
     }
 
     console.log(hexDump(map, start, length));
+  });
+
+program
+  .command("disasm")
+  .description("Disassemble code from entry points")
+  .option("-l, --layer <spec...>", layerHelp)
+  .option("-e, --entry <addr...>", "Entry point addresses (default: use PRG load addresses)")
+  .option("-r, --range <range>", "Only show instructions in range")
+  .action((options) => {
+    const map = new MemoryMap();
+    let fileCount = 0;
+    let bytesCount = 0;
+    const prgEntries: number[] = [];
+
+    if (options.layer) {
+      for (const spec of options.layer) {
+        const parts = spec.split(",");
+
+        if (parts.length === 1) {
+          const path = parts[0];
+          fileCount++;
+          const { start, data, isPrg } = loadFile(path);
+          map.addLayer(new FileLayer(`file${fileCount}`, path, start, data, undefined, isPrg));
+          if (isPrg) {
+            prgEntries.push(start);
+          }
+        } else if (parts.length >= 2) {
+          const [addrOrRange, source] = parts;
+
+          if (source.startsWith("#")) {
+            bytesCount++;
+            const hex = source.slice(1) + parts.slice(2).join("");
+            const bytes = parseHexBytes(hex);
+
+            if (isRange(addrOrRange)) {
+              const range = parseRange(addrOrRange);
+              map.addLayer(
+                new BytesLayer(`bytes${bytesCount}`, range.start, bytes, range.length)
+              );
+            } else {
+              map.addLayer(
+                new BytesLayer(`bytes${bytesCount}`, parseAddress(addrOrRange), bytes)
+              );
+            }
+          } else {
+            fileCount++;
+            const path = source;
+
+            if (isRange(addrOrRange)) {
+              const range = parseRange(addrOrRange);
+              const { data } = loadFile(path, range.start);
+              map.addLayer(
+                new FileLayer(`file${fileCount}`, path, range.start, data, range.length)
+              );
+            } else {
+              const start = parseAddress(addrOrRange);
+              const { data } = loadFile(path, start);
+              map.addLayer(new FileLayer(`file${fileCount}`, path, start, data));
+            }
+          }
+        }
+      }
+    }
+
+    // Determine entry points
+    let entryPoints: number[];
+    if (options.entry) {
+      entryPoints = options.entry.map(parseAddress);
+    } else if (prgEntries.length > 0) {
+      entryPoints = prgEntries;
+    } else {
+      const layers = map.getLayers();
+      if (layers.length === 0) {
+        console.error("No layers defined and no entry points specified");
+        process.exit(1);
+      }
+      entryPoints = [Math.min(...layers.map((l) => l.start))];
+    }
+
+    // Disassemble
+    const result = disassemble(map, { entryPoints });
+    const index = new InstructionIndex(result.instructions);
+
+    // Determine output range
+    let instructions = index.all();
+    if (options.range) {
+      const { start, length } = parseRange(options.range);
+      instructions = index.range(start, start + length);
+    }
+
+    // Output
+    const labels = map.getLabels();
+    for (const instr of instructions) {
+      // Show any labels at this address
+      const labelsHere = labels.getLabelsAt(instr.address);
+      for (const label of labelsHere) {
+        const addrStr = instr.address.toString(16).toUpperCase().padStart(4, "0");
+        console.log(`${addrStr} ${label.name}:`);
+      }
+
+      const addrStr = instr.address.toString(16).toUpperCase().padStart(4, "0");
+      const bytesStr = [...instr.bytes]
+        .map((b) => b.toString(16).toUpperCase().padStart(2, "0"))
+        .join(" ")
+        .padEnd(8);
+      console.log(`${addrStr}  ${bytesStr}  ${formatInstruction(instr)}`);
+    }
+
+    // Show warnings
+    if (result.warnings.length > 0) {
+      console.error("");
+      console.error("Warnings:");
+      for (const w of result.warnings) {
+        const addr = w.address.toString(16).toUpperCase().padStart(4, "0");
+        switch (w.type) {
+          case "undefined":
+            console.error(`  $${addr}: undefined bytes`);
+            break;
+          case "truncated":
+            console.error(`  $${addr}: truncated instruction (needed ${w.needed}, got ${w.available})`);
+            break;
+          case "overlap":
+            const existing = w.existingAddress.toString(16).toUpperCase().padStart(4, "0");
+            console.error(`  $${addr}: overlaps instruction at $${existing}`);
+            break;
+        }
+      }
+    }
   });
 
 program.parse();
