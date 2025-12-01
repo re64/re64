@@ -8,7 +8,17 @@
       "noAutoEntry": true
     }
   ],
-  "entryPoints": ["$83C1"],
+  "entryPoints": ["$8011"],
+  "regions": [
+    { "start": "$8000", "end": "$8004", "kind": "jumptable", "name": "initJumpTable" },
+    { "start": "$8004", "end": "$8011", "kind": "data", "name": "initData" },
+    { "start": "$8C51", "end": "$8C61", "kind": "text", "name": "txtBattleStations" },
+    { "start": "$8C61", "end": "$8C75", "kind": "text", "name": "txtEnterGridArea" },
+    { "start": "$8DE1", "end": "$8DF0", "kind": "text", "name": "txtByJeffMinter" },
+    { "start": "$8DF1", "end": "$8E00", "kind": "text", "name": "txtEnterLevel" },
+    { "start": "$8DD0", "end": "$8DE1", "kind": "data", "name": "paddingBeforeText" },
+    { "start": "$8E00", "end": "$9000", "kind": "data", "name": "characterSetData" }
+  ],
   "labels": [
     { "address": "$02", "name": "currentXPosition" },
     { "address": "$03", "name": "currentYPosition" },
@@ -36,7 +46,6 @@
     { "address": "$FFD2", "name": "ROM_CHROUT" },
 
     { "address": "$8000", "name": "initializeDataJumpAddress" },
-    { "address": "$800D", "name": "PrepareGame", "type": "entry" },
     { "address": "$8015", "name": "MaybeContinueCheckingScreen" },
     { "address": "$8020", "name": "CheckCurrentCharacterForShip" },
     { "address": "$8030", "name": "CheckIfHasReachedBorder" },
@@ -50,7 +59,9 @@
     { "address": "$818B", "name": "GetCharacterAtCurrentXYPos" },
     { "address": "$82EC", "name": "LoadCharacterSetData" },
     { "address": "$8386", "name": "PlaySomeSound" },
+    { "address": "$8100", "name": "MainInit", "type": "entry" },
     { "address": "$83C1", "name": "InitializeData", "type": "entry" },
+    { "address": "$83E2", "name": "InitializeData2", "type": "entry" },
     { "address": "$83E8", "name": "ReenterMainGameLoop" },
     { "address": "$8D8E", "name": "DisplayTitleScreen" }
   ]

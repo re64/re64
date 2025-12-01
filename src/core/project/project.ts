@@ -1,4 +1,5 @@
 import { Label, LabelType, createUserLabel } from "../memory/label.js";
+import { Region, RegionKind, createUserRegion } from "../memory/region.js";
 
 /** Layer definition in a project file */
 export interface ProjectLayer {
@@ -28,6 +29,20 @@ export interface ProjectLabel {
   comment?: string;
 }
 
+/** Region definition in a project file */
+export interface ProjectRegion {
+  /** Start address (hex string like "$8000" or number) */
+  start: number | string;
+  /** End address (exclusive) or length with + prefix */
+  end: number | string;
+  /** Region kind */
+  kind: RegionKind;
+  /** Optional name/label for the region */
+  name?: string;
+  /** Optional comment */
+  comment?: string;
+}
+
 /** Project file structure */
 export interface Project {
   /** Project name */
@@ -40,6 +55,8 @@ export interface Project {
   entryPoints?: (number | string)[];
   /** User-defined labels */
   labels?: ProjectLabel[];
+  /** User-defined regions (override auto-generated) */
+  regions?: ProjectRegion[];
 }
 
 /** Parse an address that may be a number or hex string */
@@ -63,6 +80,24 @@ export function projectLabelsToLabels(projectLabels: ProjectLabel[]): Label[] {
     const address = parseProjectAddress(pl.address);
     const type = pl.type ?? "address";
     return createUserLabel(address, pl.name, type);
+  });
+}
+
+/** Convert project regions to Region objects */
+export function projectRegionsToRegions(projectRegions: ProjectRegion[]): Region[] {
+  return projectRegions.map((pr) => {
+    const start = parseProjectAddress(pr.start);
+    let end: number;
+
+    // Support "end" as either absolute address or "+length" format
+    if (typeof pr.end === "string" && pr.end.startsWith("+")) {
+      const length = parseProjectAddress(pr.end.slice(1));
+      end = start + length;
+    } else {
+      end = parseProjectAddress(pr.end);
+    }
+
+    return createUserRegion(start, end, pr.kind, pr.name);
   });
 }
 

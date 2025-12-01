@@ -3,10 +3,12 @@ export type LabelType = "entry" | "address";
 
 /** Source of a label - where it came from */
 export interface LabelSource {
-  /** Kind of source: "layer" for layer-generated, "user" for user-defined */
-  kind: "layer" | "user";
+  /** Kind of source: "layer" for layer-generated, "user" for user-defined, "region" for region-generated */
+  kind: "layer" | "user" | "region";
   /** Name of the layer that generated this label (if kind is "layer") */
   layerName?: string;
+  /** Name of the region that generated this label (if kind is "region") */
+  regionName?: string;
   /** Whether this label was auto-generated */
   auto: boolean;
 }
@@ -58,6 +60,24 @@ export function createUserLabel(
     name,
     type,
     source: { kind: "user", auto: false },
+  };
+}
+
+/** Creates an auto-generated label from a region boundary */
+export function createRegionLabel(
+  address: number,
+  name: string,
+  type: LabelType,
+  regionName: string
+): Label {
+  if (address < 0 || address > 0x10000) {
+    throw new Error("Label address must be in range 0x0000-0x10000");
+  }
+  return {
+    address,
+    name,
+    type,
+    source: { kind: "region", regionName, auto: true },
   };
 }
 

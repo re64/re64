@@ -8,4 +8,13 @@ export {
   LabelIndex,
   createLayerLabel,
   createUserLabel,
+  createRegionLabel,
 } from "./label.js";
+export {
+  Region,
+  RegionKind,
+  RegionSource,
+  RegionIndex,
+  createLayerRegion,
+  createUserRegion,
+} from "./region.js";

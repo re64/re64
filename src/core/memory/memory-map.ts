@@ -1,5 +1,6 @@
 import { Layer } from "./layer.js";
 import { Label, LabelIndex, createLayerLabel } from "./label.js";
+import { Region, RegionIndex, createLayerRegion } from "./region.js";
 
 export interface ReadResult {
   value: number;
@@ -104,38 +105,81 @@ export class MemoryMap {
    */
   private generateSpanLabels(): Label[] {
     const labels: Label[] = [];
+    const regions = this.generateRegions();
 
-    // Find the address range covering all layers
+    for (const region of regions) {
+      if (region.name) {
+        labels.push(
+          createLayerLabel(
+            region.start,
+            region.name,
+            "address",
+            region.source.layerName ?? "unknown"
+          )
+        );
+      }
+    }
+
+    return labels;
+  }
+
+  /**
+   * Get auto-generated regions from layer coverage.
+   * Each contiguous span from a single layer becomes a region.
+   */
+  getRegions(): RegionIndex {
+    const index = new RegionIndex();
+    const regions = this.generateRegions();
+    index.addRegions(regions);
+    return index;
+  }
+
+  /**
+   * Generate regions for each contiguous span from a single layer.
+   */
+  private generateRegions(): Region[] {
+    const regions: Region[] = [];
+
     if (this.layers.length === 0) {
-      return labels;
+      return regions;
     }
 
     const minStart = Math.min(...this.layers.map((l) => l.start));
     const maxEnd = Math.max(...this.layers.map((l) => l.end));
 
+    let regionStart: number | undefined;
     let prevLayer: Layer | undefined;
-    for (let addr = minStart; addr < maxEnd; addr++) {
-      const result = this.readByteWithSource(addr);
+
+    for (let addr = minStart; addr <= maxEnd; addr++) {
+      const result = addr < maxEnd ? this.readByteWithSource(addr) : undefined;
       const currentLayer = result?.layer;
 
       if (currentLayer !== prevLayer) {
-        if (currentLayer) {
-          // Layer started or changed - create a span label
-          const offset = addr - currentLayer.start;
+        // End previous region
+        if (prevLayer && regionStart !== undefined) {
+          const offset = regionStart - prevLayer.start;
           const offsetHex = offset.toString(16).toUpperCase().padStart(4, "0");
-          labels.push(
-            createLayerLabel(
+          regions.push(
+            createLayerRegion(
+              regionStart,
               addr,
-              `${currentLayer.name}+$${offsetHex}`,
-              "address",
-              currentLayer.name
+              prevLayer.defaultRegionKind,
+              prevLayer.name,
+              `${prevLayer.name}+$${offsetHex}`
             )
           );
+        }
+
+        // Start new region
+        if (currentLayer) {
+          regionStart = addr;
+        } else {
+          regionStart = undefined;
         }
         prevLayer = currentLayer;
       }
     }
 
-    return labels;
+    return regions;
   }
 }

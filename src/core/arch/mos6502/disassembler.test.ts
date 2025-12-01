@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { disassemble, InstructionIndex } from "./disassembler.js";
 import { ByteReader } from "./decoder.js";
+import { RegionIndex, createUserRegion } from "../../memory/region.js";
 
 /** Simple byte reader from an array at a base address */
 function arrayReader(base: number, bytes: number[]): ByteReader {
@@ -125,12 +126,15 @@ describe("disassemble", () => {
     expect(result.warnings[0].address).toBe(0x1001);
   });
 
-  it("stops at stop points", () => {
-    // NOP, NOP, NOP - but second NOP is a stop point
+  it("stops at data regions", () => {
+    // NOP, NOP, NOP - but second NOP is in a data region
     const reader = arrayReader(0x1000, [0xea, 0xea, 0xea]);
+    const regions = new RegionIndex();
+    regions.addRegion(createUserRegion(0x1001, 0x1003, "data"));
+
     const result = disassemble(reader, {
       entryPoints: [0x1000],
-      stopPoints: new Set([0x1001]),
+      regions,
     });
 
     expect(result.instructions.size).toBe(1);

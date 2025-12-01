@@ -4,7 +4,14 @@ A collaborative C64 disassembler.
 
 ## Status
 
-Early development. Currently supports loading PRG files and D64 disk images with hex dump output.
+In active development. Currently supports:
+- Loading PRG files and D64 disk images
+- Memory layering system (multiple files can overlay each other)
+- Work-queue 6502 disassembler with control flow analysis
+- Project files (.re64 JSON) for configuration
+- Labels with resolution in instruction operands
+- Regions to define memory semantics (code, data, text, jumptable)
+- Combined output showing both instructions and hex dumps for data
 
 ## Development
 
@@ -21,9 +28,38 @@ npm test
 ```bash
 npx re64 version              # Show version
 npx re64 dump --help          # Show dump command help
+npx re64 disasm --help        # Show disassemble command help
 ```
 
-### Loading files
+### Project files
+
+The recommended way to work with re64 is through project files (`.re64` JSON files):
+
+```json
+{
+  "name": "My Game",
+  "layers": [
+    { "type": "prg", "path": "game.prg" }
+  ],
+  "entryPoints": ["$0810"],
+  "labels": [
+    { "address": "$FFD2", "name": "ROM_CHROUT" }
+  ],
+  "regions": [
+    { "start": "$2000", "end": "$3000", "kind": "data", "name": "spriteData" }
+  ]
+}
+```
+
+```bash
+# Disassemble using project file
+npx re64 disasm -p game.re64
+
+# Disassemble specific range
+npx re64 disasm -p game.re64 -r '$0800:$0900'
+```
+
+### Loading files directly
 
 ```bash
 # Load a PRG file (address from 2-byte header)
@@ -58,8 +94,8 @@ Addresses use `$` (or `0x`) prefix for hex. Ranges can be:
 # Dump specific range
 npx re64 dump -l game.prg -r '$0800+$100'
 
-# Without -r, dumps the range covering all layers
-npx re64 dump -l game.prg
+# Disassemble specific range
+npx re64 disasm -l game.prg -r '$0800:$0900'
 ```
 
 ### Layer syntax summary
@@ -73,14 +109,52 @@ npx re64 dump -l game.prg
 <range>,#<hex>            - inline bytes repeated to fill range
 ```
 
-## Project Structure
+## Architecture
+
+### Conceptual Model
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Memory Map                              │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │ Layers (actual bytes)                                   ││
+│  │  - FileLayer: PRG/raw files                             ││
+│  │  - BytesLayer: inline hex patterns                      ││
+│  │  - Layers stack and shadow (top wins)                   ││
+│  └─────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                       Regions                                │
+│  Define what memory ranges mean (code/data/text/jumptable)  │
+│  - Auto-generated from layers (PRG→code, raw→data)          │
+│  - User-defined regions override auto-generated             │
+│  - Guide disassembler behavior                              │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                        Labels                                │
+│  Mark individual addresses with names                       │
+│  - Layer-generated (PRG entry points)                       │
+│  - Region-generated (region start addresses)                │
+│  - User-defined (any address)                               │
+│  - Resolved in instruction operands (JSR ROM_CHROUT)        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Project Structure
 
 ```
 src/
 ├── core/
-│   ├── memory/   # MemoryMap, BytesLayer, FileLayer
-│   └── c64/      # D64 disk image parser
-└── cli/          # Command-line interface
+│   ├── memory/       # MemoryMap, layers, labels, regions
+│   ├── arch/
+│   │   └── mos6502/  # 6502 opcodes, decoder, disassembler
+│   ├── c64/          # D64 disk image parser
+│   └── project/      # Project file parser
+└── cli/              # Command-line interface
 ```
 
 ## License

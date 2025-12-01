@@ -1,4 +1,5 @@
 import { Label } from "./label.js";
+import { RegionKind } from "./region.js";
 
 /**
  * A memory layer maps a contiguous address range to byte values.
@@ -10,6 +11,8 @@ export interface Layer {
   readonly start: number;
   /** End address (exclusive) */
   readonly end: number;
+  /** Default region kind for this layer's content */
+  readonly defaultRegionKind: RegionKind;
 
   /** Returns the byte at address, or undefined if outside this layer's range */
   readByte(address: number): number | undefined;
@@ -25,6 +28,7 @@ export interface Layer {
  */
 export class BytesLayer implements Layer {
   public readonly length: number;
+  public readonly defaultRegionKind: RegionKind = "data";
 
   constructor(
     public readonly name: string,

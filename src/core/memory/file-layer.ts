@@ -1,5 +1,6 @@
 import { Layer } from "./layer.js";
 import { Label, createLayerLabel } from "./label.js";
+import { RegionKind } from "./region.js";
 
 /**
  * A layer backed by file data. Preserves the file path for serialization/display.
@@ -7,8 +8,12 @@ import { Label, createLayerLabel } from "./label.js";
  */
 export class FileLayer implements Layer {
   public readonly length: number;
-  /** Whether this file is a PRG (has entry point) */
+  /** Whether this file is a PRG (content is code) */
   public readonly isPrg: boolean;
+  /** Whether to suppress auto-generated entry point label */
+  public readonly suppressEntry: boolean;
+  /** Default region kind - code for PRG, data otherwise */
+  public readonly defaultRegionKind: RegionKind;
 
   constructor(
     public readonly name: string,
@@ -16,9 +21,12 @@ export class FileLayer implements Layer {
     public readonly start: number,
     public readonly data: Uint8Array,
     length?: number,
-    isPrg: boolean = false
+    isPrg: boolean = false,
+    suppressEntry: boolean = false
   ) {
     this.isPrg = isPrg;
+    this.suppressEntry = suppressEntry;
+    this.defaultRegionKind = isPrg ? "code" : "data";
     this.length = length ?? data.length;
 
     if (data.length === 0) {
@@ -48,7 +56,7 @@ export class FileLayer implements Layer {
   }
 
   getLabels(): readonly Label[] {
-    if (!this.isPrg) {
+    if (!this.isPrg || this.suppressEntry) {
       return [];
     }
     // PRG files have an entry point at the start address
