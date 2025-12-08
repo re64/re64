@@ -369,10 +369,10 @@ program
       }
     }
 
-    // Collect entry points from labels with type "entry" or "function"
+    // Collect entry points from labels with type "entry", "function", or "code"
     const labelEntryPoints = userLabels
       .getAllLabels()
-      .filter((l) => l.type === "entry" || l.type === "function")
+      .filter((l) => l.type === "entry" || l.type === "function" || l.type === "code")
       .map((l) => l.address);
 
     // Determine entry points (CLI -e overrides project entryPoints)
@@ -433,43 +433,28 @@ program
         continue;
       }
 
-      // Determine the best reference type for naming
-      // Priority: call > jump > branch > data
-      let bestType: ReferenceType = refs[0].type;
-      for (const ref of refs) {
-        if (ref.type === "call") {
-          bestType = "call";
-          break;
-        } else if (ref.type === "jump" && bestType !== "call") {
-          bestType = "jump";
-        } else if (ref.type === "branch" && bestType === "data") {
-          bestType = "branch";
-        }
-      }
+      // Check if this address is a JSR target (true subroutine)
+      const isCallTarget = refs.some((r) => r.type === "call");
+      // Check if it's a code reference (call, jump, or branch)
+      const isCodeTarget = refs.some((r) => r.type === "call" || r.type === "jump" || r.type === "branch");
 
       // Generate label name based on reference type
       const addrStr = targetAddr.toString(16).toUpperCase().padStart(4, "0");
       let name: string;
-      let labelType: "function" | "address";
+      let labelType: "function" | "code" | "address";
 
-      switch (bestType) {
-        case "call":
-          name = `sub_${addrStr}`;
-          labelType = "function";
-          break;
-        case "jump":
-          // Jumps to subroutine entries get sub_ prefix
-          name = `sub_${addrStr}`;
-          labelType = "function";
-          break;
-        case "branch":
-          name = `loc_${addrStr}`;
-          labelType = "address";
-          break;
-        case "data":
-          name = `dat_${addrStr}`;
-          labelType = "address";
-          break;
+      if (isCallTarget) {
+        // JSR target - it's a subroutine
+        name = `sub_${addrStr}`;
+        labelType = "function";
+      } else if (isCodeTarget) {
+        // JMP or branch target - it's a code location
+        name = `loc_${addrStr}`;
+        labelType = "code";
+      } else {
+        // Data reference only
+        name = `dat_${addrStr}`;
+        labelType = "address";
       }
 
       autoLabels.push(createAutoLabel(targetAddr, name, labelType));

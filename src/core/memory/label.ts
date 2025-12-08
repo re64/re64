@@ -1,10 +1,11 @@
 /**
  * Label types:
  * - "entry" - explicit entry points (from project file or PRG load)
- * - "function" - subroutine entry points (added to disassembly queue)
+ * - "function" - subroutine entry points (JSR targets, added to disassembly queue)
+ * - "code" - code locations (JMP targets, loops, etc. - added to disassembly queue)
  * - "address" - general named addresses (not queued for disassembly)
  */
-export type LabelType = "entry" | "function" | "address";
+export type LabelType = "entry" | "function" | "code" | "address";
 
 /** Source of a label - where it came from */
 export interface LabelSource {
