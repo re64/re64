@@ -111,4 +111,73 @@ describe("LabelIndex", () => {
 
     expect(index.getAllLabels()).toHaveLength(2);
   });
+
+  describe("resolve", () => {
+    it("returns exact match with offset 0", () => {
+      const index = new LabelIndex();
+      index.addLabel(createUserLabel(0x1000, "data", "address"));
+
+      const resolved = index.resolve(0x1000, 0);
+      expect(resolved).toBeDefined();
+      expect(resolved!.label.name).toBe("data");
+      expect(resolved!.offset).toBe(0);
+    });
+
+    it("returns undefined for non-matching address with zero tolerance", () => {
+      const index = new LabelIndex();
+      index.addLabel(createUserLabel(0x1000, "data", "address"));
+
+      expect(index.resolve(0x1001, 0)).toBeUndefined();
+    });
+
+    it("finds label with negative offset (address before label)", () => {
+      const index = new LabelIndex();
+      index.addLabel(createUserLabel(0x1000, "data", "address"));
+
+      const resolved = index.resolve(0x0FFF, 1);
+      expect(resolved).toBeDefined();
+      expect(resolved!.label.name).toBe("data");
+      expect(resolved!.offset).toBe(-1);
+    });
+
+    it("finds label with positive offset (address after label)", () => {
+      const index = new LabelIndex();
+      index.addLabel(createUserLabel(0x1000, "data", "address"));
+
+      const resolved = index.resolve(0x1001, 1);
+      expect(resolved).toBeDefined();
+      expect(resolved!.label.name).toBe("data");
+      expect(resolved!.offset).toBe(1);
+    });
+
+    it("prefers exact match over nearby labels", () => {
+      const index = new LabelIndex();
+      index.addLabel(createUserLabel(0x1000, "nearby", "address"));
+      index.addLabel(createUserLabel(0x1001, "exact", "address"));
+
+      const resolved = index.resolve(0x1001, 5);
+      expect(resolved).toBeDefined();
+      expect(resolved!.label.name).toBe("exact");
+      expect(resolved!.offset).toBe(0);
+    });
+
+    it("prefers smaller offset when multiple labels in range", () => {
+      const index = new LabelIndex();
+      index.addLabel(createUserLabel(0x1000, "far", "address"));
+      index.addLabel(createUserLabel(0x1003, "close", "address"));
+
+      const resolved = index.resolve(0x1002, 5);
+      expect(resolved).toBeDefined();
+      expect(resolved!.label.name).toBe("close");
+      expect(resolved!.offset).toBe(-1);
+    });
+
+    it("respects tolerance limit", () => {
+      const index = new LabelIndex();
+      index.addLabel(createUserLabel(0x1000, "data", "address"));
+
+      expect(index.resolve(0x1003, 2)).toBeUndefined();
+      expect(index.resolve(0x1003, 3)).toBeDefined();
+    });
+  });
 });

@@ -291,6 +291,7 @@ program
   .option("-l, --layer <spec...>", layerHelp)
   .option("-e, --entry <addr...>", "Entry point addresses (default: use PRG load addresses)")
   .option("-r, --range <range>", "Only show instructions in range")
+  .option("-t, --label-tolerance <n>", "Max offset for fuzzy label matching (default: 1)", "1")
   .action((options) => {
     let map: MemoryMap;
     let prgEntries: number[] = [];
@@ -407,11 +408,14 @@ program
     allLabels.addLabels(regionLabels);
     allLabels.addLabels(userLabels.getAllLabels());
 
-    // Create label resolver for operand formatting
-    const resolveLabel = (addr: number): string | undefined => {
-      const labels = allLabels.getLabelsAt(addr);
-      if (labels.length > 0) {
-        return labels[0].name;
+    // Parse label tolerance
+    const labelTolerance = parseInt(options.labelTolerance, 10) || 1;
+
+    // Create label resolver for operand formatting (with fuzzy matching)
+    const resolveLabel = (addr: number): { name: string; offset: number } | undefined => {
+      const resolved = allLabels.resolve(addr, labelTolerance);
+      if (resolved) {
+        return { name: resolved.label.name, offset: resolved.offset };
       }
       return undefined;
     };
@@ -466,6 +470,17 @@ program
       console.log(`${formatAddr(addr)}  ${bytesStr.padEnd(23)}  .TEXT`);
     };
 
+    // Helper to format a resolved label with offset
+    const formatResolvedLabel = (resolution: { name: string; offset: number }): string => {
+      if (resolution.offset === 0) {
+        return resolution.name;
+      } else if (resolution.offset > 0) {
+        return `${resolution.name}+${resolution.offset}`;
+      } else {
+        return `${resolution.name}${resolution.offset}`;
+      }
+    };
+
     // Helper to output a jumptable entry
     const outputJumptableEntry = (addr: number) => {
       const lo = map.readByte(addr);
@@ -473,10 +488,10 @@ program
       if (lo !== undefined && hi !== undefined) {
         const target = lo | (hi << 8);
         const targetStr = formatAddr(target);
-        const label = resolveLabel(target);
+        const resolved = resolveLabel(target);
         const bytesStr = `${lo.toString(16).toUpperCase().padStart(2, "0")} ${hi.toString(16).toUpperCase().padStart(2, "0")}`;
-        if (label) {
-          console.log(`${formatAddr(addr)}  ${bytesStr.padEnd(8)}  .WORD ${label}`);
+        if (resolved) {
+          console.log(`${formatAddr(addr)}  ${bytesStr.padEnd(8)}  .WORD ${formatResolvedLabel(resolved)}`);
         } else {
           console.log(`${formatAddr(addr)}  ${bytesStr.padEnd(8)}  .WORD $${targetStr}`);
         }

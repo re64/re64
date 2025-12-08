@@ -81,6 +81,14 @@ export function createRegionLabel(
   };
 }
 
+/** Result of resolving a label with possible offset */
+export interface ResolvedLabel {
+  /** The label that was found */
+  label: Label;
+  /** Offset from the label address (0 for exact match, negative if address < label) */
+  offset: number;
+}
+
 /**
  * Index for fast label lookup by address.
  * Multiple labels can exist at the same address.
@@ -125,5 +133,54 @@ export class LabelIndex {
     return this.all
       .filter((l) => l.address >= start && l.address < end)
       .sort((a, b) => a.address - b.address);
+  }
+
+  /**
+   * Resolve an address to a label, allowing for a configurable offset tolerance.
+   * Exact matches are always preferred. If no exact match, finds the nearest
+   * label within the tolerance range.
+   *
+   * @param address The address to resolve
+   * @param tolerance Maximum offset to consider (default 0 = exact match only)
+   * @returns The resolved label with offset, or undefined if no match
+   */
+  resolve(address: number, tolerance: number = 0): ResolvedLabel | undefined {
+    // First, try exact match
+    const exact = this.byAddress.get(address);
+    if (exact && exact.length > 0) {
+      return { label: exact[0], offset: 0 };
+    }
+
+    // If no tolerance, we're done
+    if (tolerance <= 0) {
+      return undefined;
+    }
+
+    // Search for nearby labels within tolerance
+    // We prefer the smallest absolute offset
+    let best: ResolvedLabel | undefined;
+    let bestAbsOffset = tolerance + 1;
+
+    for (const label of this.all) {
+      const offset = address - label.address;
+      const absOffset = Math.abs(offset);
+
+      // Must be within tolerance
+      if (absOffset > tolerance) {
+        continue;
+      }
+
+      // Prefer smaller absolute offset, or if equal, prefer positive offset (label-N)
+      // since that's more common in 6502 patterns
+      if (
+        absOffset < bestAbsOffset ||
+        (absOffset === bestAbsOffset && offset < 0 && best && best.offset >= 0)
+      ) {
+        best = { label, offset };
+        bestAbsOffset = absOffset;
+      }
+    }
+
+    return best;
   }
 }

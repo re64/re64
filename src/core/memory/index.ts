@@ -6,6 +6,7 @@ export {
   LabelType,
   LabelSource,
   LabelIndex,
+  ResolvedLabel,
   createLayerLabel,
   createUserLabel,
   createRegionLabel,

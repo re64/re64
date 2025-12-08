@@ -34,13 +34,38 @@ export interface Instruction {
   flow: FlowType;
 }
 
-/** Label resolver function type */
-export type LabelResolver = (address: number) => string | undefined;
+/** Result of label resolution with optional offset */
+export interface LabelResolution {
+  /** The label name */
+  name: string;
+  /** Offset from the label (0 for exact match) */
+  offset: number;
+}
+
+/** Label resolver function type - returns label name with offset, or undefined */
+export type LabelResolver = (address: number) => LabelResolution | undefined;
+
+/** Format a resolved label with offset */
+function formatLabelWithOffset(resolution: LabelResolution): string {
+  if (resolution.offset === 0) {
+    return resolution.name;
+  } else if (resolution.offset > 0) {
+    return `${resolution.name}+${resolution.offset}`;
+  } else {
+    return `${resolution.name}${resolution.offset}`; // offset is negative, includes minus sign
+  }
+}
 
 /** Format an operand as a string, optionally resolving labels */
 export function formatOperand(operand: Operand, resolveLabel?: LabelResolver): string {
-  const resolve16 = (addr: number) => resolveLabel?.(addr) ?? `$${hex16(addr)}`;
-  const resolve8 = (addr: number) => resolveLabel?.(addr) ?? `$${hex8(addr)}`;
+  const resolve16 = (addr: number) => {
+    const resolution = resolveLabel?.(addr);
+    return resolution ? formatLabelWithOffset(resolution) : `$${hex16(addr)}`;
+  };
+  const resolve8 = (addr: number) => {
+    const resolution = resolveLabel?.(addr);
+    return resolution ? formatLabelWithOffset(resolution) : `$${hex8(addr)}`;
+  };
 
   switch (operand.type) {
     case "implied":
