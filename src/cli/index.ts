@@ -10,12 +10,14 @@ import {
   FileLayer,
   LabelIndex,
   RegionIndex,
+  createAutoLabel,
   findFile,
   extractFile,
   listDirectory,
   disassemble,
   formatInstruction,
   InstructionIndex,
+  ReferenceType,
   Project,
   parseProject,
   parseProjectAddress,
@@ -367,14 +369,25 @@ program
       }
     }
 
+    // Collect entry points from labels with type "entry" or "function"
+    const labelEntryPoints = userLabels
+      .getAllLabels()
+      .filter((l) => l.type === "entry" || l.type === "function")
+      .map((l) => l.address);
+
     // Determine entry points (CLI -e overrides project entryPoints)
     let entryPoints: number[];
     if (options.entry) {
       entryPoints = options.entry.map(parseAddress);
     } else if (projectEntryPoints && projectEntryPoints.length > 0) {
-      entryPoints = projectEntryPoints;
+      // Combine explicit entry points with label-derived entry points
+      entryPoints = [...projectEntryPoints, ...labelEntryPoints];
     } else if (prgEntries.length > 0) {
-      entryPoints = prgEntries;
+      // Combine PRG entries with label-derived entry points
+      entryPoints = [...prgEntries, ...labelEntryPoints];
+    } else if (labelEntryPoints.length > 0) {
+      // Use only label-derived entry points
+      entryPoints = labelEntryPoints;
     } else {
       const layers = map.getLayers();
       if (layers.length === 0) {
@@ -410,6 +423,60 @@ program
 
     // Parse label tolerance
     const labelTolerance = parseInt(options.labelTolerance, 10) || 1;
+
+    // Generate auto-labels for unlabeled references
+    // These are lowest priority - only used if no other label matches (even with tolerance)
+    const autoLabels: ReturnType<typeof createAutoLabel>[] = [];
+    for (const [targetAddr, refs] of result.references) {
+      // Check if this address already has a label (with tolerance)
+      if (allLabels.resolve(targetAddr, labelTolerance)) {
+        continue;
+      }
+
+      // Determine the best reference type for naming
+      // Priority: call > jump > branch > data
+      let bestType: ReferenceType = refs[0].type;
+      for (const ref of refs) {
+        if (ref.type === "call") {
+          bestType = "call";
+          break;
+        } else if (ref.type === "jump" && bestType !== "call") {
+          bestType = "jump";
+        } else if (ref.type === "branch" && bestType === "data") {
+          bestType = "branch";
+        }
+      }
+
+      // Generate label name based on reference type
+      const addrStr = targetAddr.toString(16).toUpperCase().padStart(4, "0");
+      let name: string;
+      let labelType: "function" | "address";
+
+      switch (bestType) {
+        case "call":
+          name = `sub_${addrStr}`;
+          labelType = "function";
+          break;
+        case "jump":
+          // Jumps to subroutine entries get sub_ prefix
+          name = `sub_${addrStr}`;
+          labelType = "function";
+          break;
+        case "branch":
+          name = `loc_${addrStr}`;
+          labelType = "address";
+          break;
+        case "data":
+          name = `dat_${addrStr}`;
+          labelType = "address";
+          break;
+      }
+
+      autoLabels.push(createAutoLabel(targetAddr, name, labelType));
+    }
+
+    // Add auto-labels (lowest priority, added last)
+    allLabels.addLabels(autoLabels);
 
     // Create label resolver for operand formatting (with fuzzy matching)
     const resolveLabel = (addr: number): { name: string; offset: number } | undefined => {

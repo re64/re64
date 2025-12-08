@@ -10,6 +10,7 @@ export {
   createLayerLabel,
   createUserLabel,
   createRegionLabel,
+  createAutoLabel,
 } from "./label.js";
 export {
   Region,

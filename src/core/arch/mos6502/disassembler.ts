@@ -8,12 +8,31 @@ export type DisassemblyWarning =
   | { type: "truncated"; address: number; needed: number; available: number }
   | { type: "overlap"; address: number; existingAddress: number };
 
+/**
+ * Reference types discovered during disassembly:
+ * - "call" - JSR target (subroutine entry)
+ * - "branch" - branch target (local label)
+ * - "jump" - JMP target
+ * - "data" - data reference (LDA/STA absolute, etc.)
+ */
+export type ReferenceType = "call" | "branch" | "jump" | "data";
+
+/** Information about a reference to an address */
+export interface Reference {
+  /** Type of reference */
+  type: ReferenceType;
+  /** Address of the instruction making the reference */
+  from: number;
+}
+
 /** Result of disassembly */
 export interface DisassemblyResult {
   /** Decoded instructions, keyed by address */
   instructions: Map<number, Instruction>;
   /** Warnings encountered during disassembly */
   warnings: DisassemblyWarning[];
+  /** References discovered during disassembly, keyed by target address */
+  references: Map<number, Reference[]>;
 }
 
 /** Options for the disassembler */
@@ -63,6 +82,60 @@ function extractJumptableEntries(reader: ByteReader, regions: RegionIndex): numb
 }
 
 /**
+ * Add a reference to the references map
+ */
+function addReference(
+  references: Map<number, Reference[]>,
+  target: number,
+  type: ReferenceType,
+  from: number
+): void {
+  const existing = references.get(target);
+  if (existing) {
+    existing.push({ type, from });
+  } else {
+    references.set(target, [{ type, from }]);
+  }
+}
+
+/**
+ * Extract references from an instruction based on its flow type and operand
+ */
+function extractReferences(instr: Instruction): { target: number; type: ReferenceType }[] {
+  const refs: { target: number; type: ReferenceType }[] = [];
+  const operand = instr.operand;
+
+  switch (instr.flow) {
+    case "call":
+      // JSR - subroutine call
+      if (operand.type === "absolute") {
+        refs.push({ target: operand.address, type: "call" });
+      }
+      break;
+    case "jump":
+      // JMP - direct jump
+      if (operand.type === "absolute") {
+        refs.push({ target: operand.address, type: "jump" });
+      }
+      break;
+    case "branch":
+      // Conditional branch
+      if (operand.type === "relative") {
+        refs.push({ target: operand.target, type: "branch" });
+      }
+      break;
+    case "next":
+      // Regular instruction - check for data references
+      if (operand.type === "absolute" || operand.type === "absoluteX" || operand.type === "absoluteY") {
+        refs.push({ target: operand.address, type: "data" });
+      }
+      break;
+  }
+
+  return refs;
+}
+
+/**
  * Work-queue based disassembler.
  * Starts from entry points and follows control flow to discover code.
  * Also extracts entry points from jumptable regions.
@@ -73,6 +146,7 @@ export function disassemble(
 ): DisassemblyResult {
   const instructions = new Map<number, Instruction>();
   const warnings: DisassemblyWarning[] = [];
+  const references = new Map<number, Reference[]>();
   const regions = options.regions;
 
   // Build initial queue from explicit entry points plus jumptable entries
@@ -129,6 +203,12 @@ export function disassemble(
     const instr = result.instruction;
     instructions.set(address, instr);
 
+    // Extract and record references from this instruction
+    const instrRefs = extractReferences(instr);
+    for (const ref of instrRefs) {
+      addReference(references, ref.target, ref.type, address);
+    }
+
     // Queue targets for further disassembly
     const targets = getTargets(instr);
     for (const target of targets) {
@@ -138,7 +218,7 @@ export function disassemble(
     }
   }
 
-  return { instructions, warnings };
+  return { instructions, warnings, references };
 }
 
 /**

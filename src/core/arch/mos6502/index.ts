@@ -12,6 +12,8 @@ export {
 export { DecodeResult, ByteReader, decode } from "./decoder.js";
 export {
   DisassemblyWarning,
+  ReferenceType,
+  Reference,
   DisassemblyResult,
   DisassemblyOptions,
   disassemble,

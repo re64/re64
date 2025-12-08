@@ -1,10 +1,15 @@
-/** Label types - "entry" for entry points, "address" for general labels */
-export type LabelType = "entry" | "address";
+/**
+ * Label types:
+ * - "entry" - explicit entry points (from project file or PRG load)
+ * - "function" - subroutine entry points (added to disassembly queue)
+ * - "address" - general named addresses (not queued for disassembly)
+ */
+export type LabelType = "entry" | "function" | "address";
 
 /** Source of a label - where it came from */
 export interface LabelSource {
-  /** Kind of source: "layer" for layer-generated, "user" for user-defined, "region" for region-generated */
-  kind: "layer" | "user" | "region";
+  /** Kind of source: "layer" for layer-generated, "user" for user-defined, "region" for region-generated, "auto" for disassembler-generated */
+  kind: "layer" | "user" | "region" | "auto";
   /** Name of the layer that generated this label (if kind is "layer") */
   layerName?: string;
   /** Name of the region that generated this label (if kind is "region") */
@@ -78,6 +83,23 @@ export function createRegionLabel(
     name,
     type,
     source: { kind: "region", regionName, auto: true },
+  };
+}
+
+/** Creates an auto-generated label from disassembly analysis */
+export function createAutoLabel(
+  address: number,
+  name: string,
+  type: LabelType
+): Label {
+  if (address < 0 || address > 0x10000) {
+    throw new Error("Label address must be in range 0x0000-0x10000");
+  }
+  return {
+    address,
+    name,
+    type,
+    source: { kind: "auto", auto: true },
   };
 }
 
