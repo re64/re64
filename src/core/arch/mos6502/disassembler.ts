@@ -1,6 +1,19 @@
 import { decode, ByteReader, DecodeResult } from "./decoder.js";
 import { Instruction, getTargets, continues } from "./instruction.js";
-import { RegionIndex } from "../../memory/region.js";
+import { Region, RegionKind } from "../../memory/region.js";
+
+/**
+ * What the disassembler needs to know about memory semantics.
+ *
+ * Narrower than `MemoryMap` on purpose: `core/arch` stays independent of the
+ * layer stack, and tests can supply a literal.
+ */
+export interface RegionLookup {
+  /** Effective kind at an address, or undefined where nothing is mapped. */
+  getKindAt(address: number): RegionKind | undefined;
+  /** Jumptable regions across the whole map, for entry point extraction. */
+  getJumptables(): readonly Region[];
+}
 
 /** Warning types that can occur during disassembly */
 export type DisassemblyWarning =
@@ -39,30 +52,30 @@ export interface DisassemblyResult {
 export interface DisassemblyOptions {
   /** Entry point addresses to start disassembly from */
   entryPoints: number[];
-  /** Optional region index for determining what to disassemble */
-  regions?: RegionIndex;
+  /** Optional region info for determining what to disassemble */
+  regions?: RegionLookup;
 }
 
 /**
  * Check if an address should be disassembled as code.
  * Returns true for code regions and unknown regions (which default to code).
  */
-function shouldDisassemble(regions: RegionIndex | undefined, address: number): boolean {
+function shouldDisassemble(regions: RegionLookup | undefined, address: number): boolean {
   if (!regions) {
-    return true; // No regions = disassemble everything
+    return true; // No region info = disassemble everything
   }
-  const region = regions.getRegionAt(address);
-  if (!region) {
-    return true; // Unknown region = assume code
+  const kind = regions.getKindAt(address);
+  if (!kind) {
+    return true; // Nothing mapped here = assume code
   }
-  return region.kind === "code" || region.kind === "unknown";
+  return kind === "code" || kind === "unknown";
 }
 
 /**
  * Extract entry points from jumptable regions.
  * Reads 16-bit little-endian addresses from each jumptable region.
  */
-function extractJumptableEntries(reader: ByteReader, regions: RegionIndex): number[] {
+function extractJumptableEntries(reader: ByteReader, regions: RegionLookup): number[] {
   const entries: number[] = [];
   const jumptables = regions.getJumptables();
 

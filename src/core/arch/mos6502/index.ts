@@ -16,6 +16,7 @@ export {
   Reference,
   DisassemblyResult,
   DisassemblyOptions,
+  RegionLookup,
   disassemble,
   InstructionIndex,
 } from "./disassembler.js";

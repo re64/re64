@@ -1,6 +1,6 @@
 import { Layer } from "./layer.js";
 import { Label, createLayerLabel } from "./label.js";
-import { RegionKind } from "./region.js";
+import { RegionIndex, RegionKind } from "./region.js";
 
 /**
  * A layer backed by file data. Preserves the file path for serialization/display.
@@ -14,6 +14,7 @@ export class FileLayer implements Layer {
   public readonly suppressEntry: boolean;
   /** Default region kind - code for PRG, data otherwise */
   public readonly defaultRegionKind: RegionKind;
+  public readonly regions = new RegionIndex();
 
   constructor(
     public readonly name: string,

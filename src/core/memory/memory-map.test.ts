@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { MemoryMap } from "./memory-map.js";
 import { BytesLayer } from "./layer.js";
+import { createUserRegion } from "./region.js";
 
 /** Helper to create a constant-fill layer */
 function constLayer(name: string, start: number, length: number, value: number) {
@@ -206,6 +207,88 @@ describe("MemoryMap", () => {
       // zeros now on top
 
       expect(map.readByte(0x1000)).toBe(0x00);
+    });
+  });
+
+  describe("regions belong to their layer", () => {
+    it("resolves the region from the layer that supplies the byte", () => {
+      const map = new MemoryMap();
+      const lower = constLayer("lower", 0x1000, 0x100, 0x00);
+      const upper = constLayer("upper", 0x1000, 0x100, 0xff);
+
+      lower.regions.addRegion(createUserRegion(0x1000, 0x1010, "text", "lowerText"));
+      upper.regions.addRegion(createUserRegion(0x1000, 0x1010, "jumptable", "upperTable"));
+
+      map.addLayer(lower);
+      map.addLayer(upper); // upper on top
+
+      expect(map.getRegionAt(0x1000)?.name).toBe("upperTable");
+      expect(map.getKindAt(0x1000)).toBe("jumptable");
+    });
+
+    it("moves regions with their layer when the stack is reordered", () => {
+      // The bug this ownership change exists to fix: annotations must follow
+      // the bytes they describe, not stay pinned to an address.
+      const map = new MemoryMap();
+      const lower = constLayer("lower", 0x1000, 0x100, 0x00);
+      const upper = constLayer("upper", 0x1000, 0x100, 0xff);
+
+      lower.regions.addRegion(createUserRegion(0x1000, 0x1010, "text", "lowerText"));
+      map.addLayer(lower);
+      map.addLayer(upper);
+
+      // upper is on top and declares nothing, so its default kind applies
+      expect(map.getRegionAt(0x1000)).toBeUndefined();
+      expect(map.getKindAt(0x1000)).toBe("data");
+
+      map.moveLayer(0, 1); // lower to the top
+
+      expect(map.getRegionAt(0x1000)?.name).toBe("lowerText");
+      expect(map.getKindAt(0x1000)).toBe("text");
+    });
+
+    it("falls back to the layer default outside any declared region", () => {
+      const map = new MemoryMap();
+      const layer = constLayer("layer", 0x1000, 0x100, 0x00);
+      layer.regions.addRegion(createUserRegion(0x1000, 0x1010, "text"));
+      map.addLayer(layer);
+
+      expect(map.getKindAt(0x1005)).toBe("text");
+      expect(map.getKindAt(0x1020)).toBe("data"); // BytesLayer default
+      expect(map.getKindAt(0x2000)).toBeUndefined(); // nothing mapped
+    });
+
+    it("resolves nested regions innermost-first", () => {
+      const map = new MemoryMap();
+      const layer = constLayer("layer", 0x1000, 0x100, 0x00);
+      layer.regions.addRegion(createUserRegion(0x1000, 0x1080, "data", "outer"));
+      layer.regions.addRegion(createUserRegion(0x1010, 0x1020, "text", "inner"));
+      map.addLayer(layer);
+
+      expect(map.getRegionAt(0x1005)?.name).toBe("outer");
+      expect(map.getRegionAt(0x1015)?.name).toBe("inner");
+      expect(map.getKindAt(0x1015)).toBe("text");
+    });
+
+    it("attachRegion gives the region to the topmost covering layer", () => {
+      const map = new MemoryMap();
+      const lower = constLayer("lower", 0x1000, 0x100, 0x00);
+      const upper = constLayer("upper", 0x1000, 0x100, 0xff);
+      map.addLayer(lower);
+      map.addLayer(upper);
+
+      const owner = map.attachRegion(createUserRegion(0x1000, 0x1010, "text"));
+
+      expect(owner).toBe(upper);
+      expect(upper.regions.size).toBe(1);
+      expect(lower.regions.size).toBe(0);
+    });
+
+    it("attachRegion reports unmapped regions instead of dropping them silently", () => {
+      const map = new MemoryMap();
+      map.addLayer(constLayer("layer", 0x1000, 0x100, 0x00));
+
+      expect(map.attachRegion(createUserRegion(0x9000, 0x9010, "data"))).toBeUndefined();
     });
   });
 });

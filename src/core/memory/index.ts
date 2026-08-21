@@ -1,4 +1,4 @@
-export { Layer, BytesLayer } from "./layer.js";
+export { Layer, BytesLayer, layerRegionAt, layerKindAt } from "./layer.js";
 export { FileLayer } from "./file-layer.js";
 export { MemoryMap, ReadResult } from "./memory-map.js";
 export {
@@ -12,11 +12,4 @@ export {
   createRegionLabel,
   createAutoLabel,
 } from "./label.js";
-export {
-  Region,
-  RegionKind,
-  RegionSource,
-  RegionIndex,
-  createLayerRegion,
-  createUserRegion,
-} from "./region.js";
+export { Region, RegionKind, RegionIndex, createUserRegion } from "./region.js";

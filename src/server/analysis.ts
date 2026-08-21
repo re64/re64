@@ -343,16 +343,17 @@ export function analyze(loaded: LoadedProject, labelTolerance = 1): AnalysisResu
     entryPoints = labelEntryPoints;
   }
 
-  const allRegions = new RegionIndex();
-  allRegions.addRegions(map.getRegions().getAllRegions());
-  allRegions.addRegions(userRegions.getAllRegions());
+  // Hand each declared region to the layer that owns its start address, so it
+  // travels with that layer's content rather than with the address.
+  for (const region of userRegions.getAllRegions()) {
+    map.attachRegion(region);
+  }
 
-  const result = disassemble(map, { entryPoints, regions: allRegions });
+  const result = disassemble(map, { entryPoints, regions: map });
   const index = new InstructionIndex(result.instructions);
 
   const allLabels = new LabelIndex();
   allLabels.addLabels(map.getLabels().getAllLabels());
-  allLabels.addLabels(allRegions.generateLabels());
   allLabels.addLabels(userLabels.getAllLabels());
 
   // Auto-labels for otherwise-unnamed reference targets (lowest priority).
@@ -490,7 +491,7 @@ export function analyze(loaded: LoadedProject, labelTolerance = 1): AnalysisResu
       continue;
     }
 
-    const kind = allRegions.getRegionAt(addr)?.kind ?? "data";
+    const kind = map.getKindAt(addr) ?? "data";
 
     if (kind === "jumptable") {
       emitLabels(addr);
@@ -538,7 +539,7 @@ export function analyze(loaded: LoadedProject, labelTolerance = 1): AnalysisResu
     };
 
     while (addr < rangeEnd && !index.has(addr)) {
-      const currentKind = allRegions.getRegionAt(addr)?.kind ?? "data";
+      const currentKind = map.getKindAt(addr) ?? "data";
       if (isText ? currentKind !== "text" : currentKind === "text" || currentKind === "jumptable") {
         break;
       }
@@ -587,7 +588,7 @@ export function analyze(loaded: LoadedProject, labelTolerance = 1): AnalysisResu
     stats: {
       instructions: result.instructions.size,
       labels: allLabels.getAllLabels().length,
-      regions: allRegions.getAllRegions().length,
+      regions: map.getAllRegions().length,
       rows: rows.length,
       arrows: arrowSpans.length,
       arrowsDemoted: demoted,

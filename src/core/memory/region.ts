@@ -8,17 +8,13 @@ export type RegionKind =
   | "jumptable"  // Array of addresses (each is an entry point)
   | "unknown";   // Not yet analyzed
 
-/** Source of a region - where it came from */
-export interface RegionSource {
-  /** Kind of source: "layer" for auto-generated, "user" for user-defined */
-  kind: "layer" | "user";
-  /** Name of the layer that generated this region (if kind is "layer") */
-  layerName?: string;
-}
-
 /**
- * A region defines what a range of memory contains.
- * Regions are used to guide disassembly and display.
+ * A region declares what a range of memory contains, overriding the
+ * `defaultRegionKind` of the layer that owns it.
+ *
+ * Regions belong to a layer rather than to the address space: reordering the
+ * layer stack has to move annotations with the bytes they describe, not leave
+ * them pointing at whatever ends up at that address.
  */
 export interface Region {
   /** Start address (inclusive) */
@@ -29,25 +25,8 @@ export interface Region {
   readonly kind: RegionKind;
   /** Optional name/label for the region */
   readonly name?: string;
-  /** Where this region came from */
-  readonly source: RegionSource;
-}
-
-/** Create an auto-generated region from a layer */
-export function createLayerRegion(
-  start: number,
-  end: number,
-  kind: RegionKind,
-  layerName: string,
-  name?: string
-): Region {
-  return {
-    start,
-    end,
-    kind,
-    name,
-    source: { kind: "layer", layerName },
-  };
+  /** Optional comment */
+  readonly comment?: string;
 }
 
 /** Create a user-defined region */
@@ -55,20 +34,19 @@ export function createUserRegion(
   start: number,
   end: number,
   kind: RegionKind,
-  name?: string
+  name?: string,
+  comment?: string
 ): Region {
-  return {
-    start,
-    end,
-    kind,
-    name,
-    source: { kind: "user" },
-  };
+  return { start, end, kind, name, comment };
 }
 
 /**
- * Index for fast region lookup by address.
- * Handles overlapping regions with priority (user > layer).
+ * The regions declared inside a single layer.
+ *
+ * Nesting is resolved smallest-first, so carving a small `text` span out of a
+ * larger `data` region works without deleting or splitting the outer one. There
+ * is no source priority to arbitrate: a layer's default kind is a property of
+ * the layer, not a competing region, so anything in here is user intent.
  */
 export class RegionIndex {
   private regions: Region[] = [];
@@ -83,25 +61,14 @@ export class RegionIndex {
     }
   }
 
-  /**
-   * Get the effective region at an address.
-   * User-defined regions take priority over layer-generated ones.
-   */
+  /** The innermost region containing an address, or undefined if none does. */
   getRegionAt(address: number): Region | undefined {
     let best: Region | undefined;
 
     for (const region of this.regions) {
       if (address >= region.start && address < region.end) {
-        if (!best) {
+        if (!best || region.end - region.start < best.end - best.start) {
           best = region;
-        } else if (region.source.kind === "user" && best.source.kind === "layer") {
-          // User regions take priority
-          best = region;
-        } else if (region.source.kind === best.source.kind) {
-          // Same priority - prefer more specific (smaller) region
-          if (region.end - region.start < best.end - best.start) {
-            best = region;
-          }
         }
       }
     }
@@ -109,16 +76,14 @@ export class RegionIndex {
     return best;
   }
 
-  /** Check if an address is in a code region */
-  isCode(address: number): boolean {
-    const region = this.getRegionAt(address);
-    return region?.kind === "code";
-  }
-
-  /** Check if an address is in a data region (non-code) */
-  isData(address: number): boolean {
-    const region = this.getRegionAt(address);
-    return region !== undefined && region.kind !== "code";
+  /**
+   * Kind at an address, or undefined if no region covers it.
+   *
+   * Undefined genuinely means "not declared here" — a bare index has no layer
+   * default to fall back to. `MemoryMap.getKindAt` supplies that.
+   */
+  getKindAt(address: number): RegionKind | undefined {
+    return this.getRegionAt(address)?.kind;
   }
 
   /** Get all regions sorted by start address */

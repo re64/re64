@@ -67,14 +67,6 @@ describe("hexDump", () => {
 });
 
 describe("hexDump with labels", () => {
-  it("shows span labels for layer boundaries", () => {
-    const map = new MemoryMap();
-    map.addLayer(new BytesLayer("fill", 0x1000, new Uint8Array([0xff]), 16));
-
-    const output = hexDump(map, 0x1000, 16);
-    expect(output).toContain("1000 fill+$0000:");
-  });
-
   it("shows entry labels for PRG files", () => {
     const map = new MemoryMap();
     map.addLayer(
@@ -87,17 +79,21 @@ describe("hexDump with labels", () => {
 
   it("interrupts lines at labels", () => {
     const map = new MemoryMap();
-    // Two adjacent layers - should show labels at boundary
-    map.addLayer(new BytesLayer("first", 0x1000, new Uint8Array([0xaa]), 4));
-    map.addLayer(new BytesLayer("second", 0x1004, new Uint8Array([0xbb]), 4));
+    // Two adjacent PRG layers, each contributing an entry label at its start
+    map.addLayer(
+      new FileLayer("first", "a.prg", 0x1000, new Uint8Array([0xaa, 0xaa, 0xaa, 0xaa]), undefined, true)
+    );
+    map.addLayer(
+      new FileLayer("second", "b.prg", 0x1004, new Uint8Array([0xbb, 0xbb, 0xbb, 0xbb]), undefined, true)
+    );
 
     const output = hexDump(map, 0x1000, 8, { bytesPerLine: 16 });
     const lines = output.split("\n");
 
     // Should have multiple lines due to label interruption
     expect(lines.length).toBeGreaterThan(1);
-    expect(output).toContain("first+$0000:");
-    expect(output).toContain("second+$0000:");
+    expect(output).toContain("a:");
+    expect(output).toContain("b:");
   });
 
   it("formats labels with address and trailing colon", () => {

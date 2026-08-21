@@ -398,12 +398,14 @@ program
     }
 
     // Build region index: merge auto-generated regions with user regions (user takes priority)
-    const allRegions = new RegionIndex();
-    allRegions.addRegions(map.getRegions().getAllRegions());
-    allRegions.addRegions(userRegions.getAllRegions());
+    // Hand each declared region to the layer that owns its start address, so
+    // it travels with that layer's content rather than with the address.
+    for (const region of userRegions.getAllRegions()) {
+      map.attachRegion(region);
+    }
 
     // Disassemble
-    const result = disassemble(map, { entryPoints, regions: allRegions });
+    const result = disassemble(map, { entryPoints, regions: map });
     const index = new InstructionIndex(result.instructions);
 
     // Determine output range
@@ -413,12 +415,9 @@ program
       instructions = index.range(start, start + length);
     }
 
-    // Merge labels from map, user labels, and region-generated labels
-    const mapLabels = map.getLabels();
-    const regionLabels = allRegions.generateLabels();
+    // Merge layer labels (which include region-generated ones) with user labels
     const allLabels = new LabelIndex();
-    allLabels.addLabels(mapLabels.getAllLabels());
-    allLabels.addLabels(regionLabels);
+    allLabels.addLabels(map.getLabels().getAllLabels());
     allLabels.addLabels(userLabels.getAllLabels());
 
     // Parse label tolerance
@@ -567,8 +566,7 @@ program
         addr += instr.bytes.length;
       } else {
         // Not an instruction - check what kind of region this is
-        const region = allRegions.getRegionAt(addr);
-        const regionKind = region?.kind ?? "data";
+        const regionKind = map.getKindAt(addr) ?? "data";
 
         if (regionKind === "jumptable") {
           // Output jumptable entries (2 bytes each)
@@ -582,8 +580,7 @@ program
           const BYTES_PER_LINE = 8;
 
           while (addr < rangeEnd && !index.has(addr)) {
-            const currentRegion = allRegions.getRegionAt(addr);
-            if (currentRegion?.kind !== "text") break;
+            if (map.getKindAt(addr) !== "text") break;
             if (dataBytes.length > 0 && allLabels.hasLabelAt(addr)) break;
 
             const byte = map.readByte(addr);
@@ -623,8 +620,7 @@ program
               break;
             }
             // Break if we enter a different region type
-            const currentRegion = allRegions.getRegionAt(addr);
-            const currentKind = currentRegion?.kind ?? "data";
+            const currentKind = map.getKindAt(addr) ?? "data";
             if (currentKind === "jumptable" || currentKind === "text") {
               break;
             }
