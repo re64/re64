@@ -123,6 +123,57 @@
       .tok-xref { color: var(--xref); cursor: pointer; }
       .tok-xref:hover { text-decoration: underline; }
 
+      /* Label type tag. Entry/function/code make the address a disassembly
+         entry point; "address" is the default and is left untagged. */
+      .tok-labeltype { cursor: pointer; opacity: 0.85; }
+      .tok-labeltype:hover { opacity: 1; text-decoration: underline; }
+      .tok-labeltype.type-entry { color: #e0b45a; }
+      .tok-labeltype.type-function { color: #7fd3c1; }
+      .tok-labeltype.type-code { color: #8aa9e0; }
+
+      /* Label type menu */
+      .type-menu {
+        position: fixed;
+        z-index: 20;
+        min-width: 220px;
+        padding: 4px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      }
+      .type-menu-title {
+        padding: 4px 8px 6px;
+        font-size: 11px;
+        color: var(--dim);
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 4px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .type-menu-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 4px 8px;
+        border: none;
+        border-radius: 4px;
+        background: none;
+        color: var(--fg);
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+      .type-menu-item:hover { background: var(--accent-dim); }
+      .type-menu-item.current { color: var(--accent); }
+      .type-menu-item.current .type-menu-name::after {
+        content: " ✓";
+      }
+      .type-menu-name { flex: 1; }
+      .type-menu-note { font-size: 11px; color: var(--dim); }
+
       /* Shortcuts dialog */
       #shortcuts {
         border: 1px solid var(--border);
@@ -216,6 +267,12 @@
           <dd>Rename it in place</dd>
           <dt><kbd>n</kbd></dt>
           <dd>Name the current line, or rename its label</dd>
+          <dt><kbd>t</kbd> / <kbd>click</kbd> <span class="tok-labeltype type-function">[fn]</span></dt>
+          <dd>
+            Set type — then <kbd>f</kbd> function, <kbd>c</kbd> code,
+            <kbd>e</kbd> entry, <kbd>a</kbd> address.
+            All but <em>address</em> make it a disassembly entry point.
+          </dd>
           <dt><kbd>Enter</kbd></dt>
           <dd>Commit the name</dd>
           <dt><kbd>Esc</kbd></dt>

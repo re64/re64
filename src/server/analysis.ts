@@ -16,6 +16,7 @@ import {
   LabelIndex,
   RegionIndex,
   Label,
+  LabelType,
   createAutoLabel,
   findFile,
   extractFile,
@@ -35,12 +36,26 @@ import {
 export interface RowToken {
   start: number;
   end: number;
-  kind: "operand" | "label" | "xref" | "mnemonic";
+  kind: "operand" | "label" | "xref" | "mnemonic" | "labeltype";
   /** Address this token navigates to, when clicked. */
   target?: number;
   /** Label name, for rename actions. */
   name?: string;
+  /** Label type, for the type tag and for cycling it. */
+  labelType?: LabelType;
 }
+
+/**
+ * Short tags for the label types that change disassembly behaviour. Entry,
+ * function, and code labels are queued as entry points; "address" is not, and
+ * is left untagged since it is the default.
+ */
+export const LABEL_TYPE_TAGS: Record<LabelType, string> = {
+  entry: "entry",
+  function: "fn",
+  code: "code",
+  address: "addr",
+};
 
 export type RowKind = "label" | "instruction" | "data" | "text" | "word";
 
@@ -398,8 +413,24 @@ export function analyze(loaded: LoadedProject, labelTolerance = 1): AnalysisResu
           kind: "label",
           target: addr,
           name: label.name,
+          labelType: label.type,
         },
       ];
+
+      // "address" is the default and by far the most common, so tagging it
+      // would add noise to most rows without saying anything.
+      if (label.type !== "address") {
+        const tag = ` [${LABEL_TYPE_TAGS[label.type]}]`;
+        tokens.push({
+          start: text.length + 1,
+          end: text.length + tag.length,
+          kind: "labeltype",
+          target: addr,
+          name: label.name,
+          labelType: label.type,
+        });
+        text += tag;
+      }
 
       const refs = result.references.get(addr);
       if (refs && refs.length > 0) {

@@ -116,7 +116,9 @@ function labelEntryLine(
   type?: ProjectLabel["type"]
 ): string {
   const addr = `$${address.toString(16).toUpperCase().padStart(4, "0")}`;
-  const typePart = type ? `, "type": ${JSON.stringify(type)}` : "";
+  // "address" is the default; recorded by absence, not written out.
+  const typePart =
+    type && type !== "address" ? `, "type": ${JSON.stringify(type)}` : "";
   return `${indent}{ "address": ${JSON.stringify(addr)}, "name": ${JSON.stringify(name)}${typePart} }`;
 }
 
@@ -162,7 +164,11 @@ export function upsertLabel(
     if (addressOfLine(lines[i]) !== address) continue;
 
     let line = lines[i].replace(/"name"\s*:\s*"(?:[^"\\]|\\.)*"/, `"name": ${JSON.stringify(name)}`);
-    if (type !== undefined) {
+    if (type === "address") {
+      // "address" is the default, so record it by absence rather than writing
+      // it onto every label in the file.
+      line = line.replace(/\s*,\s*"type"\s*:\s*"[^"]*"/, "");
+    } else if (type !== undefined) {
       line = /"type"\s*:/.test(line)
         ? line.replace(/"type"\s*:\s*"[^"]*"/, `"type": ${JSON.stringify(type)}`)
         : line.replace(/\s*\}/, `, "type": ${JSON.stringify(type)} }`);

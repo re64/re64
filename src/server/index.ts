@@ -24,6 +24,8 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(__dirname, "../../public");
 
+const LABEL_TYPES = ["entry", "function", "code", "address"];
+
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -94,6 +96,11 @@ export function startServer(options: ServerOptions): void {
         const { address, name, type } = JSON.parse(await readBody(req));
         if (typeof address !== "number" || typeof name !== "string" || !name.trim()) {
           return sendJson(res, 400, { error: "address (number) and name (string) required" });
+        }
+        if (type !== undefined && !LABEL_TYPES.includes(type)) {
+          return sendJson(res, 400, {
+            error: `type must be one of ${LABEL_TYPES.join(", ")}`,
+          });
         }
         upsertLabel(projectPath, address, name.trim(), type);
         return sendJson(res, 200, { ok: true });
