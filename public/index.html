@@ -122,6 +122,46 @@
       .tok-label:hover { text-decoration: underline; }
       .tok-xref { color: var(--xref); cursor: pointer; }
       .tok-xref:hover { text-decoration: underline; }
+
+      /* Shortcuts dialog */
+      #shortcuts {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+        color: var(--fg);
+        padding: 0;
+        min-width: 420px;
+        max-width: 90vw;
+        box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+      }
+      #shortcuts::backdrop { background: rgba(0, 0, 0, 0.55); }
+
+      #shortcuts header {
+        justify-content: space-between;
+        border-bottom: 1px solid var(--border);
+        border-radius: 8px 8px 0 0;
+      }
+      #shortcuts h2 { margin: 0; font-size: 13px; font-weight: 600; }
+      #shortcuts .body { padding: 4px 16px 16px; }
+
+      #shortcuts h3 {
+        margin: 16px 0 6px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--dim);
+      }
+
+      #shortcuts dl {
+        margin: 0;
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 4px 16px;
+        align-items: baseline;
+      }
+      #shortcuts dt { text-align: right; white-space: nowrap; }
+      #shortcuts dd { margin: 0; color: var(--dim); }
     </style>
   </head>
   <body>
@@ -146,16 +186,54 @@
       <footer>
         <span id="stats"></span>
         <span class="spacer"></span>
-        <span>
-          <kbd>click</kbd> operand to jump ·
-          <kbd>click</kbd> label to rename ·
-          <kbd>n</kbd> name here ·
-          <kbd>Enter</kbd> follow / commit ·
-          <kbd>Esc</kbd> cancel ·
-          <kbd>Backspace</kbd> back
-        </span>
+        <span><kbd>?</kbd> keyboard shortcuts</span>
       </footer>
     </div>
+
+    <dialog id="shortcuts">
+      <header>
+        <h2>Keyboard shortcuts</h2>
+        <button id="shortcuts-close">Close</button>
+      </header>
+      <div class="body">
+        <h3>Navigation</h3>
+        <dl>
+          <dt><kbd>click</kbd> operand</dt>
+          <dd>Jump to the address it references</dd>
+          <dt><kbd>click</kbd> <span class="tok-xref">◂ N refs</span></dt>
+          <dd>Jump to a referrer</dd>
+          <dt><kbd>Enter</kbd></dt>
+          <dd>Follow the operand on the current line</dd>
+          <dt><kbd>Backspace</kbd> / <kbd>Alt</kbd>+<kbd>←</kbd></dt>
+          <dd>Back, along the navigation stack</dd>
+          <dt><kbd>g</kbd></dt>
+          <dd>Jump to the address box</dd>
+        </dl>
+
+        <h3>Labels</h3>
+        <dl>
+          <dt><kbd>click</kbd> label</dt>
+          <dd>Rename it in place</dd>
+          <dt><kbd>n</kbd></dt>
+          <dd>Name the current line, or rename its label</dd>
+          <dt><kbd>Enter</kbd></dt>
+          <dd>Commit the name</dd>
+          <dt><kbd>Esc</kbd></dt>
+          <dd>Cancel — clicking away also cancels</dd>
+          <dt>empty + <kbd>Enter</kbd></dt>
+          <dd>Delete the label</dd>
+        </dl>
+
+        <h3>Project</h3>
+        <dl>
+          <dt><kbd class="mod-key">Ctrl</kbd>+<kbd>S</kbd></dt>
+          <dd>Save the project file and reanalyze</dd>
+          <dt><kbd>?</kbd></dt>
+          <dd>This dialog</dd>
+        </dl>
+      </div>
+    </dialog>
+
     <script type="module" src="/app.js"></script>
   </body>
 </html>

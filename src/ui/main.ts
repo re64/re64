@@ -635,6 +635,45 @@ async function saveProjectFile(): Promise<void> {
   setStatus("Project saved");
 }
 
+// --- Shortcuts dialog -------------------------------------------------
+
+const shortcuts = $("#shortcuts") as HTMLDialogElement;
+
+/** True when typing should reach a field rather than trigger a shortcut. */
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  return (
+    el.tagName === "INPUT" ||
+    el.tagName === "TEXTAREA" ||
+    el.isContentEditable // the project editor; the disassembly view is not editable
+  );
+}
+
+function showShortcuts(): void {
+  if (!shortcuts.open) shortcuts.showModal();
+}
+
+$("#shortcuts-close").addEventListener("click", () => shortcuts.close());
+
+// Clicking the backdrop lands on the dialog element itself.
+shortcuts.addEventListener("click", (event) => {
+  if (event.target === shortcuts) shortcuts.close();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "?" || isTypingTarget(event.target)) return;
+  event.preventDefault();
+  showShortcuts();
+});
+
+// Spell the modifier the way the platform does.
+if (navigator.platform.startsWith("Mac")) {
+  for (const key of Array.from(document.querySelectorAll(".mod-key"))) {
+    key.textContent = "⌘";
+  }
+}
+
 // --- Wiring -----------------------------------------------------------
 
 function showTab(name: "disasm" | "project"): void {
