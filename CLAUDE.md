@@ -211,6 +211,46 @@ KERNAL entry points — render as plain grey names rather than links. They are
 named but have no bytes, and on 6502 they are common enough that making them
 clickable means constantly landing on an error.
 
+### Label types are backend concepts; the UI exposes one
+
+The four label types are genuinely distinct concepts, even though the
+disassembler currently treats three of them identically (all get queued):
+
+- `entry` — where execution *starts*. Emitted by a layer or region, not by the
+  user: a PRG layer sets `defaultRegionKind = "code"` and labels its load
+  address. No caller, no return contract.
+- `function` — a subroutine, from analysis (a JSR target) or declared by the
+  user. Has callers and a return contract.
+- `code` — a branch or jump target found by analysis. Intra-function.
+- `address` — a named address, not queued. The default.
+
+Do **not** collapse these because they behave alike today. That sameness is an
+artifact of the disassembler only ever queueing them; they diverge as soon as
+there is call-graph or basic-block analysis, which is where the information
+would be needed and no longer recoverable.
+
+The UI exposes only `function` (`f`), because that is the one a user reaches
+for while reading code — promoting a `loc_` they have recognised as a
+subroutine, or declaring one nothing references so it gets decoded at all.
+`entry` and `code` render as read-only tags so the analysis stays visible. The
+project file remains the escape hatch for anything else, including
+hand-written `code` labels. General capability in the backend, common cases in
+the front end.
+
+Auto-generated names encode their type in the prefix:
+
+```
+sub_XXXX → function    loc_XXXX → code    dat_XXXX → address
+```
+
+So promoting an auto label renames `loc_XXXX` to `sub_XXXX`; leaving the old
+prefix would contradict the tag. This cannot collide with auto-labelling,
+because an auto name always encodes its own address and any existing label at
+that address suppresses generation there (`allLabels.resolve(...)` short-circuits
+the loop). Clearing `function` from a label still carrying an auto-shaped name
+deletes it outright rather than leaving a redundant untyped entry; a name the
+user chose is kept and only its type is cleared.
+
 ### Cross-reference arrow rendering
 
 Two distinct styles, to keep the gutter from filling with long parallel lines:

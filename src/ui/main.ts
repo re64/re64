@@ -28,18 +28,14 @@ import { oneDark } from "@codemirror/theme-one-dark";
 type LabelType = "entry" | "function" | "code" | "address";
 
 /**
- * Accelerator keys for the type menu.
+ * The UI only sets "function"; the other types exist but are not user actions.
  *
- * Deliberately behind the `t` menu rather than bound directly: single letters
- * are scarce, and c/d/a are conventionally "make code / data / ascii" in this
- * kind of tool — operations that belong to regions, not labels.
+ * "code" is auto-generated for branch and jump targets, and "entry" comes from
+ * a layer or region — a PRG load address, say. Both are shown as tags so the
+ * analysis is visible, but neither is something you reach for while reading
+ * code. Declaring a function is. Anything else can still be hand-written in
+ * the project file.
  */
-const LABEL_TYPE_KEYS: [key: string, type: LabelType][] = [
-  ["f", "function"],
-  ["c", "code"],
-  ["e", "entry"],
-  ["a", "address"],
-];
 
 interface RowToken {
   start: number;
@@ -143,11 +139,15 @@ function buildDecorations(rows: Row[], doc: EditorState["doc"]): DecorationSet {
           cls = row.illegal ? "tok-mnemonic illegal" : "tok-mnemonic";
           break;
         case "labeltype":
+          // Display only. "code" and "entry" are analysis output, not settings;
+          // the one type worth changing by hand is function, bound to f.
           cls = `tok-labeltype type-${tok.labelType}`;
-          attrs["data-cycle"] = String(tok.target);
-          attrs["data-name"] = tok.name ?? "";
-          attrs["data-type"] = tok.labelType ?? "address";
-          attrs.title = `${tok.labelType} — click to change type`;
+          attrs.title =
+            tok.labelType === "function"
+              ? "function — an entry point for disassembly (f to clear)"
+              : tok.labelType === "code"
+                ? "code — a branch or jump target found by analysis"
+                : "entry — start of a program or code region";
           break;
       }
 
@@ -474,98 +474,22 @@ async function setLabelType(
   );
 }
 
-// --- Label type menu --------------------------------------------------
+// --- Function toggle --------------------------------------------------
 
 /**
- * Type picker, opened by `t` or by clicking a type tag.
+ * Mark the current line as a function, or clear it.
  *
- * A menu rather than a cycle: cycling costs a file write and a reanalysis per
- * step, so reaching "entry" from the default would rewrite the project three
- * times. The menu also doubles as the hint for its own accelerator keys, so
- * the shortcut is discoverable without being memorised.
+ * Declaring a function is the one type change worth a keystroke: it queues the
+ * address as a disassembly entry point, which is how code nothing references —
+ * reached only through a jump table or an indirect JMP — gets decoded at all.
+ *
+ * On an unlabelled address it creates the label too, named sub_XXXX, since
+ * "this is a subroutine" is usually known before a good name is.
  */
-let typeMenu: HTMLElement | null = null;
-
-function closeTypeMenu(): void {
-  typeMenu?.remove();
-  typeMenu = null;
-}
-
-function openTypeMenu(
-  address: number,
-  name: string,
-  current: LabelType,
-  anchor: { left: number; bottom: number }
-): void {
-  closeTypeMenu();
-
-  const menu = document.createElement("div");
-  menu.className = "type-menu";
-
-  const title = document.createElement("div");
-  title.className = "type-menu-title";
-  title.textContent = `${name} — type`;
-  menu.appendChild(title);
-
-  for (const [key, type] of LABEL_TYPE_KEYS) {
-    const item = document.createElement("button");
-    item.className = "type-menu-item" + (type === current ? " current" : "");
-    item.innerHTML =
-      `<kbd>${key}</kbd><span class="type-menu-name">${type}</span>` +
-      `<span class="type-menu-note">${
-        type === "address" ? "not an entry point" : "entry point"
-      }</span>`;
-    item.addEventListener("click", () => {
-      closeTypeMenu();
-      void setLabelType(address, name, type);
-    });
-    menu.appendChild(item);
-  }
-
-  menu.style.left = `${Math.round(anchor.left)}px`;
-  menu.style.top = `${Math.round(anchor.bottom + 4)}px`;
-  document.body.appendChild(menu);
-  typeMenu = menu;
-
-  const onKey = (event: KeyboardEvent) => {
-    const hit = LABEL_TYPE_KEYS.find(([key]) => key === event.key);
-    if (hit) {
-      event.preventDefault();
-      event.stopPropagation();
-      closeTypeMenu();
-      void setLabelType(address, name, hit[1]);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      closeTypeMenu();
-      disasmView.focus();
-    }
-  };
-  const onClickAway = (event: MouseEvent) => {
-    if (!menu.contains(event.target as Node)) closeTypeMenu();
-  };
-
-  // Capture phase, so the accelerator beats the editor's own keymap.
-  document.addEventListener("keydown", onKey, true);
-  document.addEventListener("mousedown", onClickAway, true);
-  menu.addEventListener("remove", () => {});
-
-  const observer = new MutationObserver(() => {
-    if (!menu.isConnected) {
-      document.removeEventListener("keydown", onKey, true);
-      document.removeEventListener("mousedown", onClickAway, true);
-      observer.disconnect();
-    }
-  });
-  observer.observe(document.body, { childList: true });
-}
-
-/** Open the type menu for the label on the current line. */
-function typeMenuForCurrentLine(): void {
+function toggleFunctionOnCurrentLine(): void {
   if (!analysis) return;
 
-  const head = disasmView.state.selection.main.head;
-  const lineNo = disasmView.state.doc.lineAt(head).number;
+  const lineNo = disasmView.state.doc.lineAt(disasmView.state.selection.main.head).number;
   const row = analysis.rows[lineNo - 1];
   if (!row) return;
 
@@ -573,20 +497,49 @@ function typeMenuForCurrentLine(): void {
     (r) => r.address === row.address && r.kind === "label"
   );
   const token = labelRow?.tokens.find((t) => t.kind === "label");
-  if (!token) {
-    setStatus(`No label at $${hex4(row.address)} — press n to add one`);
+
+  const name = token?.name ?? `sub_${hex4(row.address)}`;
+  const isFunction = token?.labelType === "function";
+
+  if (!isFunction) {
+    // Auto-generated names encode their type in the prefix, so a promoted
+    // label has to move to sub_ — leaving it as loc_ would give a function the
+    // prefix reserved for branch targets, and the name would contradict the tag.
+    const promoted = isAutoGeneratedName(name, row.address)
+      ? `sub_${hex4(row.address)}`
+      : name;
+    void setLabelType(row.address, promoted, "function");
     return;
   }
 
-  const coords = disasmView.coordsAtPos(head);
-  openTypeMenu(
-    row.address,
-    token.name ?? "",
-    token.labelType ?? "address",
-    coords
-      ? { left: coords.left, bottom: coords.bottom }
-      : { left: 200, bottom: 120 }
-  );
+  // Clearing a name the disassembler would generate anyway removes the entry
+  // outright, rather than leaving a redundant untyped label behind. A name you
+  // chose is kept — only its type is cleared.
+  if (isAutoGeneratedName(name, row.address)) {
+    void removeLabel(row.address, name);
+  } else {
+    void setLabelType(row.address, name, "address");
+  }
+}
+
+/** True when the name is exactly what auto-labelling produces for this address. */
+function isAutoGeneratedName(name: string, address: number): boolean {
+  return new RegExp(`^(sub|loc|dat)_${hex4(address)}$`).test(name);
+}
+
+async function removeLabel(address: number, name: string): Promise<void> {
+  const res = await fetch("/api/label", {
+    method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ address }),
+  });
+  if (!res.ok) {
+    setStatus((await res.json()).error ?? "Failed to remove label", true);
+    return;
+  }
+  await loadDisassembly(address);
+  await loadProjectFile();
+  setStatus(`${name} is no longer a function`);
 }
 
 /**
@@ -634,22 +587,9 @@ function nameCurrentLine(): void {
 const clickHandler = EditorView.domEventHandlers({
   mousedown(event) {
     const el = (event.target as HTMLElement).closest<HTMLElement>(
-      "[data-target],[data-rename],[data-cycle]"
+      "[data-target],[data-rename]"
     );
     if (!el) return false;
-
-    const cycle = el.getAttribute("data-cycle");
-    if (cycle !== null) {
-      const rect = el.getBoundingClientRect();
-      openTypeMenu(
-        Number(cycle),
-        el.getAttribute("data-name") ?? "",
-        (el.getAttribute("data-type") as LabelType) ?? "address",
-        { left: rect.left, bottom: rect.bottom }
-      );
-      event.preventDefault();
-      return true;
-    }
 
     const rename = el.getAttribute("data-rename");
     if (rename !== null) {
@@ -679,7 +619,7 @@ const navKeymap = keymap.of([
   { key: "Alt-ArrowLeft", run: () => (goBack(), true) },
   { key: "Backspace", run: () => (goBack(), true) },
   { key: "n", run: () => (nameCurrentLine(), true) },
-  { key: "t", run: () => (typeMenuForCurrentLine(), true) },
+  { key: "f", run: () => (toggleFunctionOnCurrentLine(), true) },
   { key: "Escape", run: () => (endLabelEdit(), true) },
   {
     key: "g",
