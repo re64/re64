@@ -127,7 +127,8 @@ interface ProjectLayer {
 interface ProjectLabel {
   address: number | string;  // "$8000" or 32768
   name: string;
-  type?: "entry" | "address";  // Default: "address"
+  type?: "entry" | "function" | "code" | "address";  // Default: "address"
+  comment?: string;
 }
 
 interface ProjectRegion {
@@ -135,10 +136,131 @@ interface ProjectRegion {
   end: number | string;   // Can use "+length" format: "+$100"
   kind: "code" | "data" | "text" | "jumptable" | "unknown";
   name?: string;
+  comment?: string;
 }
 ```
 
 Addresses can be decimal (32768) or hex strings ("$8000", "0x8000").
+
+## UI Design Decisions
+
+The eventual web UI is built around a single central widget: a disassembly view
+holding assembler lines, comments, cross-reference arrows, and inline editable
+elements (labels, comments). These decisions are recorded here because they
+constrain the core data model, not just the presentation layer.
+
+### Model-is-truth, not buffer-is-truth
+
+The displayed text is *derived* from the three-layer model (bytes → regions →
+labels). Users never type assembler; they edit specific fields — a label's name,
+a comment, a region's kind. Therefore:
+
+- The document is a list of rows keyed by **address**, not a text buffer.
+- CRDT sync operates on the project model (`labels`, `comments`, `regions`) —
+  the same structures already in the `.re64` schema — never on characters.
+- Two users renaming the same label is a clean conflict on one field, rather
+  than overlapping character edits in a generated string.
+
+Rejected alternative: holding generated text in an editor buffer and parsing
+edits back. That round-trips derived text through a parser and puts conflicts at
+the wrong granularity.
+
+### Widget: CodeMirror 6, read-only with decorations
+
+Chosen over a hand-rolled virtualized list mainly because of **variable row
+heights**. Inline multiline editing (a block comment expanding in place) breaks
+naive virtualization: rows growing above the viewport cause scroll jump unless
+anchoring is handled explicitly. CodeMirror 6's height map already handles
+variable-height lines (soft wrapping produces them constantly) and anchors
+scroll position across height changes.
+
+What it provides:
+- Virtualization — a full 64K map is tens of thousands of rows.
+- Block widgets for multiline inline editors and standalone comment rows.
+- Inline widgets for editable label tokens.
+- Atomic/read-only ranges so generated assembler text is not directly editable.
+- Gutters, for the cross-reference arrow layer.
+
+Consequence: **edit inline, not in popups.** Block comments expand in place as
+block widgets; label renames are in-place token editors. Popups/overlays are
+reserved for things genuinely outside document flow — the aggregated xref list,
+a region-kind picker.
+
+Label editing uses both widget forms, picked by whether a label already exists:
+
+- **Renaming** replaces the label token with an input (`Decoration.replace`), so
+  the trailing `:` and xref stub stay put and the row does not reflow.
+- **Naming a new address** has no token to replace, so the editor gets its own
+  block row above the instruction (`Decoration.widget({block: true})`), indented
+  to the label column — the row it is about to become.
+
+Enter commits, Escape reverts, and **blur reverts rather than saving**: an empty
+name means "delete this label", so a blur-commit would turn an accidentally
+cleared field into a silent deletion.
+
+Two gotchas worth remembering:
+
+- A read-only view (`EditorView.editable.of(false)`) is **not focusable**. Without
+  `contentAttributes: {tabindex: "0"}`, clicking a line leaves the keymap with no
+  listener and every shortcut silently does nothing.
+- Widgets holding form controls must return `true` from `ignoreEvent()` and stop
+  propagation on keydown, or the editor's own keymap eats the typing.
+
+Operands pointing outside the loaded map — zero-page variables, I/O registers,
+KERNAL entry points — render as plain grey names rather than links. They are
+named but have no bytes, and on 6502 they are common enough that making them
+clickable means constantly landing on an error.
+
+### Cross-reference arrow rendering
+
+Two distinct styles, to keep the gutter from filling with long parallel lines:
+
+**Nested margin arrows** for local references. 6502 relative branches are
+limited to −128..+127 bytes (~40–60 instructions), so a `branch` reference is
+*structurally* guaranteed local and always renders nested. Absolute `call`,
+`jump`, and `data` references are usually distant.
+
+**Open-ended stubs** for distant references: a short stub with a label, click to
+jump. Both directions must be rendered — outbound (`▸ DrawGrid`) at the source,
+inbound (`◂ from $8A12`) at the target. The inbound side is what reveals "this
+routine has callers" when sitting at a function head.
+
+Rules:
+- **Classify by address distance, never by viewport.** Viewport-dependent
+  classification makes arrows flip style while scrolling, reflowing the gutter
+  and shuffling lane assignments under the cursor. Distance-based
+  classification is model-derived, stable, and cacheable; nested arrows simply
+  clip at the viewport edge.
+- Threshold ~100 rows. Given the ISA, this only arbitrates same-page `JMP`s and
+  near data references.
+- **Lane allocation** is interval-overlap, ordered **shortest span first**: each
+  arrow takes the innermost lane no overlapping arrow already holds. Ordering by
+  length is what produces correct nesting — an arrow contained inside another is
+  necessarily shorter, so it claims the inner lane and forces its container
+  outward. Do *not* sweep by start address: that classic interval-graph greedy
+  uses fewer lanes but inverts nesting, because an enclosing arrow that merely
+  begins earlier steals the inner lane from the short arrow inside it.
+  Endpoints touching counts as overlap, since two corners would land in one
+  cell. Cap at 4–6 lanes; anything needing more demotes to a stub, which is what
+  permanently bounds gutter width. Long arrows demote first under this ordering,
+  which is the intended bias.
+- **Aggregate hot targets.** A common subroutine may have dozens of inbound
+  references; collapse to a single `◂ 14 refs` stub opening a popover list.
+- Stub labels use the target's resolved label name, falling back to the address.
+- Clicking a stub pushes onto a **navigation stack** — back-jump is the most-used
+  key in any disassembler.
+- Data references get no arrow at all. Only control flow (branch/jump/call) is
+  drawn; data refs would fill the margin with noise.
+
+Lane allocation and gutter rendering live in `src/server/analysis.ts`
+(`allocateArrowLanes`, `renderArrowGutter`) — model-derived, so it belongs on
+the server rather than in the view. The gutter arrives as one pre-rendered
+string per row, kept out of the document so copying disassembly does not drag
+box-drawing characters along.
+
+One rendering gotcha: box-drawing glyphs fill their em box, not the taller line
+box, so unscaled verticals show a gap at every row boundary. The gutter span is
+stretched with `scaleY` to make segments meet.
 
 ## Known Limitations & Future Features
 
