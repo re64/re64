@@ -14,6 +14,7 @@ export class FileLayer implements Layer {
   public readonly suppressEntry: boolean;
   /** Default region kind - code for PRG, data otherwise */
   public readonly defaultRegionKind: RegionKind;
+  public readonly hasBytes = true;
   public readonly regions = new RegionIndex();
 
   constructor(

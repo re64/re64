@@ -21,6 +21,7 @@ import {
   findFile,
   extractFile,
   listDirectory,
+  createC64PlatformLayer,
   disassemble,
   formatOperand,
   InstructionIndex,
@@ -283,6 +284,9 @@ export function loadProject(projectPath: string): LoadedProject {
   const baseDir = dirname(projectPath);
 
   const map = new MemoryMap();
+  // Bottom of the stack: hardware registers and KERNAL entry points, which
+  // describe the machine rather than any loaded file.
+  map.addLayer(createC64PlatformLayer());
   const prgEntries: number[] = [];
   const userLabels = new LabelIndex();
   let layerCount = 0;
@@ -378,9 +382,11 @@ export function analyze(loaded: LoadedProject, labelTolerance = 1): AnalysisResu
       : undefined;
   };
 
-  const layers = map.getLayers();
-  const rangeStart = layers.length ? Math.min(...layers.map((l) => l.start)) : 0;
-  const rangeEnd = layers.length ? Math.max(...layers.map((l) => l.end)) : 0;
+  // Symbol layers describe the address space but occupy none of it, so the
+  // rendered range comes only from layers that actually supply bytes.
+  const byteLayers = map.getLayers().filter((l) => l.hasBytes);
+  const rangeStart = byteLayers.length ? Math.min(...byteLayers.map((l) => l.start)) : 0;
+  const rangeEnd = byteLayers.length ? Math.max(...byteLayers.map((l) => l.end)) : 0;
 
   const rows: Row[] = [];
   const lineForAddress: Record<number, number> = {};
@@ -400,8 +406,15 @@ export function analyze(loaded: LoadedProject, labelTolerance = 1): AnalysisResu
 
   /** Emit label rows, plus an inbound xref stub when references exist. */
   const emitLabels = (addr: number) => {
+    const here = allLabels.getLabelsAt(addr);
+    // The built-in name is redundant wherever the project supplied one, and
+    // rendering both would show CHROUT and ROM_CHROUT on consecutive rows.
+    const shown = here.some((l) => l.source.kind !== "platform")
+      ? here.filter((l) => l.source.kind !== "platform")
+      : here;
+
     const seen = new Set<string>();
-    for (const label of allLabels.getLabelsAt(addr)) {
+    for (const label of shown) {
       if (seen.has(label.name)) continue;
       seen.add(label.name);
 

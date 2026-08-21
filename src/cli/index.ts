@@ -14,6 +14,7 @@ import {
   findFile,
   extractFile,
   listDirectory,
+  createC64PlatformLayer,
   disassemble,
   formatInstruction,
   InstructionIndex,
@@ -87,6 +88,8 @@ function loadProject(projectPath: string): { project: Project; result: LoadResul
   const baseDir = dirname(projectPath);
 
   const map = new MemoryMap();
+  // Bottom of the stack: hardware registers and KERNAL entry points.
+  map.addLayer(createC64PlatformLayer());
   const prgEntries: number[] = [];
   const userLabels = new LabelIndex();
   let layerCount = 0;
@@ -272,13 +275,13 @@ program
     if (options.range) {
       ({ start, length } = parseRange(options.range));
     } else {
-      const layers = map.getLayers();
-      if (layers.length === 0) {
+      const byteLayers = map.getLayers().filter((l) => l.hasBytes);
+      if (byteLayers.length === 0) {
         start = 0;
         length = 0x100;
       } else {
-        start = Math.min(...layers.map((l) => l.start));
-        const end = Math.max(...layers.map((l) => l.end));
+        start = Math.min(...byteLayers.map((l) => l.start));
+        const end = Math.max(...byteLayers.map((l) => l.end));
         length = end - start;
       }
     }
@@ -389,12 +392,12 @@ program
       // Use only label-derived entry points
       entryPoints = labelEntryPoints;
     } else {
-      const layers = map.getLayers();
-      if (layers.length === 0) {
+      const byteLayers = map.getLayers().filter((l) => l.hasBytes);
+      if (byteLayers.length === 0) {
         console.error("No layers defined and no entry points specified");
         process.exit(1);
       }
-      entryPoints = [Math.min(...layers.map((l) => l.start))];
+      entryPoints = [Math.min(...byteLayers.map((l) => l.start))];
     }
 
     // Build region index: merge auto-generated regions with user regions (user takes priority)
@@ -472,15 +475,17 @@ program
     };
 
     // Determine the full range to output (including data gaps)
-    const layers = map.getLayers();
+    // Symbol layers occupy no address space, so the range comes only from
+    // layers that actually supply bytes.
+    const byteLayers = map.getLayers().filter((l) => l.hasBytes);
     let rangeStart: number, rangeEnd: number;
     if (options.range) {
       const { start, length } = parseRange(options.range);
       rangeStart = start;
       rangeEnd = start + length;
-    } else if (layers.length > 0) {
-      rangeStart = Math.min(...layers.map((l) => l.start));
-      rangeEnd = Math.max(...layers.map((l) => l.end));
+    } else if (byteLayers.length > 0) {
+      rangeStart = Math.min(...byteLayers.map((l) => l.start));
+      rangeEnd = Math.max(...byteLayers.map((l) => l.end));
     } else {
       rangeStart = 0;
       rangeEnd = 0;
@@ -491,7 +496,11 @@ program
 
     // Helper to output labels at an address (deduplicated by name)
     const outputLabels = (addr: number) => {
-      const labelsHere = allLabels.getLabelsAt(addr);
+      const here = allLabels.getLabelsAt(addr);
+      // Built-in names are redundant wherever the project supplied one.
+      const labelsHere = here.some((l) => l.source.kind !== "platform")
+        ? here.filter((l) => l.source.kind !== "platform")
+        : here;
       const seenNames = new Set<string>();
       for (const label of labelsHere) {
         if (!seenNames.has(label.name)) {

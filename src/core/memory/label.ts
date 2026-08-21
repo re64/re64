@@ -9,8 +9,8 @@ export type LabelType = "entry" | "function" | "code" | "address";
 
 /** Source of a label - where it came from */
 export interface LabelSource {
-  /** Kind of source: "layer" for layer-generated, "user" for user-defined, "region" for region-generated, "auto" for disassembler-generated */
-  kind: "layer" | "user" | "region" | "auto";
+  /** Kind of source: "layer" for layer-generated, "user" for user-defined, "region" for region-generated, "platform" for the built-in symbol set, "auto" for disassembler-generated */
+  kind: "layer" | "user" | "region" | "platform" | "auto";
   /** Name of the layer that generated this label (if kind is "layer") */
   layerName?: string;
   /** Name of the region that generated this label (if kind is "region") */
@@ -32,6 +32,43 @@ export interface Label {
   readonly type: LabelType;
   /** Source of this label */
   readonly source: LabelSource;
+}
+
+/**
+ * Which label wins when several name the same address.
+ *
+ * Higher wins. Previously this was insertion order, which silently made a
+ * layer's auto entry label beat a user's own name, and would have let the
+ * built-in symbol set override a project's chosen names.
+ */
+export const LABEL_RANK: Record<LabelSource["kind"], number> = {
+  user: 4,
+  region: 3,
+  layer: 2,
+  platform: 1,
+  auto: 0,
+};
+
+/** Sort labels so the highest-ranked comes first, stably. */
+function byRank(a: Label, b: Label): number {
+  return LABEL_RANK[b.source.kind] - LABEL_RANK[a.source.kind];
+}
+
+/** Creates a label from the built-in platform symbol set */
+export function createPlatformLabel(
+  address: number,
+  name: string,
+  type: LabelType = "address"
+): Label {
+  if (address < 0 || address > 0x10000) {
+    throw new Error("Label address must be in range 0x0000-0x10000");
+  }
+  return {
+    address,
+    name,
+    type,
+    source: { kind: "platform", auto: true },
+  };
 }
 
 /** Creates an auto-generated label from a layer */
@@ -136,9 +173,10 @@ export class LabelIndex {
     }
   }
 
-  /** Get all labels at a specific address */
+  /** Labels at an address, highest priority first. */
   getLabelsAt(address: number): readonly Label[] {
-    return this.byAddress.get(address) ?? [];
+    const labels = this.byAddress.get(address);
+    return labels ? [...labels].sort(byRank) : [];
   }
 
   /** Check if there's any label at an address */
@@ -168,10 +206,10 @@ export class LabelIndex {
    * @returns The resolved label with offset, or undefined if no match
    */
   resolve(address: number, tolerance: number = 0): ResolvedLabel | undefined {
-    // First, try exact match
+    // First, try exact match — highest rank wins, not insertion order
     const exact = this.byAddress.get(address);
     if (exact && exact.length > 0) {
-      return { label: exact[0], offset: 0 };
+      return { label: [...exact].sort(byRank)[0], offset: 0 };
     }
 
     // If no tolerance, we're done

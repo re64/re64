@@ -14,6 +14,11 @@ export interface Layer {
   /** Default region kind for this layer's content */
   readonly defaultRegionKind: RegionKind;
   /**
+   * Whether this layer supplies bytes. False for symbol layers, which carry
+   * names only and are excluded from the map's address range.
+   */
+  readonly hasBytes: boolean;
+  /**
    * Regions declared inside this layer.
    *
    * Owned by the layer rather than the address space, so reordering the stack
@@ -58,6 +63,7 @@ export function layerKindAt(layer: Layer, address: number): RegionKind | undefin
 export class BytesLayer implements Layer {
   public readonly length: number;
   public readonly defaultRegionKind: RegionKind = "data";
+  public readonly hasBytes = true;
   public readonly regions = new RegionIndex();
 
   constructor(

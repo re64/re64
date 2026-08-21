@@ -1,5 +1,6 @@
 export { Layer, BytesLayer, layerRegionAt, layerKindAt } from "./layer.js";
 export { FileLayer } from "./file-layer.js";
+export { SymbolLayer } from "./symbol-layer.js";
 export { MemoryMap, ReadResult } from "./memory-map.js";
 export {
   Label,
@@ -11,5 +12,7 @@ export {
   createUserLabel,
   createRegionLabel,
   createAutoLabel,
+  createPlatformLabel,
+  LABEL_RANK,
 } from "./label.js";
 export { Region, RegionKind, RegionIndex, createUserRegion } from "./region.js";
