@@ -28,33 +28,34 @@ export function formatProject(project: Project): string {
     body.push(`  "description": ${JSON.stringify(project.description)}`);
   }
 
-  // Layers stay in expanded form; there are few of them and they read better.
+  // Layer scalars expanded, its labels and regions one per line.
   const layers = project.layers
-    .map((l) =>
-      JSON.stringify(l, null, 2)
-        .split("\n")
-        .map((line) => `    ${line}`)
-        .join("\n")
-    )
+    .map((layer) => {
+      const { labels, regions, ...scalars } = layer;
+      const parts = Object.entries(scalars)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => `      ${JSON.stringify(k)}: ${JSON.stringify(v)}`);
+
+      if (regions?.length) {
+        const body = regions
+          .map((r) => `        ${compactObject(r as unknown as Record<string, unknown>)}`)
+          .join(",\n");
+        parts.push(`      "regions": [\n${body}\n      ]`);
+      }
+      if (labels?.length) {
+        const body = labels
+          .map((l) => `        ${compactObject(l as unknown as Record<string, unknown>)}`)
+          .join(",\n");
+        parts.push(`      "labels": [\n${body}\n      ]`);
+      }
+
+      return `    {\n${parts.join(",\n")}\n    }`;
+    })
     .join(",\n");
   body.push(`  "layers": [\n${layers}\n  ]`);
 
   if (project.entryPoints?.length) {
     body.push(`  "entryPoints": [${project.entryPoints.map((e) => JSON.stringify(e)).join(", ")}]`);
-  }
-
-  if (project.regions?.length) {
-    const regions = project.regions
-      .map((r) => `    ${compactObject(r as unknown as Record<string, unknown>)}`)
-      .join(",\n");
-    body.push(`  "regions": [\n${regions}\n  ]`);
-  }
-
-  if (project.labels?.length) {
-    const labels = project.labels
-      .map((l) => `    ${compactObject(l as unknown as Record<string, unknown>)}`)
-      .join(",\n");
-    body.push(`  "labels": [\n${labels}\n  ]`);
   }
 
   lines.push(body.join(",\n"));
@@ -82,8 +83,15 @@ interface ArraySpan {
  * carries blank lines that group related labels, and those survive only if
  * edits touch individual lines instead of re-serializing the document.
  */
-function findArraySpan(lines: string[], key: string): ArraySpan | null {
-  const open = lines.findIndex((l) => new RegExp(`"${key}"\\s*:\\s*\\[`).test(l));
+function findArraySpan(lines: string[], key: string, from = 0, until = lines.length): ArraySpan | null {
+  const pattern = new RegExp(`"${key}"\\s*:\\s*\\[`);
+  let open = -1;
+  for (let i = from; i < until; i++) {
+    if (pattern.test(lines[i])) {
+      open = i;
+      break;
+    }
+  }
   if (open === -1) return null;
 
   let depth = 0;
@@ -93,6 +101,40 @@ function findArraySpan(lines: string[], key: string): ArraySpan | null {
       else if (ch === "]") {
         depth--;
         if (depth === 0) return { open, close: i };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * The line range of the Nth entry in the top-level "layers" array.
+ *
+ * Labels now nest inside their owning layer, so an edit has to be scoped to
+ * that layer's block before its "labels" array can be found — otherwise a
+ * write would land in whichever layer happens to declare one first.
+ */
+function findLayerSpan(lines: string[], layerIndex: number): ArraySpan | null {
+  const layers = findArraySpan(lines, "layers");
+  if (!layers) return null;
+
+  let depth = 0;
+  let index = -1;
+  let open = -1;
+
+  for (let i = layers.open; i <= layers.close; i++) {
+    for (const ch of lines[i]) {
+      if (ch === "{") {
+        if (depth === 0) {
+          index++;
+          if (index === layerIndex) open = i;
+        }
+        depth++;
+      } else if (ch === "}") {
+        depth--;
+        if (depth === 0 && index === layerIndex) {
+          return { open, close: i };
+        }
       }
     }
   }
@@ -141,19 +183,26 @@ export function upsertLabel(
   path: string,
   address: number,
   name: string,
-  type?: ProjectLabel["type"]
+  type: ProjectLabel["type"] | undefined,
+  layerIndex: number
 ): Project {
   const raw = readFileSync(path, "utf-8");
   const lines = raw.split("\n");
-  const span = findArraySpan(lines, "labels");
+  const layer = findLayerSpan(lines, layerIndex);
+  if (!layer) {
+    throw new Error(`No layer at index ${layerIndex} to own a label at ${address.toString(16)}`);
+  }
+  const span = findArraySpan(lines, "labels", layer.open, layer.close);
 
-  // No labels array yet — fall back to a structural write.
+  // The layer has no labels array yet — a structural write adds one. This
+  // reformats the file, but only happens once per layer.
   if (!span) {
     const project = parseProject(raw);
-    (project.labels ??= []).push({
-      address: `$${address.toString(16).toUpperCase().padStart(4, "0")}`,
+    const decl = project.layers[layerIndex];
+    (decl.labels ??= []).push({
+      address: `${address.toString(16).toUpperCase().padStart(4, "0")}`,
       name,
-      ...(type ? { type } : {}),
+      ...(type && type !== "address" ? { type } : {}),
     });
     writeFileSync(path, formatProject(project), "utf-8");
     return project;
@@ -207,10 +256,12 @@ export function upsertLabel(
 }
 
 /** Remove the label at an address, if present. */
-export function deleteLabel(path: string, address: number): Project {
+export function deleteLabel(path: string, address: number, layerIndex: number): Project {
   const raw = readFileSync(path, "utf-8");
   const lines = raw.split("\n");
-  const span = findArraySpan(lines, "labels");
+  const layer = findLayerSpan(lines, layerIndex);
+  if (!layer) return parseProject(raw);
+  const span = findArraySpan(lines, "labels", layer.open, layer.close);
   if (!span) return parseProject(raw);
 
   for (let i = span.open + 1; i < span.close; i++) {

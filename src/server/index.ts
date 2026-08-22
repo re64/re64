@@ -14,6 +14,7 @@ import { existsSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyze, loadProject } from "./analysis.js";
+import { resolveOwningLayer } from "./ownership.js";
 import {
   deleteLabel,
   readProjectFile,
@@ -102,7 +103,15 @@ export function startServer(options: ServerOptions): void {
             error: `type must be one of ${LABEL_TYPES.join(", ")}`,
           });
         }
-        upsertLabel(projectPath, address, name.trim(), type);
+        const owner = resolveOwningLayer(projectPath, address);
+        if (owner === undefined) {
+          return sendJson(res, 400, {
+            error:
+              `No layer owns $${address.toString(16).toUpperCase()}. Add a layer of ` +
+              `type "symbols" to name addresses outside the loaded bytes.`,
+          });
+        }
+        upsertLabel(projectPath, address, name.trim(), type, owner);
         return sendJson(res, 200, { ok: true });
       }
 
@@ -111,7 +120,11 @@ export function startServer(options: ServerOptions): void {
         if (typeof address !== "number") {
           return sendJson(res, 400, { error: "address (number) required" });
         }
-        deleteLabel(projectPath, address);
+        const owner = resolveOwningLayer(projectPath, address);
+        if (owner === undefined) {
+          return sendJson(res, 400, { error: "No layer owns that address" });
+        }
+        deleteLabel(projectPath, address, owner);
         return sendJson(res, 200, { ok: true });
       }
 

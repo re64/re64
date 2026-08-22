@@ -109,19 +109,20 @@ Project files (`.re64`) are JSON with this schema:
 interface Project {
   name?: string;
   description?: string;
-  layers: ProjectLayer[];      // Required: file layers to load
+  layers: ProjectLayer[];      // Required: each layer owns its annotations
   entryPoints?: (number | string)[];  // Disassembly entry points
-  labels?: ProjectLabel[];     // User-defined labels
-  regions?: ProjectRegion[];   // User-defined regions
 }
 
 interface ProjectLayer {
-  type: "prg" | "raw" | "bytes";
+  type: "prg" | "raw" | "bytes" | "symbols";
   path?: string;        // For prg/raw
   address?: number | string;  // For raw/bytes
   bytes?: string;       // Hex string for bytes type
   length?: number;      // Optional length for repeat/fill
   noAutoEntry?: boolean;  // Suppress auto entry point for PRG
+  name?: string;        // Display name; defaults to file basename
+  labels?: ProjectLabel[];    // Labels owned by this layer
+  regions?: ProjectRegion[];  // Regions carved out of this layer
 }
 
 interface ProjectLabel {
@@ -141,6 +142,21 @@ interface ProjectRegion {
 ```
 
 Addresses can be decimal (32768) or hex strings ("$8000", "0x8000").
+
+**Annotations belong to layers.** Labels and regions nest inside the layer that
+owns them, so reordering the layer stack moves them with the bytes they
+describe rather than leaving them pointing at whatever else lands at that
+address. Region and kind resolution asks the topmost layer supplying a byte —
+the same z-order rule as `readByte`.
+
+A `symbols` layer carries names for addresses with no loaded bytes (zero page,
+I/O registers, KERNAL entry points). It supplies no bytes, so it never shadows
+and occupies no address range. A built-in C64 platform layer of this kind sits
+at the bottom of every stack, supplying standard hardware and KERNAL names; a
+project's own labels outrank it, so `ROM_CHROUT` beats the built-in `CHROUT`.
+
+Label priority is explicit rather than insertion order:
+`user > region > layer > platform > auto`.
 
 ## UI Design Decisions
 

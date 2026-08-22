@@ -122,6 +122,11 @@ export class MemoryMap {
     return this.layers.flatMap((layer) => [...layer.regions.getJumptables()]);
   }
 
+  /** The topmost layer supplying a byte at this address. */
+  layerAt(address: number): Layer | undefined {
+    return this.readByteWithSource(address)?.layer;
+  }
+
   /** Every declared region across all layers, sorted by start address. */
   getAllRegions(): readonly Region[] {
     return this.layers

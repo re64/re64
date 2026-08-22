@@ -26,7 +26,7 @@ export class SymbolLayer implements Layer {
 
   constructor(
     public readonly name: string,
-    private readonly labels: readonly Label[]
+    public readonly labels: Label[] = []
   ) {}
 
   readByte(): number | undefined {

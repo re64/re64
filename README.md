@@ -39,17 +39,33 @@ The recommended way to work with re64 is through project files (`.re64` JSON fil
 {
   "name": "My Game",
   "layers": [
-    { "type": "prg", "path": "game.prg" }
+    {
+      "type": "symbols",
+      "name": "game-symbols",
+      "labels": [
+        { "address": "$02", "name": "playerX" }
+      ]
+    },
+    {
+      "type": "prg",
+      "path": "game.prg",
+      "regions": [
+        { "start": "$2000", "end": "$3000", "kind": "data", "name": "spriteData" }
+      ],
+      "labels": [
+        { "address": "$0810", "name": "MainLoop", "type": "function" }
+      ]
+    }
   ],
-  "entryPoints": ["$0810"],
-  "labels": [
-    { "address": "$FFD2", "name": "ROM_CHROUT" }
-  ],
-  "regions": [
-    { "start": "$2000", "end": "$3000", "kind": "data", "name": "spriteData" }
-  ]
+  "entryPoints": ["$0810"]
 }
 ```
+
+Labels and regions belong to the layer that owns them, so reordering the layer
+stack moves annotations with the bytes they describe. Use a `symbols` layer for
+addresses with no loaded bytes — zero page variables and the like. Standard C64
+hardware registers and KERNAL entry points (`$D020 EXTCOL`, `$FFD2 CHROUT`, …)
+are built in, so projects only declare the names they want to override.
 
 ```bash
 # Disassemble using project file

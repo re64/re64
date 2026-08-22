@@ -10,27 +10,21 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import {
-  MemoryMap,
-  BytesLayer,
-  FileLayer,
   LabelIndex,
-  RegionIndex,
   Label,
   LabelType,
   createAutoLabel,
   findFile,
   extractFile,
   listDirectory,
-  createC64PlatformLayer,
   disassemble,
   formatOperand,
   InstructionIndex,
   Reference,
-  Project,
+  LoadedProject,
+  buildMemoryMap,
   parseProject,
   parseProjectAddress,
-  projectLabelsToLabels,
-  projectRegionsToRegions,
 } from "../core/index.js";
 
 /** A clickable span within a row's text, as character offsets into `text`. */
@@ -228,10 +222,7 @@ export function renderArrowGutter(arrows: ArrowSpan[], rowCount: number): string
 const hex4 = (n: number) => n.toString(16).toUpperCase().padStart(4, "0");
 const hex2 = (n: number) => n.toString(16).toUpperCase().padStart(2, "0");
 
-function parseHexBytes(hex: string): Uint8Array {
-  return new Uint8Array(hex.match(/.{2}/g)?.map((b) => parseInt(b, 16)) ?? []);
-}
-
+/** Read a file's bytes, supporting the `disk.d64:filename` form. */
 function loadFile(
   path: string,
   explicitStart?: number
@@ -270,56 +261,14 @@ function loadFile(
   };
 }
 
-interface LoadedProject {
-  project: Project;
-  map: MemoryMap;
-  prgEntries: number[];
-  userLabels: LabelIndex;
-  userRegions: RegionIndex;
-}
-
 /** Load a project file and build its memory map. */
 export function loadProject(projectPath: string): LoadedProject {
   const project = parseProject(readFileSync(projectPath, "utf-8"));
   const baseDir = dirname(projectPath);
 
-  const map = new MemoryMap();
-  // Bottom of the stack: hardware registers and KERNAL entry points, which
-  // describe the machine rather than any loaded file.
-  map.addLayer(createC64PlatformLayer());
-  const prgEntries: number[] = [];
-  const userLabels = new LabelIndex();
-  let layerCount = 0;
-
-  for (const layer of project.layers) {
-    const name = `layer${++layerCount}`;
-
-    if (layer.type === "prg") {
-      const { start, data, isPrg } = loadFile(
-        resolve(baseDir, layer.path!),
-        layer.address === undefined ? undefined : parseProjectAddress(layer.address)
-      );
-      const suppressEntry = layer.noAutoEntry ?? false;
-      map.addLayer(
-        new FileLayer(name, layer.path!, start, data, undefined, isPrg, suppressEntry)
-      );
-      if (isPrg && !suppressEntry) prgEntries.push(start);
-    } else if (layer.type === "raw") {
-      const addr = parseProjectAddress(layer.address!);
-      const { data } = loadFile(resolve(baseDir, layer.path!), addr);
-      map.addLayer(new FileLayer(name, layer.path!, addr, data, layer.length));
-    } else if (layer.type === "bytes") {
-      const addr = parseProjectAddress(layer.address!);
-      map.addLayer(new BytesLayer(name, addr, parseHexBytes(layer.bytes!), layer.length));
-    }
-  }
-
-  if (project.labels) userLabels.addLabels(projectLabelsToLabels(project.labels));
-
-  const userRegions = new RegionIndex();
-  if (project.regions) userRegions.addRegions(projectRegionsToRegions(project.regions));
-
-  return { project, map, prgEntries, userLabels, userRegions };
+  return buildMemoryMap(project, (path, explicitStart) =>
+    loadFile(resolve(baseDir, path), explicitStart)
+  );
 }
 
 /**
@@ -329,7 +278,7 @@ export function loadProject(projectPath: string): LoadedProject {
  * click targets rather than printing.
  */
 export function analyze(loaded: LoadedProject, labelTolerance = 1): AnalysisResult {
-  const { project, map, prgEntries, userLabels, userRegions } = loaded;
+  const { project, map, prgEntries, userLabels } = loaded;
 
   const labelEntryPoints = userLabels
     .getAllLabels()
@@ -345,12 +294,6 @@ export function analyze(loaded: LoadedProject, labelTolerance = 1): AnalysisResu
     entryPoints = [...prgEntries, ...labelEntryPoints];
   } else {
     entryPoints = labelEntryPoints;
-  }
-
-  // Hand each declared region to the layer that owns its start address, so it
-  // travels with that layer's content rather than with the address.
-  for (const region of userRegions.getAllRegions()) {
-    map.attachRegion(region);
   }
 
   const result = disassemble(map, { entryPoints, regions: map });

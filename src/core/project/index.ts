@@ -8,3 +8,4 @@ export {
   projectRegionsToRegions,
   parseProject,
 } from "./project.js";
+export { FileLoader, LoadedProject, buildMemoryMap } from "./loader.js";

@@ -16,6 +16,7 @@ export class FileLayer implements Layer {
   public readonly defaultRegionKind: RegionKind;
   public readonly hasBytes = true;
   public readonly regions = new RegionIndex();
+  public readonly labels: Label[] = [];
 
   constructor(
     public readonly name: string,
@@ -59,10 +60,10 @@ export class FileLayer implements Layer {
 
   getLabels(): readonly Label[] {
     if (!this.isPrg || this.suppressEntry) {
-      return [];
+      return this.labels;
     }
     // PRG files have an entry point at the start address
     const basename = this.path.split("/").pop()?.replace(/\.[^.]+$/, "") ?? this.name;
-    return [createLayerLabel(this.start, basename, "entry", this.name)];
+    return [createLayerLabel(this.start, basename, "entry", this.name), ...this.labels];
   }
 }

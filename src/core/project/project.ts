@@ -1,20 +1,32 @@
 import { Label, LabelType, createUserLabel } from "../memory/label.js";
 import { Region, RegionKind, createUserRegion } from "../memory/region.js";
 
-/** Layer definition in a project file */
+/**
+ * Layer definition in a project file.
+ *
+ * Labels and regions nest inside the layer that owns them, so reordering the
+ * stack moves annotations with the content they describe rather than leaving
+ * them pointing at whatever else lands at that address.
+ */
 export interface ProjectLayer {
-  /** Layer type */
-  type: "prg" | "raw" | "bytes";
+  /** Layer type. "symbols" carries names for addresses with no loaded bytes. */
+  type: "prg" | "raw" | "bytes" | "symbols";
   /** File path (for prg/raw) */
   path?: string;
   /** Load address (for raw, optional override for prg) */
-  address?: number;
+  address?: number | string;
   /** Hex bytes (for bytes type) */
   bytes?: string;
   /** Length for fill/repeat */
   length?: number;
   /** Suppress automatic entry point for PRG files */
   noAutoEntry?: boolean;
+  /** Display name, defaulting to the file basename or a generated one */
+  name?: string;
+  /** Labels owned by this layer */
+  labels?: ProjectLabel[];
+  /** Regions carved out of this layer, overriding its default kind */
+  regions?: ProjectRegion[];
 }
 
 /** Label definition in a project file */
@@ -49,14 +61,10 @@ export interface Project {
   name?: string;
   /** Project description */
   description?: string;
-  /** Memory layers */
+  /** Memory layers, each owning its labels and regions */
   layers: ProjectLayer[];
   /** Manual entry points (addresses) */
   entryPoints?: (number | string)[];
-  /** User-defined labels */
-  labels?: ProjectLabel[];
-  /** User-defined regions (override auto-generated) */
-  regions?: ProjectRegion[];
 }
 
 /** Parse an address that may be a number or hex string */
@@ -79,7 +87,7 @@ export function projectLabelsToLabels(projectLabels: ProjectLabel[]): Label[] {
   return projectLabels.map((pl) => {
     const address = parseProjectAddress(pl.address);
     const type = pl.type ?? "address";
-    return createUserLabel(address, pl.name, type);
+    return createUserLabel(address, pl.name, type, pl.comment);
   });
 }
 
@@ -97,7 +105,7 @@ export function projectRegionsToRegions(projectRegions: ProjectRegion[]): Region
       end = parseProjectAddress(pr.end);
     }
 
-    return createUserRegion(start, end, pr.kind, pr.name);
+    return createUserRegion(start, end, pr.kind, pr.name, pr.comment);
   });
 }
 
@@ -130,6 +138,26 @@ export function parseProject(json: string): Project {
         throw new Error("Layer type 'bytes' requires an 'address' field");
       }
     }
+    if (layer.type === "symbols") {
+      // A symbol layer with no labels contributes nothing; that is almost
+      // always a mistake rather than an intent.
+      if (!layer.labels?.length) {
+        throw new Error("Layer type 'symbols' requires a non-empty 'labels' array");
+      }
+      if (layer.regions?.length) {
+        throw new Error("Layer type 'symbols' cannot have regions: it supplies no bytes");
+      }
+    }
+  }
+
+  // The flat top-level form was replaced by per-layer ownership. Fail loudly
+  // rather than silently ignoring annotations the user expects to see.
+  const legacy = project as { labels?: unknown; regions?: unknown };
+  if (legacy.labels !== undefined || legacy.regions !== undefined) {
+    throw new Error(
+      "Top-level 'labels'/'regions' are no longer supported: move them into the " +
+        "owning layer, or into a layer of type 'symbols' for addresses with no bytes"
+    );
   }
 
   return project;

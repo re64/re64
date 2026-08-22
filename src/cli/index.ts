@@ -19,11 +19,10 @@ import {
   formatInstruction,
   InstructionIndex,
   ReferenceType,
-  Project,
+  LoadedProject,
+  buildMemoryMap,
   parseProject,
   parseProjectAddress,
-  projectLabelsToLabels,
-  projectRegionsToRegions,
 } from "../core/index.js";
 import { hexDump } from "./hex.js";
 
@@ -73,74 +72,14 @@ function parseHexBytes(hex: string): Uint8Array {
   return new Uint8Array(bytes);
 }
 
-/** Result of loading layers */
-interface LoadResult {
-  map: MemoryMap;
-  prgEntries: number[];
-  userLabels: LabelIndex;
-  userRegions: RegionIndex;
-}
-
 /** Load a project file and build the memory map */
-function loadProject(projectPath: string): { project: Project; result: LoadResult } {
-  const json = readFileSync(projectPath, "utf-8");
-  const project = parseProject(json);
+function loadProject(projectPath: string): LoadedProject {
+  const project = parseProject(readFileSync(projectPath, "utf-8"));
   const baseDir = dirname(projectPath);
 
-  const map = new MemoryMap();
-  // Bottom of the stack: hardware registers and KERNAL entry points.
-  map.addLayer(createC64PlatformLayer());
-  const prgEntries: number[] = [];
-  const userLabels = new LabelIndex();
-  let layerCount = 0;
-
-  for (const layer of project.layers) {
-    layerCount++;
-    const name = `layer${layerCount}`;
-
-    if (layer.type === "prg") {
-      const fullPath = resolve(baseDir, layer.path!);
-      const { start, data, isPrg } = loadFile(fullPath, layer.address);
-      const suppressEntry = layer.noAutoEntry ?? false;
-      // isPrg determines default region kind (code), suppressEntry only affects auto entry label
-      map.addLayer(new FileLayer(name, layer.path!, start, data, undefined, isPrg, suppressEntry));
-      if (isPrg && !suppressEntry) {
-        prgEntries.push(start);
-      }
-    } else if (layer.type === "raw") {
-      const fullPath = resolve(baseDir, layer.path!);
-      const addr = parseProjectAddress(layer.address!);
-      const { data } = loadFile(fullPath, addr);
-      if (layer.length !== undefined) {
-        map.addLayer(new FileLayer(name, layer.path!, addr, data, layer.length));
-      } else {
-        map.addLayer(new FileLayer(name, layer.path!, addr, data));
-      }
-    } else if (layer.type === "bytes") {
-      const addr = parseProjectAddress(layer.address!);
-      const bytes = parseHexBytes(layer.bytes!);
-      if (layer.length !== undefined) {
-        map.addLayer(new BytesLayer(name, addr, bytes, layer.length));
-      } else {
-        map.addLayer(new BytesLayer(name, addr, bytes));
-      }
-    }
-  }
-
-  // Load user labels
-  if (project.labels) {
-    const labels = projectLabelsToLabels(project.labels);
-    userLabels.addLabels(labels);
-  }
-
-  // Load user regions
-  const userRegions = new RegionIndex();
-  if (project.regions) {
-    const regions = projectRegionsToRegions(project.regions);
-    userRegions.addRegions(regions);
-  }
-
-  return { project, result: { map, prgEntries, userLabels, userRegions } };
+  return buildMemoryMap(project, (path, explicitStart) =>
+    loadFile(resolve(baseDir, path), explicitStart)
+  );
 }
 
 /** Load file and return start address + data. Supports d64:filename syntax. */
@@ -301,19 +240,17 @@ program
     let map: MemoryMap;
     let prgEntries: number[] = [];
     let userLabels = new LabelIndex();
-    let userRegions = new RegionIndex();
     let projectEntryPoints: number[] | undefined;
 
     if (options.project) {
       // Load from project file
-      const { project, result } = loadProject(options.project);
-      map = result.map;
-      prgEntries = result.prgEntries;
-      userLabels = result.userLabels;
-      userRegions = result.userRegions;
+      const loaded = loadProject(options.project);
+      map = loaded.map;
+      prgEntries = loaded.prgEntries;
+      userLabels = loaded.userLabels;
 
-      if (project.entryPoints) {
-        projectEntryPoints = project.entryPoints.map(parseProjectAddress);
+      if (loaded.project.entryPoints) {
+        projectEntryPoints = loaded.project.entryPoints.map(parseProjectAddress);
       }
     } else {
       // Load from command line options
@@ -401,12 +338,6 @@ program
     }
 
     // Build region index: merge auto-generated regions with user regions (user takes priority)
-    // Hand each declared region to the layer that owns its start address, so
-    // it travels with that layer's content rather than with the address.
-    for (const region of userRegions.getAllRegions()) {
-      map.attachRegion(region);
-    }
-
     // Disassemble
     const result = disassemble(map, { entryPoints, regions: map });
     const index = new InstructionIndex(result.instructions);

@@ -32,6 +32,8 @@ export interface Label {
   readonly type: LabelType;
   /** Source of this label */
   readonly source: LabelSource;
+  /** Optional user comment */
+  readonly comment?: string;
 }
 
 /**
@@ -93,7 +95,8 @@ export function createLayerLabel(
 export function createUserLabel(
   address: number,
   name: string,
-  type: LabelType
+  type: LabelType,
+  comment?: string
 ): Label {
   if (address < 0 || address > 0x10000) {
     throw new Error("Label address must be in range 0x0000-0x10000");
@@ -103,6 +106,7 @@ export function createUserLabel(
     name,
     type,
     source: { kind: "user", auto: false },
+    comment,
   };
 }
 
