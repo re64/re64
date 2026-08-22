@@ -86,19 +86,27 @@
       #status.error { color: var(--illegal); }
 
       main { flex: 1; min-height: 0; display: flex; }
-      #content { flex: 1; min-width: 0; position: relative; }
-      #disasm, #project { position: absolute; inset: 0; }
 
       /* The map is context for reading the disassembly, not a separate mode,
          so it sits beside it rather than replacing it. */
-      #map {
-        flex: 0 0 300px;
+      #split {
+        flex: 1;
         min-width: 0;
-        overflow: auto;
-        border-right: 1px solid var(--border);
-        background: var(--bg);
+        --min: 180px;
+        --max: 60%;
+        --divider-width: 3px;
       }
-      #map.hidden { display: none; }
+      #split::part(divider) {
+        background: var(--border);
+      }
+      #split::part(divider):hover {
+        background: var(--accent-dim);
+      }
+      #split.collapsed { --min: 0px; --max: 0px; }
+
+      #map { height: 100%; overflow: auto; background: var(--bg); }
+      #content { height: 100%; position: relative; }
+      #disasm, #project { position: absolute; inset: 0; }
 
       footer {
         flex: 0 0 auto;
@@ -284,11 +292,13 @@
         <span id="status"></span>
       </header>
       <main>
-        <aside id="map"></aside>
-        <div id="content">
-          <div id="disasm"></div>
-          <div id="project" style="display: none"></div>
-        </div>
+        <sl-split-panel id="split" position="24" snap="0% 24%" snap-threshold="24">
+          <aside id="map" slot="start"></aside>
+          <div id="content" slot="end">
+            <div id="disasm"></div>
+            <div id="project" style="display: none"></div>
+          </div>
+        </sl-split-panel>
       </main>
       <footer>
         <span id="stats"></span>

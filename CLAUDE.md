@@ -181,6 +181,34 @@ Rejected alternative: holding generated text in an editor buffer and parsing
 edits back. That round-trips derived text through a parser and puts conflicts at
 the wrong granularity.
 
+### UI stack: web components, no framework
+
+Shoelace (`@shoelace-style/shoelace`) supplies application chrome — split
+panels, and later menus, trees, dialogs, toolbars. Components are imported
+individually so the bundle carries only what is used. Adoption is incremental:
+add a component when a hand-rolled one would otherwise be written.
+
+Rejected: **React with a data-dense component library** (Blueprint, Mantine).
+The deciding factor is that CodeMirror 6 is the hero widget and is *already*
+reactive — most of `src/ui/main.ts` is `StateField`/`StateEffect`/decoration
+code. A framework would insert a wrapper and a boundary at exactly the most
+complex point in the app, where CM6 manages its own DOM by design, while its
+declarative-render benefit lands on the simplest panels — `renderMap()` is a
+few dozen lines of plain DOM building.
+
+Standard DOM is also the cheaper thing to reason about from cold. `<sl-split-panel>`
+is an HTML tag: greppable, self-describing, documented outside this repo. A
+bespoke component tree has to be reconstructed mentally before anything can be
+changed, and this project is worked on in bursts across sessions.
+
+The CRDT counter-argument is real but weaker than it looks: the server is
+already the source of truth and the client already re-fetches and rebuilds, so
+that *is* the re-render model, only explicit.
+
+Nothing is foreclosed. `dockview-core` is also framework-agnostic, so if panels
+later need true IDE docking it drops in beside this rather than replacing it.
+Cost so far: +49KB, most of it the one-time Lit runtime.
+
 ### Widget: CodeMirror 6, read-only with decorations
 
 Chosen over a hand-rolled virtualized list mainly because of **variable row
@@ -323,8 +351,12 @@ stretched with `scaleY` to make segments meet.
 The memory map is a **sidebar beside the disassembly**, not a tab. It is
 context for reading code — which layer supplies these bytes, why this span is
 text — so it has to be visible *while* reading. As a tab it forced a mode
-switch to answer a question about the line under the cursor. It collapses via
-a toolbar toggle, remembered in `localStorage`.
+switch to answer a question about the line under the cursor. It is a resizable
+`<sl-split-panel>`; collapsing is a zero-width split, so dragging the divider
+to the edge and pressing the toolbar button reach the same state, and the width
+you chose is still there when you reopen it. Both are remembered in
+`localStorage`, with every access wrapped because storage throws outright in
+private windows and when site data is blocked.
 
 It renders two different relationships in two different shapes, because they
 are not the same relation:

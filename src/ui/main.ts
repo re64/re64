@@ -24,6 +24,10 @@ import {
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { json } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
+import type SlSplitPanel from "@shoelace-style/shoelace/dist/components/split-panel/split-panel.js";
+// Registers <sl-split-panel>. Components are imported individually so the
+// bundle carries only what is used.
+import "@shoelace-style/shoelace/dist/components/split-panel/split-panel.js";
 
 type LabelType = "entry" | "function" | "code" | "address";
 
@@ -953,21 +957,49 @@ for (const tab of Array.from(document.querySelectorAll(".tab"))) {
 }
 
 /**
- * Sidebar visibility, remembered locally. Wrapped because storage throws
+ * Sidebar width and visibility.
+ *
+ * Collapsing is just a zero-width split, so dragging the divider to the edge
+ * and pressing the toolbar button reach the same state — and the width you
+ * chose is still there when you reopen it.
+ *
+ * Both are remembered locally. Storage access is wrapped because it throws
  * outright in some contexts (private windows, blocked site data).
  */
-function setMapVisible(visible: boolean): void {
-  $("#map").classList.toggle("hidden", !visible);
-  $("#toggle-map").classList.toggle("active", visible);
+const split = $("#split") as SlSplitPanel;
+const DEFAULT_MAP_WIDTH = 24;
+let lastMapWidth = DEFAULT_MAP_WIDTH;
+
+function store(key: string, value: string): void {
   try {
-    localStorage.setItem("re64.map", visible ? "1" : "0");
+    localStorage.setItem(key, value);
   } catch {
-    // Not worth surfacing: the toggle still works for this session.
+    // Not worth surfacing: the setting still holds for this session.
   }
 }
 
+function setMapVisible(visible: boolean): void {
+  split.classList.toggle("collapsed", !visible);
+  split.position = visible ? lastMapWidth : 0;
+  $("#toggle-map").classList.toggle("active", visible);
+  store("re64.map", visible ? "1" : "0");
+}
+
 $("#toggle-map").addEventListener("click", () => {
-  setMapVisible($("#map").classList.contains("hidden"));
+  setMapVisible(split.position === 0);
+});
+
+// Dragging to the edge counts as collapsing, so the button stays in sync.
+split.addEventListener("sl-reposition", () => {
+  const collapsed = split.position < 1;
+  $("#toggle-map").classList.toggle("active", !collapsed);
+  if (collapsed) {
+    store("re64.map", "0");
+  } else {
+    lastMapWidth = split.position;
+    store("re64.map", "1");
+    store("re64.mapWidth", String(lastMapWidth));
+  }
 });
 
 $("#back").addEventListener("click", goBack);
@@ -995,8 +1027,10 @@ showTab("disasm");
 let mapVisible = true;
 try {
   mapVisible = localStorage.getItem("re64.map") !== "0";
+  const width = Number(localStorage.getItem("re64.mapWidth"));
+  if (width > 0 && width < 100) lastMapWidth = width;
 } catch {
-  // Default to shown.
+  // Defaults: shown, at the standard width.
 }
 setMapVisible(mapVisible);
 void loadDisassembly();
