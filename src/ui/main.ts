@@ -807,20 +807,135 @@ if (navigator.platform.startsWith("Mac")) {
   }
 }
 
+// --- Memory map panel -------------------------------------------------
+
+interface RegionNode {
+  start: number;
+  end: number;
+  kind: string;
+  name?: string;
+  comment?: string;
+  children: RegionNode[];
+}
+
+interface LayerView {
+  depth: number;
+  name: string;
+  start: number;
+  end: number;
+  hasBytes: boolean;
+  defaultKind: string;
+  source: string;
+  labelCount: number;
+  regions: RegionNode[];
+}
+
+/**
+ * Two shapes, because there are two relationships. Layers stack by z-order, so
+ * they render as an ordered list; regions contain one another by address range,
+ * so they render as a tree. Both are read-only for now — reordering the stack
+ * and retyping spans are edits, and edits are a separate pass.
+ */
+function renderMap(layers: LayerView[]): void {
+  const root = $("#map");
+  root.textContent = "";
+
+  for (const layer of layers) {
+    const card = document.createElement("section");
+    card.className = "map-layer" + (layer.hasBytes ? "" : " no-bytes");
+
+    const head = document.createElement("div");
+    head.className = "map-layer-head";
+    head.innerHTML =
+      `<span class="map-depth">${layer.depth === 0 ? "top" : layer.depth}</span>` +
+      `<span class="map-name"></span>` +
+      `<span class="map-range"></span>` +
+      `<span class="map-meta"></span>`;
+    head.querySelector(".map-name")!.textContent = layer.name;
+    head.querySelector(".map-range")!.textContent = layer.hasBytes
+      ? `${hex4(layer.start)}–${hex4(layer.end)}`
+      : "no bytes";
+    head.querySelector(".map-meta")!.textContent =
+      `${layer.source} · ${layer.labelCount} label${layer.labelCount === 1 ? "" : "s"}` +
+      (layer.hasBytes ? ` · default ${layer.defaultKind}` : "");
+    card.appendChild(head);
+
+    if (layer.hasBytes) {
+      const body = document.createElement("div");
+      body.className = "map-regions";
+      if (layer.regions.length) {
+        body.appendChild(renderRegions(layer.regions));
+      } else {
+        const empty = document.createElement("div");
+        empty.className = "map-empty";
+        empty.textContent = `No regions declared — all ${layer.defaultKind}.`;
+        body.appendChild(empty);
+      }
+      card.appendChild(body);
+    }
+
+    root.appendChild(card);
+  }
+}
+
+function renderRegions(nodes: RegionNode[]): HTMLElement {
+  const list = document.createElement("ul");
+
+  for (const node of nodes) {
+    const item = document.createElement("li");
+
+    const row = document.createElement("div");
+    row.className = "map-region";
+    row.title = node.comment ?? `Go to ${hex4(node.start)}`;
+    row.innerHTML =
+      `<span class="map-region-range"></span>` +
+      `<span class="map-region-kind kind-${node.kind}"></span>` +
+      `<span class="map-region-name"></span>`;
+    row.querySelector(".map-region-range")!.textContent =
+      `${hex4(node.start)}–${hex4(node.end)}`;
+    row.querySelector(".map-region-kind")!.textContent = node.kind;
+    row.querySelector(".map-region-name")!.textContent = node.name ?? "";
+    row.addEventListener("click", () => {
+      showTab("disasm");
+      goToAddress(node.start);
+    });
+    item.appendChild(row);
+
+    if (node.children.length) item.appendChild(renderRegions(node.children));
+    list.appendChild(item);
+  }
+
+  return list;
+}
+
+async function loadMap(): Promise<void> {
+  const res = await fetch("/api/map");
+  if (!res.ok) {
+    setStatus("Failed to load the memory map", true);
+    return;
+  }
+  const { layers } = (await res.json()) as { layers: LayerView[] };
+  renderMap(layers);
+}
+
 // --- Wiring -----------------------------------------------------------
 
-function showTab(name: "disasm" | "project"): void {
+type TabName = "disasm" | "map" | "project";
+
+function showTab(name: TabName): void {
   for (const tab of Array.from(document.querySelectorAll(".tab"))) {
     tab.classList.toggle("active", tab.getAttribute("data-tab") === name);
   }
-  $("#disasm").style.display = name === "disasm" ? "" : "none";
-  $("#project").style.display = name === "project" ? "" : "none";
-  (name === "disasm" ? disasmView : projectView).focus();
+  for (const id of ["disasm", "map", "project"] as const) {
+    $(`#${id}`).style.display = id === name ? "" : "none";
+  }
+  if (name === "disasm") disasmView.focus();
+  else if (name === "project") projectView.focus();
 }
 
 for (const tab of Array.from(document.querySelectorAll(".tab"))) {
   tab.addEventListener("click", () =>
-    showTab(tab.getAttribute("data-tab") as "disasm" | "project")
+    showTab(tab.getAttribute("data-tab") as TabName)
   );
 }
 
@@ -828,6 +943,7 @@ $("#back").addEventListener("click", goBack);
 $("#reload").addEventListener("click", () => {
   void loadDisassembly(currentAddress() ?? undefined);
   void loadProjectFile();
+  void loadMap();
 });
 $("#save").addEventListener("click", () => void saveProjectFile());
 
@@ -846,3 +962,4 @@ updateBackButton();
 showTab("disasm");
 void loadDisassembly();
 void loadProjectFile();
+void loadMap();

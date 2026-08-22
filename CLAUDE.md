@@ -318,6 +318,28 @@ One rendering gotcha: box-drawing glyphs fill their em box, not the taller line
 box, so unscaled verticals show a gap at every row boundary. The gutter span is
 stretched with `scaleY` to make segments meet.
 
+### Layers list, regions tree
+
+The memory map panel renders two different relationships in two different
+shapes, because they are not the same relation:
+
+- **Layers stack by z-order**, which is a *list*. Order is meaningful and
+  editable; a tree would imply containment that does not exist.
+- **Regions contain one another by address range**, which is a *tree*. Drawing
+  it makes the override visible — why $8080 reads as text inside a code layer.
+
+The tree is derived at render time (`buildRegionTree` in
+`src/server/map-view.ts`), never stored. A stored hierarchy would make
+concurrent edits reparent nodes, which is exactly what the flat model avoids.
+Regions that merely overlap without containment stay siblings rather than being
+forced into a parent, since the model permits overlap and hiding it would
+mislead.
+
+D64 detail is a *property of a layer*, not a level of nesting: a layer sourced
+from `disk.d64:filename` shows the image and file name. Modelling disks as
+containers would be a real change to `FileLayer` and the schema, and nothing
+needs it yet.
+
 ## Known Limitations & Future Features
 
 ### Text Region Rendering

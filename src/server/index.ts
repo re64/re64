@@ -15,6 +15,7 @@ import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyze, loadProject } from "./analysis.js";
 import { resolveOwningLayer } from "./ownership.js";
+import { buildMapView } from "./map-view.js";
 import {
   deleteLabel,
   readProjectFile,
@@ -91,6 +92,10 @@ export function startServer(options: ServerOptions): void {
           name: loaded.project.name ?? "untitled",
           ...analysis,
         });
+      }
+
+      if (path === "/api/map" && req.method === "GET") {
+        return sendJson(res, 200, buildMapView(loadProject(projectPath)));
       }
 
       if (path === "/api/label" && req.method === "POST") {

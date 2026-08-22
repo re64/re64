@@ -85,7 +85,7 @@
       #status.error { color: var(--illegal); }
 
       main { flex: 1; min-height: 0; position: relative; }
-      #disasm, #project { position: absolute; inset: 0; }
+      #disasm, #map, #project { position: absolute; inset: 0; }
 
       footer {
         flex: 0 0 auto;
@@ -129,6 +129,57 @@
       .tok-labeltype.type-entry { color: #e0b45a; }
       .tok-labeltype.type-function { color: #7fd3c1; }
       .tok-labeltype.type-code { color: #8aa9e0; }
+
+      /* Memory map panel */
+      #map { overflow: auto; padding: 16px; }
+      .map-layer {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        margin-bottom: 12px;
+        background: var(--panel);
+      }
+      .map-layer.no-bytes { opacity: 0.75; }
+      .map-layer-head {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      .map-depth {
+        font-size: 11px;
+        color: var(--dim);
+        min-width: 3.5ch;
+      }
+      .map-name { font-weight: 600; color: var(--accent); }
+      .map-range {
+        font-family: "SF Mono", Menlo, Consolas, monospace;
+        color: var(--fg);
+      }
+      .map-meta { color: var(--dim); font-size: 12px; margin-left: auto; }
+      .map-regions { padding: 6px 12px 10px; }
+      .map-regions ul { list-style: none; margin: 0; padding: 0 0 0 16px; }
+      .map-regions > ul { padding-left: 0; }
+      .map-region {
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+        padding: 2px 0;
+        font-family: "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12px;
+        cursor: pointer;
+        border-radius: 3px;
+      }
+      .map-region:hover { background: var(--accent-dim); }
+      .map-region-range { color: var(--accent); min-width: 13ch; }
+      .map-region-kind { min-width: 10ch; }
+      .map-region-name { color: var(--label); }
+      .map-empty { color: var(--dim); font-size: 12px; padding: 2px 0; }
+      .kind-code { color: #8aa9e0; }
+      .kind-data { color: #b58ad0; }
+      .kind-text { color: #d2a05a; }
+      .kind-jumptable { color: #7fd3c1; }
+      .kind-unknown { color: var(--dim); }
 
       /* Shortcuts dialog */
       #shortcuts {
@@ -177,6 +228,7 @@
         <span class="brand">re64</span>
         <div class="tabs">
           <button class="tab active" data-tab="disasm">Disassembly</button>
+          <button class="tab" data-tab="map">Memory map</button>
           <button class="tab" data-tab="project">Project</button>
         </div>
         <button id="back">← Back</button>
@@ -188,6 +240,7 @@
       </header>
       <main>
         <div id="disasm"></div>
+        <div id="map" style="display: none"></div>
         <div id="project" style="display: none"></div>
       </main>
       <footer>
@@ -215,6 +268,8 @@
           <dd>Back, along the navigation stack</dd>
           <dt><kbd>g</kbd></dt>
           <dd>Jump to the address box</dd>
+          <dt><kbd>click</kbd> a region</dt>
+          <dd>In the memory map, jump to where it starts</dd>
         </dl>
 
         <h3>Labels</h3>
