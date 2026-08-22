@@ -243,6 +243,278 @@ means losing readability and diffs. This changes the file format, so it is
 the expensive decision — and it is independent of the React question. React
 can land first over the existing fetch-and-rebuild flow.
 
+*How to settle it (planned, not yet run):* spawn one subagent per candidate
+library, give each the **same** task — porting the memory map panel is a good
+size — and the **same** verification loop, then compare what actually happened:
+typecheck iterations, APIs hallucinated, lines written, whether it rendered
+correctly first try. Same task and same loop in every arm, or the comparison
+measures the task rather than the library.
+
+This matters because the ranking below is *inference about failure modes*, not
+evidence. Recorded here so it is not mistaken for a finding:
+
+- What determines whether an AI maintainer gets a library right is whether its
+  API lives in **types or in strings**. Typed props fail at compile time and
+  cost one iteration; CSS class strings and stringly-typed props fail at
+  runtime and cost a browser round-trip. Every error `tsc` could catch this
+  session was caught immediately; every one that survived was string content
+  (`# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/claude-code) when working with code in this repository.
+
+## Project Overview
+
+re64 is a C64 disassembler. The long-term goal is a collaborative web-based tool with CRDT support for real-time collaboration. Currently it's a local CLI tool in active development.
+
+## Architecture
+
+### Directory Structure
+
+- `src/core/` - Platform-agnostic code shared between CLI and future web UI
+- `src/cli/` - Command-line interface using Commander
+- `assets/` - Example files and project configurations
+- Future: `src/server/` and `src/ui/` directories
+
+Keep core/ free of Node.js-specific APIs where possible to maintain web compatibility.
+
+### Conceptual Model
+
+The system has three layers of abstraction:
+
+**1. Memory Map & Layers** - The "physical" layer
+- `MemoryMap` contains stacked `Layer` objects (FileLayer, BytesLayer)
+- Layers provide actual bytes, stack and shadow each other (top wins)
+- This is the raw data being analyzed
+
+**2. Regions** - Semantic "what is this?"
+- Define what a range of memory *means* (code, data, text, jumptable, unknown)
+- Not backed by bytes - they overlay the memory map
+- Sources:
+  - Auto-generated from layers via `defaultRegionKind` (PRG→code, raw→data)
+  - User-defined in project file (finer granularity, overrides auto)
+- Guide the disassembler on how to interpret bytes
+
+**3. Labels** - Semantic "what is this called?"
+- Mark individual addresses with names
+- Sources:
+  - Layer-generated (PRG entry points)
+  - Region-generated (named region start addresses)
+  - User-defined in project file
+- Resolved in instruction operands (e.g., `JSR ROM_CHROUT` instead of `JSR $FFD2`)
+
+### Key Types
+
+```
+src/core/
+├── memory/
+│   ├── layer.ts         # Layer interface, BytesLayer
+│   ├── file-layer.ts    # FileLayer (PRG/raw files)
+│   ├── memory-map.ts    # MemoryMap (layer stack)
+│   ├── label.ts         # Label, LabelIndex, label factories
+│   └── region.ts        # Region, RegionKind, RegionIndex
+├── arch/
+│   └── mos6502/
+│       ├── opcodes.ts       # Complete 6502 opcode table (legal + illegal)
+│       ├── instruction.ts   # Instruction type, operand formatting
+│       ├── decoder.ts       # Single instruction decoder
+│       └── disassembler.ts  # Work-queue disassembler
+├── c64/
+│   └── d64.ts           # D64 disk image parser
+└── project/
+    └── project.ts       # Project file schema and parser
+```
+
+### Disassembler Design
+
+The 6502 disassembler uses a work-queue approach:
+1. Start with entry points in the queue
+2. Decode instruction at queue head
+3. Add control flow targets (branches, jumps, fall-through) to queue
+4. Skip addresses in non-code regions
+5. Continue until queue is empty
+
+This discovers all reachable code without disassembling data as instructions.
+
+## Commands
+
+- `npm run build` - Compile TypeScript
+- `npm test` - Run tests once
+- `npm run test:watch` - Run tests in watch mode
+- `npm run dev` - Watch mode compilation
+- `npm run typecheck` - Type check without emitting
+
+## Testing
+
+Tests live alongside source files with `.test.ts` suffix. Use vitest.
+
+## Guidelines
+
+- Minimal dependencies - only add packages when clearly beneficial
+- Write unit tests for core functionality
+- Keep abstractions simple until complexity is needed
+- TypeScript strict mode is enabled
+
+## Documentation
+
+- Use TSDoc (`/** */`) for public interfaces and classes
+- Document "why", not "what" - let types speak for themselves
+- Keep comments minimal; add them for non-obvious design decisions or C64-specific knowledge
+- Don't restate what the code or types already say
+
+## Project Files
+
+Project files (`.re64`) are JSON with this schema:
+
+```typescript
+interface Project {
+  name?: string;
+  description?: string;
+  layers: ProjectLayer[];      // Required: each layer owns its annotations
+  entryPoints?: (number | string)[];  // Disassembly entry points
+}
+
+interface ProjectLayer {
+  type: "prg" | "raw" | "bytes" | "symbols";
+  path?: string;        // For prg/raw
+  address?: number | string;  // For raw/bytes
+  bytes?: string;       // Hex string for bytes type
+  length?: number;      // Optional length for repeat/fill
+  noAutoEntry?: boolean;  // Suppress auto entry point for PRG
+  name?: string;        // Display name; defaults to file basename
+  labels?: ProjectLabel[];    // Labels owned by this layer
+  regions?: ProjectRegion[];  // Regions carved out of this layer
+}
+
+interface ProjectLabel {
+  address: number | string;  // "$8000" or 32768
+  name: string;
+  type?: "entry" | "function" | "code" | "address";  // Default: "address"
+  comment?: string;
+}
+
+interface ProjectRegion {
+  start: number | string;
+  end: number | string;   // Can use "+length" format: "+$100"
+  kind: "code" | "data" | "text" | "jumptable" | "unknown";
+  name?: string;
+  comment?: string;
+}
+```
+
+Addresses can be decimal (32768) or hex strings ("$8000", "0x8000").
+
+**Annotations belong to layers.** Labels and regions nest inside the layer that
+owns them, so reordering the layer stack moves them with the bytes they
+describe rather than leaving them pointing at whatever else lands at that
+address. Region and kind resolution asks the topmost layer supplying a byte —
+the same z-order rule as `readByte`.
+
+A `symbols` layer carries names for addresses with no loaded bytes (zero page,
+I/O registers, KERNAL entry points). It supplies no bytes, so it never shadows
+and occupies no address range. A built-in C64 platform layer of this kind sits
+at the bottom of every stack, supplying standard hardware and KERNAL names; a
+project's own labels outrank it, so `ROM_CHROUT` beats the built-in `CHROUT`.
+
+Label priority is explicit rather than insertion order:
+`user > region > layer > platform > auto`.
+
+## UI Design Decisions
+
+The eventual web UI is built around a single central widget: a disassembly view
+holding assembler lines, comments, cross-reference arrows, and inline editable
+elements (labels, comments). These decisions are recorded here because they
+constrain the core data model, not just the presentation layer.
+
+### Model-is-truth, not buffer-is-truth
+
+The displayed text is *derived* from the three-layer model (bytes → regions →
+labels). Users never type assembler; they edit specific fields — a label's name,
+a comment, a region's kind. Therefore:
+
+- The document is a list of rows keyed by **address**, not a text buffer.
+- CRDT sync operates on the project model (`labels`, `comments`, `regions`) —
+  the same structures already in the `.re64` schema — never on characters.
+- Two users renaming the same label is a clean conflict on one field, rather
+  than overlapping character edits in a generated string.
+
+Rejected alternative: holding generated text in an editor buffer and parsing
+edits back. That round-trips derived text through a parser and puts conflicts at
+the wrong granularity.
+
+### UI stack: web components, no framework
+
+Shoelace (`@shoelace-style/shoelace`) supplies application chrome — split
+panels, and later menus, trees, dialogs, toolbars. Components are imported
+individually so the bundle carries only what is used. Adoption is incremental:
+add a component when a hand-rolled one would otherwise be written.
+
+Rejected: **React with a data-dense component library** (Blueprint, Mantine).
+The deciding factor is that CodeMirror 6 is the hero widget and is *already*
+reactive — most of `src/ui/main.ts` is `StateField`/`StateEffect`/decoration
+code. A framework would insert a wrapper and a boundary at exactly the most
+complex point in the app, where CM6 manages its own DOM by design, while its
+declarative-render benefit lands on the simplest panels — `renderMap()` is a
+few dozen lines of plain DOM building.
+
+Standard DOM is also the cheaper thing to reason about from cold. `<sl-split-panel>`
+is an HTML tag: greppable, self-describing, documented outside this repo. A
+bespoke component tree has to be reconstructed mentally before anything can be
+changed, and this project is worked on in bursts across sessions.
+
+The CRDT counter-argument is real but weaker than it looks: the server is
+already the source of truth and the client already re-fetches and rebuilds, so
+that *is* the re-render model, only explicit.
+
+Nothing is foreclosed. `dockview-core` is also framework-agnostic, so if panels
+later need true IDE docking it drops in beside this rather than replacing it.
+Cost so far: +49KB, most of it the one-time Lit runtime.
+
+**Open question, deliberately parked (2026-08-22): move to React?**
+Not settled. The arguments, so they do not have to be reconstructed:
+
+*For React (with Yjs beneath it):*
+- A component library gives **nesting, layout composition, and a consistent
+  look across advanced controls** — virtualized trees, data grids, comboboxes,
+  context menus. Shoelace supplies widgets but is not a composition system,
+  and this is the strongest argument on the table.
+- Reconciliation beats the current `renderMap()`, which clears its container
+  and rebuilds the whole subtree. Irrelevant at three panels; not irrelevant
+  as panels multiply.
+- The port only gets more expensive: ~1000 lines of `src/ui/main.ts` today.
+- CM6 in React is a solved pattern — mount once into a ref, drive with
+  effects, never let React manage its internals. The earlier claim that CM6
+  argues *against* React was overstated: it argues against React owning CM6's
+  DOM, which nobody proposes.
+
+*Layering, which an earlier version of this file got wrong:*
+Redux and Yjs are not alternatives. Y.Doc would hold truth, sync, and
+per-user undo (`UndoManager` with `trackedOrigins`, so Ctrl-Z reverts your
+edits and not a collaborator's); a store is an immutable projection for
+rendering. With Yjs authoritative, `useSyncExternalStore` may remove the need
+for Redux entirely. The rule that matters: the projection stays one-way —
+Yjs accepts writes, the store only mirrors. Two stores both accepting writes
+is the trap; a read-only projection is not.
+
+*Separable and unanswered:* **Yjs vs JSON as the persisted format.** Readable
+JSON in git is a real advantage over panopticon's compressed-CBOR blob; Yjs's
+native persistence is a binary update log. Keeping JSON means rebuilding the
+Y.Doc on load and losing cross-session merge fidelity; keeping the Yjs log
+means losing readability and diffs. This changes the file format, so it is
+the expensive decision — and it is independent of the React question. React
+can land first over the existing fetch-and-rebuild flow.
+
+ dropped from a template literal, blank lines stripped by a serializer).
+- On that criterion Blueprint drops despite being the best *category* fit: its
+  convention is versioned CSS classes (`bp3-`, `bp4-`, `bp5-`, `bp6-`), which
+  is exactly the invisible failure mode. Fluent UI drops harder — v8 and v9 are
+  different libraries sharing a name.
+- Mantine ranks first because its styling is typed props rather than class
+  strings, with the caveat that it has nine majors and v6→v7 rewrote styling.
+- Whatever is chosen: **pin the version, and verify an unfamiliar API against
+  the shipped `.d.ts` in node_modules before using it.** Reading node_modules
+  is a cheap check a human would skip, and it collapses the version-blending
+  risk.
+
 *Not blocked by any of this:* annotation edits still have **no undo**.
 `history()` is wired only to the project JSON editor. Every edit has a natural
 inverse, so a small client-side command history closes the gap today without
