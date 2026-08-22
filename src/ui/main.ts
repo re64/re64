@@ -819,7 +819,8 @@ interface RegionNode {
 }
 
 interface LayerView {
-  depth: number;
+  /** Height in the stack: 0 is the bottom, higher numbers sit on top. */
+  level: number;
   name: string;
   start: number;
   end: number;
@@ -833,49 +834,60 @@ interface LayerView {
 /**
  * Two shapes, because there are two relationships. Layers stack by z-order, so
  * they render as an ordered list; regions contain one another by address range,
- * so they render as a tree. Both are read-only for now — reordering the stack
- * and retyping spans are edits, and edits are a separate pass.
+ * so they render as a tree.
+ *
+ * The list is laid out bottom-up (CSS `column-reverse`), so the stack reads the
+ * way it stacks — the platform layer at the foot, level 0 — and in the same
+ * order as the project file declares them. Read-only for now: reordering the
+ * stack and retyping spans are edits, and editing is a separate pass.
  */
 function renderMap(layers: LayerView[]): void {
   const root = $("#map");
   root.textContent = "";
 
+  const title = document.createElement("div");
+  title.className = "map-title";
+  title.textContent = "Memory map";
+  root.appendChild(title);
+
+  const stack = document.createElement("div");
+  stack.className = "map-stack";
+
   for (const layer of layers) {
     const card = document.createElement("section");
-    card.className = "map-layer" + (layer.hasBytes ? "" : " no-bytes");
+    card.className =
+      "map-layer" +
+      (layer.hasBytes ? "" : " no-bytes") +
+      (layer.hasBytes && layer.regions.length ? " has-regions" : "");
 
     const head = document.createElement("div");
     head.className = "map-layer-head";
     head.innerHTML =
-      `<span class="map-depth">${layer.depth === 0 ? "top" : layer.depth}</span>` +
+      `<span class="map-level"></span>` +
       `<span class="map-name"></span>` +
       `<span class="map-range"></span>` +
       `<span class="map-meta"></span>`;
+    head.querySelector(".map-level")!.textContent = String(layer.level);
     head.querySelector(".map-name")!.textContent = layer.name;
     head.querySelector(".map-range")!.textContent = layer.hasBytes
-      ? `${hex4(layer.start)}–${hex4(layer.end)}`
-      : "no bytes";
+      ? `$${hex4(layer.start)}–$${hex4(layer.end)}`
+      : "";
     head.querySelector(".map-meta")!.textContent =
       `${layer.source} · ${layer.labelCount} label${layer.labelCount === 1 ? "" : "s"}` +
-      (layer.hasBytes ? ` · default ${layer.defaultKind}` : "");
+      (layer.hasBytes ? ` · ${layer.defaultKind}` : "");
     card.appendChild(head);
 
-    if (layer.hasBytes) {
+    if (layer.hasBytes && layer.regions.length) {
       const body = document.createElement("div");
       body.className = "map-regions";
-      if (layer.regions.length) {
-        body.appendChild(renderRegions(layer.regions));
-      } else {
-        const empty = document.createElement("div");
-        empty.className = "map-empty";
-        empty.textContent = `No regions declared — all ${layer.defaultKind}.`;
-        body.appendChild(empty);
-      }
+      body.appendChild(renderRegions(layer.regions));
       card.appendChild(body);
     }
 
-    root.appendChild(card);
+    stack.appendChild(card);
   }
+
+  root.appendChild(stack);
 }
 
 function renderRegions(nodes: RegionNode[]): HTMLElement {
@@ -886,15 +898,16 @@ function renderRegions(nodes: RegionNode[]): HTMLElement {
 
     const row = document.createElement("div");
     row.className = "map-region";
-    row.title = node.comment ?? `Go to ${hex4(node.start)}`;
+    // The column is too narrow for a kind column, so the kind is carried by
+    // colour and spelled out in the tooltip.
+    row.title =
+      `${node.kind} · $${hex4(node.start)}–$${hex4(node.end)}` +
+      (node.comment ? ` · ${node.comment}` : "");
     row.innerHTML =
-      `<span class="map-region-range"></span>` +
-      `<span class="map-region-kind kind-${node.kind}"></span>` +
+      `<span class="map-region-range kind-${node.kind}"></span>` +
       `<span class="map-region-name"></span>`;
-    row.querySelector(".map-region-range")!.textContent =
-      `${hex4(node.start)}–${hex4(node.end)}`;
-    row.querySelector(".map-region-kind")!.textContent = node.kind;
-    row.querySelector(".map-region-name")!.textContent = node.name ?? "";
+    row.querySelector(".map-region-range")!.textContent = `$${hex4(node.start)}`;
+    row.querySelector(".map-region-name")!.textContent = node.name ?? node.kind;
     row.addEventListener("click", () => {
       showTab("disasm");
       goToAddress(node.start);
@@ -920,13 +933,13 @@ async function loadMap(): Promise<void> {
 
 // --- Wiring -----------------------------------------------------------
 
-type TabName = "disasm" | "map" | "project";
+type TabName = "disasm" | "project";
 
 function showTab(name: TabName): void {
   for (const tab of Array.from(document.querySelectorAll(".tab"))) {
     tab.classList.toggle("active", tab.getAttribute("data-tab") === name);
   }
-  for (const id of ["disasm", "map", "project"] as const) {
+  for (const id of ["disasm", "project"] as const) {
     $(`#${id}`).style.display = id === name ? "" : "none";
   }
   if (name === "disasm") disasmView.focus();
@@ -938,6 +951,24 @@ for (const tab of Array.from(document.querySelectorAll(".tab"))) {
     showTab(tab.getAttribute("data-tab") as TabName)
   );
 }
+
+/**
+ * Sidebar visibility, remembered locally. Wrapped because storage throws
+ * outright in some contexts (private windows, blocked site data).
+ */
+function setMapVisible(visible: boolean): void {
+  $("#map").classList.toggle("hidden", !visible);
+  $("#toggle-map").classList.toggle("active", visible);
+  try {
+    localStorage.setItem("re64.map", visible ? "1" : "0");
+  } catch {
+    // Not worth surfacing: the toggle still works for this session.
+  }
+}
+
+$("#toggle-map").addEventListener("click", () => {
+  setMapVisible($("#map").classList.contains("hidden"));
+});
 
 $("#back").addEventListener("click", goBack);
 $("#reload").addEventListener("click", () => {
@@ -960,6 +991,14 @@ $("#goto").addEventListener("keydown", (e) => {
 
 updateBackButton();
 showTab("disasm");
+
+let mapVisible = true;
+try {
+  mapVisible = localStorage.getItem("re64.map") !== "0";
+} catch {
+  // Default to shown.
+}
+setMapVisible(mapVisible);
 void loadDisassembly();
 void loadProjectFile();
 void loadMap();

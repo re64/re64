@@ -22,8 +22,17 @@ export interface RegionNode {
 }
 
 export interface LayerView {
-  /** Position in the stack; 0 is topmost. */
-  depth: number;
+  /**
+   * Height in the stack: 0 is the bottom, higher numbers sit on top and
+   * shadow what is below.
+   *
+   * Deliberately not `MemoryMap`'s array index, which counts from the top
+   * because that is the order bytes are searched. Exposing that would put the
+   * platform layer — the foundation everything rests on — at the highest
+   * number, and would read in the opposite order to the project file, where
+   * layers are declared bottom-up.
+   */
+  level: number;
   name: string;
   start: number;
   end: number;
@@ -109,13 +118,16 @@ export function buildMapView(loaded: LoadedProject): MapView {
   // the platform layer is in the map but not in the declarations.
   const declarationIndex = new Map(loaded.layers.map((l, i) => [l, i]));
 
-  const layers = loaded.map.getLayers().map((layer, depth) => {
+  // Bottom-up, matching the project file's declaration order.
+  const stack = [...loaded.map.getLayers()].reverse();
+
+  const layers = stack.map((layer, level) => {
     const declared = declarationIndex.has(layer)
       ? loaded.project.layers[declarationIndex.get(layer)!]
       : undefined;
 
     return {
-      depth,
+      level,
       name: layer.name,
       start: layer.start,
       end: layer.end,

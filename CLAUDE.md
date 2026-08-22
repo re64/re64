@@ -320,13 +320,27 @@ stretched with `scaleY` to make segments meet.
 
 ### Layers list, regions tree
 
-The memory map panel renders two different relationships in two different
-shapes, because they are not the same relation:
+The memory map is a **sidebar beside the disassembly**, not a tab. It is
+context for reading code — which layer supplies these bytes, why this span is
+text — so it has to be visible *while* reading. As a tab it forced a mode
+switch to answer a question about the line under the cursor. It collapses via
+a toolbar toggle, remembered in `localStorage`.
+
+It renders two different relationships in two different shapes, because they
+are not the same relation:
 
 - **Layers stack by z-order**, which is a *list*. Order is meaningful and
   editable; a tree would imply containment that does not exist.
 - **Regions contain one another by address range**, which is a *tree*. Drawing
   it makes the override visible — why $8080 reads as text inside a code layer.
+
+**Layers are numbered from the bottom** — the platform layer is level 0, and
+higher numbers sit on top and shadow what is below. Do *not* surface
+`MemoryMap`'s array index, which counts from the top because that is the order
+bytes are searched: that is an implementation detail, it puts the foundation
+layer at the highest number, and it reads in the opposite order to the project
+file, where layers are declared bottom-up. The list is laid out with CSS
+`column-reverse` so the stack reads the way it stacks.
 
 The tree is derived at render time (`buildRegionTree` in
 `src/server/map-view.ts`), never stored. A stored hierarchy would make

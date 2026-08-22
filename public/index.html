@@ -78,14 +78,27 @@
       button { cursor: pointer; }
       button:hover:not(:disabled) { border-color: var(--accent-dim); }
       button:disabled { opacity: 0.4; cursor: default; }
+      button.active { color: var(--accent); border-color: var(--accent-dim); }
 
       #goto { width: 90px; font-family: 'SF Mono', Menlo, Consolas, monospace; }
 
       #status { color: var(--dim); font-size: 12px; min-width: 200px; }
       #status.error { color: var(--illegal); }
 
-      main { flex: 1; min-height: 0; position: relative; }
-      #disasm, #map, #project { position: absolute; inset: 0; }
+      main { flex: 1; min-height: 0; display: flex; }
+      #content { flex: 1; min-width: 0; position: relative; }
+      #disasm, #project { position: absolute; inset: 0; }
+
+      /* The map is context for reading the disassembly, not a separate mode,
+         so it sits beside it rather than replacing it. */
+      #map {
+        flex: 0 0 300px;
+        min-width: 0;
+        overflow: auto;
+        border-right: 1px solid var(--border);
+        background: var(--bg);
+      }
+      #map.hidden { display: none; }
 
       footer {
         flex: 0 0 auto;
@@ -130,51 +143,83 @@
       .tok-labeltype.type-function { color: #7fd3c1; }
       .tok-labeltype.type-code { color: #8aa9e0; }
 
-      /* Memory map panel */
-      #map { overflow: auto; padding: 16px; }
+      /* Memory map sidebar */
+      .map-title {
+        padding: 8px 10px 4px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--dim);
+      }
+      /* Layers are listed bottom-up, so the stack reads the way it stacks and
+         the order matches the project file. */
+      .map-stack { display: flex; flex-direction: column-reverse; padding: 0 8px 12px; }
       .map-layer {
         border: 1px solid var(--border);
-        border-radius: 6px;
-        margin-bottom: 12px;
+        border-radius: 5px;
+        margin-top: 6px;
         background: var(--panel);
       }
-      .map-layer.no-bytes { opacity: 0.75; }
+      .map-layer.no-bytes { opacity: 0.7; }
       .map-layer-head {
         display: flex;
         align-items: baseline;
-        gap: 10px;
-        padding: 8px 12px;
-        border-bottom: 1px solid var(--border);
+        gap: 6px;
+        padding: 5px 8px;
+        flex-wrap: wrap;
       }
-      .map-depth {
-        font-size: 11px;
+      .map-layer.has-regions .map-layer-head { border-bottom: 1px solid var(--border); }
+      .map-level {
+        font-size: 10px;
         color: var(--dim);
-        min-width: 3.5ch;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 0 4px;
       }
-      .map-name { font-weight: 600; color: var(--accent); }
+      .map-name {
+        font-weight: 600;
+        color: var(--accent);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
       .map-range {
         font-family: "SF Mono", Menlo, Consolas, monospace;
+        font-size: 11px;
         color: var(--fg);
       }
-      .map-meta { color: var(--dim); font-size: 12px; margin-left: auto; }
-      .map-regions { padding: 6px 12px 10px; }
-      .map-regions ul { list-style: none; margin: 0; padding: 0 0 0 16px; }
+      .map-meta {
+        color: var(--dim);
+        font-size: 11px;
+        flex-basis: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .map-regions { padding: 4px 8px 6px; }
+      .map-regions ul { list-style: none; margin: 0; padding: 0 0 0 10px; }
       .map-regions > ul { padding-left: 0; }
       .map-region {
         display: flex;
-        gap: 10px;
+        gap: 6px;
         align-items: baseline;
-        padding: 2px 0;
+        padding: 1px 3px;
         font-family: "SF Mono", Menlo, Consolas, monospace;
-        font-size: 12px;
+        font-size: 11px;
         cursor: pointer;
         border-radius: 3px;
       }
       .map-region:hover { background: var(--accent-dim); }
-      .map-region-range { color: var(--accent); min-width: 13ch; }
-      .map-region-kind { min-width: 10ch; }
-      .map-region-name { color: var(--label); }
-      .map-empty { color: var(--dim); font-size: 12px; padding: 2px 0; }
+      .map-region-range { color: var(--accent); white-space: nowrap; }
+      .map-region-name {
+        color: var(--label);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .map-empty { color: var(--dim); font-size: 11px; padding: 1px 3px; }
       .kind-code { color: #8aa9e0; }
       .kind-data { color: #b58ad0; }
       .kind-text { color: #d2a05a; }
@@ -228,9 +273,9 @@
         <span class="brand">re64</span>
         <div class="tabs">
           <button class="tab active" data-tab="disasm">Disassembly</button>
-          <button class="tab" data-tab="map">Memory map</button>
           <button class="tab" data-tab="project">Project</button>
         </div>
+        <button id="toggle-map" title="Show or hide the memory map">▤ Map</button>
         <button id="back">← Back</button>
         <input id="goto" placeholder="$8000" spellcheck="false" />
         <button id="reload">Reload</button>
@@ -239,9 +284,11 @@
         <span id="status"></span>
       </header>
       <main>
-        <div id="disasm"></div>
-        <div id="map" style="display: none"></div>
-        <div id="project" style="display: none"></div>
+        <aside id="map"></aside>
+        <div id="content">
+          <div id="disasm"></div>
+          <div id="project" style="display: none"></div>
+        </div>
       </main>
       <footer>
         <span id="stats"></span>
