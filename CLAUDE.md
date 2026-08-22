@@ -209,6 +209,45 @@ Nothing is foreclosed. `dockview-core` is also framework-agnostic, so if panels
 later need true IDE docking it drops in beside this rather than replacing it.
 Cost so far: +49KB, most of it the one-time Lit runtime.
 
+**Open question, deliberately parked (2026-08-22): move to React?**
+Not settled. The arguments, so they do not have to be reconstructed:
+
+*For React (with Yjs beneath it):*
+- A component library gives **nesting, layout composition, and a consistent
+  look across advanced controls** — virtualized trees, data grids, comboboxes,
+  context menus. Shoelace supplies widgets but is not a composition system,
+  and this is the strongest argument on the table.
+- Reconciliation beats the current `renderMap()`, which clears its container
+  and rebuilds the whole subtree. Irrelevant at three panels; not irrelevant
+  as panels multiply.
+- The port only gets more expensive: ~1000 lines of `src/ui/main.ts` today.
+- CM6 in React is a solved pattern — mount once into a ref, drive with
+  effects, never let React manage its internals. The earlier claim that CM6
+  argues *against* React was overstated: it argues against React owning CM6's
+  DOM, which nobody proposes.
+
+*Layering, which an earlier version of this file got wrong:*
+Redux and Yjs are not alternatives. Y.Doc would hold truth, sync, and
+per-user undo (`UndoManager` with `trackedOrigins`, so Ctrl-Z reverts your
+edits and not a collaborator's); a store is an immutable projection for
+rendering. With Yjs authoritative, `useSyncExternalStore` may remove the need
+for Redux entirely. The rule that matters: the projection stays one-way —
+Yjs accepts writes, the store only mirrors. Two stores both accepting writes
+is the trap; a read-only projection is not.
+
+*Separable and unanswered:* **Yjs vs JSON as the persisted format.** Readable
+JSON in git is a real advantage over panopticon's compressed-CBOR blob; Yjs's
+native persistence is a binary update log. Keeping JSON means rebuilding the
+Y.Doc on load and losing cross-session merge fidelity; keeping the Yjs log
+means losing readability and diffs. This changes the file format, so it is
+the expensive decision — and it is independent of the React question. React
+can land first over the existing fetch-and-rebuild flow.
+
+*Not blocked by any of this:* annotation edits still have **no undo**.
+`history()` is wired only to the project JSON editor. Every edit has a natural
+inverse, so a small client-side command history closes the gap today without
+prejudging the above.
+
 ### Widget: CodeMirror 6, read-only with decorations
 
 Chosen over a hand-rolled virtualized list mainly because of **variable row
