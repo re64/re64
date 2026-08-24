@@ -22,7 +22,11 @@ import {
   LoadedProject,
   buildMemoryMap,
   parseProject,
-  parseProjectAddress,
+  Project,
+  Row,
+  analyze,
+  formatRows,
+  formatWarnings,
 } from "../core/index.js";
 import { hexDump } from "./hex.js";
 
@@ -240,7 +244,8 @@ program
     let map: MemoryMap;
     let prgEntries: number[] = [];
     let userLabels = new LabelIndex();
-    let projectEntryPoints: number[] | undefined;
+    // Layers declared on the command line have no project file behind them.
+    let project: Project = { layers: [] };
 
     if (options.project) {
       // Load from project file
@@ -248,10 +253,8 @@ program
       map = loaded.map;
       prgEntries = loaded.prgEntries;
       userLabels = loaded.userLabels;
+      project = loaded.project;
 
-      if (loaded.project.entryPoints) {
-        projectEntryPoints = loaded.project.entryPoints.map(parseProjectAddress);
-      }
     } else {
       // Load from command line options
       map = new MemoryMap();
@@ -309,309 +312,33 @@ program
       }
     }
 
-    // Collect entry points from labels with type "entry", "function", or "code"
-    const labelEntryPoints = userLabels
-      .getAllLabels()
-      .filter((l) => l.type === "entry" || l.type === "function" || l.type === "code")
-      .map((l) => l.address);
-
-    // Determine entry points (CLI -e overrides project entryPoints)
-    let entryPoints: number[];
-    if (options.entry) {
-      entryPoints = options.entry.map(parseAddress);
-    } else if (projectEntryPoints && projectEntryPoints.length > 0) {
-      // Combine explicit entry points with label-derived entry points
-      entryPoints = [...projectEntryPoints, ...labelEntryPoints];
-    } else if (prgEntries.length > 0) {
-      // Combine PRG entries with label-derived entry points
-      entryPoints = [...prgEntries, ...labelEntryPoints];
-    } else if (labelEntryPoints.length > 0) {
-      // Use only label-derived entry points
-      entryPoints = labelEntryPoints;
-    } else {
-      const byteLayers = map.getLayers().filter((l) => l.hasBytes);
-      if (byteLayers.length === 0) {
-        console.error("No layers defined and no entry points specified");
-        process.exit(1);
+    // The view model is shared with the web UI: one walk over the address
+    // range, two renderers. Annotations are off because nothing in a terminal
+    // is clickable, so type tags and xref stubs would only be noise.
+    const analysis = analyze(
+      { project, map, prgEntries, userLabels, layers: [] },
+      {
+        labelTolerance: parseInt(options.labelTolerance, 10) || 1,
+        annotations: false,
+        entryPoints: options.entry?.map(parseAddress),
       }
-      entryPoints = [Math.min(...byteLayers.map((l) => l.start))];
-    }
+    );
 
-    // Build region index: merge auto-generated regions with user regions (user takes priority)
-    // Disassemble
-    const result = disassemble(map, { entryPoints, regions: map });
-    const index = new InstructionIndex(result.instructions);
-
-    // Determine output range
-    let instructions = index.all();
+    let rows = analysis.rows;
     if (options.range) {
       const { start, length } = parseRange(options.range);
-      instructions = index.range(start, start + length);
+      rows = rows.filter((r: Row) => r.address >= start && r.address < start + length);
     }
 
-    // Merge layer labels (which include region-generated ones) with user labels
-    const allLabels = new LabelIndex();
-    allLabels.addLabels(map.getLabels().getAllLabels());
-    allLabels.addLabels(userLabels.getAllLabels());
-
-    // Parse label tolerance
-    const labelTolerance = parseInt(options.labelTolerance, 10) || 1;
-
-    // Generate auto-labels for unlabeled references
-    // These are lowest priority - only used if no other label matches (even with tolerance)
-    const autoLabels: ReturnType<typeof createAutoLabel>[] = [];
-    for (const [targetAddr, refs] of result.references) {
-      // Check if this address already has a label (with tolerance)
-      if (allLabels.resolve(targetAddr, labelTolerance)) {
-        continue;
-      }
-
-      // Check if this address is a JSR target (true subroutine)
-      const isCallTarget = refs.some((r) => r.type === "call");
-      // Check if it's a code reference (call, jump, or branch)
-      const isCodeTarget = refs.some((r) => r.type === "call" || r.type === "jump" || r.type === "branch");
-
-      // Generate label name based on reference type
-      const addrStr = targetAddr.toString(16).toUpperCase().padStart(4, "0");
-      let name: string;
-      let labelType: "function" | "code" | "address";
-
-      if (isCallTarget) {
-        // JSR target - it's a subroutine
-        name = `sub_${addrStr}`;
-        labelType = "function";
-      } else if (isCodeTarget) {
-        // JMP or branch target - it's a code location
-        name = `loc_${addrStr}`;
-        labelType = "code";
-      } else {
-        // Data reference only
-        name = `dat_${addrStr}`;
-        labelType = "address";
-      }
-
-      autoLabels.push(createAutoLabel(targetAddr, name, labelType));
+    for (const line of formatRows(rows)) {
+      console.log(line);
     }
 
-    // Add auto-labels (lowest priority, added last)
-    allLabels.addLabels(autoLabels);
-
-    // Create label resolver for operand formatting (with fuzzy matching)
-    const resolveLabel = (addr: number): { name: string; offset: number } | undefined => {
-      const resolved = allLabels.resolve(addr, labelTolerance);
-      if (resolved) {
-        return { name: resolved.label.name, offset: resolved.offset };
-      }
-      return undefined;
-    };
-
-    // Determine the full range to output (including data gaps)
-    // Symbol layers occupy no address space, so the range comes only from
-    // layers that actually supply bytes.
-    const byteLayers = map.getLayers().filter((l) => l.hasBytes);
-    let rangeStart: number, rangeEnd: number;
-    if (options.range) {
-      const { start, length } = parseRange(options.range);
-      rangeStart = start;
-      rangeEnd = start + length;
-    } else if (byteLayers.length > 0) {
-      rangeStart = Math.min(...byteLayers.map((l) => l.start));
-      rangeEnd = Math.max(...byteLayers.map((l) => l.end));
-    } else {
-      rangeStart = 0;
-      rangeEnd = 0;
-    }
-
-    // Helper to format address
-    const formatAddr = (addr: number) => addr.toString(16).toUpperCase().padStart(4, "0");
-
-    // Helper to output labels at an address (deduplicated by name)
-    const outputLabels = (addr: number) => {
-      const here = allLabels.getLabelsAt(addr);
-      // Built-in names are redundant wherever the project supplied one.
-      const labelsHere = here.some((l) => l.source.kind !== "platform")
-        ? here.filter((l) => l.source.kind !== "platform")
-        : here;
-      const seenNames = new Set<string>();
-      for (const label of labelsHere) {
-        if (!seenNames.has(label.name)) {
-          seenNames.add(label.name);
-          console.log(`${formatAddr(addr)} ${label.name}:`);
-        }
-      }
-    };
-
-    // Helper to output a hex dump line (for data bytes)
-    const outputDataLine = (addr: number, bytes: number[]) => {
-      const bytesStr = bytes
-        .map((b) => b.toString(16).toUpperCase().padStart(2, "0"))
-        .join(" ");
-      const asciiStr = bytes
-        .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : "."))
-        .join("");
-      console.log(`${formatAddr(addr)}  ${bytesStr.padEnd(23)}  |${asciiStr}|`);
-    };
-
-    // Helper to output a text region line
-    // Shows bytes with .TEXT directive - interpretation depends on the game's charset
-    const outputTextLine = (addr: number, bytes: number[]) => {
-      const bytesStr = bytes
-        .map((b) => b.toString(16).toUpperCase().padStart(2, "0"))
-        .join(" ");
-      console.log(`${formatAddr(addr)}  ${bytesStr.padEnd(23)}  .TEXT`);
-    };
-
-    // Helper to format a resolved label with offset
-    const formatResolvedLabel = (resolution: { name: string; offset: number }): string => {
-      if (resolution.offset === 0) {
-        return resolution.name;
-      } else if (resolution.offset > 0) {
-        return `${resolution.name}+${resolution.offset}`;
-      } else {
-        return `${resolution.name}${resolution.offset}`;
-      }
-    };
-
-    // Helper to output a jumptable entry
-    const outputJumptableEntry = (addr: number) => {
-      const lo = map.readByte(addr);
-      const hi = map.readByte(addr + 1);
-      if (lo !== undefined && hi !== undefined) {
-        const target = lo | (hi << 8);
-        const targetStr = formatAddr(target);
-        const resolved = resolveLabel(target);
-        const bytesStr = `${lo.toString(16).toUpperCase().padStart(2, "0")} ${hi.toString(16).toUpperCase().padStart(2, "0")}`;
-        if (resolved) {
-          console.log(`${formatAddr(addr)}  ${bytesStr.padEnd(8)}  .WORD ${formatResolvedLabel(resolved)}`);
-        } else {
-          console.log(`${formatAddr(addr)}  ${bytesStr.padEnd(8)}  .WORD $${targetStr}`);
-        }
-      }
-    };
-
-    // Walk through the range, outputting instructions and data
-    let addr = rangeStart;
-    while (addr < rangeEnd) {
-      // Check if there's an instruction at this address
-      const instr = index.get(addr);
-
-      if (instr) {
-        // Output instruction
-        outputLabels(addr);
-        const bytesStr = [...instr.bytes]
-          .map((b) => b.toString(16).toUpperCase().padStart(2, "0"))
-          .join(" ")
-          .padEnd(8);
-        console.log(`${formatAddr(addr)}  ${bytesStr}  ${formatInstruction(instr, resolveLabel)}`);
-        addr += instr.bytes.length;
-      } else {
-        // Not an instruction - check what kind of region this is
-        const regionKind = map.getKindAt(addr) ?? "data";
-
-        if (regionKind === "jumptable") {
-          // Output jumptable entries (2 bytes each)
-          outputLabels(addr);
-          outputJumptableEntry(addr);
-          addr += 2;
-        } else if (regionKind === "text") {
-          // Output text region
-          const dataBytes: number[] = [];
-          let lineStartAddr = addr;
-          const BYTES_PER_LINE = 8;
-
-          while (addr < rangeEnd && !index.has(addr)) {
-            if (map.getKindAt(addr) !== "text") break;
-            if (dataBytes.length > 0 && allLabels.hasLabelAt(addr)) break;
-
-            const byte = map.readByte(addr);
-            if (byte === undefined) {
-              if (dataBytes.length > 0) {
-                outputLabels(lineStartAddr);
-                outputTextLine(lineStartAddr, dataBytes.splice(0));
-              }
-              addr++;
-              lineStartAddr = addr;
-              continue;
-            }
-
-            dataBytes.push(byte);
-            addr++;
-
-            if (dataBytes.length === BYTES_PER_LINE) {
-              outputLabels(lineStartAddr);
-              outputTextLine(lineStartAddr, dataBytes.splice(0));
-              lineStartAddr = addr;
-            }
-          }
-
-          if (dataBytes.length > 0) {
-            outputLabels(lineStartAddr);
-            outputTextLine(lineStartAddr, dataBytes);
-          }
-        } else {
-          // Regular data - accumulate bytes until we hit an instruction or label
-          const dataBytes: number[] = [];
-          let lineStartAddr = addr;
-          const BYTES_PER_LINE = 8;
-
-          while (addr < rangeEnd && !index.has(addr)) {
-            // Break at label boundaries (except at start of data block)
-            if (dataBytes.length > 0 && allLabels.hasLabelAt(addr)) {
-              break;
-            }
-            // Break if we enter a different region type
-            const currentKind = map.getKindAt(addr) ?? "data";
-            if (currentKind === "jumptable" || currentKind === "text") {
-              break;
-            }
-
-            const byte = map.readByte(addr);
-            if (byte === undefined) {
-              if (dataBytes.length > 0) {
-                outputLabels(lineStartAddr);
-                outputDataLine(lineStartAddr, dataBytes.splice(0));
-              }
-              addr++;
-              lineStartAddr = addr;
-              continue;
-            }
-
-            dataBytes.push(byte);
-            addr++;
-
-            if (dataBytes.length === BYTES_PER_LINE) {
-              outputLabels(lineStartAddr);
-              outputDataLine(lineStartAddr, dataBytes.splice(0));
-              lineStartAddr = addr;
-            }
-          }
-
-          if (dataBytes.length > 0) {
-            outputLabels(lineStartAddr);
-            outputDataLine(lineStartAddr, dataBytes);
-          }
-        }
-      }
-    }
-
-    // Show warnings
-    if (result.warnings.length > 0) {
+    if (analysis.warnings.length > 0) {
       console.error("");
       console.error("Warnings:");
-      for (const w of result.warnings) {
-        const addr = w.address.toString(16).toUpperCase().padStart(4, "0");
-        switch (w.type) {
-          case "undefined":
-            console.error(`  $${addr}: undefined bytes`);
-            break;
-          case "truncated":
-            console.error(`  $${addr}: truncated instruction (needed ${w.needed}, got ${w.available})`);
-            break;
-          case "overlap":
-            const existing = w.existingAddress.toString(16).toUpperCase().padStart(4, "0");
-            console.error(`  $${addr}: overlaps instruction at $${existing}`);
-            break;
-        }
+      for (const line of formatWarnings(analysis.warnings)) {
+        console.error(line);
       }
     }
   });

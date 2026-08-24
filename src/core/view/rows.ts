@@ -89,7 +89,37 @@ const hex2 = (n: number) => n.toString(16).toUpperCase().padStart(2, "0");
  * Mirrors the CLI's walk over the address range, but emits structured rows with
  * click targets rather than printing.
  */
-export function analyze(loaded: LoadedProject, labelTolerance = 1): AnalysisResult {
+/** What a consumer wants out of the view model. */
+export interface AnalyzeOptions {
+  /** Max offset for fuzzy label matching. */
+  labelTolerance?: number;
+  /**
+   * Include interaction affordances in row text: label type tags and inbound
+   * xref stubs.
+   *
+   * On for the web UI, where they are clickable. Off for plain text output,
+   * where nothing can be clicked and they would only be noise.
+   */
+  annotations?: boolean;
+  /**
+   * Entry points to disassemble from, overriding the ones derived from the
+   * project and its layers. The CLI exposes this as -e.
+   */
+  entryPoints?: number[];
+}
+
+export function analyze(
+  loaded: LoadedProject,
+  options: AnalyzeOptions | number = {}
+): AnalysisResult {
+  // A bare number is the old labelTolerance argument.
+  const {
+    labelTolerance = 1,
+    annotations = true,
+    entryPoints: entryPointOverride,
+  } = typeof options === "number" ? { labelTolerance: options } : options;
+
+
   const { project, map, prgEntries, userLabels } = loaded;
 
   const labelEntryPoints = userLabels
@@ -100,7 +130,9 @@ export function analyze(loaded: LoadedProject, labelTolerance = 1): AnalysisResu
   const projectEntryPoints = project.entryPoints?.map(parseProjectAddress) ?? [];
 
   let entryPoints: number[];
-  if (projectEntryPoints.length > 0) {
+  if (entryPointOverride?.length) {
+    entryPoints = entryPointOverride;
+  } else if (projectEntryPoints.length > 0) {
     entryPoints = [...projectEntryPoints, ...labelEntryPoints];
   } else if (prgEntries.length > 0) {
     entryPoints = [...prgEntries, ...labelEntryPoints];
@@ -188,7 +220,7 @@ export function analyze(loaded: LoadedProject, labelTolerance = 1): AnalysisResu
 
       // "address" is the default and by far the most common, so tagging it
       // would add noise to most rows without saying anything.
-      if (label.type !== "address") {
+      if (annotations && label.type !== "address") {
         const tag = ` [${LABEL_TYPE_TAGS[label.type]}]`;
         tokens.push({
           start: text.length + 1,
@@ -201,7 +233,7 @@ export function analyze(loaded: LoadedProject, labelTolerance = 1): AnalysisResu
         text += tag;
       }
 
-      const refs = result.references.get(addr);
+      const refs = annotations ? result.references.get(addr) : undefined;
       if (refs && refs.length > 0) {
         const stub = `  ◂ ${refs.length} ref${refs.length === 1 ? "" : "s"}`;
         tokens.push({
