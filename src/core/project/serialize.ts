@@ -1,14 +1,19 @@
 /**
- * Reading and writing `.re64` project files from the server.
+ * Editing `.re64` project text without reformatting it.
  *
  * Project files are hand-edited and tracked in git, so writes must preserve the
- * house style: one label/region per line, compact objects. `JSON.stringify`
- * with plain indentation would explode every entry across five lines and turn
- * any single-label edit into a whole-file diff.
+ * house style: one label/region per line, compact objects, and the blank lines
+ * used to group related labels. `JSON.stringify` with plain indentation would
+ * explode every entry across five lines and turn a one-label rename into a
+ * whole-file diff.
+ *
+ * Pure text in, text out. The client edits its own copy and re-analyses locally;
+ * the server only writes the result. Every edit is re-parsed before being
+ * returned, so a botched splice throws instead of producing a corrupt file.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
-import { Project, ProjectLabel, parseProject, parseProjectAddress } from "../core/index.js";
+import { Project, ProjectLabel } from "./project.js";
+import { parseProject, parseProjectAddress } from "./project.js";
 
 /** Serialize one object compactly on a single line: `{ "a": 1, "b": 2 }`. */
 function compactObject(obj: Record<string, unknown>): string {
@@ -61,11 +66,6 @@ export function formatProject(project: Project): string {
   lines.push(body.join(",\n"));
   lines.push("}");
   return lines.join("\n") + "\n";
-}
-
-export function readProjectFile(path: string): { project: Project; raw: string } {
-  const raw = readFileSync(path, "utf-8");
-  return { project: parseProject(raw), raw };
 }
 
 /** The span of lines holding the entries of a top-level array. */
@@ -180,13 +180,12 @@ function lastEntryLine(lines: string[], span: ArraySpan): number {
  * position so a rename produces a one-line diff.
  */
 export function upsertLabel(
-  path: string,
+  raw: string,
   address: number,
   name: string,
   type: ProjectLabel["type"] | undefined,
   layerIndex: number
-): Project {
-  const raw = readFileSync(path, "utf-8");
+): string {
   const lines = raw.split("\n");
   const layer = findLayerSpan(lines, layerIndex);
   if (!layer) {
@@ -204,8 +203,7 @@ export function upsertLabel(
       name,
       ...(type && type !== "address" ? { type } : {}),
     });
-    writeFileSync(path, formatProject(project), "utf-8");
-    return project;
+    return formatProject(project);
   }
 
   let done = false;
@@ -250,19 +248,17 @@ export function upsertLabel(
   }
 
   const updated = lines.join("\n");
-  const project = parseProject(updated); // throws before writing if we corrupted it
-  writeFileSync(path, updated, "utf-8");
-  return project;
+  parseProject(updated); // throws rather than returning something corrupt
+  return updated;
 }
 
 /** Remove the label at an address, if present. */
-export function deleteLabel(path: string, address: number, layerIndex: number): Project {
-  const raw = readFileSync(path, "utf-8");
+export function deleteLabel(raw: string, address: number, layerIndex: number): string {
   const lines = raw.split("\n");
   const layer = findLayerSpan(lines, layerIndex);
-  if (!layer) return parseProject(raw);
+  if (!layer) return raw;
   const span = findArraySpan(lines, "labels", layer.open, layer.close);
-  if (!span) return parseProject(raw);
+  if (!span) return raw;
 
   for (let i = span.open + 1; i < span.close; i++) {
     if (addressOfLine(lines[i]) !== address) continue;
@@ -278,14 +274,11 @@ export function deleteLabel(path: string, address: number, layerIndex: number): 
   }
 
   const updated = lines.join("\n");
-  const project = parseProject(updated);
-  writeFileSync(path, updated, "utf-8");
-  return project;
+  parseProject(updated);
+  return updated;
 }
 
-/** Replace the whole project file, validating that it parses first. */
-export function writeProjectRaw(path: string, raw: string): Project {
-  const project = parseProject(raw);
-  writeFileSync(path, raw.endsWith("\n") ? raw : raw + "\n", "utf-8");
-  return project;
+/** Normalise trailing whitespace the way a written file should look. */
+export function normalizeProjectText(raw: string): string {
+  return raw.endsWith("\n") ? raw : raw + "\n";
 }

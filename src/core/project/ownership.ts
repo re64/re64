@@ -1,27 +1,25 @@
 /**
- * Deciding which layer should own an annotation.
+ * Which layer should own an annotation.
  *
  * Labels nest inside their layer in the project file, so a write has to pick
  * one. The rule mirrors how the address resolves at read time.
  */
 
-import { loadProject } from "./analysis.js";
+import { LoadedProject } from "./loader.js";
 
 /**
  * Index into `project.layers` of the layer that should own a label here.
  *
  * The topmost layer supplying a byte at the address wins, matching how the
  * label will resolve once written. Addresses with no bytes — zero page, I/O
- * registers — fall to the first declared symbol layer, which is exactly what
- * that layer type exists for. Returns undefined when neither applies, so the
- * caller can say so rather than writing the label somewhere arbitrary.
+ * registers — fall to the first declared symbol layer, which is what that layer
+ * type exists for. Undefined when neither applies, so the caller can say so
+ * rather than writing the label somewhere arbitrary.
  */
 export function resolveOwningLayer(
-  projectPath: string,
+  loaded: LoadedProject,
   address: number
 ): number | undefined {
-  const loaded = loadProject(projectPath);
-
   const owner = loaded.map.layerAt(address);
   if (owner) {
     const index = loaded.layers.indexOf(owner);

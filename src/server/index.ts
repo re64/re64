@@ -15,18 +15,22 @@ import { existsSync } from "node:fs";
 import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadProject } from "./analysis.js";
-import { resolveOwningLayer } from "./ownership.js";
-import {
-  deleteLabel,
-  readProjectFile,
-  upsertLabel,
-  writeProjectRaw,
-} from "./project-file.js";
+import { createHash } from "node:crypto";
+import { writeFileSync } from "node:fs";
+import { normalizeProjectText, parseProject } from "../core/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(__dirname, "../../public");
 
-const LABEL_TYPES = ["entry", "function", "code", "address"];
+/**
+ * Identifies the file's current contents.
+ *
+ * A save carries the version it was based on, so an edit made in another editor
+ * while the UI was open is a conflict rather than a silent overwrite.
+ */
+function versionOf(text: string): string {
+  return createHash("sha256").update(text).digest("hex").slice(0, 12);
+}
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -74,14 +78,31 @@ export function startServer(options: ServerOptions): void {
     try {
       // --- API ---------------------------------------------------------
       if (path === "/api/project" && req.method === "GET") {
-        const { project, raw } = readProjectFile(projectPath);
-        return sendJson(res, 200, { path: projectPath, raw, project });
+        const raw = readFileSync(projectPath, "utf-8");
+        return sendJson(res, 200, { path: projectPath, raw, version: versionOf(raw) });
       }
 
       if (path === "/api/project" && req.method === "PUT") {
-        const raw = await readBody(req);
-        const project = writeProjectRaw(projectPath, raw);
-        return sendJson(res, 200, { ok: true, project });
+        const body = await readBody(req);
+        const { raw, baseVersion } = JSON.parse(body) as {
+          raw: string;
+          baseVersion?: string;
+        };
+
+        const current = versionOf(readFileSync(projectPath, "utf-8"));
+        if (baseVersion !== undefined && baseVersion !== current) {
+          return sendJson(res, 409, {
+            error:
+              "The project file changed since it was loaded. Reload to pick up " +
+              "the change, or your edits will overwrite it.",
+            version: current,
+          });
+        }
+
+        parseProject(raw); // refuse to write something that will not load
+        const text = normalizeProjectText(raw);
+        writeFileSync(projectPath, text, "utf-8");
+        return sendJson(res, 200, { ok: true, version: versionOf(text) });
       }
 
       // Raw bytes for a layer, so the browser can build the memory map and
@@ -109,41 +130,6 @@ export function startServer(options: ServerOptions): void {
         });
         res.end(bytes);
         return;
-      }
-
-      if (path === "/api/label" && req.method === "POST") {
-        const { address, name, type } = JSON.parse(await readBody(req));
-        if (typeof address !== "number" || typeof name !== "string" || !name.trim()) {
-          return sendJson(res, 400, { error: "address (number) and name (string) required" });
-        }
-        if (type !== undefined && !LABEL_TYPES.includes(type)) {
-          return sendJson(res, 400, {
-            error: `type must be one of ${LABEL_TYPES.join(", ")}`,
-          });
-        }
-        const owner = resolveOwningLayer(projectPath, address);
-        if (owner === undefined) {
-          return sendJson(res, 400, {
-            error:
-              `No layer owns $${address.toString(16).toUpperCase()}. Add a layer of ` +
-              `type "symbols" to name addresses outside the loaded bytes.`,
-          });
-        }
-        upsertLabel(projectPath, address, name.trim(), type, owner);
-        return sendJson(res, 200, { ok: true });
-      }
-
-      if (path === "/api/label" && req.method === "DELETE") {
-        const { address } = JSON.parse(await readBody(req));
-        if (typeof address !== "number") {
-          return sendJson(res, 400, { error: "address (number) required" });
-        }
-        const owner = resolveOwningLayer(projectPath, address);
-        if (owner === undefined) {
-          return sendJson(res, 400, { error: "No layer owns that address" });
-        }
-        deleteLabel(projectPath, address, owner);
-        return sendJson(res, 200, { ok: true });
       }
 
       // --- Static ------------------------------------------------------
