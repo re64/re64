@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildRegionTree } from "./map-view.js";
-import { createUserRegion } from "../core/index.js";
+import { createUserRegion } from "../index.js";
 
 describe("buildRegionTree", () => {
   it("nests a region inside the one containing it", () => {

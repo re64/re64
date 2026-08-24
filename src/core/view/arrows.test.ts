@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { Reference } from "../core/index.js";
-import { allocateArrowLanes, renderArrowGutter, ArrowSpan } from "./analysis.js";
+import { Reference } from "../index.js";
+import { allocateArrowLanes, renderArrowGutter, ArrowSpan } from "./arrows.js";
 
 /**
  * Build the reference/line maps `allocateArrowLanes` expects from a list of

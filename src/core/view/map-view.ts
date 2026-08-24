@@ -8,8 +8,8 @@
  * exists precisely to avoid that.
  */
 
-import { Layer, Region } from "../core/index.js";
-import { LoadedProject } from "../core/index.js";
+import { Layer, Region } from "../index.js";
+import { LoadedProject } from "../index.js";
 
 export interface RegionNode {
   start: number;

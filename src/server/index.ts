@@ -13,9 +13,9 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { analyze, loadProject } from "./analysis.js";
+import { loadProject } from "./analysis.js";
+import { analyze, buildMapView } from "../core/index.js";
 import { resolveOwningLayer } from "./ownership.js";
-import { buildMapView } from "./map-view.js";
 import {
   deleteLabel,
   readProjectFile,
