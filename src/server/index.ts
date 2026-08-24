@@ -10,11 +10,11 @@
 
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { existsSync } from "node:fs";
-import { dirname, extname, join, resolve } from "node:path";
+import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadProject } from "./analysis.js";
-import { analyze, buildMapView } from "../core/index.js";
 import { resolveOwningLayer } from "./ownership.js";
 import {
   deleteLabel,
@@ -84,18 +84,31 @@ export function startServer(options: ServerOptions): void {
         return sendJson(res, 200, { ok: true, project });
       }
 
-      if (path === "/api/disasm" && req.method === "GET") {
-        const tolerance = Number(url.searchParams.get("tolerance") ?? "1") || 1;
-        const loaded = loadProject(projectPath);
-        const analysis = analyze(loaded, tolerance);
-        return sendJson(res, 200, {
-          name: loaded.project.name ?? "untitled",
-          ...analysis,
+      // Raw bytes for a layer, so the browser can build the memory map and
+      // analyse locally. Confined to the project file's directory: the path
+      // comes from the project, but the project is user-supplied.
+      if (path === "/api/blob" && req.method === "GET") {
+        const requested = url.searchParams.get("path");
+        if (!requested) {
+          return sendJson(res, 400, { error: "path parameter required" });
+        }
+        const baseDir = dirname(projectPath);
+        const filePath = resolve(baseDir, requested);
+        const inside = relative(baseDir, filePath);
+        if (inside.startsWith("..") || resolve(inside) === inside) {
+          return sendJson(res, 403, { error: "path escapes the project directory" });
+        }
+        if (!existsSync(filePath)) {
+          return sendJson(res, 404, { error: `no such file: ${requested}` });
+        }
+        const bytes = readFileSync(filePath);
+        res.writeHead(200, {
+          "content-type": "application/octet-stream",
+          "content-length": bytes.length,
+          "cache-control": "no-store",
         });
-      }
-
-      if (path === "/api/map" && req.method === "GET") {
-        return sendJson(res, 200, buildMapView(loadProject(projectPath)));
+        res.end(bytes);
+        return;
       }
 
       if (path === "/api/label" && req.method === "POST") {

@@ -24,6 +24,8 @@ import {
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { json } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { LoadedProject, analyze, buildMapView } from "../core/index.js";
+import { loadProjectFromServer } from "./project-source.js";
 import type SlSplitPanel from "@shoelace-style/shoelace/dist/components/split-panel/split-panel.js";
 // Registers <sl-split-panel>. Components are imported individually so the
 // bundle carries only what is used.
@@ -375,7 +377,6 @@ async function commitLabelEdit(target: EditTarget, value: string): Promise<void>
   }
 
   await loadDisassembly(target.address);
-  await loadProjectFile();
 }
 
 // --- Navigation -------------------------------------------------------
@@ -465,7 +466,6 @@ async function setLabelType(
 
   const before = analysis?.stats.instructions ?? 0;
   await loadDisassembly(address);
-  await loadProjectFile();
   const delta = (analysis?.stats.instructions ?? 0) - before;
 
   setStatus(
@@ -542,7 +542,6 @@ async function removeLabel(address: number, name: string): Promise<void> {
     return;
   }
   await loadDisassembly(address);
-  await loadProjectFile();
   setStatus(`${name} is no longer a function`);
 }
 
@@ -725,36 +724,56 @@ const projectView = new EditorView({
 
 // --- Loading ----------------------------------------------------------
 
+/**
+ * The loaded model, kept so edits can re-analyse locally instead of asking the
+ * server to redo work the client has all the inputs for.
+ */
+let loadedProject: LoadedProject | null = null;
+
+/**
+ * Fetch the project and its bytes, then analyse in the browser.
+ *
+ * Analysis is ~16ms for a whole C64 address space, so there is no reason for a
+ * round-trip: the server serves bytes, the client derives everything else.
+ */
 async function loadDisassembly(restoreAddress?: number): Promise<void> {
-  const res = await fetch("/api/disasm");
-  if (!res.ok) {
-    setStatus((await res.json()).error ?? "Disassembly failed", true);
+  let raw: string;
+  try {
+    const fetched = await loadProjectFromServer();
+    loadedProject = fetched.loaded;
+    raw = fetched.raw;
+  } catch (err) {
+    setStatus(err instanceof Error ? err.message : "Could not load the project", true);
     return;
   }
-  analysis = await res.json();
-  const rows = analysis!.rows;
+
+  const result = analyze(loadedProject);
+  analysis = {
+    name: loadedProject.project.name ?? "untitled",
+    ...result,
+  };
+  const rows = analysis.rows;
+
+  // The map is derived from the same model, so it never lags the disassembly.
+  renderMap(buildMapView(loadedProject).layers);
+
+  projectView.dispatch({
+    changes: { from: 0, to: projectView.state.doc.length, insert: raw },
+  });
 
   disasmView.dispatch({
     changes: { from: 0, to: disasmView.state.doc.length, insert: rows.map((r) => r.text).join("\n") },
     effects: setRows.of(rows),
   });
 
-  const { instructions, labels, regions, arrows, arrowsDemoted } = analysis!.stats;
+  const { instructions, labels, regions, arrows, arrowsDemoted } = analysis.stats;
   $("#stats").textContent =
-    `${analysis!.name} · ${instructions} instructions · ${labels} labels · ${regions} regions` +
+    `${analysis.name} · ${instructions} instructions · ${labels} labels · ${regions} regions` +
     ` · ${arrows} arrows` +
     (arrowsDemoted ? ` (${arrowsDemoted} as stubs)` : "") +
-    (analysis!.warnings.length ? ` · ${analysis!.warnings.length} warnings` : "");
+    (analysis.warnings.length ? ` · ${analysis.warnings.length} warnings` : "");
 
   if (restoreAddress !== undefined) goToAddress(restoreAddress, false);
-}
-
-async function loadProjectFile(): Promise<void> {
-  const res = await fetch("/api/project");
-  const { raw } = await res.json();
-  projectView.dispatch({
-    changes: { from: 0, to: projectView.state.doc.length, insert: raw },
-  });
 }
 
 async function saveProjectFile(): Promise<void> {
@@ -925,16 +944,6 @@ function renderRegions(nodes: RegionNode[]): HTMLElement {
   return list;
 }
 
-async function loadMap(): Promise<void> {
-  const res = await fetch("/api/map");
-  if (!res.ok) {
-    setStatus("Failed to load the memory map", true);
-    return;
-  }
-  const { layers } = (await res.json()) as { layers: LayerView[] };
-  renderMap(layers);
-}
-
 // --- Wiring -----------------------------------------------------------
 
 type TabName = "disasm" | "project";
@@ -1005,8 +1014,6 @@ split.addEventListener("sl-reposition", () => {
 $("#back").addEventListener("click", goBack);
 $("#reload").addEventListener("click", () => {
   void loadDisassembly(currentAddress() ?? undefined);
-  void loadProjectFile();
-  void loadMap();
 });
 $("#save").addEventListener("click", () => void saveProjectFile());
 
@@ -1034,5 +1041,3 @@ try {
 }
 setMapVisible(mapVisible);
 void loadDisassembly();
-void loadProjectFile();
-void loadMap();
