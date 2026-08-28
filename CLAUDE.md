@@ -647,9 +647,11 @@ Rules:
 - Data references get no arrow at all. Only control flow (branch/jump/call) is
   drawn; data refs would fill the margin with noise.
 
-Lane allocation and gutter rendering live in `src/server/analysis.ts`
-(`allocateArrowLanes`, `renderArrowGutter`) — model-derived, so it belongs on
-the server rather than in the view. The gutter arrives as one pre-rendered
+Lane allocation and gutter rendering live in `src/core/view/arrows.ts`
+(`allocateArrowLanes`, `renderArrowGutter`). They are model-derived and pure, so
+the **CLI draws the same gutter as the web UI** — `formatRows()` prefixes it,
+and `--no-arrows` turns it off. Box-drawing glyphs need no special handling in
+a terminal. The gutter arrives as one pre-rendered
 string per row, kept out of the document so copying disassembly does not drag
 box-drawing characters along.
 

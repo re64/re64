@@ -10,6 +10,25 @@ const row = (text: string): Row => ({
 });
 
 describe("formatRows", () => {
+  it("prefixes the arrow gutter when given one", () => {
+    expect(formatRows([row("8000  RTS")], ["  └►"])).toEqual(["  └► 8000  RTS"]);
+  });
+
+  it("keeps rows aligned when some have no arrow through them", () => {
+    // Every gutter entry is the same width, so blank ones still pad.
+    const out = formatRows([row("8000  A"), row("8001  B")], ["┌─►", "│  "]);
+    expect(out).toEqual(["┌─► 8000  A", "│   8001  B"]);
+  });
+
+  it("omits the gutter entirely when arrows are empty", () => {
+    expect(formatRows([row("8000  RTS")], [])).toEqual(["8000  RTS"]);
+  });
+
+  it("leaves rows past the end of the gutter unprefixed", () => {
+    // A sliced range must not shift arrows onto the wrong lines.
+    expect(formatRows([row("a"), row("b")], ["┌─"])).toEqual(["┌─ a", "b"]);
+  });
+
   it("renders row text and ignores interaction spans", () => {
     // The spans exist for the web UI; nothing in a terminal is clickable.
     expect(formatRows([row("8000  A9 00      LDA #$00")])).toEqual([

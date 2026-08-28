@@ -73,6 +73,9 @@ npx re64 disasm -p game.re64
 
 # Disassemble specific range
 npx re64 disasm -p game.re64 -r '$0800:$0900'
+
+# Without the cross-reference arrow gutter
+npx re64 disasm -p game.re64 --no-arrows
 ```
 
 ### Loading files directly

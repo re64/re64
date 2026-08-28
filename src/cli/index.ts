@@ -240,6 +240,7 @@ program
   .option("-e, --entry <addr...>", "Entry point addresses (default: use PRG load addresses)")
   .option("-r, --range <range>", "Only show instructions in range")
   .option("-t, --label-tolerance <n>", "Max offset for fuzzy label matching (default: 1)", "1")
+  .option("--no-arrows", "Hide the cross-reference arrow gutter")
   .action((options) => {
     let map: MemoryMap;
     let prgEntries: number[] = [];
@@ -324,13 +325,21 @@ program
       }
     );
 
-    let rows = analysis.rows;
+    // Rows and their gutter are index-aligned, so a range has to slice both in
+    // step or the arrows end up against the wrong lines.
+    let kept = analysis.rows.map((_: Row, i: number) => i);
     if (options.range) {
       const { start, length } = parseRange(options.range);
-      rows = rows.filter((r: Row) => r.address >= start && r.address < start + length);
+      kept = kept.filter((i: number) => {
+        const addr = analysis.rows[i].address;
+        return addr >= start && addr < start + length;
+      });
     }
 
-    for (const line of formatRows(rows)) {
+    const rows = kept.map((i: number) => analysis.rows[i]);
+    const arrows = options.arrows ? kept.map((i: number) => analysis.arrows[i]) : [];
+
+    for (const line of formatRows(rows, arrows)) {
       console.log(line);
     }
 
