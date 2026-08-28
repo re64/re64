@@ -12,6 +12,8 @@ In active development. Currently supports:
 - Labels with resolution in instruction operands
 - Regions to define memory semantics (code, data, text, jumptable)
 - Combined output showing both instructions and hex dumps for data
+- Cross-reference arrow gutter, in the CLI and the web UI alike
+- Web UI with a memory map sidebar, inline label editing, and local analysis
 
 ## Development
 
@@ -167,14 +169,28 @@ npx re64 disasm -l game.prg -r '$0800:$0900'
 
 ```
 src/
-├── core/
+├── core/             # pure; runs under Node and in the browser
 │   ├── memory/       # MemoryMap, layers, labels, regions
 │   ├── arch/
-│   │   └── mos6502/  # 6502 opcodes, decoder, disassembler
-│   ├── c64/          # D64 disk image parser
-│   └── project/      # Project file parser
-└── cli/              # Command-line interface
+│   │   └── mos6502/  # opcodes, decoder, work-queue disassembler
+│   ├── c64/          # D64 parser, built-in hardware/KERNAL symbols
+│   ├── project/      # schema, loader, line-preserving serializer
+│   ├── analysis/     # program analysis: xrefs (blocks, call graph next)
+│   └── view/         # view model: rows, tokens, arrow lanes, gutter
+├── cli/              # Node I/O; renders rows as text
+├── ui/               # browser; renders rows as CodeMirror decorations
+└── server/           # serves the project file and layer bytes
 ```
+
+**Analysis runs client-side.** The core library is free of Node APIs so the same
+disassembly runs in the CLI and in the browser; the web UI fetches the project
+and its bytes, then builds the memory map and analyses locally. The server only
+stores files.
+
+**The CLI and the web UI share one render walk.** Both consume the same rows —
+the CLI prints them and ignores the interaction spans, while the UI turns those
+spans into clickable decorations. The cross-reference arrow gutter is drawn in
+both.
 
 ## License
 
