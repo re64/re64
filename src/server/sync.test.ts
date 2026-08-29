@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createServer, Server } from "node:http";
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocket } from "ws";
-import { ProjectSessionStore, pathsFor } from "./session-store.js";
+import { ProjectSessionStore } from "./session-store.js";
+import { FileStorage, pathsFor } from "../store/index.js";
 import { SyncServer } from "./sync.js";
 import {
   CrdtDoc,
@@ -35,6 +36,14 @@ const PROJECT = `{
 
 let dir: string;
 let projectPath: string;
+
+/**
+ * What is stored, read the way the store reads it.
+ *
+ * Not `readFileSync`: these assertions are about behaviour, not about the
+ * project living in a file, and the backing store is being replaced.
+ */
+const currentText = () => new FileStorage(pathsFor(projectPath)).readText();
 let http: Server;
 let sync: SyncServer;
 let store: ProjectSessionStore;
@@ -85,7 +94,7 @@ beforeEach(async () => {
   projectPath = join(dir, "test.re64");
   writeFileSync(projectPath, PROJECT, "utf-8");
 
-  store = new ProjectSessionStore(pathsFor(projectPath));
+  store = new ProjectSessionStore(new FileStorage(pathsFor(projectPath)));
   sync = new SyncServer({ store, idleMs: 50, writeMs: 20 });
   http = createServer();
   http.on("upgrade", (req, socket, head) => sync.handleUpgrade(req, socket, head));
@@ -165,7 +174,7 @@ describe("two participants on one project", () => {
     expect(history[0].authors).toEqual(["alice", "bob"]);
     expect(history[0].summary).toHaveLength(2);
 
-    const file = readFileSync(projectPath, "utf-8");
+    const file = currentText();
     expect(file).toContain(`"name": "Begin"`);
     expect(file).toContain(`"name": "Repeat"`);
   });
@@ -183,7 +192,7 @@ describe("two participants on one project", () => {
     await alice.close();
     await new Promise((r) => setTimeout(r, 150));
 
-    expect(readFileSync(projectPath, "utf-8")).toContain(`"name": "Rescued"`);
+    expect(currentText()).toContain(`"name": "Rescued"`);
   });
 
   it("leaves the file untouched when nobody edits", async () => {
@@ -192,7 +201,7 @@ describe("two participants on one project", () => {
     await alice.close();
     await new Promise((r) => setTimeout(r, 150));
 
-    expect(readFileSync(projectPath, "utf-8")).toBe(PROJECT);
+    expect(currentText()).toBe(PROJECT);
     expect(store.history()).toEqual([]);
   });
 });
@@ -210,7 +219,7 @@ describe("keeping the file current during a session", () => {
     });
     await new Promise((r) => setTimeout(r, 120));
 
-    expect(readFileSync(projectPath, "utf-8")).toContain(`"name": "Live"`);
+    expect(currentText()).toContain(`"name": "Live"`);
     // Still mid-session, so nothing has been recorded as history yet.
     expect(store.history()).toEqual([]);
 
@@ -228,7 +237,7 @@ describe("keeping the file current during a session", () => {
       await new Promise((r) => setTimeout(r, 60));
     }
 
-    expect(readFileSync(projectPath, "utf-8")).toContain(`"name": "Three"`);
+    expect(currentText()).toContain(`"name": "Three"`);
     expect(store.history()).toEqual([]);
 
     await alice.close();
@@ -248,7 +257,7 @@ describe("keeping the file current during a session", () => {
     }
     await new Promise((r) => setTimeout(r, 120));
 
-    expect(readFileSync(projectPath, "utf-8")).toContain(`"name": "Rapid9"`);
+    expect(currentText()).toContain(`"name": "Rapid9"`);
 
     await alice.close();
   });

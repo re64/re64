@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocket } from "ws";
 import { startServer, RunningServer } from "./index.js";
+import { FileStorage, pathsFor } from "../store/index.js";
 import {
   CrdtDoc,
   applyOpToDoc,
@@ -44,6 +45,14 @@ const PROJECT = `{
 
 let dir: string;
 let projectPath: string;
+
+/**
+ * What is stored, read the way the store reads it.
+ *
+ * Not `readFileSync`: these assertions are about behaviour, not about the
+ * project living in a file, and the backing store is being replaced.
+ */
+const currentText = () => new FileStorage(pathsFor(projectPath)).readText();
 let server: RunningServer;
 
 beforeEach(async () => {
@@ -149,7 +158,7 @@ describe("an HTTP write racing a live session", () => {
     expect(response.status).toBe(200);
     await settle();
 
-    const onDisk = readFileSync(projectPath, "utf-8");
+    const onDisk = currentText();
     expect(onDisk).toContain(`"name": "FromSocket"`);
     expect(onDisk).toContain(`"name": "FromHttp"`);
 
@@ -170,7 +179,7 @@ describe("an HTTP write racing a live session", () => {
 
     const after = (await fetchProject()).version;
     expect(after).not.toBe(before);
-    expect(readFileSync(projectPath, "utf-8")).toBe(PROJECT); // not flattened yet
+    expect(currentText()).toBe(PROJECT); // not flattened yet
 
     await alice.close();
   });
@@ -200,7 +209,7 @@ describe("an HTTP write racing a live session", () => {
   it("is a no-op when the content is unchanged", async () => {
     const { body } = await putProject(PROJECT);
     expect(body).toMatchObject({ applied: 0 });
-    expect(readFileSync(projectPath, "utf-8")).toBe(PROJECT);
+    expect(currentText()).toBe(PROJECT);
   });
 });
 

@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ProjectSessionStore, pathsFor } from "./session-store.js";
-import { applyOpToDoc, encodeDoc } from "../core/crdt/index.js";
+import { ProjectSessionStore } from "./session-store.js";
+import { FileStorage, pathsFor } from "../store/index.js";
+import { applyOpToDoc, encodeDoc, projectFromDoc } from "../core/crdt/index.js";
 
 const PROJECT = `{
   "name": "Test",
@@ -27,6 +28,15 @@ const PROJECT = `{
 let dir: string;
 let projectPath: string;
 
+/**
+ * What is stored, read the way the store reads it.
+ *
+ * Not `readFileSync`: these assertions are about behaviour, not about the
+ * project living in a file, and the backing store is being replaced.
+ */
+const storage = () => new FileStorage(pathsFor(projectPath));
+const currentText = () => storage().readText();
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "re64-session-"));
   projectPath = join(dir, "test.re64");
@@ -35,7 +45,7 @@ beforeEach(() => {
 
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-const store = () => new ProjectSessionStore(pathsFor(projectPath));
+const store = () => new ProjectSessionStore(new FileStorage(pathsFor(projectPath)));
 
 describe("flattening a session", () => {
   it("writes the file and records one entry, not one per edit", () => {
@@ -53,7 +63,7 @@ describe("flattening a session", () => {
     expect(entry?.authors).toEqual(["alice"]);
     expect(entry?.summary).toHaveLength(2);
     expect(s.history()).toHaveLength(1);
-    expect(readFileSync(projectPath, "utf-8")).toContain(`"name": "MainLoop"`);
+    expect(currentText()).toContain(`"name": "MainLoop"`);
   });
 
   it("touches only the lines that changed, keeping the grouping blank", () => {
@@ -65,7 +75,7 @@ describe("flattening a session", () => {
     });
     s.flatten(1000);
 
-    const after = readFileSync(projectPath, "utf-8");
+    const after = currentText();
     const before = PROJECT.split("\n");
     const now = after.split("\n");
 
@@ -80,7 +90,7 @@ describe("flattening a session", () => {
     s.document();
 
     expect(s.flatten(1000)).toBeUndefined();
-    expect(readFileSync(projectPath, "utf-8")).toBe(PROJECT);
+    expect(currentText()).toBe(PROJECT);
     expect(s.history()).toEqual([]);
   });
 
@@ -118,13 +128,13 @@ describe("crash safety", () => {
     });
     // No flatten: simulate the process dying here.
 
-    expect(existsSync(pathsFor(projectPath).log)).toBe(true);
+    expect(storage().hasUpdates()).toBe(true);
 
     const recovered = store();
     const entry = recovered.flatten(2000);
 
     expect(entry?.summary).toHaveLength(1);
-    expect(readFileSync(projectPath, "utf-8")).toContain(`"name": "Survived"`);
+    expect(currentText()).toContain(`"name": "Survived"`);
   });
 
   it("discards the log once the work is in the file", () => {
@@ -134,7 +144,39 @@ describe("crash safety", () => {
     });
     s.flatten(1000);
 
-    expect(existsSync(pathsFor(projectPath).log)).toBe(false);
+    expect(storage().hasUpdates()).toBe(false);
+  });
+});
+
+describe("updates recorded against older text", () => {
+  it("are dropped rather than resurrecting what that text deleted", () => {
+    // The CLI and an editor both write the project directly. A crash log built
+    // against the text as it was before their edit would merge cleanly and put
+    // back the very label they removed, so it must not be replayed at all.
+    const s = store();
+    applyOpToDoc(s.document(), {
+      op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Doomed",
+    });
+    expect(storage().hasUpdates()).toBe(true);
+
+    // Someone else rewrites the project without going through the document.
+    storage().writeText(PROJECT.replace('"Loop"', '"RewrittenElsewhere"'));
+
+    const fresh = store();
+    const names = (projectFromDoc(fresh.document()).layers[0].labels ?? []).map((l) => l.name);
+    expect(names).toContain("RewrittenElsewhere");
+    expect(names).not.toContain("Doomed");
+  });
+
+  it("still replay when the text is the one they were built from", () => {
+    const s = store();
+    applyOpToDoc(s.document(), {
+      op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Kept",
+    });
+
+    const fresh = store();
+    const names = (projectFromDoc(fresh.document()).layers[0].labels ?? []).map((l) => l.name);
+    expect(names).toContain("Kept");
   });
 });
 

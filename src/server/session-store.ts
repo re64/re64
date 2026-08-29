@@ -20,9 +20,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { FSWatcher, appendFileSync, existsSync, readFileSync, unlinkSync, watch } from "node:fs";
-import { basename, dirname } from "node:path";
-import { writeFileAtomic } from "../fsutil.js";
+import { HistoryEntry, ProjectStorage, revOf } from "../store/index.js";
 import {
   Change,
   Op,
@@ -40,56 +38,8 @@ import {
   projectFromDoc,
 } from "../core/crdt/index.js";
 
-/** One flattened session, as recorded in the project's history. */
-export interface HistoryEntry {
-  at: number;
-  /** Everyone who contributed to the session. */
-  authors: string[];
-  /** What changed, in the vocabulary the UI and CLI use. */
-  summary: string[];
-}
-
-export interface SessionPaths {
-  project: string;
-  /** Yjs updates as they arrive; exists only while a session is open. */
-  log: string;
-  /** Flattened sessions, one JSON object per line. */
-  history: string;
-}
-
-/**
- * Updates are length-prefixed in the log.
- *
- * Yjs updates are not concatenative: appending two and applying the result as
- * one fails. Each is framed so the log can be replayed update by update.
- */
-function frameUpdate(update: Uint8Array): Buffer {
-  const framed = Buffer.allocUnsafe(4 + update.length);
-  framed.writeUInt32BE(update.length, 0);
-  Buffer.from(update).copy(framed, 4);
-  return framed;
-}
-
-/** Read framed updates, stopping at a partial one left by a crash. */
-function readLog(buffer: Buffer): Uint8Array[] {
-  const updates: Uint8Array[] = [];
-  let offset = 0;
-  while (offset + 4 <= buffer.length) {
-    const length = buffer.readUInt32BE(offset);
-    if (offset + 4 + length > buffer.length) break; // truncated tail
-    updates.push(new Uint8Array(buffer.subarray(offset + 4, offset + 4 + length)));
-    offset += 4 + length;
-  }
-  return updates;
-}
-
-export function pathsFor(projectPath: string): SessionPaths {
-  return {
-    project: projectPath,
-    log: `${projectPath}.session`,
-    history: `${projectPath}.history`,
-  };
-}
+export type { HistoryEntry } from "../store/index.js";
+export { pathsFor } from "../store/index.js";
 
 export class ProjectSessionStore {
   private doc: CrdtDoc | undefined;
@@ -112,10 +62,11 @@ export class ProjectSessionStore {
    * differ between platforms.
    */
   private lastWritten: string | undefined;
-  private watcher: FSWatcher | undefined;
-  private watchTimer: NodeJS.Timeout | undefined;
+  private unwatch: (() => void) | undefined;
+  /** The revision the document was built from; see `StoredUpdate`. */
+  private baseRev = "";
 
-  constructor(private readonly paths: SessionPaths) {}
+  constructor(private readonly storage: ProjectStorage) {}
 
   /**
    * The shared document, built on first use.
@@ -126,19 +77,23 @@ export class ProjectSessionStore {
   document(): CrdtDoc {
     if (this.doc) return this.doc;
 
-    const project = parseProject(readFileSync(this.paths.project, "utf-8"));
-    this.doc = docFromProject(project);
+    const text = this.storage.readText();
+    this.baseRev = revOf(text);
+    this.doc = docFromProject(parseProject(text));
 
-    if (existsSync(this.paths.log)) {
-      const recovered = readLog(readFileSync(this.paths.log));
-      for (const update of recovered) applyUpdate(this.doc, update, "recovery");
-      if (recovered.length > 0) this.dirty = true;
-    }
+    // Replay only what was built against this exact text. An update recorded
+    // against an older revision would merge without complaint and resurrect
+    // entries the current text deleted, so it is dropped instead.
+    const recovered = this.storage
+      .readUpdates()
+      .filter((stored) => stored.baseRev === this.baseRev);
+    for (const stored of recovered) applyUpdate(this.doc, stored.update, "recovery");
+    if (recovered.length > 0) this.dirty = true;
 
     // Every subsequent change is appended, so nothing depends on a clean exit.
     this.doc.on("update", (update: Uint8Array, origin: unknown) => {
       if (origin === "recovery") return;
-      appendFileSync(this.paths.log, frameUpdate(update));
+      this.storage.appendUpdate(update, this.baseRev);
       this.dirty = true;
       for (const listener of this.listeners) listener(update, origin);
     });
@@ -217,13 +172,14 @@ export class ProjectSessionStore {
     // volume that went away. There is nothing to diff against, and recreating
     // it would resurrect something the user removed on purpose. The session's
     // work stays in the sidecar log, which is what it is for.
-    if (!existsSync(this.paths.project)) return [];
-    const text = readFileSync(this.paths.project, "utf-8");
+    if (!this.storage.exists()) return [];
+    const text = this.storage.readText();
     const ops = diffProjects(parseProject(text), projectFromDoc(doc));
     if (ops.length > 0) {
       const updated = applyOps(text, ops);
-      writeFileAtomic(this.paths.project, updated);
+      this.storage.writeText(updated);
       this.lastWritten = updated;
+      this.baseRev = revOf(updated);
       this.sessionOps.push(...ops);
     }
     return ops;
@@ -256,7 +212,7 @@ export class ProjectSessionStore {
       authors: [...this.authors].sort(),
       summary: this.sessionOps.map(describeOp),
     };
-    appendFileSync(this.paths.history, JSON.stringify(entry) + "\n", "utf-8");
+    this.storage.appendHistory(entry);
 
     this.discardLog();
     return entry;
@@ -264,7 +220,7 @@ export class ProjectSessionStore {
 
   /** Crash-safety log has served its purpose once the file is written. */
   private discardLog(): void {
-    if (existsSync(this.paths.log)) unlinkSync(this.paths.log);
+    this.storage.clearUpdates();
     this.dirty = false;
     this.authors.clear();
     this.sessionOps = [];
@@ -282,30 +238,15 @@ export class ProjectSessionStore {
    * reaches connected sessions rather than only landing on disk.
    */
   watchFile(applyExternal: (ops: Op[]) => void): void {
-    if (this.watcher) return;
-    this.lastWritten ??= readFileSync(this.paths.project, "utf-8");
-
-    // Watching the directory rather than the file. A watch on a path follows
-    // the inode behind it, and every writer here replaces that inode by
-    // renaming a temporary file over it — so a file watch stops reporting
-    // after the very first write, including our own.
-    const dir = dirname(this.paths.project);
-    const file = basename(this.paths.project);
-
-    this.watcher = watch(dir, (_event, name) => {
-      if (name !== null && name !== file) return;
-      // Debounced: an editor may write in several steps, and a single save
-      // reports more than once on most platforms.
-      if (this.watchTimer) clearTimeout(this.watchTimer);
-      this.watchTimer = setTimeout(() => this.absorbExternalChange(applyExternal), 120);
-      this.watchTimer.unref?.();
-    });
+    if (this.unwatch) return;
+    this.lastWritten ??= this.storage.readText();
+    this.unwatch = this.storage.watch(() => this.absorbExternalChange(applyExternal));
   }
 
   private absorbExternalChange(applyExternal: (ops: Op[]) => void): void {
     let text: string;
     try {
-      text = readFileSync(this.paths.project, "utf-8");
+      text = this.storage.readText();
     } catch {
       return; // Being replaced; the next event will bring the new content.
     }
@@ -319,6 +260,7 @@ export class ProjectSessionStore {
     }
 
     this.lastWritten = text;
+    this.baseRev = revOf(text);
     if (ops.length === 0) return;
 
     applyExternal(ops);
@@ -333,26 +275,15 @@ export class ProjectSessionStore {
   }
 
   stopWatching(): void {
-    if (this.watchTimer) clearTimeout(this.watchTimer);
-    this.watcher?.close();
-    this.watcher = undefined;
+    this.unwatch?.();
+    this.unwatch = undefined;
   }
 
   /** Past sessions, oldest first. */
   history(): HistoryEntry[] {
-    if (!existsSync(this.paths.history)) return [];
-    return readFileSync(this.paths.history, "utf-8")
-      .split("\n")
-      .filter((line) => line.trim())
-      .flatMap((line) => {
-        try {
-          return [JSON.parse(line) as HistoryEntry];
-        } catch {
-          // A partially written final line costs one entry, not the file.
-          return [];
-        }
-      });
+    return this.storage.history();
   }
+
 }
 
 /** Convert a change log into a history entry, for edits that bypassed a session. */

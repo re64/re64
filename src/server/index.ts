@@ -14,7 +14,8 @@ import { readFileSync } from "node:fs";
 import { existsSync } from "node:fs";
 import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectSessionStore, pathsFor } from "./session-store.js";
+import { ProjectSessionStore } from "./session-store.js";
+import { FileStorage, pathsFor } from "../store/index.js";
 import { diffProjects, parseProject } from "../core/index.js";
 import { SyncServer } from "./sync.js";
 import { applyOpToDoc, projectFromDoc } from "../core/crdt/index.js";
@@ -73,7 +74,7 @@ export function startServer(options: ServerOptions): RunningServer {
     process.exit(1);
   }
 
-  const store = new ProjectSessionStore(pathsFor(projectPath));
+  const store = new ProjectSessionStore(new FileStorage(pathsFor(projectPath)));
   const sync = new SyncServer({
     store,
     // Long enough that a page reload rejoins the same session rather than

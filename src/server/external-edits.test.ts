@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ProjectSessionStore, pathsFor } from "./session-store.js";
+import { ProjectSessionStore } from "./session-store.js";
+import { FileStorage, pathsFor } from "../store/index.js";
 import { applyOpToDoc, projectFromDoc } from "../core/crdt/index.js";
 import { Op, applyOps } from "../core/ops/index.js";
 import { writeFileAtomic } from "../fsutil.js";
@@ -35,6 +36,14 @@ const PROJECT = `{
 
 let dir: string;
 let projectPath: string;
+
+/**
+ * What is stored, read the way the store reads it.
+ *
+ * Not `readFileSync`: these assertions are about behaviour, not about the
+ * project living in a file, and the backing store is being replaced.
+ */
+const currentText = () => new FileStorage(pathsFor(projectPath)).readText();
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "re64-external-"));
@@ -69,7 +78,7 @@ describe("edits made to the file by someone else", () => {
     s.writeFile();
 
     // Someone edits the file directly, the way the CLI does.
-    writeFileAtomic(projectPath, readFileSync(projectPath, "utf-8").replace('"Loop"', '"FromCli"'));
+    writeFileAtomic(projectPath, currentText().replace('"Loop"', '"FromCli"'));
     await settle();
 
     // A second session edit, whose write is where the revert used to happen.
@@ -79,7 +88,7 @@ describe("edits made to the file by someone else", () => {
     });
     s.writeFile();
 
-    const text = readFileSync(projectPath, "utf-8");
+    const text = currentText();
     expect(text).toContain("FromWeb");
     expect(text).toContain("FromCli");
     s.stopWatching();
@@ -90,7 +99,7 @@ describe("edits made to the file by someone else", () => {
     watching(s);
     s.document();
 
-    writeFileAtomic(projectPath, readFileSync(projectPath, "utf-8").replace('"Loop"', '"Renamed"'));
+    writeFileAtomic(projectPath, currentText().replace('"Loop"', '"Renamed"'));
     await settle();
 
     expect(labelNames(s)).toContain("Renamed");
@@ -105,7 +114,7 @@ describe("edits made to the file by someone else", () => {
     // Deleted the way the CLI deletes, so the file stays well-formed.
     writeFileAtomic(
       projectPath,
-      applyOps(readFileSync(projectPath, "utf-8"), [{ op: "label.delete", id: "lbl_2", layerId: "lay_a" }])
+      applyOps(currentText(), [{ op: "label.delete", id: "lbl_2", layerId: "lay_a" }])
     );
     await settle();
 
@@ -122,11 +131,11 @@ describe("edits made to the file by someone else", () => {
       type: "function",
     });
     s.writeFile();
-    const after = readFileSync(projectPath, "utf-8");
+    const after = currentText();
     await settle();
 
     // Nothing to absorb, so the file is untouched and the document unchanged.
-    expect(readFileSync(projectPath, "utf-8")).toBe(after);
+    expect(currentText()).toBe(after);
     expect(labelNames(s)).toEqual(["Renamed", "Loop"]);
     s.stopWatching();
   });
@@ -154,7 +163,7 @@ describe("history", () => {
     s.addAuthor("alice");
     s.document();
 
-    writeFileAtomic(projectPath, readFileSync(projectPath, "utf-8").replace('"Loop"', '"FromCli"'));
+    writeFileAtomic(projectPath, currentText().replace('"Loop"', '"FromCli"'));
     await settle();
 
     const entry = s.flatten(1_000);
@@ -165,5 +174,5 @@ describe("history", () => {
 });
 
 function store(): ProjectSessionStore {
-  return new ProjectSessionStore(pathsFor(projectPath));
+  return new ProjectSessionStore(new FileStorage(pathsFor(projectPath)));
 }
