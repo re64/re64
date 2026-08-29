@@ -10,6 +10,7 @@
 
 import { Layer, Region } from "../index.js";
 import { LoadedProject } from "../index.js";
+import { splitD64Path } from "../project/file-source.js";
 
 export interface RegionNode {
   start: number;
@@ -98,7 +99,7 @@ function describeSource(layer: Layer, declared?: { type: string; path?: string }
   if (!declared) return "built-in";
   switch (declared.type) {
     case "prg":
-      return declared.path?.includes(".d64:")
+      return declared.path !== undefined && splitD64Path(declared.path)
         ? `disk image · ${declared.path}`
         : `PRG · ${declared.path ?? "?"}`;
     case "raw":

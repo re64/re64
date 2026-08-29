@@ -14,14 +14,10 @@ import { readFileSync } from "node:fs";
 import { existsSync } from "node:fs";
 import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadProject } from "./analysis.js";
 import { ProjectSessionStore, pathsFor } from "./session-store.js";
+import { diffProjects, parseProject } from "../core/index.js";
 import { SyncServer } from "./sync.js";
-import { applyOps, diffProjects } from "../core/index.js";
 import { applyOpToDoc, projectFromDoc } from "../core/crdt/index.js";
-import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
-import { normalizeProjectText, parseProject } from "../core/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(__dirname, "../../public");

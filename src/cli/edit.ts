@@ -24,7 +24,7 @@ import {
   parseProjectAddress,
   resolveOwningLayer,
 } from "../core/index.js";
-import { loadProject } from "../server/analysis.js";
+import { loadProjectFile } from "../node-files.js";
 
 /** Where a project's edit log lives. */
 export const logPathFor = (projectPath: string) => `${projectPath}.log`;
@@ -103,7 +103,7 @@ export function redoLast(projectPath: string): string | null {
  * address, so nothing in the JSON alone says where it sits.
  */
 export function owningLayerId(projectPath: string, address: number): string {
-  const loaded = loadProject(projectPath);
+  const loaded = loadProjectFile(projectPath);
   const index = resolveOwningLayer(loaded, address);
   if (index === undefined) {
     throw new Error(

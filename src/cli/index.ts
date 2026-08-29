@@ -1,26 +1,21 @@
 #!/usr/bin/env node
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
 import { Command } from "commander";
 import {
   VERSION,
+  makeFileLoader,
   MemoryMap,
   BytesLayer,
   FileLayer,
   LabelIndex,
   RegionIndex,
   createAutoLabel,
-  findFile,
-  extractFile,
-  listDirectory,
   createC64PlatformLayer,
   disassemble,
   formatInstruction,
   InstructionIndex,
   ReferenceType,
-  LoadedProject,
-  buildMemoryMap,
   parseProject,
   parseProjectAddress,
   Project,
@@ -31,6 +26,7 @@ import {
   migrateIds,
   newId,
 } from "../core/index.js";
+import { loadProjectFile, nodeFileBytes } from "../node-files.js";
 import { hexDump } from "./hex.js";
 import {
   labelSetOp,
@@ -87,62 +83,13 @@ function parseHexBytes(hex: string): Uint8Array {
   return new Uint8Array(bytes);
 }
 
-/** Load a project file and build the memory map */
-function loadProject(projectPath: string): LoadedProject {
-  const project = parseProject(readFileSync(projectPath, "utf-8"));
-  const baseDir = dirname(projectPath);
-
-  return buildMemoryMap(project, (path, explicitStart) =>
-    loadFile(resolve(baseDir, path), explicitStart)
-  );
-}
-
-/** Load file and return start address + data. Supports d64:filename syntax. */
-function loadFile(
-  path: string,
-  explicitStart?: number
-): { start: number; data: Uint8Array; isPrg: boolean } {
-  let fullData: Uint8Array;
-
-  if (path.includes(":")) {
-    // Check if it's a d64 disk image with embedded filename
-    const colonIndex = path.lastIndexOf(":");
-    const possibleD64 = path.substring(0, colonIndex);
-    const innerFilename = path.substring(colonIndex + 1);
-
-    // Only treat as d64:filename if the part before : looks like a d64 file
-    if (possibleD64.toLowerCase().endsWith(".d64")) {
-      const diskImage = new Uint8Array(readFileSync(possibleD64));
-      const entry = findFile(diskImage, innerFilename);
-      if (!entry) {
-        const entries = listDirectory(diskImage);
-        const available = entries.map((e) => e.filename).join(", ");
-        throw new Error(
-          `File "${innerFilename}" not found in ${possibleD64}. Available: ${available}`
-        );
-      }
-      fullData = extractFile(diskImage, entry);
-    } else {
-      // Not a d64, treat the whole thing as a path (might have : on Windows)
-      fullData = new Uint8Array(readFileSync(path));
-    }
-  } else {
-    fullData = new Uint8Array(readFileSync(path));
-  }
-
-  if (explicitStart !== undefined) {
-    // Raw file at explicit address - not a PRG
-    return { start: explicitStart, data: fullData, isPrg: false };
-  }
-
-  // PRG file: first two bytes are load address (little-endian)
-  if (fullData.length < 3) {
-    throw new Error(`File too small to be a PRG: ${path}`);
-  }
-  const start = fullData[0] | (fullData[1] << 8);
-  const data = fullData.slice(2);
-  return { start, data, isPrg: true };
-}
+/**
+ * Bytes for `--layer` specs, which are relative to the working directory.
+ *
+ * A project's own layer paths resolve against the project file instead; that is
+ * `loadProjectFile`'s job, and the difference is intentional.
+ */
+const loadFile = makeFileLoader(nodeFileBytes());
 
 const program = new Command();
 
@@ -400,7 +347,7 @@ program
 
     if (options.project) {
       // Load from project file
-      const loaded = loadProject(options.project);
+      const loaded = loadProjectFile(options.project);
       map = loaded.map;
       prgEntries = loaded.prgEntries;
       userLabels = loaded.userLabels;
