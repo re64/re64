@@ -209,6 +209,62 @@ Nothing is foreclosed. `dockview-core` is also framework-agnostic, so if panels
 later need true IDE docking it drops in beside this rather than replacing it.
 Cost so far: +49KB, most of it the one-time Lit runtime.
 
+### Identity, operations, and collaboration
+
+Settled and built. Reasoning about *merge* found three flaws that were real
+regardless of whether a CRDT ever shipped, so the modelling landed first.
+
+**Everything has an id.** Labels, regions, and layers each carry one. An address
+cannot identify a label — several share one, and a rename changes the field you
+would key on. A region's start moves, so keying on it makes "extend this region"
+indistinguishable from delete-plus-create. Files without ids stay loadable: the
+loader derives them from content so every client agrees, and the next write
+persists real ones. `re64 migrate` does it eagerly.
+
+**The primary label is an index, not a flag.** `primaryLabels` maps an address to
+a label id at project level. That makes "one primary per address" structural:
+concurrent promotions write one map key and converge, where a per-label flag
+would leave both set with nothing able to repair it. A dangling id means no
+primary and falls back to rank, so a delete racing a promote self-heals.
+Resolution is **explicit primary → source rank → id** — id, not name, so a rename
+does not silently move the primary.
+
+**Operations are the interface.** `src/core/ops/` holds a closed vocabulary, each
+op with a computable inverse, applied to project *text* through the line-editing
+serializer. They are the agent API, the history record, and the undo
+description. The CRDT beneath only decides how concurrent edits merge; nothing
+reads a binary update to learn what happened. The property the tests hold to is
+that an op followed by its inverse restores the exact original bytes.
+
+**Yjs sits behind one door.** `src/core/crdt/` is the only place that may import
+it, asserted by a test. Readable JSON stays canonical; a document is built from
+it at the start of a session and flattened back at the end. That works only
+because construction is deterministic — fixed `clientID`, sorted insertion — so
+two clients loading the same file produce byte-identical documents and their
+edits have a common ancestor.
+
+**Flatten must go through operations**, never `formatProject`. A document knows
+the content everyone agreed on, not how the file was laid out: which labels a
+blank line grouped, what order regions were declared in. Regenerating the text
+turns a one-line edit into a whole-file diff. So a session is diffed against the
+file and the resulting ops applied line by line.
+
+**A session ends on a timeout**, not a goodbye. Tabs close without warning and
+agents simply stop; waiting for a clean exit would mean rarely flattening. It
+also lets a reload rejoin rather than splitting one piece of work in two.
+
+Persistence serves three separate purposes, and they want different answers:
+
+| Purpose | Format | Shape | Lifetime |
+|---|---|---|---|
+| Crash safety | Yjs updates, length-framed | append-only log | dropped after flatten |
+| The project | JSON | last state | canonical |
+| History | JSON, one entry per session | linear | durable |
+
+Merge stays server-side, which holds only while the API serves *resolved state*
+rather than broadcasting per-user logs. The moment clients receive raw logs they
+need merge logic too, and the same code has to exist in both places.
+
 **Open question, deliberately parked (2026-08-22): move to React?**
 Not settled. The arguments, so they do not have to be reconstructed:
 

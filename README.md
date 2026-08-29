@@ -13,6 +13,9 @@ In active development. Currently supports:
 - Regions to define memory semantics (code, data, text, jumptable)
 - Combined output showing both instructions and hex dumps for data
 - Cross-reference arrow gutter, in the CLI and the web UI alike
+- Stable ids on labels, regions, and layers
+- Operation-based editing with undo/redo, from the CLI or the UI
+- Real-time collaboration over a WebSocket, with per-session history
 - Web UI with a memory map sidebar, inline label editing, and local analysis
 
 ## Development
@@ -78,6 +81,32 @@ npx re64 disasm -p game.re64 -r '$0800:$0900'
 
 # Without the cross-reference arrow gutter
 npx re64 disasm -p game.re64 --no-arrows
+```
+
+### Editing
+
+Edits go through an operation layer shared with the web UI, and are recorded
+beside the project so undo survives the process exiting.
+
+```bash
+npx re64 label set game.re64 '$81A2' DrawGrid --type function
+npx re64 label rm  game.re64 '$81A2'
+npx re64 region set game.re64 '$8080:$80A0' text --name copyright
+npx re64 apply game.re64 ops.json --author agent-1   # a batch
+npx re64 undo game.re64
+npx re64 redo game.re64
+
+npx re64 migrate game.re64    # write stable ids into an older project
+```
+
+`apply` takes a JSON array of operations, which is how an agent edits a project
+without a browser:
+
+```json
+[
+  { "op": "label.set", "id": "lbl_a1b2c3", "layerId": "lay_x1y2z3",
+    "address": 33186, "name": "DrawGrid", "type": "function" }
+]
 ```
 
 ### Loading files directly
