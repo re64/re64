@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { existsSync } from "node:fs";
 import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { FileStorage, ProjectStore, pathsFor } from "../store/index.js";
+import { FileStorage, ProjectStore, SqliteStorage, pathsFor } from "../store/index.js";
 import { diffProjects, parseProject } from "../core/index.js";
 import { SyncServer } from "./sync.js";
 import { applyOpToDoc, projectFromDoc } from "../core/crdt/index.js";
@@ -65,6 +65,24 @@ export interface RunningServer {
   close(): Promise<void>;
 }
 
+/** Marks a request that tried to leave the project directory. */
+const FORBIDDEN = new Uint8Array(0);
+
+/**
+ * Serve a layer binary from beside the project file.
+ *
+ * Only for a plain `.re64`, which names files it does not contain. A database
+ * holds its own, so there is no directory to escape from and no check to make.
+ */
+function fromDisk(projectPath: string, requested: string): Uint8Array | undefined {
+  const baseDir = dirname(projectPath);
+  const filePath = resolve(baseDir, requested);
+  const inside = relative(baseDir, filePath);
+  if (inside.startsWith("..") || resolve(inside) === inside) return FORBIDDEN;
+  if (!existsSync(filePath)) return undefined;
+  return new Uint8Array(readFileSync(filePath));
+}
+
 export function startServer(options: ServerOptions): RunningServer {
   const { projectPath, port, host } = options;
 
@@ -73,7 +91,11 @@ export function startServer(options: ServerOptions): RunningServer {
     process.exit(1);
   }
 
-  const store = new ProjectStore(new FileStorage(pathsFor(projectPath)));
+  // A database or a plain project file, both served identically. The database
+  // is the one that carries its own binaries.
+  const database = projectPath.endsWith("db") ? new SqliteStorage(projectPath) : undefined;
+  const storage = database ?? new FileStorage(pathsFor(projectPath));
+  const store = new ProjectStore(storage);
   const sync = new SyncServer({
     store,
     // Long enough that a page reload rejoins the same session rather than
@@ -93,8 +115,11 @@ export function startServer(options: ServerOptions): RunningServer {
     try {
       // --- API ---------------------------------------------------------
       if (path === "/api/project" && req.method === "GET") {
-        const raw = readFileSync(projectPath, "utf-8");
-        return sendJson(res, 200, { path: projectPath, raw, version: store.version() });
+        return sendJson(res, 200, {
+          path: projectPath,
+          raw: storage.readText(),
+          version: store.version(),
+        });
       }
 
       if (path === "/api/project" && req.method === "PUT") {
@@ -143,20 +168,20 @@ export function startServer(options: ServerOptions): RunningServer {
         if (!requested) {
           return sendJson(res, 400, { error: "path parameter required" });
         }
-        const baseDir = dirname(projectPath);
-        const filePath = resolve(baseDir, requested);
-        const inside = relative(baseDir, filePath);
-        if (inside.startsWith("..") || resolve(inside) === inside) {
-          return sendJson(res, 403, { error: "path escapes the project directory" });
-        }
-        if (!existsSync(filePath)) {
+        const bytes = database ? database.blob(requested) : fromDisk(projectPath, requested);
+        if (bytes === undefined) {
           return sendJson(res, 404, { error: `no such file: ${requested}` });
         }
-        const bytes = readFileSync(filePath);
+        if (bytes === FORBIDDEN) {
+          return sendJson(res, 403, { error: "path escapes the project directory" });
+        }
         res.writeHead(200, {
           "content-type": "application/octet-stream",
           "content-length": bytes.length,
-          "cache-control": "no-store",
+          // Content-addressed and immutable: a name maps to bytes that never
+          // change under it, so a reload need not refetch a 174KB disk image.
+          "cache-control": database ? "public, max-age=31536000, immutable" : "no-store",
+          ...(database ? { etag: `"${database.blobHash(requested) ?? ""}"` } : {}),
         });
         res.end(bytes);
         return;

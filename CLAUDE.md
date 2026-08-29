@@ -237,8 +237,9 @@ reads a binary update to learn what happened. The property the tests hold to is
 that an op followed by its inverse restores the exact original bytes.
 
 **Yjs sits behind one door.** `src/core/crdt/` is the only place that may import
-it, asserted by a test. Readable JSON stays canonical; a document is built from
-it at the start of a session and flattened back at the end. That works only
+it, asserted by a test. Readable JSON stays canonical — now a column rather than
+a file; a document is built from it at the start of a session and flattened back
+at the end. That works only
 because construction is deterministic — fixed `clientID`, sorted insertion — so
 two clients loading the same file produce byte-identical documents and their
 edits have a common ancestor.
@@ -247,44 +248,111 @@ edits have a common ancestor.
 the content everyone agreed on, not how the file was laid out: which labels a
 blank line grouped, what order regions were declared in. Regenerating the text
 turns a one-line edit into a whole-file diff. So a session is diffed against the
-file and the resulting ops applied line by line.
+stored text and the resulting ops applied line by line.
 
 **A session ends on a timeout**, not a goodbye. Tabs close without warning and
 agents simply stop; waiting for a clean exit would mean rarely flattening. It
 also lets a reload rejoin rather than splitting one piece of work in two.
 
-**How edits reach the filesystem.** Three moments, deliberately distinct:
+**How edits reach the store.** Three moments, deliberately distinct:
 
-- **A debounced write, ~1.5s after edits stop.** The project file tracks a live
-  session closely, so `git diff` shows the work as it happens, the CLI reads
-  current content, and an editor open on the same file stays in step. Without
-  this the file would sit stale for as long as anyone stayed connected.
+- **A debounced write, ~1.5s after edits stop.** The stored project tracks a
+  live session closely, so the CLI reads current content and any other process
+  stays in step. Without this it would sit stale for as long as anyone stayed
+  connected.
 - **A flatten, ~30s after the last participant leaves** (or on SIGINT/SIGTERM).
   Writes anything outstanding and records one history entry.
 - **An HTTP PUT**, which writes immediately.
 
-All three write from the *whole document*, never one caller's own changes.
+All three write from the *whole document*, never one caller's own changes. The
+`.re64` export is a separate, on-demand step (`re64 export`) — it is what git
+tracks, so it moves when you decide it should, not on a timer.
 
 History is accumulated as the session writes, not derived at the end — the file
 is already current by then, so an end-of-session diff would be empty and the
 entry would be lost.
 
-Files beside the project:
+### Storage: SQLite, one database per project
+
+The canonical store is `<name>.re64db`, sitting beside the binaries it
+describes. `<name>.re64` is its **export**, written on demand by `re64 export`
+and read directly by `disasm`.
 
 | Path | Holds | Committed? |
 |---|---|---|
-| `<name>.re64` | the project | yes — this is the artefact |
-| `<name>.re64.history` | one JSON line per flattened session | your call; it is the record git cannot give, since it names who did what within a session |
-| `<name>.re64.session` | Yjs updates awaiting a flatten | no — gitignored, transient, deleted once written |
-| `<name>.re64.log` | the CLI's undo log | no — matched by `*.log` |
+| `<name>.re64db` | the project, its binaries, history and undo log | no — gitignored |
+| `<name>.re64` | the export | yes — this is what a diff shows and what you hand someone |
+| `<name>.re64.history` | one JSON line per flattened session | exported alongside; the record git cannot give, since it names who did what *within* a session |
+
+The reason to be in a database is not size — a heavily annotated game is a
+couple of thousand tiny records. It is that **a JSON file has no transactions**
+and three writers share the project: the CLI, the server, and whoever has it
+open in an editor. Applying an operation and recording how to undo it were two
+writes that could come apart, leaving a project edited with no way back.
+Everything the filesystem needed to approximate safety — atomic rename, a
+directory watcher, comparing content to recognise one's own writes — exists
+because a file could not offer what `BEGIN IMMEDIATE` gives.
+
+**The project is one column of text, not normalized tables.** Nothing queries
+below project granularity: `/api/project` returns the whole string, analysis
+runs client-side over a whole `LoadedProject`, and `version()` hashes the whole
+document. Normalizing would buy query granularity nothing wants, at the cost of
+the property `serialize.ts` exists for — that a one-label rename is a one-line
+diff. Import and export move the text **verbatim**; `formatProject` regenerates
+layout from content and must never appear on either path.
+
+The trigger for normalizing later, so it is recognisable: the server needing to
+answer a question about *part* of a project — cross-project search, or serving
+one layer without the rest.
+
+`ProjectStorage` (`src/store/storage.ts`) is the interface, with two
+implementations that run the **identical** test suite: `SqliteStorage` and
+`FileStorage`. The filesystem one is not transitional — `disasm -p project.re64`
+must keep working, and `re64 import` reads layer paths from disk. SQLite is
+canonical for *edited* projects; a plain `.re64` stays a first-class read-only
+input.
+
+**Binaries are content-addressed.** `files(name → hash)` and `blobs(hash →
+bytes)`. Dedup is the smaller reason; the larger is that nothing previously
+checked the bytes behind a layer were the ones its addresses were named against,
+so re-dumping a game silently pointed every label at nonsense.
+
+Names stay project-local and **the byte source stays keyed by them**, so content
+addressing is invisible above `src/store`: the loader, the D64 handling,
+`FileLayer` and the browser client are untouched. That is load-bearing, not
+convenience — a layer's `path` also derives its id (`loader.ts`), its display
+name, and the name of its entry label (`file-layer.ts`), so rewriting paths into
+hashes would change the disassembly itself.
+
+Names are normalized identically on write and lookup (POSIX separators, no
+leading `./`), because `game.prg`, `./game.prg` and `sub/../game.prg` are one
+file on disk but would be three rows. A name reaching outside the project is
+refused rather than resolved: there is no outside once the bytes are in the
+database. Blobs are **append-only** — nothing collects one no name points at.
+
+Because a name maps to bytes that cannot change under it, `/api/blob` is served
+`immutable` with the content hash as its `ETag`.
+
+Not done, and worth knowing: an exported `.re64` carries no hashes, so someone
+handed the file plus a binary cannot verify they match. Adding them to the text
+would break the verbatim round trip, so it needs to be opt-in.
 
 Persistence serves three separate purposes, and they want different answers:
 
-| Purpose | Format | Shape | Lifetime |
+| Purpose | Table | Shape | Lifetime |
 |---|---|---|---|
-| Crash safety | Yjs updates, length-framed | append-only log | dropped after flatten |
-| The project | JSON | last state | canonical |
-| History | JSON, one entry per session | linear | durable |
+| Crash safety | `session_updates` | append-only | dropped after flatten |
+| The project | `project` | last state | canonical |
+| History | `history` | linear, one row per session | durable |
+| Undo | `ops` | every op with its inverse | durable |
+
+**A CRDT update is only valid against the text it was built from.**
+`docFromProject` is deterministic *given the project text*, so `session_updates`
+records the `base_rev` each update was built against and recovery replays only
+matching ones. Without that guard, a crash log written before another writer
+edited the project merges cleanly and silently resurrects what that edit
+deleted. `rev` is a content hash rather than a counter, so two writers naming
+the same text agree on its name without coordinating.
 
 **A whole-document PUT conflicts rather than merges.** An agent may send JSON
 instead of operations, and it is routed through the shared document as a
@@ -795,46 +863,46 @@ from `disk.d64:filename` shows the image and file name. Modelling disks as
 containers would be a real change to `FileLayer` and the schema, and nothing
 needs it yet.
 
-### The file is shared, not owned
+### Nobody owns the project
 
-The server is not the only writer. `re64 label set` writes the project file
-directly, with no server involvement, and a user may have it open in an editor.
-Left alone this loses data *silently*: the server's write applies
-`diff(document, file)`, so an edit the document never learned about is diffed in
-the wrong direction and reverted.
+The server is not the only writer. `re64 label set` opens the store in its own
+process — no daemon — and a user may have the export open in an editor. Left
+alone this loses data *silently*, and the shape of the loss is worth
+remembering: a write that diffs its own document against the stored text treats
+the document as the whole truth, so anything a second writer added since gets
+diffed straight back out.
 
-So the file is treated as another participant. The store watches it, and an
-external change becomes ordinary operations applied to the shared document —
-which merges them and broadcasts them to connected sessions like any other
-edit. External ops are recorded in the session history under the author `file`,
-since the store cannot know who wrote it but must not claim a session ended in
-a state it did not.
+Two things fix it, and both are needed:
 
-Two things this depends on:
+- **Every write goes through the document.** `ProjectStore.runOps` is the only
+  mutating primitive; the CLI and the server both use it. Operations are routed
+  into the document and the document produces the text, so no write can be
+  invisible to whoever else holds one.
+- **A write folds in what changed underneath it first**, and does so
+  **three-way** — diffing from the text as it was last known, which describes
+  what *they* did. Comparing two documents has no common ancestor and cannot
+  tell "they added this" from "we deleted it". A watcher normally absorbs first,
+  but correctness must not depend on one running.
 
-- **Writers rename a temporary file over the target** (`src/fsutil.ts`), so no
-  reader ever sees a half-written project. Both the CLI and the server do this.
-- **The watch is on the directory, not the file.** A watch on a path follows the
-  inode behind it, and the rename above replaces that inode — so a file watch
-  goes deaf after the first write, *including the server's own*. This was found
-  the hard way; the symptom is a watcher that appears to work until the first
-  save.
+Noticing another writer is `ProjectStorage.watch`. It looks filesystem-shaped
+but is not: SQLite answers with `PRAGMA data_version`, which changes only when a
+*different* connection commits — no debounce, no spurious events, no platform
+differences. The filesystem implementation watches the **directory, not the
+file**, because a watch on a path follows the inode and every writer replaces it
+by renaming a temporary file over the target; a file watch goes deaf after the
+first write, including its own.
 
-The store tells its own writes from everyone else's by comparing content against
-the text it last wrote, rather than trusting watch events, which coalesce, fire
-spuriously, and differ between platforms. A file caught mid-save or hand-edited
-into invalid JSON is skipped rather than treated as a deletion of everything;
-the next event brings the valid content.
+**Undo is scoped to its author.** The record is shared, so an unscoped `re64
+undo` let someone at the CLI silently revert what a browser user had just done.
+`--any` asks for the old behaviour.
+
+External changes are recorded in the session history under the author `file`:
+the store cannot know who wrote it, but must not claim a session ended in a
+state it did not.
 
 Persistence driven by timers is wrapped so a failure reports rather than
-throwing: the file is outside the server's control and can vanish under a live
-session, and an unhandled throw in a timer takes the whole process down. Losing
-one write is recoverable — the session is still in the document and the sidecar
-log — while losing the server is not.
-
-Long term this belongs in SQLite rather than the filesystem, with an import
-path for existing project files; deliberately deferred to keep the current
-barrier to entry low.
+throwing. Losing one write is recoverable — the session is still in the document
+and the update log — while an unhandled throw in a timer takes the process down.
 
 ## Known Limitations & Future Features
 
