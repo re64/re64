@@ -2,10 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ProjectSessionStore } from "./session-store.js";
-import { FileStorage, pathsFor } from "../store/index.js";
+import { FileStorage, ProjectStore, pathsFor } from "../store/index.js";
 import { applyOpToDoc, projectFromDoc } from "../core/crdt/index.js";
-import { Op, applyOps } from "../core/ops/index.js";
+import { applyOps } from "../core/ops/index.js";
 import { writeFileAtomic } from "../fsutil.js";
 
 /**
@@ -53,16 +52,14 @@ beforeEach(() => {
 
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-const labelNames = (s: ProjectSessionStore) =>
+const labelNames = (s: ProjectStore) =>
   (projectFromDoc(s.document()).layers[0].labels ?? []).map((l) => l.name);
 
 /** Wait past the watcher's debounce, which absorbs a burst of save events. */
 const settle = () => new Promise((r) => setTimeout(r, 400));
 
-function watching(s: ProjectSessionStore): void {
-  s.watchFile((ops: Op[]) => {
-    for (const op of ops) s.applyExternalOp(op);
-  });
+function watching(s: ProjectStore): void {
+  s.watchFile();
 }
 
 describe("edits made to the file by someone else", () => {
@@ -173,6 +170,6 @@ describe("history", () => {
   });
 });
 
-function store(): ProjectSessionStore {
-  return new ProjectSessionStore(new FileStorage(pathsFor(projectPath)));
+function store(): ProjectStore {
+  return new ProjectStore(new FileStorage(pathsFor(projectPath)));
 }

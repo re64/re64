@@ -20,13 +20,15 @@
  */
 
 import { createHash } from "node:crypto";
-import { HistoryEntry, ProjectStorage, revOf } from "../store/index.js";
+import { HistoryEntry, ProjectStorage, revOf } from "./storage.js";
 import {
   Change,
   Op,
+  applyOp,
   applyOps,
   diffProjects,
   describeOp,
+  invertOp,
   parseProject,
 } from "../core/index.js";
 import {
@@ -38,10 +40,7 @@ import {
   projectFromDoc,
 } from "../core/crdt/index.js";
 
-export type { HistoryEntry } from "../store/index.js";
-export { pathsFor } from "../store/index.js";
-
-export class ProjectSessionStore {
+export class ProjectStore {
   private doc: CrdtDoc | undefined;
   private readonly authors = new Set<string>();
   private readonly listeners: ((update: Uint8Array, origin: unknown) => void)[] = [];
@@ -79,6 +78,7 @@ export class ProjectSessionStore {
 
     const text = this.storage.readText();
     this.baseRev = revOf(text);
+    this.lastWritten = text;
     this.doc = docFromProject(parseProject(text));
 
     // Replay only what was built against this exact text. An update recorded
@@ -123,6 +123,11 @@ export class ProjectSessionStore {
       .update(JSON.stringify(projectFromDoc(this.document())))
       .digest("hex")
       .slice(0, 12);
+  }
+
+  /** The project as stored, without going through the document. */
+  text(): string {
+    return this.storage.readText();
   }
 
   /** Note who is editing, for the history entry. */
@@ -174,6 +179,7 @@ export class ProjectSessionStore {
     // work stays in the sidecar log, which is what it is for.
     if (!this.storage.exists()) return [];
     const text = this.storage.readText();
+    this.absorb(text);
     const ops = diffProjects(parseProject(text), projectFromDoc(doc));
     if (ops.length > 0) {
       const updated = applyOps(text, ops);
@@ -182,7 +188,126 @@ export class ProjectSessionStore {
       this.baseRev = revOf(updated);
       this.sessionOps.push(...ops);
     }
+    // The crash log's job is done: everything it held is now in the text, so a
+    // process dying here loses nothing. Without this it would grow for the
+    // lifetime of the project, since a CLI invocation never flattens.
+    this.storage.clearUpdates();
     return ops;
+  }
+
+  /**
+   * Fold in what another writer changed, before deciding what to write.
+   *
+   * Without this a write is a claim that the document is the whole truth, and
+   * anything a second writer put in the text since gets diffed straight back
+   * out — the silent revert this store exists to prevent. A watcher normally
+   * absorbs first, but correctness cannot depend on one running.
+   *
+   * Three-way, not two: the diff is taken from the text as we last knew it, so
+   * it describes what *they* did. Diffing our document against theirs has no
+   * common ancestor and cannot tell "they added this" from "we deleted it".
+   */
+  private absorb(text: string): void {
+    if (this.lastWritten === undefined || text === this.lastWritten) {
+      this.lastWritten = text;
+      return;
+    }
+
+    const external = diffProjects(parseProject(this.lastWritten), parseProject(text));
+    for (const op of external) applyOpToDoc(this.document(), op, "external");
+    this.lastWritten = text;
+    this.baseRev = revOf(text);
+    if (external.length > 0) {
+      this.sessionOps.push(...external);
+      this.authors.add("file");
+      this.dirty = true;
+    }
+  }
+
+  /**
+   * Apply operations and record them so they can be undone.
+   *
+   * This is the only way anything mutates a project. Both the CLI and the
+   * server's own writes come through here, which is what makes the hazard it
+   * replaces structurally impossible rather than merely guarded against: when a
+   * second writer edited the text directly, the next write diffed the document
+   * against it and emitted operations reverting that edit.
+   *
+   * Inverses are computed as the batch runs. Each has to see the state its own
+   * operation saw, so computing them up front would invert against the wrong
+   * document.
+   */
+  runOps(
+    ops: readonly Op[],
+    author: string,
+    now: number
+  ): { applied: number; descriptions: string[] } {
+    if (ops.length === 0) return { applied: 0, descriptions: [] };
+
+    let text = this.storage.readText();
+    const changes: Change[] = [];
+    for (const op of ops) {
+      changes.push({ op, inverse: invertOp(text, op), author, at: now });
+      text = applyOp(text, op);
+    }
+
+    this.addAuthor(author);
+    this.applyThroughDocument(ops, author);
+    this.storage.writeOps([...this.storage.readOps(), ...changes]);
+
+    return { applied: ops.length, descriptions: ops.map(describeOp) };
+  }
+
+  /**
+   * Undo the most recent change, by default one of the caller's own.
+   *
+   * Scoped to the author because the record is shared: a person at the CLI
+   * pressing undo should not silently revert what someone in a browser just
+   * did. `author` omitted means anyone's.
+   */
+  undo(author?: string): string | null {
+    return this.step(
+      (c) => !c.undone && (author === undefined || c.author === author),
+      (c) => c.inverse,
+      true
+    );
+  }
+
+  /** Redo the most recently undone change, by the same scoping rule. */
+  redo(author?: string): string | null {
+    return this.step(
+      (c) => c.undone === true && (author === undefined || c.author === author),
+      (c) => c.op,
+      false
+    );
+  }
+
+  private step(
+    wanted: (change: Change) => boolean,
+    direction: (change: Change) => Op,
+    undone: boolean
+  ): string | null {
+    const log = this.storage.readOps();
+    for (let i = log.length - 1; i >= 0; i--) {
+      if (!wanted(log[i])) continue;
+      this.applyThroughDocument([direction(log[i])], log[i].author ?? "unknown");
+      log[i].undone = undone;
+      this.storage.writeOps(log);
+      return describeOp(log[i].op);
+    }
+    return null;
+  }
+
+  /**
+   * Route operations into the document, then let the document produce the text.
+   *
+   * Never applied to the text directly. The document is what merges, so a write
+   * that skipped it would be invisible to everyone else holding one.
+   */
+  private applyThroughDocument(ops: readonly Op[], author: string): void {
+    const doc = this.document();
+    for (const op of ops) applyOpToDoc(doc, op, author);
+    this.writeFile();
   }
 
   /**
@@ -237,42 +362,21 @@ export class ProjectSessionStore {
    * The change is applied as operations, so it merges like any other edit and
    * reaches connected sessions rather than only landing on disk.
    */
-  watchFile(applyExternal: (ops: Op[]) => void): void {
+  watchFile(): void {
     if (this.unwatch) return;
-    this.lastWritten ??= this.storage.readText();
-    this.unwatch = this.storage.watch(() => this.absorbExternalChange(applyExternal));
+    this.unwatch = this.storage.watch(() => this.absorbExternalChange());
   }
 
-  private absorbExternalChange(applyExternal: (ops: Op[]) => void): void {
-    let text: string;
+  private absorbExternalChange(): void {
+    this.document();
     try {
-      text = this.storage.readText();
+      this.absorb(this.storage.readText());
     } catch {
-      return; // Being replaced; the next event will bring the new content.
+      // The project is being replaced, or is mid-save and not valid JSON yet.
+      // The next event brings the finished content.
     }
-    if (text === this.lastWritten) return; // Our own write coming back.
-
-    let ops: Op[];
-    try {
-      ops = diffProjects(projectFromDoc(this.document()), parseProject(text));
-    } catch {
-      return; // Mid-save or hand-broken; wait for it to become valid again.
-    }
-
-    this.lastWritten = text;
-    this.baseRev = revOf(text);
-    if (ops.length === 0) return;
-
-    applyExternal(ops);
-
-    // Record it as part of the session. The store cannot tell who wrote the
-    // file, so it is attributed to the filesystem rather than to a participant
-    // — but leaving it out entirely would make the history claim a session
-    // ended in a state it did not.
-    this.sessionOps.push(...ops);
-    this.authors.add("file");
-    this.dirty = true;
   }
+
 
   stopWatching(): void {
     this.unwatch?.();

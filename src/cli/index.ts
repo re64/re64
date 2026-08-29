@@ -28,14 +28,7 @@ import {
 } from "../core/index.js";
 import { loadProjectFile, nodeFileBytes } from "../node-files.js";
 import { hexDump } from "./hex.js";
-import {
-  labelSetOp,
-  owningLayerId,
-  redoLast,
-  regionSetOp,
-  runOps,
-  undoLast,
-} from "./edit.js";
+import { openProject } from "./edit.js";
 
 function parseAddress(value: string): number {
   const num = value.startsWith("0x") || value.startsWith("$")
@@ -204,12 +197,13 @@ label
   .argument("<name>", "Label name")
   .option("-t, --type <type>", "entry | function | code | address")
   .option("-c, --comment <text>", "Attach a comment")
+  .option("-a, --author <name>", "Who made this edit", "cli")
   .action((projectPath: string, addressArg: string, name: string, options) => {
     const address = parseAddress(addressArg);
-    const layerId = owningLayerId(projectPath, address);
-    const op = labelSetOp(projectPath, layerId, address, name, options.type, options.comment);
-    const { descriptions } = runOps(projectPath, [op], "cli", Date.now());
-    console.log(descriptions[0]);
+    const editor = openProject(projectPath);
+    const layerId = editor.owningLayerId(address);
+    const op = editor.labelSetOp(layerId, address, name, options.type, options.comment);
+    console.log(editor.run([op], options.author ?? "cli", Date.now())[0]);
   });
 
 label
@@ -217,23 +211,16 @@ label
   .description("Remove the label at an address")
   .argument("<project>", "Project file (.re64)")
   .argument("<address>", "Address, e.g. $81A2")
-  .action((projectPath: string, addressArg: string) => {
+  .option("-a, --author <name>", "Who made this edit", "cli")
+  .action((projectPath: string, addressArg: string, options) => {
     const address = parseAddress(addressArg);
-    const layerId = owningLayerId(projectPath, address);
-    const project = parseProject(readFileSync(projectPath, "utf-8"));
-    const layer = project.layers.find((l) => l.id === layerId);
-    const existing = layer?.labels?.find((l) => parseProjectAddress(l.address) === address);
-    if (!existing) {
+    const editor = openProject(projectPath);
+    const op = editor.labelDeleteOp(editor.owningLayerId(address), address);
+    if (!op) {
       console.error(`No label at ${addressArg}`);
       process.exit(1);
     }
-    const { descriptions } = runOps(
-      projectPath,
-      [{ op: "label.delete", id: existing.id!, layerId }],
-      "cli",
-      Date.now()
-    );
-    console.log(descriptions[0]);
+    console.log(editor.run([op], options.author ?? "cli", Date.now())[0]);
   });
 
 const region = program.command("region").description("Declare what a range of memory holds");
@@ -245,12 +232,13 @@ region
   .argument("<range>", "Range, e.g. $8080:$80A0 or $8080+$20")
   .argument("<kind>", "code | data | text | jumptable | unknown")
   .option("-n, --name <name>", "Name the region")
+  .option("-a, --author <name>", "Who made this edit", "cli")
   .action((projectPath: string, rangeArg: string, kind: string, options) => {
     const { start, length } = parseRange(rangeArg);
-    const layerId = owningLayerId(projectPath, start);
-    const op = regionSetOp(projectPath, layerId, start, start + length, kind as never, options.name);
-    const { descriptions } = runOps(projectPath, [op], "cli", Date.now());
-    console.log(descriptions[0]);
+    const editor = openProject(projectPath);
+    const layerId = editor.owningLayerId(start);
+    const op = editor.regionSetOp(layerId, start, start + length, kind as never, options.name);
+    console.log(editor.run([op], options.author ?? "cli", Date.now())[0]);
   });
 
 region
@@ -258,24 +246,15 @@ region
   .description("Remove the region starting at an address")
   .argument("<project>", "Project file (.re64)")
   .argument("<address>", "Region start, e.g. $8080")
-  .action((projectPath: string, addressArg: string) => {
-    const start = parseAddress(addressArg);
-    const project = parseProject(readFileSync(projectPath, "utf-8"));
-    for (const layer of project.layers) {
-      const found = layer.regions?.find((r) => parseProjectAddress(r.start) === start);
-      if (found) {
-        const { descriptions } = runOps(
-          projectPath,
-          [{ op: "region.delete", id: found.id!, layerId: layer.id! }],
-          "cli",
-          Date.now()
-        );
-        console.log(descriptions[0]);
-        return;
-      }
+  .option("-a, --author <name>", "Who made this edit", "cli")
+  .action((projectPath: string, addressArg: string, options) => {
+    const editor = openProject(projectPath);
+    const op = editor.regionDeleteOp(parseAddress(addressArg));
+    if (!op) {
+      console.error(`No region starting at ${addressArg}`);
+      process.exit(1);
     }
-    console.error(`No region starting at ${addressArg}`);
-    process.exit(1);
+    console.log(editor.run([op], options.author, Date.now())[0]);
   });
 
 program
@@ -290,17 +269,20 @@ program
       console.error("Expected a JSON array of operations");
       process.exit(1);
     }
-    const { applied, descriptions } = runOps(projectPath, ops, options.author, Date.now());
+    const descriptions = openProject(projectPath).run(ops, options.author, Date.now());
     for (const line of descriptions) console.log(line);
-    console.log(`Applied ${applied} operation${applied === 1 ? "" : "s"}.`);
+    const n = descriptions.length;
+    console.log(`Applied ${n} operation${n === 1 ? "" : "s"}.`);
   });
 
 program
   .command("undo")
   .description("Undo the most recent edit")
   .argument("<project>", "Project file (.re64)")
-  .action((projectPath: string) => {
-    const undone = undoLast(projectPath);
+  .option("-a, --author <name>", "Whose edit to undo", "cli")
+  .option("--any", "Undo whoever edited last, not only your own")
+  .action((projectPath: string, options) => {
+    const undone = openProject(projectPath).undo(options.any ? undefined : options.author);
     console.log(undone ? `Undid: ${undone}` : "Nothing to undo.");
   });
 
@@ -308,8 +290,10 @@ program
   .command("redo")
   .description("Redo the most recently undone edit")
   .argument("<project>", "Project file (.re64)")
-  .action((projectPath: string) => {
-    const redone = redoLast(projectPath);
+  .option("-a, --author <name>", "Whose edit to redo", "cli")
+  .option("--any", "Redo whoever edited last, not only your own")
+  .action((projectPath: string, options) => {
+    const redone = openProject(projectPath).redo(options.any ? undefined : options.author);
     console.log(redone ? `Redid: ${redone}` : "Nothing to redo.");
   });
 

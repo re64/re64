@@ -10,6 +10,7 @@
 import { appendFileSync, existsSync, readFileSync, unlinkSync, watch } from "node:fs";
 import { basename, dirname } from "node:path";
 import { writeFileAtomic } from "../fsutil.js";
+import { Change, decodeChanges, encodeChanges } from "../core/index.js";
 import {
   HistoryEntry,
   ProjectStorage,
@@ -24,11 +25,14 @@ export interface SessionPaths {
   log: string;
   /** Flattened sessions, one JSON object per line. */
   history: string;
+  /** Operations with their inverses, for undo across invocations. */
+  ops: string;
 }
 
 export function pathsFor(projectPath: string): SessionPaths {
   return {
     project: projectPath,
+    ops: `${projectPath}.log`,
     log: `${projectPath}.session`,
     history: `${projectPath}.history`,
   };
@@ -129,6 +133,19 @@ export class FileStorage implements ProjectStorage {
       if (timer) clearTimeout(timer);
       watcher.close();
     };
+  }
+
+  readOps(): Change[] {
+    return existsSync(this.paths.ops)
+      ? decodeChanges(readFileSync(this.paths.ops, "utf-8"))
+      : [];
+  }
+
+  writeOps(changes: readonly Change[]): void {
+    // Rewritten whole rather than appended: undo flips a flag on an existing
+    // entry, which an append-only file cannot express. A table can, and this
+    // becomes an insert plus an update once one is behind it.
+    writeFileAtomic(this.paths.ops, encodeChanges(changes));
   }
 
   appendHistory(entry: HistoryEntry): void {

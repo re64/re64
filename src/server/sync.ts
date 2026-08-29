@@ -17,7 +17,7 @@
 import { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
-import { ProjectSessionStore } from "./session-store.js";
+import { ProjectStore } from "../store/index.js";
 
 /** First byte of every frame. */
 const enum Message {
@@ -28,7 +28,7 @@ const enum Message {
 }
 
 export interface SyncOptions {
-  store: ProjectSessionStore;
+  store: ProjectStore;
   /**
    * How long after the last participant leaves before the session is flattened.
    *
@@ -74,9 +74,7 @@ export class SyncServer {
     // participant too. Their changes become operations on the shared document
     // and reach connected sessions, instead of being reverted by the next
     // write.
-    options.store.watchFile((ops) => {
-      for (const op of ops) options.store.applyExternalOp(op);
-    });
+    options.store.watchFile();
   }
 
   /** Adopt an HTTP upgrade for the sync endpoint. */

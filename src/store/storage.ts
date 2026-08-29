@@ -15,6 +15,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { Change } from "../core/index.js";
 
 /** One flattened session, as recorded in the project's history. */
 export interface HistoryEntry {
@@ -53,6 +54,16 @@ export interface ProjectStorage {
 
   appendHistory(entry: HistoryEntry): void;
   history(): HistoryEntry[];
+
+  /**
+   * The undo record: every operation with its inverse, oldest first.
+   *
+   * Durable rather than per-session, because `re64 undo` runs in a new process
+   * each time and has nothing else to remember. Undone entries stay as
+   * tombstones so redo has something to aim at.
+   */
+  readOps(): Change[];
+  writeOps(changes: readonly Change[]): void;
 
   /**
    * Call back when another writer commits a change.

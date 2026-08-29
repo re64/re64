@@ -2,8 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ProjectSessionStore } from "./session-store.js";
-import { FileStorage, pathsFor } from "../store/index.js";
+import { FileStorage, ProjectStore, pathsFor } from "../store/index.js";
 import { applyOpToDoc, encodeDoc, projectFromDoc } from "../core/crdt/index.js";
 
 const PROJECT = `{
@@ -45,7 +44,7 @@ beforeEach(() => {
 
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-const store = () => new ProjectSessionStore(new FileStorage(pathsFor(projectPath)));
+const store = () => new ProjectStore(new FileStorage(pathsFor(projectPath)));
 
 describe("flattening a session", () => {
   it("writes the file and records one entry, not one per edit", () => {
@@ -177,6 +176,123 @@ describe("updates recorded against older text", () => {
     const fresh = store();
     const names = (projectFromDoc(fresh.document()).layers[0].labels ?? []).map((l) => l.name);
     expect(names).toContain("Kept");
+  });
+});
+
+describe("two writers on one project", () => {
+  // Separate stores over one backing store: the CLI in one process while a
+  // server holds a live session in another.
+  const two = () => [store(), store()] as const;
+
+  it("does not revert an edit the other made", () => {
+    const [server, cli] = two();
+    applyOpToDoc(server.document(), {
+      op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "FromWeb",
+      type: "function",
+    });
+
+    cli.runOps(
+      [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "FromCli" }],
+      "cli",
+      1
+    );
+
+    // The write that used to revert it: the server diffing its document
+    // against a text that had changed underneath.
+    server.writeFile();
+
+    expect(currentText()).toContain("FromWeb");
+    expect(currentText()).toContain("FromCli");
+  });
+
+  it("carries the other's pending edit into its own write", () => {
+    // The update log is the channel. An edit the server has not yet written is
+    // still in the log, and the base revision says it applies to the text the
+    // CLI is about to read — so the CLI replays it rather than writing a text
+    // that silently drops it.
+    const [server, cli] = two();
+    applyOpToDoc(server.document(), {
+      op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "NotYetWritten",
+      type: "function",
+    });
+    expect(currentText()).not.toContain("NotYetWritten");
+
+    cli.runOps(
+      [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Cli" }],
+      "cli",
+      1
+    );
+
+    expect(currentText()).toContain("NotYetWritten");
+  });
+});
+
+describe("undo", () => {
+  it("restores the exact bytes it started from", () => {
+    const s = store();
+    s.runOps(
+      [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Renamed" }],
+      "cli",
+      1
+    );
+    expect(currentText()).not.toBe(PROJECT);
+
+    s.undo("cli");
+    expect(currentText()).toBe(PROJECT);
+  });
+
+  it("leaves a collaborator's edit alone and takes its own", () => {
+    // The record is shared, so an unscoped undo would let someone at the CLI
+    // silently revert what a browser user just did.
+    const s = store();
+    s.runOps(
+      [{ op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "ByAlice",
+         type: "function" }],
+      "alice",
+      1
+    );
+    s.runOps(
+      [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "ByBob" }],
+      "bob",
+      2
+    );
+
+    expect(s.undo("alice")).toBe("set $8000 to ByAlice (function)");
+    expect(currentText()).toContain("ByBob");
+    expect(currentText()).not.toContain("ByAlice");
+  });
+
+  it("reaches anyone's edit when asked to", () => {
+    const s = store();
+    s.runOps(
+      [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "ByBob" }],
+      "bob",
+      1
+    );
+    expect(s.undo()).toBe("set $8004 to ByBob");
+  });
+
+  it("has nothing to undo when the author did nothing", () => {
+    const s = store();
+    s.runOps(
+      [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "ByBob" }],
+      "bob",
+      1
+    );
+    expect(s.undo("carol")).toBeNull();
+  });
+
+  it("redoes what it undid, and stops there", () => {
+    const s = store();
+    s.runOps(
+      [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Renamed" }],
+      "cli",
+      1
+    );
+    s.undo("cli");
+    expect(s.redo("cli")).toBe("set $8004 to Renamed");
+    expect(currentText()).toContain("Renamed");
+    expect(s.redo("cli")).toBeNull();
   });
 });
 

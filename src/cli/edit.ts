@@ -5,161 +5,122 @@
  * operations — without a browser. Every change goes through the same operation
  * layer the UI uses, and is recorded beside the project so `undo` works across
  * invocations.
+ *
+ * One editor per invocation, holding one store. Every op used to re-read and
+ * re-parse the project for itself: a single `label set` cost three reads of the
+ * project plus one of the log, and each read could see a different state.
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { writeFileAtomic } from "../fsutil.js";
 import {
-  Change,
   LabelType,
+  LoadedProject,
   Op,
+  Project,
   RegionKind,
-  applyOp,
-  decodeChanges,
-  describeOp,
-  encodeChanges,
-  invertOp,
   newId,
   parseProject,
   parseProjectAddress,
   resolveOwningLayer,
 } from "../core/index.js";
+import { FileStorage, ProjectStore, pathsFor } from "../store/index.js";
 import { loadProjectFile } from "../node-files.js";
 
-/** Where a project's edit log lives. */
-export const logPathFor = (projectPath: string) => `${projectPath}.log`;
+export class ProjectEditor {
+  private readonly store: ProjectStore;
+  private parsed?: Project;
+  private loaded?: LoadedProject;
 
-function readLog(projectPath: string): Change[] {
-  const path = logPathFor(projectPath);
-  return existsSync(path) ? decodeChanges(readFileSync(path, "utf-8")) : [];
-}
-
-function writeLog(projectPath: string, changes: readonly Change[]): void {
-  writeFileSync(logPathFor(projectPath), encodeChanges(changes), "utf-8");
-}
-
-/**
- * Apply operations, record them, and write both files.
- *
- * Inverses are computed as the batch runs, because each one has to see the
- * state its operation saw — computing them all up front would invert against
- * the wrong document.
- */
-export function runOps(
-  projectPath: string,
-  ops: readonly Op[],
-  author: string,
-  now: number
-): { applied: number; descriptions: string[] } {
-  let text = readFileSync(projectPath, "utf-8");
-  const log = readLog(projectPath);
-  const descriptions: string[] = [];
-
-  for (const op of ops) {
-    const inverse = invertOp(text, op);
-    text = applyOp(text, op);
-    log.push({ op, inverse, author, at: now });
-    descriptions.push(describeOp(op));
+  constructor(private readonly projectPath: string) {
+    this.store = new ProjectStore(new FileStorage(pathsFor(projectPath)));
   }
 
-  writeFileAtomic(projectPath, text);
-  writeLog(projectPath, log);
-  return { applied: ops.length, descriptions };
-}
-
-/** Undo the most recent change that has not been undone. */
-export function undoLast(projectPath: string): string | null {
-  const log = readLog(projectPath);
-  for (let i = log.length - 1; i >= 0; i--) {
-    if (log[i].undone) continue;
-    const text = applyOp(readFileSync(projectPath, "utf-8"), log[i].inverse);
-    writeFileAtomic(projectPath, text);
-    log[i].undone = true;
-    writeLog(projectPath, log);
-    return describeOp(log[i].op);
+  /**
+   * The layer that should own an annotation at an address, by id.
+   *
+   * Loads the project properly rather than guessing from the schema: a PRG
+   * layer's range comes from the file's load header, not from any declared
+   * address, so nothing in the JSON alone says where it sits.
+   */
+  owningLayerId(address: number): string {
+    const loaded = (this.loaded ??= loadProjectFile(this.projectPath));
+    const index = resolveOwningLayer(loaded, address);
+    if (index === undefined) {
+      throw new Error(
+        `No layer owns ${address.toString(16).toUpperCase()}. Add a layer of ` +
+          `type "symbols" to name addresses outside the loaded bytes.`
+      );
+    }
+    const id = loaded.project.layers[index].id;
+    if (!id) throw new Error(`Layer ${index} has no id; run: re64 migrate ${this.projectPath}`);
+    return id;
   }
-  return null;
-}
 
-/** Redo the most recently undone change. */
-export function redoLast(projectPath: string): string | null {
-  const log = readLog(projectPath);
-  for (let i = log.length - 1; i >= 0; i--) {
-    if (!log[i].undone) continue;
-    const text = applyOp(readFileSync(projectPath, "utf-8"), log[i].op);
-    writeFileAtomic(projectPath, text);
-    log[i].undone = false;
-    writeLog(projectPath, log);
-    return describeOp(log[i].op);
+  project(): Project {
+    return (this.parsed ??= parseProject(this.store.text()));
   }
-  return null;
-}
 
-/**
- * The layer that should own an annotation at an address, by id.
- *
- * Loads the project properly rather than guessing from the schema: a PRG
- * layer's range comes from the file's load header, not from any declared
- * address, so nothing in the JSON alone says where it sits.
- */
-export function owningLayerId(projectPath: string, address: number): string {
-  const loaded = loadProjectFile(projectPath);
-  const index = resolveOwningLayer(loaded, address);
-  if (index === undefined) {
-    throw new Error(
-      `No layer owns ${address.toString(16).toUpperCase()}. Add a layer of ` +
-        `type "symbols" to name addresses outside the loaded bytes.`
-    );
+  /** A label.set op, reusing the id already at that address if there is one. */
+  labelSetOp(
+    layerId: string,
+    address: number,
+    name: string,
+    type?: LabelType,
+    comment?: string
+  ): Op {
+    const layer = this.project().layers.find((l) => l.id === layerId);
+    const existing = layer?.labels?.find((l) => parseProjectAddress(l.address) === address);
+    return { op: "label.set", id: existing?.id ?? newId("lbl"), layerId, address, name, type, comment };
   }
-  const id = loaded.project.layers[index].id;
-  if (!id) throw new Error(`Layer ${index} has no id; run: re64 migrate ${projectPath}`);
-  return id;
+
+  /** A label.delete op, or undefined when nothing is named there. */
+  labelDeleteOp(layerId: string, address: number): Op | undefined {
+    const layer = this.project().layers.find((l) => l.id === layerId);
+    const existing = layer?.labels?.find((l) => parseProjectAddress(l.address) === address);
+    return existing?.id ? { op: "label.delete", id: existing.id, layerId } : undefined;
+  }
+
+  /** A region.set op, reusing the id of a region with the same start. */
+  regionSetOp(
+    layerId: string,
+    start: number,
+    end: number,
+    kind: RegionKind,
+    name?: string
+  ): Op {
+    const layer = this.project().layers.find((l) => l.id === layerId);
+    const existing = layer?.regions?.find((r) => parseProjectAddress(r.start) === start);
+    return { op: "region.set", id: existing?.id ?? newId("rgn"), layerId, start, end, kind, name };
+  }
+
+  /** A region.delete op for whichever layer declares a region starting there. */
+  regionDeleteOp(start: number): Op | undefined {
+    for (const layer of this.project().layers) {
+      const found = layer.regions?.find((r) => parseProjectAddress(r.start) === start);
+      if (found?.id && layer.id) {
+        return { op: "region.delete", id: found.id, layerId: layer.id };
+      }
+    }
+    return undefined;
+  }
+
+  run(ops: readonly Op[], author: string, now: number): string[] {
+    const { descriptions } = this.store.runOps(ops, author, now);
+    this.parsed = undefined;
+    this.loaded = undefined;
+    return descriptions;
+  }
+
+  undo(author?: string): string | null {
+    this.parsed = undefined;
+    return this.store.undo(author);
+  }
+
+  redo(author?: string): string | null {
+    this.parsed = undefined;
+    return this.store.redo(author);
+  }
 }
 
-/** Build a label.set op, reusing the id already at that address if there is one. */
-export function labelSetOp(
-  projectPath: string,
-  layerId: string,
-  address: number,
-  name: string,
-  type?: LabelType,
-  comment?: string
-): Op {
-  const project = parseProject(readFileSync(projectPath, "utf-8"));
-  const layer = project.layers.find((l) => l.id === layerId);
-  const existing = layer?.labels?.find((l) => parseProjectAddress(l.address) === address);
-
-  return {
-    op: "label.set",
-    id: existing?.id ?? newId("lbl"),
-    layerId,
-    address,
-    name,
-    type,
-    comment,
-  };
-}
-
-/** Build a region.set op, reusing the id of a region with the same start. */
-export function regionSetOp(
-  projectPath: string,
-  layerId: string,
-  start: number,
-  end: number,
-  kind: RegionKind,
-  name?: string
-): Op {
-  const project = parseProject(readFileSync(projectPath, "utf-8"));
-  const layer = project.layers.find((l) => l.id === layerId);
-  const existing = layer?.regions?.find((r) => parseProjectAddress(r.start) === start);
-
-  return {
-    op: "region.set",
-    id: existing?.id ?? newId("rgn"),
-    layerId,
-    start,
-    end,
-    kind,
-    name,
-  };
+export function openProject(projectPath: string): ProjectEditor {
+  return new ProjectEditor(projectPath);
 }

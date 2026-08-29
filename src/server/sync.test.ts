@@ -4,8 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocket } from "ws";
-import { ProjectSessionStore } from "./session-store.js";
-import { FileStorage, pathsFor } from "../store/index.js";
+import { FileStorage, ProjectStore, pathsFor } from "../store/index.js";
 import { SyncServer } from "./sync.js";
 import {
   CrdtDoc,
@@ -46,7 +45,7 @@ let projectPath: string;
 const currentText = () => new FileStorage(pathsFor(projectPath)).readText();
 let http: Server;
 let sync: SyncServer;
-let store: ProjectSessionStore;
+let store: ProjectStore;
 let port: number;
 
 /** A client that mirrors the server's document over a socket. */
@@ -94,7 +93,7 @@ beforeEach(async () => {
   projectPath = join(dir, "test.re64");
   writeFileSync(projectPath, PROJECT, "utf-8");
 
-  store = new ProjectSessionStore(new FileStorage(pathsFor(projectPath)));
+  store = new ProjectStore(new FileStorage(pathsFor(projectPath)));
   sync = new SyncServer({ store, idleMs: 50, writeMs: 20 });
   http = createServer();
   http.on("upgrade", (req, socket, head) => sync.handleUpgrade(req, socket, head));
