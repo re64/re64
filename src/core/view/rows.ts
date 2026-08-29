@@ -18,6 +18,7 @@ import {
   InstructionIndex,
   LoadedProject,
   parseProjectAddress,
+  RegionKind,
 } from "../index.js";
 import { ArrowSpan, allocateArrowLanes, renderArrowGutter } from "./arrows.js";
 
@@ -251,8 +252,12 @@ export function analyze(
 
   const bytesColumn = (bytes: number[]) => bytes.map(hex2).join(" ");
 
+  /** Raised where the walk fails to advance; see the guard at the loop foot. */
+  const walkWarnings: string[] = [];
+
   let addr = rangeStart;
   while (addr < rangeEnd) {
+    const addrAtStart = addr;
     const instr = index.get(addr);
 
     if (instr) {
@@ -292,8 +297,9 @@ export function analyze(
     }
 
     const kind = map.getKindAt(addr) ?? "data";
+    const strategy = rowStrategy(kind);
 
-    if (kind === "jumptable") {
+    if (strategy === "word") {
       emitLabels(addr);
       const lo = map.readByte(addr);
       const hi = map.readByte(addr + 1);
@@ -321,7 +327,7 @@ export function analyze(
 
     // Data and text regions: accumulate up to 8 bytes per row, breaking at
     // labels, region boundaries, and decoded instructions.
-    const isText = kind === "text";
+    const isText = strategy === "text";
     const bytes: number[] = [];
     let lineStart = addr;
 
@@ -339,10 +345,9 @@ export function analyze(
     };
 
     while (addr < rangeEnd && !index.has(addr)) {
-      const currentKind = map.getKindAt(addr) ?? "data";
-      if (isText ? currentKind !== "text" : currentKind === "text" || currentKind === "jumptable") {
-        break;
-      }
+      // Stop where a different strategy takes over, so every byte in the range
+      // is claimed by exactly one branch of the outer dispatch.
+      if (rowStrategy(map.getKindAt(addr) ?? "data") !== strategy) break;
       if (bytes.length > 0 && allLabels.hasLabelAt(addr)) break;
 
       const byte = map.readByte(addr);
@@ -361,6 +366,16 @@ export function analyze(
       }
     }
     flush();
+
+    // Every branch above is meant to consume at least one byte. If none did,
+    // something is unhandled: step over it rather than spinning forever, and
+    // say so, because silence here would look like a hang.
+    if (addr === addrAtStart) {
+      walkWarnings.push(
+        `${hex4(addr)}: could not render (region kind "${kind}"); skipped one byte`
+      );
+      addr++;
+    }
   }
 
   const warnings = result.warnings.map((w) => {
@@ -373,6 +388,8 @@ export function analyze(
         return `$${hex4(w.address)}: overlaps instruction at $${hex4(w.existingAddress)}`;
     }
   });
+
+  warnings.push(...walkWarnings);
 
   const { arrows: arrowSpans, demoted } = allocateArrowLanes(
     result.references,
@@ -394,6 +411,34 @@ export function analyze(
       arrowsDemoted: demoted,
     },
   };
+}
+
+/**
+ * How a region kind is rendered.
+ *
+ * Exhaustive on purpose: adding a `RegionKind` without deciding how to render
+ * it fails to compile rather than falling through at runtime. The walk below
+ * dispatches on the strategy rather than on the kind, so the outer branch and
+ * the inner accumulator cannot disagree about who handles what — which is
+ * exactly how an unhandled kind used to leave the address un-advanced.
+ */
+type RowStrategy = "word" | "text" | "bytes";
+
+function rowStrategy(kind: RegionKind): RowStrategy {
+  switch (kind) {
+    case "jumptable":
+      return "word";
+    case "text":
+      return "text";
+    case "data":
+    case "code":
+    case "unknown":
+      return "bytes";
+    default: {
+      const unhandled: never = kind;
+      throw new Error(`unhandled region kind: ${String(unhandled)}`);
+    }
+  }
 }
 
 /** The address an operand refers to, if it refers to one at all. */

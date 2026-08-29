@@ -67,6 +67,22 @@ export interface Project {
   entryPoints?: (number | string)[];
 }
 
+/**
+ * Valid values for the string-typed fields a project file can set.
+ *
+ * These are user-written, so they are checked here rather than deeper down:
+ * a typo should name the offending region, not surface as a crash inside the
+ * render walk.
+ */
+const REGION_KINDS: readonly RegionKind[] = [
+  "code",
+  "data",
+  "text",
+  "jumptable",
+  "unknown",
+];
+const LABEL_TYPES: readonly LabelType[] = ["entry", "function", "code", "address"];
+
 /** Parse an address that may be a number or hex string */
 export function parseProjectAddress(value: number | string): number {
   if (typeof value === "number") {
@@ -146,6 +162,28 @@ export function parseProject(json: string): Project {
       }
       if (layer.regions?.length) {
         throw new Error("Layer type 'symbols' cannot have regions: it supplies no bytes");
+      }
+    }
+  }
+
+  for (const [index, layer] of project.layers.entries()) {
+    const where = layer.path ?? layer.name ?? `layer ${index}`;
+
+    for (const region of layer.regions ?? []) {
+      if (!REGION_KINDS.includes(region.kind)) {
+        throw new Error(
+          `Unknown region kind "${region.kind}" at ${String(region.start)} in ${where}. ` +
+            `Expected one of: ${REGION_KINDS.join(", ")}`
+        );
+      }
+    }
+
+    for (const label of layer.labels ?? []) {
+      if (label.type !== undefined && !LABEL_TYPES.includes(label.type)) {
+        throw new Error(
+          `Unknown label type "${label.type}" for "${label.name}" in ${where}. ` +
+            `Expected one of: ${LABEL_TYPES.join(", ")}`
+        );
       }
     }
   }

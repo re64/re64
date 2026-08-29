@@ -352,4 +352,12 @@ program
     }
   });
 
-program.parse();
+// Action handlers run synchronously during parse, so a bad project file or an
+// unreadable path surfaces here. Report it as a message: a stack trace is noise
+// when the fault is in the input rather than the code.
+try {
+  program.parse();
+} catch (err) {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exit(1);
+}

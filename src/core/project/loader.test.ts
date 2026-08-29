@@ -147,6 +147,59 @@ describe("project schema", () => {
     expect(() => parseProject(legacy)).toThrow(/no longer supported/);
   });
 
+  it("names the offending region when its kind is unknown", () => {
+    // A typo in a hand-written file should say what is wrong and where, not
+    // surface later as a crash inside the render walk.
+    const bad = JSON.stringify({
+      layers: [
+        {
+          type: "prg",
+          path: "game.prg",
+          regions: [{ start: "$1000", end: "$1010", kind: "sprite" }],
+        },
+      ],
+    });
+
+    expect(() => parseProject(bad)).toThrow(/Unknown region kind "sprite".*\$1000.*game\.prg/);
+  });
+
+  it("names the offending label when its type is unknown", () => {
+    const bad = JSON.stringify({
+      layers: [
+        {
+          type: "prg",
+          path: "game.prg",
+          labels: [{ address: "$1000", name: "Start", type: "subroutine" }],
+        },
+      ],
+    });
+
+    expect(() => parseProject(bad)).toThrow(/Unknown label type "subroutine".*Start/);
+  });
+
+  it("accepts every documented region kind and label type", () => {
+    const ok = JSON.stringify({
+      layers: [
+        {
+          type: "prg",
+          path: "game.prg",
+          regions: ["code", "data", "text", "jumptable", "unknown"].map((kind, i) => ({
+            start: 0x1000 + i * 16,
+            end: 0x1000 + i * 16 + 8,
+            kind,
+          })),
+          labels: ["entry", "function", "code", "address"].map((type, i) => ({
+            address: 0x1000 + i,
+            name: `l${i}`,
+            type,
+          })),
+        },
+      ],
+    });
+
+    expect(() => parseProject(ok)).not.toThrow();
+  });
+
   it("requires a symbol layer to carry labels and no regions", () => {
     const empty = JSON.stringify({ layers: [{ type: "symbols" }] });
     expect(() => parseProject(empty)).toThrow(/non-empty 'labels'/);
