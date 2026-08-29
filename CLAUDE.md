@@ -891,22 +891,36 @@ Two things fix it, and both are needed:
   tell "they added this" from "we deleted it". A watcher normally absorbs first,
   but correctness must not depend on one running.
 
-Noticing another writer is `ProjectStorage.watch`, and **both implementations
-poll** — SQLite for `PRAGMA data_version`, which changes only when a *different*
-connection commits, and the filesystem one for mtime and size.
+**Only a database is watched.** `SqliteStorage` polls `PRAGMA data_version`,
+which changes only when a *different* connection commits. `FileStorage.watch`
+does nothing, deliberately: a project file has one writer, and a `.re64` is now
+the *exported* form, so watching one would be a timer in every server process
+looking for hand-edits to a generated file that the next `re64 export`
+overwrites. Two processes on one project is what the database is for, rather
+than something to approximate with `stat`.
 
-Polling is the second answer, not the first. `fs.watch` was tried and is a trap
-here: a watch on a path follows the inode, and every writer replaces it by
-renaming a temporary file over the target, so the watch goes deaf after the
-first write — including its own. Watching the directory instead fixes that and
-inherits the rest: one save reports several times, needing a debounce tuned by
-guess; the reported filename is null on some platforms; and the latency depends
-on machine load, which showed up as tests that failed a few percent of the time
-rather than tests that were wrong. A `stat` every 150ms has none of that.
+The filesystem was watched once, and the sequence is worth keeping because each
+step looked like the fix. `fs.watch` on a path follows the inode, and every
+writer replaces it by renaming a temporary file over the target — so the watch
+went deaf after the first write, including its own. Watching the *directory*
+fixed that and inherited the rest: one save reports several times, needing a
+debounce tuned by guess; the reported filename is null on some platforms; and
+the latency tracks machine load, which surfaced as a test failing about one full
+run in four while passing every time alone. Polling removed the flakiness and
+left the question of why any of it was there.
 
-This is affordable because **correctness does not depend on it** — a write folds
-in external changes whether or not anything is watching. Watching is only
-liveness: how soon a connected browser sees an edit someone made elsewhere.
+Not watching is affordable because **correctness does not depend on it** — a
+write folds in whatever changed underneath it either way. Only latency differs:
+a database learns immediately, a file at the next write.
+
+**Fold in before applying, not after.** Removing the watcher exposed an ordering
+bug it had been hiding. `runOps` applied its operations to the document and
+reconciled afterwards, so a change someone else had made to the same label
+landed on top of the edit being made — reconciliation cannot tell that edit from
+anything else the document is missing. With a watcher running the poll usually
+absorbed first and hid it; between polls, on either store, it did not. Absorbing
+first also means an inverse is computed against the state its operation is
+actually applied to.
 
 **Undo is scoped to its author.** The record is shared, so an unscoped `re64
 undo` let someone at the CLI silently revert what a browser user had just done.

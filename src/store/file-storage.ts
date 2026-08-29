@@ -7,7 +7,7 @@
  * against.
  */
 
-import { appendFileSync, existsSync, readFileSync, statSync, unlinkSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, unlinkSync } from "node:fs";
 import { writeFileAtomic } from "../fsutil.js";
 import { Change, decodeChanges, encodeChanges } from "../core/index.js";
 import {
@@ -69,9 +69,6 @@ function unframe(buffer: Buffer): StoredUpdate[] {
   return updates;
 }
 
-/** Frequent enough to feel immediate, rare enough to cost nothing. */
-const POLL_MS = 150;
-
 export class FileStorage implements ProjectStorage {
   constructor(readonly paths: SessionPaths) {}
 
@@ -119,41 +116,23 @@ export class FileStorage implements ProjectStorage {
   }
 
   /**
-   * Poll, rather than subscribe to filesystem events.
+   * Does nothing, on purpose.
    *
-   * `fs.watch` was the obvious choice and the wrong one. A watch on a path
-   * follows the inode, and every writer here replaces it by renaming a
-   * temporary file over the target, so the watch goes deaf after the first
-   * write — including its own. Watching the directory instead fixes that but
-   * inherits the rest: a single save reports several times, needing a debounce
-   * tuned by guess; the event name is null on some platforms; and how long any
-   * of it takes depends on machine load, which made the tests flaky rather than
-   * wrong.
+   * A project file has one writer. Watching it was how the pre-database
+   * arrangement let a server notice the CLI editing the same file, and a
+   * database is what replaced that: two processes on one store is what SQLite
+   * is for, rather than something to approximate with `stat`.
    *
-   * Polling has none of that, costs one `stat` every 150ms, and is what the
-   * SQLite store does with `data_version` — so both answer "did someone else
-   * write?" the same way.
+   * There is also less and less to watch. A `.re64` is now the *exported* form,
+   * so this would be a timer in every server process looking for hand-edits to
+   * a generated file — which the next `re64 export` overwrites anyway.
+   *
+   * Nothing is at risk: `writeFile` folds in whatever changed underneath it
+   * before deciding what to write, so a change made elsewhere is picked up at
+   * the next write rather than lost. Only the latency goes.
    */
-  watch(onChange: () => void): () => void {
-    const stamp = () => {
-      try {
-        const { mtimeMs, size } = statSync(this.paths.project);
-        return `${mtimeMs}:${size}`;
-      } catch {
-        return ""; // Mid-rename, or gone; the next poll settles it.
-      }
-    };
-
-    let seen = stamp();
-    const timer = setInterval(() => {
-      const now = stamp();
-      if (now === seen || now === "") return;
-      seen = now;
-      onChange();
-    }, POLL_MS);
-    timer.unref?.();
-
-    return () => clearInterval(timer);
+  watch(_onChange: () => void): () => void {
+    return () => {};
   }
 
   readOps(): Change[] {

@@ -245,6 +245,13 @@ export class ProjectStore {
     if (ops.length === 0) return { applied: 0, descriptions: [] };
 
     return this.storage.transaction(() => {
+      // Learn what anyone else did *before* applying ours, not after. Applying
+      // first and reconciling second lets their change land on top of the edit
+      // being made, because reconciliation cannot tell it from anything else
+      // the document is missing. It also means inverses are computed against
+      // the state the operation is actually applied to.
+      this.absorb(this.storage.readText());
+
       let text = this.storage.readText();
       const changes: Change[] = [];
       for (const op of ops) {
@@ -310,6 +317,7 @@ export class ProjectStore {
    */
   private applyThroughDocument(ops: readonly Op[], author: string): void {
     const doc = this.document();
+    this.absorb(this.storage.readText());
     for (const op of ops) applyOpToDoc(doc, op, author);
     this.writeFile();
   }

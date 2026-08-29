@@ -2,21 +2,22 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FileStorage, ProjectStorage, ProjectStore, SqliteStorage, pathsFor } from "./index.js";
+import { FileStorage, ProjectStore, SqliteStorage, pathsFor } from "./index.js";
 import { projectFromDoc } from "../core/crdt/index.js";
 import { applyOps } from "../core/ops/index.js";
 
 /**
  * A second writer, and how the first finds out.
  *
- * `re64 label set` opens the project in its own process; so does a server
- * holding a live session. Neither owns it. Without noticing each other, the one
- * that writes second computes its change against a state the other has already
- * moved on from, and quietly undoes their work.
+ * Two processes on one project is what a database is for: `re64 label set`
+ * opens the store in its own process while a server holds a live session. A
+ * project *file* has one writer — watching one was how the pre-database
+ * arrangement approximated this, and it is not approximated any more.
  *
- * Both backing stores are exercised because they answer "someone else wrote"
- * completely differently: a filesystem reports directory events, and SQLite
- * reports `PRAGMA data_version`.
+ * What both still guarantee is that nothing is lost. A write folds in whatever
+ * changed underneath it, so a database learns immediately and a file learns at
+ * the next write. Only the latency differs; that is the whole difference, and
+ * the tests below say which is which.
  */
 
 const PROJECT = `{
@@ -38,33 +39,22 @@ const PROJECT = `{
 }
 `;
 
-interface Backend {
-  name: string;
-  create(dir: string): void;
-  open(dir: string): ProjectStorage;
-}
+let dir: string;
 
-const BACKENDS: Backend[] = [
-  {
-    name: "a file being watched",
-    create: (dir) => writeFileSync(join(dir, "test.re64"), PROJECT, "utf-8"),
-    open: (dir) => new FileStorage(pathsFor(join(dir, "test.re64"))),
-  },
-  {
-    name: "a second database connection",
-    create: (dir) => new SqliteStorage(join(dir, "test.re64db")).initialize(PROJECT, 0),
-    open: (dir) => new SqliteStorage(join(dir, "test.re64db")),
-  },
-];
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "re64-external-"));
+});
+afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+const labelNames = (s: ProjectStore) =>
+  (projectFromDoc(s.document()).layers[0].labels ?? []).map((l) => l.name);
 
 /**
- * Wait for something to become true, rather than for a fixed time.
+ * Wait for something to become true rather than for a fixed time.
  *
- * A directory event coalesces on its own schedule and `data_version` is polled
- * on ours, so how long either takes depends on what else the machine is doing.
- * A fixed sleep tuned on an idle machine fails a few percent of the time under
- * a full suite — which is worse than a slow test, because it teaches you to
- * re-run rather than to look.
+ * How long a poll takes depends on what else the machine is doing, and a sleep
+ * tuned on an idle one fails a few percent of the time under a full suite —
+ * which is worse than a slow test, because it teaches you to re-run.
  */
 async function until(condition: () => boolean, what: string): Promise<void> {
   const deadline = Date.now() + 5_000;
@@ -75,29 +65,17 @@ async function until(condition: () => boolean, what: string): Promise<void> {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-/**
- * A fixed pause, only for asserting that something does *not* happen.
- *
- * There is no condition to poll for absence; the wait itself is the evidence.
- */
-const settle = () => new Promise((r) => setTimeout(r, 400));
+/** Only for asserting something does *not* happen; there is nothing to poll. */
+const settle = () => new Promise((r) => setTimeout(r, 300));
 
-describe.each(BACKENDS)("$name", (b) => {
-  let dir: string;
+describe("a database, which two processes may hold at once", () => {
+  const open = () => new SqliteStorage(join(dir, "test.re64db"));
+  const store = () => new ProjectStore(open());
 
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "re64-external-"));
-    b.create(dir);
-  });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
-
-  const store = () => new ProjectStore(b.open(dir));
-  const currentText = () => b.open(dir).readText();
-  const labelNames = (s: ProjectStore) =>
-    (projectFromDoc(s.document()).layers[0].labels ?? []).map((l) => l.name);
+  beforeEach(() => open().initialize(PROJECT, 0));
 
   const asSomeoneElse = (edit: (text: string) => string) => {
-    const other = b.open(dir);
+    const other = open();
     other.writeText(edit(other.readText()));
   };
 
@@ -132,10 +110,10 @@ describe.each(BACKENDS)("$name", (b) => {
       1
     );
     s.watchFile();
-    const after = currentText();
+    const after = open().readText();
     await settle();
 
-    expect(currentText()).toBe(after);
+    expect(open().readText()).toBe(after);
     expect(labelNames(s)).toEqual(["Mine", "Loop"]);
     s.stopWatching();
   });
@@ -168,34 +146,48 @@ describe.each(BACKENDS)("$name", (b) => {
   });
 });
 
-describe("a project caught mid-write", () => {
-  let dir: string;
+describe("a project file, which has one writer", () => {
+  const path = () => join(dir, "test.re64");
+  const open = () => new FileStorage(pathsFor(path()));
+  const store = () => new ProjectStore(open());
 
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "re64-external-"));
-    writeFileSync(join(dir, "test.re64"), PROJECT, "utf-8");
-  });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  beforeEach(() => writeFileSync(join(dir, "test.re64"), PROJECT, "utf-8"));
 
-  it("waits for valid JSON rather than reading a deletion into it", async () => {
-    // Only a file can be caught like this; a transaction cannot be half seen.
-    const storage = new FileStorage(pathsFor(join(dir, "test.re64")));
-    const s = new ProjectStore(storage);
+  it("is not watched", async () => {
+    // Deliberate. A `.re64` is the exported form, so watching one would be a
+    // timer in every server process looking for hand-edits to a generated file
+    // that the next export overwrites. Concurrent editing is what a database
+    // is for.
+    const s = store();
     s.document();
     s.watchFile();
 
-    storage.writeText('{ "layers": [ {');
+    open().writeText(PROJECT.replace('"Loop"', '"Elsewhere"'));
     await settle();
-    expect((projectFromDoc(s.document()).layers[0].labels ?? []).length).toBe(2);
 
-    storage.writeText(PROJECT.replace('"Loop"', '"Recovered"'));
-    await until(
-      () =>
-        (projectFromDoc(s.document()).layers[0].labels ?? []).some(
-          (l) => l.name === "Recovered"
-        ),
-      "the valid content to be picked up"
-    );
+    expect(labelNames(s)).not.toContain("Elsewhere");
     s.stopWatching();
+  });
+
+  it("still loses nothing, because the next write folds the change in", async () => {
+    // This is what makes not watching affordable: latency, not correctness.
+    const s = store();
+    s.runOps(
+      [{ op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "Mine",
+         type: "function" }],
+      "me",
+      1
+    );
+
+    open().writeText(open().readText().replace('"Loop"', '"Elsewhere"'));
+    s.runOps(
+      [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Later" }],
+      "me",
+      2
+    );
+
+    // The edit made elsewhere survived a write that never saw it happen.
+    expect(labelNames(s)).toContain("Later");
+    expect(open().readText()).toContain("Mine");
   });
 });
