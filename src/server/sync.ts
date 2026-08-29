@@ -48,6 +48,15 @@ export class SyncServer {
 
   constructor(private readonly options: SyncOptions) {
     this.wss.on("connection", (socket, request) => this.join(socket, request));
+
+    // Relay every change to the shared document, not only the ones that
+    // arrived over a socket. An HTTP write is applied to the same document as
+    // a synthetic client, and connected sessions have to see it or they carry
+    // on from a state the server has already moved past.
+    options.store.onUpdate((update, origin) => {
+      const from = origin instanceof WebSocket ? origin : undefined;
+      this.broadcast(frame(Message.Update, update), from);
+    });
   }
 
   /** Adopt an HTTP upgrade for the sync endpoint. */
@@ -72,16 +81,11 @@ export class SyncServer {
       if (data.length < 1) return;
       const payload = new Uint8Array(data.subarray(1));
 
-      if (data[0] === Message.Sync) {
-        // What the client had that we did not; merge and tell everyone.
+      // Merging tags the update with this socket, and the document observer
+      // relays it onward to everyone else. One broadcast path, so an HTTP
+      // write and a socket edit are treated the same.
+      if (data[0] === Message.Sync || data[0] === Message.Update) {
         this.options.store.merge(payload, socket);
-        this.broadcast(frame(Message.Update, payload), socket);
-        return;
-      }
-
-      if (data[0] === Message.Update) {
-        this.options.store.merge(payload, socket);
-        this.broadcast(frame(Message.Update, payload), socket);
       }
     });
 
@@ -93,7 +97,7 @@ export class SyncServer {
     socket.on("error", () => socket.close());
   }
 
-  private broadcast(data: Buffer, except: WebSocket): void {
+  private broadcast(data: Buffer, except?: WebSocket): void {
     for (const client of this.clients) {
       if (client !== except && client.readyState === WebSocket.OPEN) client.send(data);
     }

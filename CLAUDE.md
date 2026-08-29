@@ -261,6 +261,21 @@ Persistence serves three separate purposes, and they want different answers:
 | The project | JSON | last state | canonical |
 | History | JSON, one entry per session | linear | durable |
 
+**A whole-document PUT conflicts rather than merges.** An agent may send JSON
+instead of operations, and it is routed through the shared document as a
+synthetic client so connected sessions see it. But a whole document says "make
+it look like this", which would revert a concurrent edit it never knew about —
+so a stale one gets a 409 telling it to reload or send operations instead. The
+version it is checked against is the **document**, not the file: during a live
+session the file is stale by design, and comparing it would report "unchanged"
+throughout and defeat the check.
+
+**The file has one writer.** Both the socket and HTTP paths write it from the
+whole document, never from one caller's own changes, or it would land in a mixed
+state with an HTTP write on disk and a socket edit merged a moment earlier
+missing. Writing the file and recording history are separate: a save is not a
+session, and one history entry per keystroke would defeat the point.
+
 Merge stays server-side, which holds only while the API serves *resolved state*
 rather than broadcasting per-user logs. The moment clients receive raw logs they
 need merge logic too, and the same code has to exist in both places.

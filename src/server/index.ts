@@ -26,16 +26,6 @@ import { normalizeProjectText, parseProject } from "../core/index.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(__dirname, "../../public");
 
-/**
- * Identifies the file's current contents.
- *
- * A save carries the version it was based on, so an edit made in another editor
- * while the UI was open is a conflict rather than a silent overwrite.
- */
-function versionOf(text: string): string {
-  return createHash("sha256").update(text).digest("hex").slice(0, 12);
-}
-
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -65,9 +55,21 @@ export interface ServerOptions {
   projectPath: string;
   port: number;
   host: string;
+  /** Suppress the startup banner; tests bind ephemeral ports in bulk. */
+  quiet?: boolean;
 }
 
-export function startServer(options: ServerOptions): void {
+/** A running server, so callers (and tests) can shut one down cleanly. */
+export interface RunningServer {
+  /** Resolves once the socket is bound and connections will be accepted. */
+  ready: Promise<void>;
+  /** The port actually bound, which differs from the request when 0 was asked for. */
+  port: number;
+  /** Flatten any open session and stop listening. */
+  close(): Promise<void>;
+}
+
+export function startServer(options: ServerOptions): RunningServer {
   const { projectPath, port, host } = options;
 
   if (!existsSync(projectPath)) {
@@ -93,7 +95,7 @@ export function startServer(options: ServerOptions): void {
       // --- API ---------------------------------------------------------
       if (path === "/api/project" && req.method === "GET") {
         const raw = readFileSync(projectPath, "utf-8");
-        return sendJson(res, 200, { path: projectPath, raw, version: versionOf(raw) });
+        return sendJson(res, 200, { path: projectPath, raw, version: store.version() });
       }
 
       if (path === "/api/project" && req.method === "PUT") {
@@ -103,12 +105,16 @@ export function startServer(options: ServerOptions): void {
           baseVersion?: string;
         };
 
-        const current = versionOf(readFileSync(projectPath, "utf-8"));
+        // Checked against the document, not the file: during a live session the
+        // file is stale by design, so comparing it would let a whole-document
+        // write silently overwrite edits that had already merged.
+        const current = store.version();
         if (baseVersion !== undefined && baseVersion !== current) {
           return sendJson(res, 409, {
             error:
-              "The project file changed since it was loaded. Reload to pick up " +
-              "the change, or your edits will overwrite it.",
+              "The project changed since it was loaded — someone else edited it. " +
+              "Reload to pick up their changes, or send operations instead of a " +
+              "whole document to merge with them.",
             version: current,
           });
         }
@@ -123,11 +129,11 @@ export function startServer(options: ServerOptions): void {
         for (const op of ops) applyOpToDoc(doc, op, "http");
         store.addAuthor("http");
 
-        const text = normalizeProjectText(
-          ops.length ? applyOps(readFileSync(projectPath, "utf-8"), ops) : raw
-        );
-        writeFileSync(projectPath, text, "utf-8");
-        return sendJson(res, 200, { ok: true, version: versionOf(text), applied: ops.length });
+        // Write from the whole document, so the file reflects socket edits that
+        // merged alongside this one. History stays session-scoped: a save is
+        // not a session, and one entry per keystroke would defeat the point.
+        store.writeFile();
+        return sendJson(res, 200, { ok: true, version: store.version(), applied: ops.length });
       }
 
       // Raw bytes for a layer, so the browser can build the memory map and
@@ -202,10 +208,28 @@ export function startServer(options: ServerOptions): void {
     });
   }
 
-  server.listen(port, host, () => {
-    console.log(`re64 ui   http://${host}:${port}`);
-    console.log(`project   ${projectPath}`);
+  const ready = new Promise<void>((resolve) => {
+    server.listen(port, host, () => {
+      if (!options.quiet) {
+        const bound = (server.address() as { port: number }).port;
+        console.log(`re64 ui   http://${host}:${bound}`);
+        console.log(`project   ${projectPath}`);
+      }
+      resolve();
+    });
   });
+
+  return {
+    ready,
+    get port() {
+      return (server.address() as { port: number } | null)?.port ?? port;
+    },
+    async close() {
+      sync.flattenNow();
+      sync.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
 }
 
 // Invoked directly: re64-server <project.re64> [--port N]

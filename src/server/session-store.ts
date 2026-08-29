@@ -19,9 +19,11 @@
  * hand-declared regions — a whole-file diff standing in for a one-line edit.
  */
 
+import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import {
   Change,
+  Op,
   applyOps,
   diffProjects,
   describeOp,
@@ -89,6 +91,7 @@ export function pathsFor(projectPath: string): SessionPaths {
 export class ProjectSessionStore {
   private doc: CrdtDoc | undefined;
   private readonly authors = new Set<string>();
+  private readonly listeners: ((update: Uint8Array, origin: unknown) => void)[] = [];
   private dirty = false;
 
   constructor(private readonly paths: SessionPaths) {}
@@ -116,9 +119,34 @@ export class ProjectSessionStore {
       if (origin === "recovery") return;
       appendFileSync(this.paths.log, frameUpdate(update));
       this.dirty = true;
+      for (const listener of this.listeners) listener(update, origin);
     });
 
     return this.doc;
+  }
+
+  /**
+   * Watch every change to the shared document.
+   *
+   * Registered before the document exists, so a listener added at construction
+   * still sees the first edit.
+   */
+  onUpdate(listener: (update: Uint8Array, origin: unknown) => void): void {
+    this.listeners.push(listener);
+  }
+
+  /**
+   * Identifies the content the document currently holds.
+   *
+   * Not the file: during a live session the file is stale by design, so a
+   * caller checking it would think nothing had changed and overwrite work that
+   * had merged in the meantime.
+   */
+  version(): string {
+    return createHash("sha256")
+      .update(JSON.stringify(projectFromDoc(this.document())))
+      .digest("hex")
+      .slice(0, 12);
   }
 
   /** Note who is editing, for the history entry. */
@@ -140,29 +168,45 @@ export class ProjectSessionStore {
   }
 
   /**
-   * Write the session into the project file and record one history entry.
+   * Bring the project file up to date with the document.
+   *
+   * The file is written from the *whole* document rather than from any one
+   * caller's changes, so it never lands in a mixed state where an HTTP write
+   * is on disk but a socket edit merged a moment earlier is not.
+   *
+   * The operations are applied line by line rather than the document being
+   * written out: the document knows the content, not which labels a blank line
+   * grouped or what order regions were declared in.
+   *
+   * Returns what changed, so a caller can decide whether it is worth recording.
+   */
+  writeFile(): Op[] {
+    const doc = this.document();
+    const text = readFileSync(this.paths.project, "utf-8");
+    const ops = diffProjects(parseProject(text), projectFromDoc(doc));
+    if (ops.length > 0) writeFileSync(this.paths.project, applyOps(text, ops), "utf-8");
+    return ops;
+  }
+
+  /**
+   * End the session: write the file and record one history entry.
    *
    * Returns the entry, or undefined when nothing changed — an idle session
    * should leave no trace.
+   *
+   * Building the document rather than assuming it exists matters: a process
+   * that starts only to flatten a crashed session has never touched it, and
+   * returning early would discard the very work the log was keeping safe.
    */
   flatten(now: number): HistoryEntry | undefined {
-    // Build the document rather than assume it exists: a process that starts
-    // only to flatten a crashed session has never touched it, and returning
-    // early here would discard the very work the log was keeping safe.
-    const doc = this.document();
+    this.document();
     if (!this.dirty) return undefined;
 
-    const text = readFileSync(this.paths.project, "utf-8");
-    const before = parseProject(text);
-    const after = projectFromDoc(doc);
-    const ops = diffProjects(before, after);
-
+    const ops = this.writeFile();
     if (ops.length === 0) {
       this.discardLog();
       return undefined;
     }
-
-    writeFileSync(this.paths.project, applyOps(text, ops), "utf-8");
 
     const entry: HistoryEntry = {
       at: now,
