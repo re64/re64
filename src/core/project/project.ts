@@ -75,6 +75,17 @@ export interface Project {
   layers: ProjectLayer[];
   /** Manual entry points (addresses) */
   entryPoints?: (number | string)[];
+  /**
+   * Which label to show where several share an address, by label id.
+   *
+   * Keyed by address, so "one primary per address" is structural rather than a
+   * flag several labels could each set. Project level rather than per-layer,
+   * because two layers can hold labels at the same address.
+   *
+   * An id that no longer exists means "no primary" and falls back to rank, so
+   * deleting a promoted label needs no cleanup.
+   */
+  primaryLabels?: Record<string, string>;
 }
 
 /**

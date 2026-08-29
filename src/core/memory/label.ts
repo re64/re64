@@ -58,9 +58,22 @@ export const LABEL_RANK: Record<LabelSource["kind"], number> = {
   auto: 0,
 };
 
-/** Sort labels so the highest-ranked comes first, stably. */
-function byRank(a: Label, b: Label): number {
-  return LABEL_RANK[b.source.kind] - LABEL_RANK[a.source.kind];
+/**
+ * Which label wins at an address, when several sit there.
+ *
+ * Order: an explicit primary, then source rank, then id. The last step matters
+ * more than it looks — comparing rank alone leaves equal-ranked labels in
+ * insertion order, which differs between clients that declared them in
+ * different orders, so the same data would resolve to different names. Id is
+ * used rather than name because a rename should not silently move the primary.
+ */
+function compareLabels(a: Label, b: Label, primaryId?: string): number {
+  if (primaryId !== undefined) {
+    if (a.id === primaryId) return -1;
+    if (b.id === primaryId) return 1;
+  }
+  const rank = LABEL_RANK[b.source.kind] - LABEL_RANK[a.source.kind];
+  return rank !== 0 ? rank : a.id.localeCompare(b.id);
 }
 
 /** Creates a label from the built-in platform symbol set */
@@ -178,6 +191,28 @@ export class LabelIndex {
   private byAddress = new Map<number, Label[]>();
   private all: Label[] = [];
 
+  /**
+   * Explicit primary label per address, by id.
+   *
+   * A separate index rather than a flag on each label, so "one primary per
+   * address" is a single map entry. Two clients promoting different labels
+   * write the same key and converge; a flag on each would leave both true,
+   * which is a multi-object invariant nothing could repair.
+   *
+   * A dangling id — the label was deleted — means no primary, and resolution
+   * falls back to rank. That self-heals rather than needing a cleanup pass.
+   */
+  private primary = new Map<number, string>();
+
+  setPrimaryLabels(primary: ReadonlyMap<number, string>): void {
+    this.primary = new Map(primary);
+  }
+
+  /** The label id explicitly promoted at an address, if any. */
+  primaryAt(address: number): string | undefined {
+    return this.primary.get(address);
+  }
+
   addLabel(label: Label): void {
     this.all.push(label);
     const existing = this.byAddress.get(label.address);
@@ -197,7 +232,9 @@ export class LabelIndex {
   /** Labels at an address, highest priority first. */
   getLabelsAt(address: number): readonly Label[] {
     const labels = this.byAddress.get(address);
-    return labels ? [...labels].sort(byRank) : [];
+    if (!labels) return [];
+    const primaryId = this.primary.get(address);
+    return [...labels].sort((a, b) => compareLabels(a, b, primaryId));
   }
 
   /** Check if there's any label at an address */
@@ -227,10 +264,10 @@ export class LabelIndex {
    * @returns The resolved label with offset, or undefined if no match
    */
   resolve(address: number, tolerance: number = 0): ResolvedLabel | undefined {
-    // First, try exact match — highest rank wins, not insertion order
+    // First, try exact match — explicit primary, then rank, then id
     const exact = this.byAddress.get(address);
     if (exact && exact.length > 0) {
-      return { label: [...exact].sort(byRank)[0], offset: 0 };
+      return { label: this.getLabelsAt(address)[0], offset: 0 };
     }
 
     // If no tolerance, we're done

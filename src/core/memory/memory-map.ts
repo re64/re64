@@ -14,6 +14,15 @@ export interface ReadResult {
 export class MemoryMap {
   private layers: Layer[] = [];
 
+  /**
+   * Project-level choice of which label to show at an address.
+   *
+   * Not per-layer: two layers can hold labels at one address, so the choice is
+   * a display preference over the whole map rather than an annotation on any
+   * one layer's content.
+   */
+  primaryLabels = new Map<number, string>();
+
   getLayers(): readonly Layer[] {
     return this.layers;
   }
@@ -91,6 +100,7 @@ export class MemoryMap {
       index.addLabels(layer.getLabels());
       index.addLabels(layer.regions.generateLabels());
     }
+    index.setPrimaryLabels(this.primaryLabels);
 
     return index;
   }

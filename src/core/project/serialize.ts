@@ -63,6 +63,14 @@ export function formatProject(project: Project): string {
     body.push(`  "entryPoints": [${project.entryPoints.map((e) => JSON.stringify(e)).join(", ")}]`);
   }
 
+  const primary = Object.entries(project.primaryLabels ?? {});
+  if (primary.length) {
+    const entries = primary
+      .map(([address, id]) => `    ${JSON.stringify(address)}: ${JSON.stringify(id)}`)
+      .join(",\n");
+    body.push(`  "primaryLabels": {\n${entries}\n  }`);
+  }
+
   lines.push(body.join(",\n"));
   lines.push("}");
   return lines.join("\n") + "\n";

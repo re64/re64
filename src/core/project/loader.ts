@@ -124,5 +124,9 @@ export function buildMemoryMap(
     map.addLayer(layer);
   });
 
+  for (const [address, labelId] of Object.entries(project.primaryLabels ?? {})) {
+    map.primaryLabels.set(parseProjectAddress(address), labelId);
+  }
+
   return { project, map, prgEntries, userLabels, layers };
 }
