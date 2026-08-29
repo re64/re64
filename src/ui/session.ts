@@ -11,16 +11,19 @@
  */
 
 import {
+  Change,
   LoadedProject,
+  Op,
+  applyOp,
   blobPaths,
   buildMemoryMap,
-  deleteLabel,
+  describeOp,
+  invertOp,
   makeFileLoader,
+  newId,
   parseProject,
   ProjectLabel,
   resolveOwningLayer,
-  upsertLabel,
-  newId,
 } from "../core/index.js";
 
 export class ProjectSession {
@@ -28,7 +31,9 @@ export class ProjectSession {
     public raw: string,
     private version: string,
     public loaded: LoadedProject,
-    private readonly blobs: Map<string, Uint8Array>
+    private readonly blobs: Map<string, Uint8Array>,
+    /** Edits made this session, each with the operation that undoes it. */
+    private changes: Change[] = []
   ) {}
 
   /** Fetch the project and every byte it references, then build the map. */
@@ -74,6 +79,20 @@ export class ProjectSession {
     return resolveOwningLayer(this.loaded, address);
   }
 
+  /** The id of the layer that owns an address. */
+  private layerIdFor(address: number): string {
+    const index = this.layerFor(address);
+    if (index === undefined) {
+      throw new Error(
+        `No layer owns $${address.toString(16).toUpperCase()}. Add a layer of ` +
+          `type "symbols" to name addresses outside the loaded bytes.`
+      );
+    }
+    const id = this.loaded.project.layers[index].id;
+    if (!id) throw new Error("Project has no ids; run: re64 migrate");
+    return id;
+  }
+
   /**
    * Apply a text edit and rebuild the model.
    *
@@ -86,29 +105,82 @@ export class ProjectSession {
     this.raw = next;
   }
 
+  /**
+   * Run operations, recording each with the inverse that undoes it.
+   *
+   * Inverses are computed as the batch runs, because each has to see the state
+   * its own operation saw.
+   */
+  async run(ops: readonly Op[]): Promise<void> {
+    let text = this.raw;
+    const recorded: Change[] = [];
+    for (const op of ops) {
+      recorded.push({ op, inverse: invertOp(text, op), at: Date.now() });
+      text = applyOp(text, op);
+    }
+    await this.apply(text);
+    // A fresh edit discards anything that was undone, as every editor does.
+    this.changes = this.changes.filter((c) => !c.undone).concat(recorded);
+  }
+
+  /** What undo would revert, or undefined if there is nothing. */
+  undoDescription(): string | undefined {
+    const next = [...this.changes].reverse().find((c) => !c.undone);
+    return next && describeOp(next.op);
+  }
+
+  /** What redo would reapply. */
+  redoDescription(): string | undefined {
+    const next = [...this.changes].reverse().find((c) => c.undone);
+    return next && describeOp(next.op);
+  }
+
+  async undo(): Promise<string | undefined> {
+    for (let i = this.changes.length - 1; i >= 0; i--) {
+      if (this.changes[i].undone) continue;
+      await this.apply(applyOp(this.raw, this.changes[i].inverse));
+      this.changes[i].undone = true;
+      return describeOp(this.changes[i].op);
+    }
+    return undefined;
+  }
+
+  async redo(): Promise<string | undefined> {
+    for (let i = this.changes.length - 1; i >= 0; i--) {
+      if (!this.changes[i].undone) continue;
+      await this.apply(applyOp(this.raw, this.changes[i].op));
+      this.changes[i].undone = false;
+      return describeOp(this.changes[i].op);
+    }
+    return undefined;
+  }
+
   async setLabel(
     address: number,
     name: string,
     type: ProjectLabel["type"] | undefined
   ): Promise<void> {
-    const layer = this.layerFor(address);
-    if (layer === undefined) {
-      throw new Error(
-        `No layer owns $${address.toString(16).toUpperCase()}. Add a layer of ` +
-          `type "symbols" to name addresses outside the loaded bytes.`
-      );
-    }
-    // Reuse the id of the label already at this address; mint one otherwise, so
-    // a rename keeps the same identity rather than replacing the label.
+    // Reuse the id already at this address so a rename keeps its identity
+    // rather than replacing the label with a new one.
     const existing = this.loaded.map.getLabels().getLabelsAt(address)[0];
-    const id = existing?.id ?? newId("lbl");
-    await this.apply(upsertLabel(this.raw, id, address, name, type, layer));
+    await this.run([
+      {
+        op: "label.set",
+        id: existing?.id ?? newId("lbl"),
+        layerId: this.layerIdFor(address),
+        address,
+        name,
+        type,
+      },
+    ]);
   }
 
   async removeLabel(address: number): Promise<void> {
-    const layer = this.layerFor(address);
-    if (layer === undefined) return;
-    await this.apply(deleteLabel(this.raw, address, layer));
+    const existing = this.loaded.map.getLabels().getLabelsAt(address)[0];
+    if (!existing) return;
+    await this.run([
+      { op: "label.delete", id: existing.id, layerId: this.layerIdFor(address) },
+    ]);
   }
 
   /** Replace the whole document, as the raw JSON editor does. */

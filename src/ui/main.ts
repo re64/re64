@@ -402,6 +402,47 @@ async function edit(
   }
 }
 
+/**
+ * Undo and redo the project edits made this session.
+ *
+ * Separate from CodeMirror's own history, which covers typing in the project
+ * JSON editor. These are model edits — a rename, a region retype — and each
+ * carries the operation that reverses it.
+ */
+async function undoEdit(): Promise<void> {
+  if (!session) return;
+  const address = currentAddress();
+  const undone = await session.undo();
+  if (!undone) {
+    setStatus("Nothing to undo");
+    return;
+  }
+  render(address ?? undefined);
+  setStatus(`Undid: ${undone}`);
+  try {
+    await session.save();
+  } catch (err) {
+    setStatus(err instanceof Error ? err.message : "Could not save", true);
+  }
+}
+
+async function redoEdit(): Promise<void> {
+  if (!session) return;
+  const address = currentAddress();
+  const redone = await session.redo();
+  if (!redone) {
+    setStatus("Nothing to redo");
+    return;
+  }
+  render(address ?? undefined);
+  setStatus(`Redid: ${redone}`);
+  try {
+    await session.save();
+  } catch (err) {
+    setStatus(err instanceof Error ? err.message : "Could not save", true);
+  }
+}
+
 // --- Navigation -------------------------------------------------------
 
 function currentAddress(): number | null {
@@ -628,6 +669,8 @@ const navKeymap = keymap.of([
   { key: "n", run: () => (nameCurrentLine(), true) },
   { key: "f", run: () => (toggleFunctionOnCurrentLine(), true) },
   { key: "Escape", run: () => (endLabelEdit(), true) },
+  { key: "Mod-z", run: () => (void undoEdit(), true) },
+  { key: "Mod-Shift-z", run: () => (void redoEdit(), true) },
   {
     key: "g",
     run: () => {

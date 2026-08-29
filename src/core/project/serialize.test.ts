@@ -72,7 +72,7 @@ const blankCount = (s: string) => linesOf(s).filter((l) => l.trim() === "").leng
 
 describe("upsertLabel", () => {
   it("renames in place, changing exactly one line", () => {
-    const out = upsertLabel(PROJECT, "lbl_t8100", 0x8100, "MainLoop", undefined, 1);
+    const out = upsertLabel(PROJECT, "lbl_bbb002", 0x8100, "MainLoop", undefined, 1);
 
     // One line out, one line in: a rename, not a reformat.
     expect(diffSize(PROJECT, out)).toBe(2);
@@ -82,7 +82,7 @@ describe("upsertLabel", () => {
 
   it("preserves the blank lines that group labels", () => {
     // The whole reason this edits text rather than re-serialising JSON.
-    const out = upsertLabel(PROJECT, "lbl_t2", 0x02, "shipX", undefined, 0);
+    const out = upsertLabel(PROJECT, "lbl_aaa001", 0x02, "shipX", undefined, 0);
 
     expect(blankCount(out)).toBe(blankCount(PROJECT));
   });
@@ -110,17 +110,17 @@ describe("upsertLabel", () => {
   });
 
   it("records the default type by absence rather than writing it out", () => {
-    const typed = upsertLabel(PROJECT, "lbl_t8100", 0x8100, "Loop", "function", 1);
+    const typed = upsertLabel(PROJECT, "lbl_bbb002", 0x8100, "Loop", "function", 1);
     expect(typed).toContain(`"name": "Loop", "type": "function"`);
 
-    const cleared = upsertLabel(typed, "lbl_t8100", 0x8100, "Loop", "address", 1);
+    const cleared = upsertLabel(typed, "lbl_bbb002", 0x8100, "Loop", "address", 1);
     expect(cleared).toContain(`{ "id": "lbl_bbb002", "address": "$8100", "name": "Loop" }`);
     expect(cleared).not.toContain(`"type": "address"`);
   });
 
   it("round-trips a type change back to the original text", () => {
-    const there = upsertLabel(PROJECT, "lbl_t8100", 0x8100, "Loop", "function", 1);
-    const back = upsertLabel(there, "lbl_t8100", 0x8100, "Loop", "address", 1);
+    const there = upsertLabel(PROJECT, "lbl_bbb002", 0x8100, "Loop", "function", 1);
+    const back = upsertLabel(there, "lbl_bbb002", 0x8100, "Loop", "address", 1);
 
     expect(back).toBe(PROJECT);
   });
@@ -152,7 +152,7 @@ describe("upsertLabel on a file without ids", () => {
 
 describe("deleteLabel", () => {
   it("removes one line and leaves the grouping intact", () => {
-    const out = deleteLabel(PROJECT, 0x8100, 1);
+    const out = deleteLabel(PROJECT, "lbl_bbb002", 1);
 
     expect(diffSize(PROJECT, out)).toBe(1);
     expect(linesOf(out).length).toBe(linesOf(PROJECT).length - 1);
@@ -161,7 +161,7 @@ describe("deleteLabel", () => {
   });
 
   it("fixes the trailing comma when the last entry goes", () => {
-    const out = deleteLabel(PROJECT, 0x8200, 1);
+    const out = deleteLabel(PROJECT, "lbl_bbb003", 1);
 
     expect(() => parseProject(out)).not.toThrow();
     expect(parseProject(out).layers[1].labels!.map((l) => l.name)).toEqual([
@@ -171,12 +171,12 @@ describe("deleteLabel", () => {
   });
 
   it("leaves the text alone when the address is not there", () => {
-    expect(deleteLabel(PROJECT, 0x9999, 1)).toBe(PROJECT);
+    expect(deleteLabel(PROJECT, "lbl_missing", 1)).toBe(PROJECT);
   });
 
   it("round-trips with upsert", () => {
     const added = upsertLabel(PROJECT, "lbl_t8400", 0x8400, "Temp", undefined, 1);
-    expect(deleteLabel(added, 0x8400, 1)).toBe(PROJECT);
+    expect(deleteLabel(added, "lbl_t8400", 1)).toBe(PROJECT);
   });
 });
 

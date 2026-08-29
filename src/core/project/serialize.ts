@@ -176,6 +176,85 @@ function labelEntryLine(
   );
 }
 
+const ID_IN_LINE = /"id"\s*:\s*"([^"]+)"/;
+
+/** The id an entry line declares, or null. */
+function idOfLine(line: string): string | null {
+  return ID_IN_LINE.exec(line)?.[1] ?? null;
+}
+
+/** Line index of the entry with this id inside a span, or -1. */
+function findEntryById(lines: string[], span: ArraySpan, id: string): number {
+  for (let i = span.open + 1; i < span.close; i++) {
+    if (idOfLine(lines[i]) === id) return i;
+  }
+  return -1;
+}
+
+function regionEntryLine(
+  indent: string,
+  id: string,
+  start: number,
+  end: number,
+  kind: string,
+  name?: string,
+  comment?: string
+): string {
+  const hex = (n: number) => "$" + n.toString(16).toUpperCase().padStart(4, "0");
+  const parts = [
+    `"id": ${JSON.stringify(id)}`,
+    `"start": ${JSON.stringify(hex(start))}`,
+    `"end": ${JSON.stringify(hex(end))}`,
+    `"kind": ${JSON.stringify(kind)}`,
+  ];
+  if (name !== undefined) parts.push(`"name": ${JSON.stringify(name)}`);
+  if (comment !== undefined) parts.push(`"comment": ${JSON.stringify(comment)}`);
+  return `${indent}{ ${parts.join(", ")} }`;
+}
+
+/**
+ * Insert an entry line into an array span, in ascending order of a sort key.
+ *
+ * Shared by labels and regions: both lists are kept roughly sorted by address,
+ * and appending out of order would make diffs harder to read than they need to
+ * be.
+ */
+function insertEntry(
+  lines: string[],
+  span: ArraySpan,
+  line: string,
+  sortKey: number,
+  keyOf: (line: string) => number | null
+): void {
+  let insertAt = -1;
+  for (let i = span.open + 1; i < span.close; i++) {
+    const key = keyOf(lines[i]);
+    if (key !== null && key > sortKey) {
+      insertAt = i;
+      break;
+    }
+  }
+
+  if (insertAt !== -1) {
+    // Step back over blank lines so the entry joins the group above rather
+    // than jumping the separator. Without this, undoing the deletion of an
+    // entry that sat just above a blank line puts it back on the wrong side.
+    while (insertAt > span.open + 1 && !lines[insertAt - 1].trim()) insertAt--;
+    lines.splice(insertAt, 0, line + ",");
+    return;
+  }
+
+  const last = lastEntryLine(lines, span);
+  if (last === span.open) {
+    // The array is empty: appending a comma to its opening bracket would
+    // produce "[,". Insert straight after it instead.
+    lines.splice(span.open + 1, 0, line);
+    return;
+  }
+  lines[last] = lines[last].replace(/,?\s*$/, ",");
+  lines.splice(last + 1, 0, line);
+}
+
 /** Index of the last line in the span that is an actual entry, not blank. */
 function lastEntryLine(lines: string[], span: ArraySpan): number {
   for (let i = span.close - 1; i > span.open; i--) {
@@ -220,49 +299,40 @@ export function upsertLabel(
     return formatProject(project);
   }
 
-  let done = false;
-  for (let i = span.open; i <= span.close && !done; i++) {
-    if (addressOfLine(lines[i]) !== address) continue;
+  // Identify by id: a rename changes the name, and several labels can share an
+  // address, so neither identifies the line. An entry written before ids
+  // existed is matched by address instead, and gains an id here.
+  let target = findEntryById(lines, span, id);
+  if (target < 0) {
+    for (let i = span.open + 1; i < span.close; i++) {
+      if (idOfLine(lines[i]) === null && addressOfLine(lines[i]) === address) {
+        target = i;
+        break;
+      }
+    }
+  }
 
-    let line = lines[i].replace(/"name"\s*:\s*"(?:[^"\\]|\\.)*"/, `"name": ${JSON.stringify(name)}`);
-    // A file written before ids existed self-migrates on its first edit.
+  if (target >= 0) {
+    let line = lines[target].replace(
+      /"name"\s*:\s*"(?:[^"\\]|\\.)*"/,
+      `"name": ${JSON.stringify(name)}`
+    );
     if (!/"id"\s*:/.test(line)) {
       line = line.replace(/\{\s*/, `{ "id": ${JSON.stringify(id)}, `);
     }
     if (type === "address") {
-      // "address" is the default, so record it by absence rather than writing
-      // it onto every label in the file.
+      // The default is recorded by absence, not written onto every label.
       line = line.replace(/\s*,\s*"type"\s*:\s*"[^"]*"/, "");
     } else if (type !== undefined) {
       line = /"type"\s*:/.test(line)
         ? line.replace(/"type"\s*:\s*"[^"]*"/, `"type": ${JSON.stringify(type)}`)
         : line.replace(/\s*\}/, `, "type": ${JSON.stringify(type)} }`);
     }
-    lines[i] = line;
-    done = true;
-  }
-
-  if (!done) {
+    lines[target] = line;
+  } else {
     const last = lastEntryLine(lines, span);
-    const indent = /^(\s*)/.exec(lines[last] === lines[span.open] ? "    {" : lines[last])![1];
-
-    // Insert before the first entry with a higher address, if the list is
-    // ordered around here; otherwise append after the final entry.
-    let insertAt = -1;
-    for (let i = span.open + 1; i < span.close; i++) {
-      const addr = addressOfLine(lines[i]);
-      if (addr !== null && addr > address) {
-        insertAt = i;
-        break;
-      }
-    }
-
-    if (insertAt === -1) {
-      lines[last] = lines[last].replace(/,?\s*$/, ",");
-      lines.splice(last + 1, 0, labelEntryLine(indent, id, address, name, type));
-    } else {
-      lines.splice(insertAt, 0, labelEntryLine(indent, id, address, name, type) + ",");
-    }
+    const indent = /^(\s*)/.exec(lines[last] === lines[span.open] ? "        {" : lines[last])![1];
+    insertEntry(lines, span, labelEntryLine(indent, id, address, name, type), address, addressOfLine);
   }
 
   const updated = lines.join("\n");
@@ -271,24 +341,197 @@ export function upsertLabel(
 }
 
 /** Remove the label at an address, if present. */
-export function deleteLabel(raw: string, address: number, layerIndex: number): string {
+export function deleteLabel(raw: string, id: string, layerIndex: number): string {
   const lines = raw.split("\n");
   const layer = findLayerSpan(lines, layerIndex);
   if (!layer) return raw;
   const span = findArraySpan(lines, "labels", layer.open, layer.close);
   if (!span) return raw;
 
-  for (let i = span.open + 1; i < span.close; i++) {
-    if (addressOfLine(lines[i]) !== address) continue;
+  // By id only. An un-migrated entry has no id to match, and deleting "the
+  // first line without one" would remove an arbitrary label — the caller
+  // migrates first instead.
+  const at = findEntryById(lines, span, id);
+  if (at < 0) return raw;
 
-    const wasLast = i === lastEntryLine(lines, span);
-    lines.splice(i, 1);
-    // Removing the final entry leaves a trailing comma on its predecessor.
-    if (wasLast) {
-      const newLast = lastEntryLine(lines, { open: span.open, close: span.close - 1 });
-      if (newLast > span.open) lines[newLast] = lines[newLast].replace(/,\s*$/, "");
+  const wasLast = at === lastEntryLine(lines, span);
+  lines.splice(at, 1);
+  if (wasLast) {
+    const newLast = lastEntryLine(lines, { open: span.open, close: span.close - 1 });
+    if (newLast > span.open) lines[newLast] = lines[newLast].replace(/,\s*$/, "");
+  }
+
+  const updated = lines.join("\n");
+  parseProject(updated);
+  return updated;
+}
+
+const START_IN_LINE = /"start"\s*:\s*(?:"(\$|0x)?([0-9A-Fa-f]+)"|(\d+))/;
+
+/** The start address an entry line declares, or null. */
+function startOfLine(line: string): number | null {
+  const m = START_IN_LINE.exec(line);
+  if (!m) return null;
+  if (m[3] !== undefined) return parseInt(m[3], 10);
+  return parseInt(m[2], m[1] === undefined ? 10 : 16);
+}
+
+/** Create or replace a region, identified by id. */
+export function upsertRegion(
+  raw: string,
+  layerIndex: number,
+  region: {
+    id: string;
+    start: number;
+    end: number;
+    kind: string;
+    name?: string;
+    comment?: string;
+  }
+): string {
+  const lines = raw.split("\n");
+  const layer = findLayerSpan(lines, layerIndex);
+  if (!layer) throw new Error(`No layer at index ${layerIndex}`);
+
+  const span = findArraySpan(lines, "regions", layer.open, layer.close);
+
+  // No regions array yet: a structural write adds one. Reformats the file, but
+  // only ever once per layer.
+  if (!span) {
+    const project = parseProject(raw);
+    const decl = project.layers[layerIndex];
+    (decl.regions ??= []).push({
+      id: region.id,
+      start: "$" + region.start.toString(16).toUpperCase().padStart(4, "0"),
+      end: "$" + region.end.toString(16).toUpperCase().padStart(4, "0"),
+      kind: region.kind as never,
+      ...(region.name !== undefined ? { name: region.name } : {}),
+      ...(region.comment !== undefined ? { comment: region.comment } : {}),
+    });
+    return formatProject(project);
+  }
+
+  // With no entries left, the bracket line's indent is the array's, not an
+  // entry's — nest one level in from it.
+  const last = lastEntryLine(lines, span);
+  const indent =
+    last === span.open
+      ? /^(\s*)/.exec(lines[span.open])![1] + "  "
+      : /^(\s*)/.exec(lines[last])![1];
+
+  const line = regionEntryLine(
+    indent,
+    region.id,
+    region.start,
+    region.end,
+    region.kind,
+    region.name,
+    region.comment
+  );
+
+  const at = findEntryById(lines, span, region.id);
+  if (at >= 0) {
+    // Keep whatever separator the line already carried.
+    lines[at] = line + (lines[at].trimEnd().endsWith(",") ? "," : "");
+  } else {
+    insertEntry(lines, span, line, region.start, startOfLine);
+  }
+
+  const updated = lines.join("\n");
+  parseProject(updated);
+  return updated;
+}
+
+/** Remove a region by id. */
+export function deleteRegion(raw: string, layerIndex: number, id: string): string {
+  const lines = raw.split("\n");
+  const layer = findLayerSpan(lines, layerIndex);
+  if (!layer) return raw;
+  const span = findArraySpan(lines, "regions", layer.open, layer.close);
+  if (!span) return raw;
+
+  const at = findEntryById(lines, span, id);
+  if (at < 0) return raw;
+
+  const wasLast = at === lastEntryLine(lines, span);
+  lines.splice(at, 1);
+  if (wasLast) {
+    const newLast = lastEntryLine(lines, { open: span.open, close: span.close - 1 });
+    if (newLast > span.open) lines[newLast] = lines[newLast].replace(/,\s*$/, "");
+  }
+
+  const updated = lines.join("\n");
+  parseProject(updated);
+  return updated;
+}
+
+const HEX4 = (n: number) => "$" + n.toString(16).toUpperCase().padStart(4, "0");
+
+/**
+ * Promote a label at an address, or clear the choice by passing undefined.
+ *
+ * The block is created on first use and removed when it empties, so a project
+ * that never promotes anything carries no trace of the feature.
+ */
+export function setPrimaryLabel(
+  raw: string,
+  address: number,
+  labelId: string | undefined
+): string {
+  const lines = raw.split("\n");
+  const key = HEX4(address);
+  const open = lines.findIndex((l) => /"primaryLabels"\s*:\s*\{/.test(l));
+
+  if (open === -1) {
+    if (labelId === undefined) return raw;
+    // No block yet: add one before the closing brace of the document.
+    const close = lines.length - 1 - [...lines].reverse().findIndex((l) => l.trim() === "}");
+    lines[close - 1] = lines[close - 1].replace(/,?\s*$/, ",");
+    lines.splice(close, 0,
+      `  "primaryLabels": {`,
+      `    ${JSON.stringify(key)}: ${JSON.stringify(labelId)}`,
+      `  }`);
+    const created = lines.join("\n");
+    parseProject(created);
+    return created;
+  }
+
+  let close = open;
+  let depth = 0;
+  for (let i = open; i < lines.length; i++) {
+    for (const ch of lines[i]) {
+      if (ch === "{") depth++;
+      else if (ch === "}") depth--;
     }
-    break;
+    if (depth === 0) { close = i; break; }
+  }
+
+  const at = lines.findIndex(
+    (l, i) => i > open && i < close && l.includes(JSON.stringify(key) + ":")
+  );
+
+  if (labelId === undefined) {
+    if (at === -1) return raw;
+    lines.splice(at, 1);
+    // An empty block is noise; drop it entirely.
+    const remaining = lines.slice(open + 1, close - 1).filter((l) => l.trim());
+    if (remaining.length === 0) {
+      lines.splice(open, 2);
+      const prev = open - 1;
+      if (prev >= 0) lines[prev] = lines[prev].replace(/,\s*$/, "");
+    } else {
+      const last = close - 2;
+      if (lines[last]) lines[last] = lines[last].replace(/,\s*$/, "");
+    }
+  } else if (at >= 0) {
+    lines[at] = lines[at].replace(
+      /:\s*"[^"]*"/,
+      `: ${JSON.stringify(labelId)}`
+    );
+  } else {
+    const last = close - 1;
+    lines[last] = lines[last].replace(/,?\s*$/, ",");
+    lines.splice(last + 1, 0, `    ${JSON.stringify(key)}: ${JSON.stringify(labelId)}`);
   }
 
   const updated = lines.join("\n");

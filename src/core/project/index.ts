@@ -14,6 +14,9 @@ export {
   formatProject,
   upsertLabel,
   deleteLabel,
+  upsertRegion,
+  deleteRegion,
+  setPrimaryLabel,
   migrateIds,
   normalizeProjectText,
 } from "./serialize.js";
