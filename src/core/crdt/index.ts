@@ -1,5 +1,6 @@
 export {
   BASE_CLIENT_ID,
+  CrdtDoc,
   docFromProject,
   projectFromDoc,
   encodeDoc,

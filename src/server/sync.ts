@@ -1,0 +1,132 @@
+/**
+ * The sync relay.
+ *
+ * A minimal Yjs sync protocol over WebSocket: a joining client sends what it
+ * has, the server sends back what it lacks, and from then on each update is
+ * broadcast to everyone else on the same project.
+ *
+ * The relay does not understand the schema. It moves opaque updates and lets
+ * the CRDT decide what merging means — the server still does not know what a
+ * 6502 is. Only the flatten step needs the project format, and that lives in
+ * the session store.
+ *
+ * The protocol is deliberately small rather than reusing y-websocket, because
+ * the server also has to know when a session ends in order to flatten it.
+ */
+
+import { IncomingMessage } from "node:http";
+import type { Duplex } from "node:stream";
+import { WebSocket, WebSocketServer } from "ws";
+import { ProjectSessionStore } from "./session-store.js";
+
+/** First byte of every frame. */
+const enum Message {
+  /** "Here is what I have" — sent on join, answered with the difference. */
+  Sync = 0,
+  /** "Here is a change." */
+  Update = 1,
+}
+
+export interface SyncOptions {
+  store: ProjectSessionStore;
+  /**
+   * How long after the last participant leaves before the session is flattened.
+   *
+   * A timeout rather than an explicit end: a browser tab closes without warning
+   * and an agent simply stops, so waiting for a clean goodbye would mean often
+   * never flattening. It also lets a reload rejoin the same session instead of
+   * splitting one piece of work across two history entries.
+   */
+  idleMs: number;
+  onFlatten?: (summary: string[]) => void;
+}
+
+export class SyncServer {
+  private readonly wss = new WebSocketServer({ noServer: true });
+  private readonly clients = new Set<WebSocket>();
+  private idleTimer: NodeJS.Timeout | undefined;
+
+  constructor(private readonly options: SyncOptions) {
+    this.wss.on("connection", (socket, request) => this.join(socket, request));
+  }
+
+  /** Adopt an HTTP upgrade for the sync endpoint. */
+  handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void {
+    this.wss.handleUpgrade(request, socket, head, (ws) => {
+      this.wss.emit("connection", ws, request);
+    });
+  }
+
+  private join(socket: WebSocket, request: IncomingMessage): void {
+    const author =
+      new URL(request.url ?? "/", "http://localhost").searchParams.get("author") ?? "anonymous";
+
+    this.clients.add(socket);
+    this.options.store.addAuthor(author);
+    this.cancelIdleFlatten();
+
+    // Hand the newcomer the current state; it replies with anything we lack.
+    socket.send(frame(Message.Sync, this.options.store.snapshot()));
+
+    socket.on("message", (data: Buffer) => {
+      if (data.length < 1) return;
+      const payload = new Uint8Array(data.subarray(1));
+
+      if (data[0] === Message.Sync) {
+        // What the client had that we did not; merge and tell everyone.
+        this.options.store.merge(payload, socket);
+        this.broadcast(frame(Message.Update, payload), socket);
+        return;
+      }
+
+      if (data[0] === Message.Update) {
+        this.options.store.merge(payload, socket);
+        this.broadcast(frame(Message.Update, payload), socket);
+      }
+    });
+
+    socket.on("close", () => {
+      this.clients.delete(socket);
+      if (this.clients.size === 0) this.scheduleIdleFlatten();
+    });
+
+    socket.on("error", () => socket.close());
+  }
+
+  private broadcast(data: Buffer, except: WebSocket): void {
+    for (const client of this.clients) {
+      if (client !== except && client.readyState === WebSocket.OPEN) client.send(data);
+    }
+  }
+
+  private scheduleIdleFlatten(): void {
+    this.cancelIdleFlatten();
+    this.idleTimer = setTimeout(() => this.flattenNow(), this.options.idleMs);
+    // Do not hold the process open just to wait for a flatten.
+    this.idleTimer.unref?.();
+  }
+
+  private cancelIdleFlatten(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = undefined;
+  }
+
+  /** Flatten immediately — on shutdown, or when a client asks explicitly. */
+  flattenNow(): void {
+    const entry = this.options.store.flatten(Date.now());
+    if (entry) this.options.onFlatten?.(entry.summary);
+  }
+
+  close(): void {
+    this.cancelIdleFlatten();
+    for (const client of this.clients) client.close();
+    this.wss.close();
+  }
+}
+
+function frame(kind: Message, payload: Uint8Array): Buffer {
+  const out = Buffer.allocUnsafe(payload.length + 1);
+  out[0] = kind;
+  Buffer.from(payload).copy(out, 1);
+  return out;
+}

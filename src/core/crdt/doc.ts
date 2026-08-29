@@ -34,6 +34,14 @@ import { Project, ProjectLabel, ProjectLayer, ProjectRegion } from "../project/p
  */
 export const BASE_CLIENT_ID = 0;
 
+/**
+ * A document, named without exposing the library.
+ *
+ * Consumers hold one and pass it back; they never reach inside. That is what
+ * keeps every file outside this directory free of Yjs imports.
+ */
+export type CrdtDoc = Y.Doc;
+
 /** Root names. Declared up front because `Doc.toJSON()` only reports roots that have been accessed. */
 const ROOT_LAYERS = "layers";
 const ROOT_META = "meta";

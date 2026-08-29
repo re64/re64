@@ -15,6 +15,10 @@ import { existsSync } from "node:fs";
 import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadProject } from "./analysis.js";
+import { ProjectSessionStore, pathsFor } from "./session-store.js";
+import { SyncServer } from "./sync.js";
+import { applyOps, diffProjects } from "../core/index.js";
+import { applyOpToDoc, projectFromDoc } from "../core/crdt/index.js";
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { normalizeProjectText, parseProject } from "../core/index.js";
@@ -71,6 +75,16 @@ export function startServer(options: ServerOptions): void {
     process.exit(1);
   }
 
+  const store = new ProjectSessionStore(pathsFor(projectPath));
+  const sync = new SyncServer({
+    store,
+    // Long enough that a page reload rejoins the same session rather than
+    // splitting one piece of work across two history entries.
+    idleMs: 30_000,
+    onFlatten: (summary) =>
+      console.log(`flattened ${summary.length} change${summary.length === 1 ? "" : "s"}`),
+  });
+
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     const path = url.pathname;
@@ -99,10 +113,21 @@ export function startServer(options: ServerOptions): void {
           });
         }
 
-        parseProject(raw); // refuse to write something that will not load
-        const text = normalizeProjectText(raw);
+        const incoming = parseProject(raw); // refuse what will not load
+
+        // Route the write through the shared document as a synthetic client:
+        // one write path, two front doors. A blind overwrite would discard
+        // whatever a connected session had merged in the meantime.
+        const doc = store.document();
+        const ops = diffProjects(projectFromDoc(doc), incoming);
+        for (const op of ops) applyOpToDoc(doc, op, "http");
+        store.addAuthor("http");
+
+        const text = normalizeProjectText(
+          ops.length ? applyOps(readFileSync(projectPath, "utf-8"), ops) : raw
+        );
         writeFileSync(projectPath, text, "utf-8");
-        return sendJson(res, 200, { ok: true, version: versionOf(text) });
+        return sendJson(res, 200, { ok: true, version: versionOf(text), applied: ops.length });
       }
 
       // Raw bytes for a layer, so the browser can build the memory map and
@@ -132,6 +157,10 @@ export function startServer(options: ServerOptions): void {
         return;
       }
 
+      if (path === "/api/history" && req.method === "GET") {
+        return sendJson(res, 200, { entries: store.history() });
+      }
+
       // --- Static ------------------------------------------------------
       const filePath = join(PUBLIC_DIR, path === "/" ? "index.html" : path);
       if (!filePath.startsWith(PUBLIC_DIR)) {
@@ -155,6 +184,23 @@ export function startServer(options: ServerOptions): void {
       sendJson(res, 500, { error: message });
     }
   });
+
+  server.on("upgrade", (request, socket, head) => {
+    if (new URL(request.url ?? "/", "http://localhost").pathname === "/sync") {
+      sync.handleUpgrade(request, socket, head);
+    } else {
+      socket.destroy();
+    }
+  });
+
+  // A session that never idles out would otherwise be lost on shutdown.
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => {
+      sync.flattenNow();
+      sync.close();
+      process.exit(0);
+    });
+  }
 
   server.listen(port, host, () => {
     console.log(`re64 ui   http://${host}:${port}`);
