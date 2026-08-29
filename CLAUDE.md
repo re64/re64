@@ -679,10 +679,17 @@ can land first over the existing fetch-and-rebuild flow.
   is a cheap check a human would skip, and it collapses the version-blending
   risk.
 
-*Not blocked by any of this:* annotation edits still have **no undo**.
-`history()` is wired only to the project JSON editor. Every edit has a natural
-inverse, so a small client-side command history closes the gap today without
-prejudging the above.
+*Not blocked by any of this, and since done:* annotation edits have undo.
+`Mod-Z` / `Mod-Shift-Z` in `src/ui/main.ts`, over `ProjectSession`'s own stack
+of operations paired with their inverses — separate from CodeMirror's
+`history()`, which covers typing in the project JSON editor and nothing else.
+
+It is **session-local**: held in memory, discarded on reload, and invisible to
+the `ops` table the CLI undoes from. So `re64 undo --any` cannot reach a browser
+edit, and a browser cannot reach the CLI's. Closing that means routing UI edits
+through the server as operations rather than as whole-document PUTs, which
+trades away the property `session.ts` is built around — that a rename shows
+instantly and only the save crosses the wire.
 
 ### Widget: CodeMirror 6, read-only with decorations
 
