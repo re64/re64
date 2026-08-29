@@ -86,7 +86,7 @@ beforeEach(async () => {
   writeFileSync(projectPath, PROJECT, "utf-8");
 
   store = new ProjectSessionStore(pathsFor(projectPath));
-  sync = new SyncServer({ store, idleMs: 50 });
+  sync = new SyncServer({ store, idleMs: 50, writeMs: 20 });
   http = createServer();
   http.on("upgrade", (req, socket, head) => sync.handleUpgrade(req, socket, head));
 
@@ -194,5 +194,62 @@ describe("two participants on one project", () => {
 
     expect(readFileSync(projectPath, "utf-8")).toBe(PROJECT);
     expect(store.history()).toEqual([]);
+  });
+});
+
+describe("keeping the file current during a session", () => {
+  it("writes edits to disk without waiting for the session to end", async () => {
+    // Without this the file sits stale for as long as anyone stays connected:
+    // git shows nothing, the CLI reads old content, and an editor open on the
+    // same file never sees the work.
+    const alice = await Client.connect(url("alice"));
+    await settle();
+
+    applyOpToDoc(alice.doc, {
+      op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Live",
+    });
+    await new Promise((r) => setTimeout(r, 120));
+
+    expect(readFileSync(projectPath, "utf-8")).toContain(`"name": "Live"`);
+    // Still mid-session, so nothing has been recorded as history yet.
+    expect(store.history()).toEqual([]);
+
+    await alice.close();
+  });
+
+  it("records history only when the session ends, not on every write", async () => {
+    const alice = await Client.connect(url("alice"));
+    await settle();
+
+    for (const name of ["One", "Two", "Three"]) {
+      applyOpToDoc(alice.doc, {
+        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name,
+      });
+      await new Promise((r) => setTimeout(r, 60));
+    }
+
+    expect(readFileSync(projectPath, "utf-8")).toContain(`"name": "Three"`);
+    expect(store.history()).toEqual([]);
+
+    await alice.close();
+    await new Promise((r) => setTimeout(r, 150));
+
+    expect(store.history()).toHaveLength(1);
+  });
+
+  it("coalesces a burst of edits into one write", async () => {
+    const alice = await Client.connect(url("alice"));
+    await settle();
+
+    for (let i = 0; i < 10; i++) {
+      applyOpToDoc(alice.doc, {
+        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: `Rapid${i}`,
+      });
+    }
+    await new Promise((r) => setTimeout(r, 120));
+
+    expect(readFileSync(projectPath, "utf-8")).toContain(`"name": "Rapid9"`);
+
+    await alice.close();
   });
 });

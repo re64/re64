@@ -253,6 +253,31 @@ file and the resulting ops applied line by line.
 agents simply stop; waiting for a clean exit would mean rarely flattening. It
 also lets a reload rejoin rather than splitting one piece of work in two.
 
+**How edits reach the filesystem.** Three moments, deliberately distinct:
+
+- **A debounced write, ~1.5s after edits stop.** The project file tracks a live
+  session closely, so `git diff` shows the work as it happens, the CLI reads
+  current content, and an editor open on the same file stays in step. Without
+  this the file would sit stale for as long as anyone stayed connected.
+- **A flatten, ~30s after the last participant leaves** (or on SIGINT/SIGTERM).
+  Writes anything outstanding and records one history entry.
+- **An HTTP PUT**, which writes immediately.
+
+All three write from the *whole document*, never one caller's own changes.
+
+History is accumulated as the session writes, not derived at the end — the file
+is already current by then, so an end-of-session diff would be empty and the
+entry would be lost.
+
+Files beside the project:
+
+| Path | Holds | Committed? |
+|---|---|---|
+| `<name>.re64` | the project | yes — this is the artefact |
+| `<name>.re64.history` | one JSON line per flattened session | your call; it is the record git cannot give, since it names who did what within a session |
+| `<name>.re64.session` | Yjs updates awaiting a flatten | no — gitignored, transient, deleted once written |
+| `<name>.re64.log` | the CLI's undo log | no — matched by `*.log` |
+
 Persistence serves three separate purposes, and they want different answers:
 
 | Purpose | Format | Shape | Lifetime |

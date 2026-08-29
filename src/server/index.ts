@@ -83,6 +83,9 @@ export function startServer(options: ServerOptions): RunningServer {
     // Long enough that a page reload rejoins the same session rather than
     // splitting one piece of work across two history entries.
     idleMs: 30_000,
+    // The file should track a live session closely enough that git, the CLI,
+    // and an editor open on it all see the work as it happens.
+    writeMs: 1_500,
     onFlatten: (summary) =>
       console.log(`flattened ${summary.length} change${summary.length === 1 ? "" : "s"}`),
   });

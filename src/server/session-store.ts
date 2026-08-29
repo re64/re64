@@ -92,6 +92,14 @@ export class ProjectSessionStore {
   private doc: CrdtDoc | undefined;
   private readonly authors = new Set<string>();
   private readonly listeners: ((update: Uint8Array, origin: unknown) => void)[] = [];
+  /**
+   * What this session has changed so far.
+   *
+   * Accumulated as the file is written rather than derived at the end: the file
+   * is kept current during a session, so a diff taken at flatten time would be
+   * empty and the history entry would be lost.
+   */
+  private sessionOps: Op[] = [];
   private dirty = false;
 
   constructor(private readonly paths: SessionPaths) {}
@@ -184,7 +192,10 @@ export class ProjectSessionStore {
     const doc = this.document();
     const text = readFileSync(this.paths.project, "utf-8");
     const ops = diffProjects(parseProject(text), projectFromDoc(doc));
-    if (ops.length > 0) writeFileSync(this.paths.project, applyOps(text, ops), "utf-8");
+    if (ops.length > 0) {
+      writeFileSync(this.paths.project, applyOps(text, ops), "utf-8");
+      this.sessionOps.push(...ops);
+    }
     return ops;
   }
 
@@ -202,8 +213,10 @@ export class ProjectSessionStore {
     this.document();
     if (!this.dirty) return undefined;
 
-    const ops = this.writeFile();
-    if (ops.length === 0) {
+    // Catch anything the debounce had not yet written, then record everything
+    // the session did — not just what was still outstanding at the end.
+    this.writeFile();
+    if (this.sessionOps.length === 0) {
       this.discardLog();
       return undefined;
     }
@@ -211,7 +224,7 @@ export class ProjectSessionStore {
     const entry: HistoryEntry = {
       at: now,
       authors: [...this.authors].sort(),
-      summary: ops.map(describeOp),
+      summary: this.sessionOps.map(describeOp),
     };
     appendFileSync(this.paths.history, JSON.stringify(entry) + "\n", "utf-8");
 
@@ -224,6 +237,7 @@ export class ProjectSessionStore {
     if (existsSync(this.paths.log)) unlinkSync(this.paths.log);
     this.dirty = false;
     this.authors.clear();
+    this.sessionOps = [];
   }
 
   /** Past sessions, oldest first. */

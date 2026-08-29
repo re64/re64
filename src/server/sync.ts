@@ -38,6 +38,16 @@ export interface SyncOptions {
    * splitting one piece of work across two history entries.
    */
   idleMs: number;
+  /**
+   * How long after the last edit before the project file is brought up to date.
+   *
+   * Separate from flattening, and much shorter. Without it the file would sit
+   * stale for as long as anyone stayed connected — `git diff` would show
+   * nothing, the CLI would read old content, and an editor open on the same
+   * file would never see the work. Debounced rather than per-edit so a burst of
+   * renames costs one write.
+   */
+  writeMs: number;
   onFlatten?: (summary: string[]) => void;
 }
 
@@ -45,6 +55,7 @@ export class SyncServer {
   private readonly wss = new WebSocketServer({ noServer: true });
   private readonly clients = new Set<WebSocket>();
   private idleTimer: NodeJS.Timeout | undefined;
+  private writeTimer: NodeJS.Timeout | undefined;
 
   constructor(private readonly options: SyncOptions) {
     this.wss.on("connection", (socket, request) => this.join(socket, request));
@@ -56,6 +67,7 @@ export class SyncServer {
     options.store.onUpdate((update, origin) => {
       const from = origin instanceof WebSocket ? origin : undefined;
       this.broadcast(frame(Message.Update, update), from);
+      this.scheduleWrite();
     });
   }
 
@@ -103,6 +115,16 @@ export class SyncServer {
     }
   }
 
+  /** Bring the file up to date shortly after edits stop. */
+  private scheduleWrite(): void {
+    if (this.writeTimer) clearTimeout(this.writeTimer);
+    this.writeTimer = setTimeout(() => {
+      this.writeTimer = undefined;
+      this.options.store.writeFile();
+    }, this.options.writeMs);
+    this.writeTimer.unref?.();
+  }
+
   private scheduleIdleFlatten(): void {
     this.cancelIdleFlatten();
     this.idleTimer = setTimeout(() => this.flattenNow(), this.options.idleMs);
@@ -115,6 +137,13 @@ export class SyncServer {
     this.idleTimer = undefined;
   }
 
+  /** Bring the file up to date now, without ending the session. */
+  writeNow(): void {
+    if (this.writeTimer) clearTimeout(this.writeTimer);
+    this.writeTimer = undefined;
+    this.options.store.writeFile();
+  }
+
   /** Flatten immediately — on shutdown, or when a client asks explicitly. */
   flattenNow(): void {
     const entry = this.options.store.flatten(Date.now());
@@ -122,6 +151,8 @@ export class SyncServer {
   }
 
   close(): void {
+    if (this.writeTimer) clearTimeout(this.writeTimer);
+    this.writeTimer = undefined;
     this.cancelIdleFlatten();
     for (const client of this.clients) client.close();
     this.wss.close();

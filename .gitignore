@@ -4,3 +4,6 @@ dist/
 .DS_Store
 public/app.js
 public/app.js.map
+
+# Transient session state: Yjs updates awaiting a flatten.
+*.re64.session
