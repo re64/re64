@@ -130,7 +130,7 @@ describe("disassemble", () => {
     // NOP, NOP, NOP - but second NOP is in a data region
     const reader = arrayReader(0x1000, [0xea, 0xea, 0xea]);
     const regions = new RegionIndex();
-    regions.addRegion(createUserRegion(0x1001, 0x1003, "data"));
+    regions.addRegion(createUserRegion("rgn_1001", 0x1001, 0x1003, "data"));
 
     const result = disassemble(reader, {
       entryPoints: [0x1000],

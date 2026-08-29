@@ -20,6 +20,7 @@ import {
   ProjectLabel,
   resolveOwningLayer,
   upsertLabel,
+  newId,
 } from "../core/index.js";
 
 export class ProjectSession {
@@ -97,7 +98,11 @@ export class ProjectSession {
           `type "symbols" to name addresses outside the loaded bytes.`
       );
     }
-    await this.apply(upsertLabel(this.raw, address, name, type, layer));
+    // Reuse the id of the label already at this address; mint one otherwise, so
+    // a rename keeps the same identity rather than replacing the label.
+    const existing = this.loaded.map.getLabels().getLabelsAt(address)[0];
+    const id = existing?.id ?? newId("lbl");
+    await this.apply(upsertLabel(this.raw, id, address, name, type, layer));
   }
 
   async removeLabel(address: number): Promise<void> {

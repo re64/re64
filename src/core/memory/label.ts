@@ -24,6 +24,13 @@ export interface LabelSource {
  * Address can be 0-$10000 (inclusive) to allow end-of-memory labels.
  */
 export interface Label {
+  /**
+   * Stable identity, independent of address and name.
+   *
+   * Several labels can share an address, and a rename changes the name — so
+   * neither can identify one. Edits and the primary-label index name this.
+   */
+  readonly id: string;
   /** Address in range 0x0000-0x10000 (end-of-memory allowed) */
   readonly address: number;
   /** Label name */
@@ -58,6 +65,7 @@ function byRank(a: Label, b: Label): number {
 
 /** Creates a label from the built-in platform symbol set */
 export function createPlatformLabel(
+  id: string,
   address: number,
   name: string,
   type: LabelType = "address"
@@ -66,6 +74,7 @@ export function createPlatformLabel(
     throw new Error("Label address must be in range 0x0000-0x10000");
   }
   return {
+    id,
     address,
     name,
     type,
@@ -75,6 +84,7 @@ export function createPlatformLabel(
 
 /** Creates an auto-generated label from a layer */
 export function createLayerLabel(
+  id: string,
   address: number,
   name: string,
   type: LabelType,
@@ -84,6 +94,7 @@ export function createLayerLabel(
     throw new Error("Label address must be in range 0x0000-0x10000");
   }
   return {
+    id,
     address,
     name,
     type,
@@ -93,6 +104,7 @@ export function createLayerLabel(
 
 /** Creates a user-defined label */
 export function createUserLabel(
+  id: string,
   address: number,
   name: string,
   type: LabelType,
@@ -102,6 +114,7 @@ export function createUserLabel(
     throw new Error("Label address must be in range 0x0000-0x10000");
   }
   return {
+    id,
     address,
     name,
     type,
@@ -112,6 +125,7 @@ export function createUserLabel(
 
 /** Creates an auto-generated label from a region boundary */
 export function createRegionLabel(
+  id: string,
   address: number,
   name: string,
   type: LabelType,
@@ -121,6 +135,7 @@ export function createRegionLabel(
     throw new Error("Label address must be in range 0x0000-0x10000");
   }
   return {
+    id,
     address,
     name,
     type,
@@ -130,6 +145,7 @@ export function createRegionLabel(
 
 /** Creates an auto-generated label from disassembly analysis */
 export function createAutoLabel(
+  id: string,
   address: number,
   name: string,
   type: LabelType
@@ -138,6 +154,7 @@ export function createAutoLabel(
     throw new Error("Label address must be in range 0x0000-0x10000");
   }
   return {
+    id,
     address,
     name,
     type,

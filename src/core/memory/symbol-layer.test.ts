@@ -9,7 +9,7 @@ describe("SymbolLayer", () => {
   it("supplies no bytes and never shadows", () => {
     const map = new MemoryMap();
     map.addLayer(new BytesLayer("data", 0x1000, new Uint8Array([0xaa]), 0x10));
-    map.addLayer(new SymbolLayer("syms", [createPlatformLabel(0x1000, "SOMETHING")]));
+    map.addLayer(new SymbolLayer("syms", [createPlatformLabel("lbl_platform1000", 0x1000, "SOMETHING")]));
 
     // Symbol layer was added last, so it is on top — and must still not shadow.
     expect(map.readByte(0x1000)).toBe(0xaa);
@@ -18,7 +18,7 @@ describe("SymbolLayer", () => {
 
   it("contributes labels regardless of having no range", () => {
     const map = new MemoryMap();
-    map.addLayer(new SymbolLayer("syms", [createPlatformLabel(0xd020, "EXTCOL")]));
+    map.addLayer(new SymbolLayer("syms", [createPlatformLabel("lbl_platformd020", 0xd020, "EXTCOL")]));
 
     expect(map.getLabels().resolve(0xd020)?.label.name).toBe("EXTCOL");
   });
@@ -37,8 +37,8 @@ describe("SymbolLayer", () => {
 describe("label priority", () => {
   it("ranks a user label above a platform one at the same address", () => {
     const map = new MemoryMap();
-    map.addLayer(new SymbolLayer("c64", [createPlatformLabel(0xffd2, "CHROUT")]));
-    map.addLayer(new SymbolLayer("project", [createUserLabel(0xffd2, "ROM_CHROUT", "address")]));
+    map.addLayer(new SymbolLayer("c64", [createPlatformLabel("lbl_platformffd2", 0xffd2, "CHROUT")]));
+    map.addLayer(new SymbolLayer("project", [createUserLabel("lbl_userffd2", 0xffd2, "ROM_CHROUT", "address")]));
 
     expect(map.getLabels().resolve(0xffd2)?.label.name).toBe("ROM_CHROUT");
   });
@@ -46,8 +46,8 @@ describe("label priority", () => {
   it("resolves by rank rather than insertion order", () => {
     // The platform label is added last; insertion order would have let it win.
     const map = new MemoryMap();
-    map.addLayer(new SymbolLayer("project", [createUserLabel(0xd016, "VIC_CTRL2", "address")]));
-    map.addLayer(new SymbolLayer("c64", [createPlatformLabel(0xd016, "SCROLX")]));
+    map.addLayer(new SymbolLayer("project", [createUserLabel("lbl_userd016", 0xd016, "VIC_CTRL2", "address")]));
+    map.addLayer(new SymbolLayer("c64", [createPlatformLabel("lbl_platformd016", 0xd016, "SCROLX")]));
 
     expect(map.getLabels().resolve(0xd016)?.label.name).toBe("VIC_CTRL2");
     expect(LABEL_RANK.user).toBeGreaterThan(LABEL_RANK.platform);

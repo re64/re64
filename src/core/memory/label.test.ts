@@ -7,7 +7,7 @@ import {
 
 describe("createLayerLabel", () => {
   it("creates a label with layer source", () => {
-    const label = createLayerLabel(0x1000, "main", "entry", "file1");
+    const label = createLayerLabel("lbl_layer1000", 0x1000, "main", "entry", "file1");
     expect(label.address).toBe(0x1000);
     expect(label.name).toBe("main");
     expect(label.type).toBe("entry");
@@ -17,22 +17,22 @@ describe("createLayerLabel", () => {
   });
 
   it("allows $10000 for end-of-memory", () => {
-    const label = createLayerLabel(0x10000, "end", "address", "layer1");
+    const label = createLayerLabel("lbl_layer10000", 0x10000, "end", "address", "layer1");
     expect(label.address).toBe(0x10000);
   });
 
   it("rejects addresses above $10000", () => {
-    expect(() => createLayerLabel(0x10001, "bad", "address", "layer1")).toThrow();
+    expect(() => createLayerLabel("lbl_layer10001", 0x10001, "bad", "address", "layer1")).toThrow();
   });
 
   it("rejects negative addresses", () => {
-    expect(() => createLayerLabel(-1, "bad", "address", "layer1")).toThrow();
+    expect(() => createLayerLabel("lbl_bad", -1, "bad", "address", "layer1")).toThrow();
   });
 });
 
 describe("createUserLabel", () => {
   it("creates a label with user source", () => {
-    const label = createUserLabel(0x2000, "player_x", "address");
+    const label = createUserLabel("lbl_user2000", 0x2000, "player_x", "address");
     expect(label.address).toBe(0x2000);
     expect(label.name).toBe("player_x");
     expect(label.type).toBe("address");
@@ -44,7 +44,7 @@ describe("createUserLabel", () => {
 describe("LabelIndex", () => {
   it("stores and retrieves labels by address", () => {
     const index = new LabelIndex();
-    const label = createUserLabel(0x1000, "test", "address");
+    const label = createUserLabel("lbl_user1000", 0x1000, "test", "address");
     index.addLabel(label);
 
     const found = index.getLabelsAt(0x1000);
@@ -59,8 +59,8 @@ describe("LabelIndex", () => {
 
   it("supports multiple labels at same address", () => {
     const index = new LabelIndex();
-    const label1 = createUserLabel(0x1000, "main", "entry");
-    const label2 = createLayerLabel(0x1000, "file+$0", "address", "file1");
+    const label1 = createUserLabel("lbl_user1000", 0x1000, "main", "entry");
+    const label2 = createLayerLabel("lbl_layer1000", 0x1000, "file+$0", "address", "file1");
     index.addLabel(label1);
     index.addLabel(label2);
 
@@ -70,7 +70,7 @@ describe("LabelIndex", () => {
 
   it("hasLabelAt returns correct boolean", () => {
     const index = new LabelIndex();
-    index.addLabel(createUserLabel(0x1000, "test", "address"));
+    index.addLabel(createUserLabel("lbl_user1000", 0x1000, "test", "address"));
 
     expect(index.hasLabelAt(0x1000)).toBe(true);
     expect(index.hasLabelAt(0x2000)).toBe(false);
@@ -78,9 +78,9 @@ describe("LabelIndex", () => {
 
   it("getAllLabels returns sorted by address", () => {
     const index = new LabelIndex();
-    index.addLabel(createUserLabel(0x3000, "c", "address"));
-    index.addLabel(createUserLabel(0x1000, "a", "address"));
-    index.addLabel(createUserLabel(0x2000, "b", "address"));
+    index.addLabel(createUserLabel("lbl_user3000", 0x3000, "c", "address"));
+    index.addLabel(createUserLabel("lbl_user1000", 0x1000, "a", "address"));
+    index.addLabel(createUserLabel("lbl_user2000", 0x2000, "b", "address"));
 
     const all = index.getAllLabels();
     expect(all[0].address).toBe(0x1000);
@@ -90,10 +90,10 @@ describe("LabelIndex", () => {
 
   it("getLabelsInRange returns labels in range", () => {
     const index = new LabelIndex();
-    index.addLabel(createUserLabel(0x1000, "a", "address"));
-    index.addLabel(createUserLabel(0x1500, "b", "address"));
-    index.addLabel(createUserLabel(0x2000, "c", "address"));
-    index.addLabel(createUserLabel(0x3000, "d", "address"));
+    index.addLabel(createUserLabel("lbl_user1000", 0x1000, "a", "address"));
+    index.addLabel(createUserLabel("lbl_user1500", 0x1500, "b", "address"));
+    index.addLabel(createUserLabel("lbl_user2000", 0x2000, "c", "address"));
+    index.addLabel(createUserLabel("lbl_user3000", 0x3000, "d", "address"));
 
     const range = index.getLabelsInRange(0x1000, 0x2000);
     expect(range).toHaveLength(2);
@@ -104,8 +104,8 @@ describe("LabelIndex", () => {
   it("addLabels adds multiple labels", () => {
     const index = new LabelIndex();
     const labels = [
-      createUserLabel(0x1000, "a", "address"),
-      createUserLabel(0x2000, "b", "address"),
+      createUserLabel("lbl_user1000", 0x1000, "a", "address"),
+      createUserLabel("lbl_user2000", 0x2000, "b", "address"),
     ];
     index.addLabels(labels);
 
@@ -115,7 +115,7 @@ describe("LabelIndex", () => {
   describe("resolve", () => {
     it("returns exact match with offset 0", () => {
       const index = new LabelIndex();
-      index.addLabel(createUserLabel(0x1000, "data", "address"));
+      index.addLabel(createUserLabel("lbl_user1000", 0x1000, "data", "address"));
 
       const resolved = index.resolve(0x1000, 0);
       expect(resolved).toBeDefined();
@@ -125,14 +125,14 @@ describe("LabelIndex", () => {
 
     it("returns undefined for non-matching address with zero tolerance", () => {
       const index = new LabelIndex();
-      index.addLabel(createUserLabel(0x1000, "data", "address"));
+      index.addLabel(createUserLabel("lbl_user1000", 0x1000, "data", "address"));
 
       expect(index.resolve(0x1001, 0)).toBeUndefined();
     });
 
     it("finds label with negative offset (address before label)", () => {
       const index = new LabelIndex();
-      index.addLabel(createUserLabel(0x1000, "data", "address"));
+      index.addLabel(createUserLabel("lbl_user1000", 0x1000, "data", "address"));
 
       const resolved = index.resolve(0x0FFF, 1);
       expect(resolved).toBeDefined();
@@ -142,7 +142,7 @@ describe("LabelIndex", () => {
 
     it("finds label with positive offset (address after label)", () => {
       const index = new LabelIndex();
-      index.addLabel(createUserLabel(0x1000, "data", "address"));
+      index.addLabel(createUserLabel("lbl_user1000", 0x1000, "data", "address"));
 
       const resolved = index.resolve(0x1001, 1);
       expect(resolved).toBeDefined();
@@ -152,8 +152,8 @@ describe("LabelIndex", () => {
 
     it("prefers exact match over nearby labels", () => {
       const index = new LabelIndex();
-      index.addLabel(createUserLabel(0x1000, "nearby", "address"));
-      index.addLabel(createUserLabel(0x1001, "exact", "address"));
+      index.addLabel(createUserLabel("lbl_user1000", 0x1000, "nearby", "address"));
+      index.addLabel(createUserLabel("lbl_user1001", 0x1001, "exact", "address"));
 
       const resolved = index.resolve(0x1001, 5);
       expect(resolved).toBeDefined();
@@ -163,8 +163,8 @@ describe("LabelIndex", () => {
 
     it("prefers smaller offset when multiple labels in range", () => {
       const index = new LabelIndex();
-      index.addLabel(createUserLabel(0x1000, "far", "address"));
-      index.addLabel(createUserLabel(0x1003, "close", "address"));
+      index.addLabel(createUserLabel("lbl_user1000", 0x1000, "far", "address"));
+      index.addLabel(createUserLabel("lbl_user1003", 0x1003, "close", "address"));
 
       const resolved = index.resolve(0x1002, 5);
       expect(resolved).toBeDefined();
@@ -174,7 +174,7 @@ describe("LabelIndex", () => {
 
     it("respects tolerance limit", () => {
       const index = new LabelIndex();
-      index.addLabel(createUserLabel(0x1000, "data", "address"));
+      index.addLabel(createUserLabel("lbl_user1000", 0x1000, "data", "address"));
 
       expect(index.resolve(0x1003, 2)).toBeUndefined();
       expect(index.resolve(0x1003, 3)).toBeDefined();

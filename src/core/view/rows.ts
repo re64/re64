@@ -19,6 +19,7 @@ import {
   LoadedProject,
   parseProjectAddress,
   RegionKind,
+  derivedId,
 } from "../index.js";
 import { ArrowSpan, allocateArrowLanes, renderArrowGutter } from "./arrows.js";
 
@@ -154,11 +155,11 @@ export function analyze(
     if (allLabels.resolve(targetAddr, labelTolerance)) continue;
     const addrStr = hex4(targetAddr);
     if (refs.some((r) => r.type === "call")) {
-      autoLabels.push(createAutoLabel(targetAddr, `sub_${addrStr}`, "function"));
+      autoLabels.push(createAutoLabel(derivedId("lbl", "auto", targetAddr), targetAddr, `sub_${addrStr}`, "function"));
     } else if (refs.some((r) => r.type === "jump" || r.type === "branch")) {
-      autoLabels.push(createAutoLabel(targetAddr, `loc_${addrStr}`, "code"));
+      autoLabels.push(createAutoLabel(derivedId("lbl", "auto", targetAddr), targetAddr, `loc_${addrStr}`, "code"));
     } else {
-      autoLabels.push(createAutoLabel(targetAddr, `dat_${addrStr}`, "address"));
+      autoLabels.push(createAutoLabel(derivedId("lbl", "auto", targetAddr), targetAddr, `dat_${addrStr}`, "address"));
     }
   }
   allLabels.addLabels(autoLabels);

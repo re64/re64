@@ -1,4 +1,5 @@
 import { Label } from "./label.js";
+import { newId } from "../project/identity.js";
 import { Region, RegionIndex, RegionKind } from "./region.js";
 
 /**
@@ -6,6 +7,8 @@ import { Region, RegionIndex, RegionKind } from "./region.js";
  * Layers are stacked in a MemoryMap, with upper layers shadowing lower ones.
  */
 export interface Layer {
+  /** Stable identity, so ops and history can name a layer across reorders. */
+  readonly id: string;
   readonly name: string;
   /** Start address (inclusive) */
   readonly start: number;
@@ -77,7 +80,10 @@ export class BytesLayer implements Layer {
     public readonly name: string,
     public readonly start: number,
     public readonly data: Uint8Array,
-    length?: number
+    length?: number,
+    // Defaulted so ad-hoc layers (CLI -l, tests) need not invent one; the
+    // project loader passes the persisted id so it survives reloads.
+    public readonly id: string = newId("lay")
   ) {
     this.length = length ?? data.length;
 

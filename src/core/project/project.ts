@@ -1,5 +1,6 @@
 import { Label, LabelType, createUserLabel } from "../memory/label.js";
 import { Region, RegionKind, createUserRegion } from "../memory/region.js";
+import { derivedId } from "./identity.js";
 
 /**
  * Layer definition in a project file.
@@ -9,6 +10,11 @@ import { Region, RegionKind, createUserRegion } from "../memory/region.js";
  * them pointing at whatever else lands at that address.
  */
 export interface ProjectLayer {
+  /**
+   * Stable identity. Optional in the file: a project written before ids
+   * existed gets one derived from its content, and the next write persists it.
+   */
+  id?: string;
   /** Layer type. "symbols" carries names for addresses with no loaded bytes. */
   type: "prg" | "raw" | "bytes" | "symbols";
   /** File path (for prg/raw) */
@@ -31,6 +37,8 @@ export interface ProjectLayer {
 
 /** Label definition in a project file */
 export interface ProjectLabel {
+  /** Stable identity; derived from content when the file omits it. */
+  id?: string;
   /** Address (hex string like "$83C1" or number) */
   address: number | string;
   /** Label name */
@@ -43,6 +51,8 @@ export interface ProjectLabel {
 
 /** Region definition in a project file */
 export interface ProjectRegion {
+  /** Stable identity; derived from content when the file omits it. */
+  id?: string;
   /** Start address (hex string like "$8000" or number) */
   start: number | string;
   /** End address (exclusive) or length with + prefix */
@@ -98,17 +108,30 @@ export function parseProjectAddress(value: number | string): number {
   return parseInt(str, 10);
 }
 
-/** Convert project labels to Label objects */
-export function projectLabelsToLabels(projectLabels: ProjectLabel[]): Label[] {
+/**
+ * Convert project labels to Label objects.
+ *
+ * A label without an id gets one derived from its layer, address, and name, so
+ * every client that loads the same un-migrated file agrees on it. The next
+ * write persists a real id and the derivation stops mattering.
+ */
+export function projectLabelsToLabels(
+  projectLabels: ProjectLabel[],
+  layerId: string
+): Label[] {
   return projectLabels.map((pl) => {
     const address = parseProjectAddress(pl.address);
     const type = pl.type ?? "address";
-    return createUserLabel(address, pl.name, type, pl.comment);
+    const id = pl.id ?? derivedId("lbl", layerId, address, pl.name);
+    return createUserLabel(id, address, pl.name, type, pl.comment);
   });
 }
 
 /** Convert project regions to Region objects */
-export function projectRegionsToRegions(projectRegions: ProjectRegion[]): Region[] {
+export function projectRegionsToRegions(
+  projectRegions: ProjectRegion[],
+  layerId: string
+): Region[] {
   return projectRegions.map((pr) => {
     const start = parseProjectAddress(pr.start);
     let end: number;
@@ -121,7 +144,8 @@ export function projectRegionsToRegions(projectRegions: ProjectRegion[]): Region
       end = parseProjectAddress(pr.end);
     }
 
-    return createUserRegion(start, end, pr.kind, pr.name, pr.comment);
+    const id = pr.id ?? derivedId("rgn", layerId, start, pr.kind);
+    return createUserRegion(id, start, end, pr.kind, pr.name, pr.comment);
   });
 }
 

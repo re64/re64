@@ -1,6 +1,7 @@
 import { Layer } from "./layer.js";
 import { Label, createLayerLabel } from "./label.js";
 import { RegionIndex, RegionKind } from "./region.js";
+import { derivedId, newId } from "../project/identity.js";
 
 /**
  * A layer backed by file data. Preserves the file path for serialization/display.
@@ -25,7 +26,8 @@ export class FileLayer implements Layer {
     public readonly data: Uint8Array,
     length?: number,
     isPrg: boolean = false,
-    suppressEntry: boolean = false
+    suppressEntry: boolean = false,
+    public readonly id: string = newId("lay")
   ) {
     this.isPrg = isPrg;
     this.suppressEntry = suppressEntry;
@@ -64,6 +66,9 @@ export class FileLayer implements Layer {
     }
     // PRG files have an entry point at the start address
     const basename = this.path.split("/").pop()?.replace(/\.[^.]+$/, "") ?? this.name;
-    return [createLayerLabel(this.start, basename, "entry", this.name), ...this.labels];
+    return [
+      createLayerLabel(derivedId("lbl", this.id, "entry"), this.start, basename, "entry", this.name),
+      ...this.labels,
+    ];
   }
 }

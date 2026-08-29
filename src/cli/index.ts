@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { Command } from "commander";
 import {
@@ -27,6 +27,8 @@ import {
   analyze,
   formatRows,
   formatWarnings,
+  migrateIds,
+  newId,
 } from "../core/index.js";
 import { hexDump } from "./hex.js";
 
@@ -230,6 +232,22 @@ program
     }
 
     console.log(hexDump(map, start, length));
+  });
+
+program
+  .command("migrate")
+  .description("Write stable ids into a project file")
+  .argument("<file>", "Project file (.re64)")
+  .action((file: string) => {
+    const raw = readFileSync(file, "utf-8");
+    const migrated = migrateIds(raw, (prefix) => newId(prefix));
+    if (migrated === raw) {
+      console.log("Already migrated; nothing to write.");
+      return;
+    }
+    writeFileSync(file, migrated, "utf-8");
+    const count = (text: string) => (text.match(/"id"\s*:/g) ?? []).length;
+    console.log(`Wrote ${count(migrated) - count(raw)} ids to ${file}.`);
   });
 
 program

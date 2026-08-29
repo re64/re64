@@ -30,12 +30,12 @@ function project(
   const layer = new FileLayer("test", "test.prg", ORG, new Uint8Array(bytes), undefined, true, true);
 
   for (const r of extra.regions ?? []) {
-    layer.regions.addRegion(createUserRegion(r.start, r.end, r.kind, r.name));
+    layer.regions.addRegion(createUserRegion(`rgn_${r.start.toString(16)}`, r.start, r.end, r.kind, r.name));
   }
 
   const userLabels = new LabelIndex();
   for (const l of extra.labels ?? []) {
-    const label = createUserLabel(l.address, l.name, l.type ?? "address");
+    const label = createUserLabel(`lbl_${l.address.toString(16)}`, l.address, l.name, l.type ?? "address");
     layer.labels.push(label);
     userLabels.addLabel(label);
   }

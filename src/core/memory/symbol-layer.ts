@@ -1,6 +1,7 @@
 import { Layer } from "./layer.js";
 import { Label } from "./label.js";
 import { RegionIndex, RegionKind } from "./region.js";
+import { newId } from "../project/identity.js";
 
 /**
  * A layer that carries names but no bytes.
@@ -26,7 +27,8 @@ export class SymbolLayer implements Layer {
 
   constructor(
     public readonly name: string,
-    public readonly labels: Label[] = []
+    public readonly labels: Label[] = [],
+    public readonly id: string = newId("lay")
   ) {}
 
   readByte(): number | undefined {

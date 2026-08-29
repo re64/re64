@@ -22,6 +22,7 @@ import {
   projectLabelsToLabels,
   projectRegionsToRegions,
 } from "./project.js";
+import { derivedId } from "./identity.js";
 
 /** How the loader gets at file bytes, so core stays free of node:fs. */
 export interface FileLoader {
@@ -83,6 +84,9 @@ export function buildMemoryMap(
 
   project.layers.forEach((decl, index) => {
     const name = layerName(decl, index);
+    // Derived from position and source when absent: stable for a given file,
+    // replaced by a real id on the next write.
+    const layerId = decl.id ?? derivedId("lay", index, decl.type, decl.path ?? decl.name ?? "");
     let layer: Layer;
 
     if (decl.type === "prg") {
@@ -91,26 +95,26 @@ export function buildMemoryMap(
         decl.address === undefined ? undefined : parseProjectAddress(decl.address)
       );
       const suppressEntry = decl.noAutoEntry ?? false;
-      layer = new FileLayer(name, decl.path!, start, data, undefined, isPrg, suppressEntry);
+      layer = new FileLayer(name, decl.path!, start, data, undefined, isPrg, suppressEntry, layerId);
       if (isPrg && !suppressEntry) prgEntries.push(start);
     } else if (decl.type === "raw") {
       const addr = parseProjectAddress(decl.address!);
       const { data } = loadFile(decl.path!, addr);
-      layer = new FileLayer(name, decl.path!, addr, data, decl.length);
+      layer = new FileLayer(name, decl.path!, addr, data, decl.length, false, false, layerId);
     } else if (decl.type === "bytes") {
       const addr = parseProjectAddress(decl.address!);
-      layer = new BytesLayer(name, addr, parseHexBytes(decl.bytes!), decl.length);
+      layer = new BytesLayer(name, addr, parseHexBytes(decl.bytes!), decl.length, layerId);
     } else {
-      layer = new SymbolLayer(name, projectLabelsToLabels(decl.labels ?? []));
+      layer = new SymbolLayer(name, projectLabelsToLabels(decl.labels ?? [], layerId), layerId);
     }
 
     if (decl.regions?.length) {
-      layer.regions.addRegions(projectRegionsToRegions(decl.regions));
+      layer.regions.addRegions(projectRegionsToRegions(decl.regions, layerId));
     }
 
     // A symbol layer receives its labels via the constructor; every other kind
     // takes ownership here, so they move with the layer on reorder.
-    const labels = projectLabelsToLabels(decl.labels ?? []);
+    const labels = projectLabelsToLabels(decl.labels ?? [], layerId);
     if (decl.type !== "symbols") {
       layer.labels.push(...labels);
     }

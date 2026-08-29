@@ -1,4 +1,5 @@
 import { Label, createRegionLabel } from "./label.js";
+import { derivedId } from "../project/identity.js";
 
 /** What kind of data a memory region contains */
 export type RegionKind =
@@ -17,6 +18,13 @@ export type RegionKind =
  * them pointing at whatever ends up at that address.
  */
 export interface Region {
+  /**
+   * Stable identity, independent of extent.
+   *
+   * Regions move and grow, so keying on the start address would make "extend
+   * this region" indistinguishable from delete-plus-create.
+   */
+  readonly id: string;
   /** Start address (inclusive) */
   readonly start: number;
   /** End address (exclusive) */
@@ -31,13 +39,14 @@ export interface Region {
 
 /** Create a user-defined region */
 export function createUserRegion(
+  id: string,
   start: number,
   end: number,
   kind: RegionKind,
   name?: string,
   comment?: string
 ): Region {
-  return { start, end, kind, name, comment };
+  return { id, start, end, kind, name, comment };
 }
 
 /**
@@ -116,7 +125,16 @@ export class RegionIndex {
     for (const region of this.regions) {
       if (region.name) {
         const type = region.kind === "code" ? "entry" : "address";
-        labels.push(createRegionLabel(region.start, region.name, type, region.name));
+        // Derived from the region's own id so the label is stable across loads.
+        labels.push(
+          createRegionLabel(
+            derivedId("lbl", region.id, "name"),
+            region.start,
+            region.name,
+            type,
+            region.name
+          )
+        );
       }
     }
 
