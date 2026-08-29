@@ -1,0 +1,232 @@
+/**
+ * The CRDT adapter: a project as a Yjs document.
+ *
+ * **Nothing outside this directory may import Yjs.** Everything else — the
+ * disassembler, the view model, the UI — works with plain project objects, so
+ * the merge library stays swappable. A `Y.Map` leaking into `analyze()` would
+ * end that, and a test asserts it has not happened.
+ *
+ * Readable JSON stays canonical. A document is built from it at the start of a
+ * session and flattened back at the end; the CRDT exists for the window in
+ * between, where concurrent edits have to merge.
+ *
+ * Flattening a session back to a file must go through the operation layer and
+ * the line-editing serializer, **not** `formatProject`. Regenerating the text
+ * discards the blank lines that group related labels, and reorders regions that
+ * were declared by hand — a whole-file diff in place of the one-line edit that
+ * actually happened. `projectFromDoc` gives content, not formatting.
+ *
+ * That only works because construction is **deterministic**: two clients
+ * loading the same JSON produce byte-identical documents, giving their edits a
+ * common ancestor to merge onto. Without it, identical content would get
+ * different internal ids and merging would duplicate rather than combine.
+ */
+
+import * as Y from "yjs";
+import { Project, ProjectLabel, ProjectLayer, ProjectRegion } from "../project/project.js";
+
+/**
+ * Client id used while building the shared base.
+ *
+ * Fixed, and set before any content, so the base is identical everywhere. Each
+ * participant switches to its own id before making edits, which is what keeps
+ * their changes distinguishable.
+ */
+export const BASE_CLIENT_ID = 0;
+
+/** Root names. Declared up front because `Doc.toJSON()` only reports roots that have been accessed. */
+const ROOT_LAYERS = "layers";
+const ROOT_META = "meta";
+const ROOT_PRIMARY = "primaryLabels";
+
+/** Scalars a project carries outside its layers. */
+const META_KEYS = ["name", "description", "entryPoints"] as const;
+
+function mapFrom(record: Record<string, unknown>): Y.Map<unknown> {
+  const map = new Y.Map<unknown>();
+  // Sorted, so two clients insert in the same order and produce the same bytes.
+  for (const key of Object.keys(record).sort()) {
+    if (record[key] !== undefined) map.set(key, record[key]);
+  }
+  return map;
+}
+
+/**
+ * Build a document from a project.
+ *
+ * Deterministic: same input, same bytes, on every client.
+ */
+export function docFromProject(project: Project): Y.Doc {
+  const doc = new Y.Doc();
+  doc.clientID = BASE_CLIENT_ID;
+
+  doc.transact(() => {
+    const layers = doc.getArray<Y.Map<unknown>>(ROOT_LAYERS);
+    for (const layer of project.layers) {
+      const { labels, regions, ...scalars } = layer;
+      const entry = mapFrom(scalars as Record<string, unknown>);
+
+      // Keyed by id rather than held in an array: two people editing different
+      // labels then touch different keys, and neither reorders the other's.
+      const labelMap = new Y.Map<Y.Map<unknown>>();
+      for (const label of [...(labels ?? [])].sort(byId)) {
+        labelMap.set(label.id!, mapFrom(label as unknown as Record<string, unknown>));
+      }
+      entry.set("labels", labelMap);
+
+      const regionMap = new Y.Map<Y.Map<unknown>>();
+      for (const region of [...(regions ?? [])].sort(byId)) {
+        regionMap.set(region.id!, mapFrom(region as unknown as Record<string, unknown>));
+      }
+      entry.set("regions", regionMap);
+
+      layers.push([entry]);
+    }
+
+    const meta = doc.getMap<unknown>(ROOT_META);
+    for (const key of META_KEYS) {
+      if (project[key] !== undefined) meta.set(key, project[key]);
+    }
+
+    const primary = doc.getMap<string>(ROOT_PRIMARY);
+    for (const address of Object.keys(project.primaryLabels ?? {}).sort()) {
+      primary.set(address, project.primaryLabels![address]);
+    }
+  }, "load");
+
+  return doc;
+}
+
+const byId = (a: { id?: string }, b: { id?: string }) =>
+  (a.id ?? "").localeCompare(b.id ?? "");
+
+/** Read a document back as a plain project. */
+export function projectFromDoc(doc: Y.Doc): Project {
+  // Touch every root: an untouched one is missing from the document's view,
+  // even when updates carrying it have been applied.
+  const layers = doc.getArray<Y.Map<unknown>>(ROOT_LAYERS);
+  const meta = doc.getMap<unknown>(ROOT_META);
+  const primary = doc.getMap<string>(ROOT_PRIMARY);
+
+  const project: Project = {
+    layers: layers.toArray().map((entry) => {
+      const scalars = { ...(entry.toJSON() as Record<string, unknown>) };
+      delete scalars.labels;
+      delete scalars.regions;
+
+      const labels = entry.get("labels") as Y.Map<Y.Map<unknown>> | undefined;
+      const regions = entry.get("regions") as Y.Map<Y.Map<unknown>> | undefined;
+
+      const layer = inOrder<ProjectLayer>(scalars, LAYER_FIELDS);
+      const labelList = labels
+        ? sortedValues<ProjectLabel>(labels, "address").map((l) =>
+            inOrder<ProjectLabel>(l as unknown as Record<string, unknown>, LABEL_FIELDS)
+          )
+        : [];
+      const regionList = regions
+        ? sortedValues<ProjectRegion>(regions, "start").map((r) =>
+            inOrder<ProjectRegion>(r as unknown as Record<string, unknown>, REGION_FIELDS)
+          )
+        : [];
+      if (labelList.length) layer.labels = labelList;
+      if (regionList.length) layer.regions = regionList;
+      return layer;
+    }),
+  };
+
+  for (const key of META_KEYS) {
+    const value = meta.get(key);
+    if (value !== undefined) (project as unknown as Record<string, unknown>)[key] = value;
+  }
+
+  const primaryJson = primary.toJSON() as Record<string, string>;
+  if (Object.keys(primaryJson).length) project.primaryLabels = primaryJson;
+
+  return project;
+}
+
+/**
+ * Field order as the project file writes it.
+ *
+ * Keys go into the document sorted, so construction is deterministic; they come
+ * back out in the order the serializer expects. Without this, flattening a
+ * session would rewrite every line just to reorder "id" and "address", turning
+ * a one-label edit into a whole-file diff.
+ */
+const LABEL_FIELDS = ["id", "address", "name", "type", "comment"] as const;
+const REGION_FIELDS = ["id", "start", "end", "kind", "name", "comment"] as const;
+const LAYER_FIELDS = [
+  "id",
+  "type",
+  "path",
+  "address",
+  "bytes",
+  "length",
+  "noAutoEntry",
+  "name",
+] as const;
+
+function inOrder<T>(source: Record<string, unknown>, fields: readonly string[]): T {
+  const out: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (source[field] !== undefined) out[field] = source[field];
+  }
+  // Anything the schema gained since is kept rather than silently dropped.
+  for (const key of Object.keys(source)) {
+    if (!fields.includes(key) && source[key] !== undefined) out[key] = source[key];
+  }
+  return out as T;
+}
+
+/**
+ * Entries in a stable order.
+ *
+ * A `Y.Map` iterates in an order that reflects how it was built, which differs
+ * between clients that inserted concurrently. Sorting by address keeps the
+ * written file stable, so the same state always serialises the same way.
+ */
+function sortedValues<T>(map: Y.Map<Y.Map<unknown>>, key: string): T[] {
+  const parseAddress = (value: unknown): number => {
+    if (typeof value === "number") return value;
+    const text = String(value ?? "").trim();
+    if (text.startsWith("$")) return parseInt(text.slice(1), 16);
+    if (text.startsWith("0x")) return parseInt(text.slice(2), 16);
+    return parseInt(text, 10);
+  };
+
+  return [...map.values()]
+    .map((entry) => entry.toJSON() as T)
+    .sort((a, b) => {
+      const delta =
+        parseAddress((a as Record<string, unknown>)[key]) -
+        parseAddress((b as Record<string, unknown>)[key]);
+      return delta !== 0
+        ? delta
+        : String((a as { id?: string }).id).localeCompare(String((b as { id?: string }).id));
+    });
+}
+
+/** The whole document as one update, for sending or storing. */
+export function encodeDoc(doc: Y.Doc): Uint8Array {
+  return Y.encodeStateAsUpdate(doc);
+}
+
+/** Merge an update into a document. */
+export function applyUpdate(doc: Y.Doc, update: Uint8Array, origin?: unknown): void {
+  Y.applyUpdate(doc, update, origin);
+}
+
+/** Squash a session's updates into one, for a single history entry. */
+export function squashUpdates(updates: readonly Uint8Array[]): Uint8Array {
+  return Y.mergeUpdates([...updates]);
+}
+
+/** What this document has, so a peer can send only what it lacks. */
+export function stateVector(doc: Y.Doc): Uint8Array {
+  return Y.encodeStateVector(doc);
+}
+
+/** Everything in `doc` that a peer with `since` does not have. */
+export function diffSince(doc: Y.Doc, since: Uint8Array): Uint8Array {
+  return Y.encodeStateAsUpdate(doc, since);
+}
