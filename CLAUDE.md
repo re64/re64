@@ -795,6 +795,47 @@ from `disk.d64:filename` shows the image and file name. Modelling disks as
 containers would be a real change to `FileLayer` and the schema, and nothing
 needs it yet.
 
+### The file is shared, not owned
+
+The server is not the only writer. `re64 label set` writes the project file
+directly, with no server involvement, and a user may have it open in an editor.
+Left alone this loses data *silently*: the server's write applies
+`diff(document, file)`, so an edit the document never learned about is diffed in
+the wrong direction and reverted.
+
+So the file is treated as another participant. The store watches it, and an
+external change becomes ordinary operations applied to the shared document —
+which merges them and broadcasts them to connected sessions like any other
+edit. External ops are recorded in the session history under the author `file`,
+since the store cannot know who wrote it but must not claim a session ended in
+a state it did not.
+
+Two things this depends on:
+
+- **Writers rename a temporary file over the target** (`src/fsutil.ts`), so no
+  reader ever sees a half-written project. Both the CLI and the server do this.
+- **The watch is on the directory, not the file.** A watch on a path follows the
+  inode behind it, and the rename above replaces that inode — so a file watch
+  goes deaf after the first write, *including the server's own*. This was found
+  the hard way; the symptom is a watcher that appears to work until the first
+  save.
+
+The store tells its own writes from everyone else's by comparing content against
+the text it last wrote, rather than trusting watch events, which coalesce, fire
+spuriously, and differ between platforms. A file caught mid-save or hand-edited
+into invalid JSON is skipped rather than treated as a deletion of everything;
+the next event brings the valid content.
+
+Persistence driven by timers is wrapped so a failure reports rather than
+throwing: the file is outside the server's control and can vanish under a live
+session, and an unhandled throw in a timer takes the whole process down. Losing
+one write is recoverable — the session is still in the document and the sidecar
+log — while losing the server is not.
+
+Long term this belongs in SQLite rather than the filesystem, with an import
+path for existing project files; deliberately deferred to keep the current
+barrier to entry low.
+
 ## Known Limitations & Future Features
 
 ### Text Region Rendering

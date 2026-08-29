@@ -8,6 +8,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { writeFileAtomic } from "../fsutil.js";
 import {
   Change,
   LabelType,
@@ -61,7 +62,7 @@ export function runOps(
     descriptions.push(describeOp(op));
   }
 
-  writeFileSync(projectPath, text, "utf-8");
+  writeFileAtomic(projectPath, text);
   writeLog(projectPath, log);
   return { applied: ops.length, descriptions };
 }
@@ -72,7 +73,7 @@ export function undoLast(projectPath: string): string | null {
   for (let i = log.length - 1; i >= 0; i--) {
     if (log[i].undone) continue;
     const text = applyOp(readFileSync(projectPath, "utf-8"), log[i].inverse);
-    writeFileSync(projectPath, text, "utf-8");
+    writeFileAtomic(projectPath, text);
     log[i].undone = true;
     writeLog(projectPath, log);
     return describeOp(log[i].op);
@@ -86,7 +87,7 @@ export function redoLast(projectPath: string): string | null {
   for (let i = log.length - 1; i >= 0; i--) {
     if (!log[i].undone) continue;
     const text = applyOp(readFileSync(projectPath, "utf-8"), log[i].op);
-    writeFileSync(projectPath, text, "utf-8");
+    writeFileAtomic(projectPath, text);
     log[i].undone = false;
     writeLog(projectPath, log);
     return describeOp(log[i].op);

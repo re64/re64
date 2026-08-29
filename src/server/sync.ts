@@ -69,6 +69,14 @@ export class SyncServer {
       this.broadcast(frame(Message.Update, update), from);
       this.scheduleWrite();
     });
+
+    // Someone editing the file directly — the CLI, or an editor — is a
+    // participant too. Their changes become operations on the shared document
+    // and reach connected sessions, instead of being reverted by the next
+    // write.
+    options.store.watchFile((ops) => {
+      for (const op of ops) options.store.applyExternalOp(op);
+    });
   }
 
   /** Adopt an HTTP upgrade for the sync endpoint. */
@@ -120,16 +128,33 @@ export class SyncServer {
     if (this.writeTimer) clearTimeout(this.writeTimer);
     this.writeTimer = setTimeout(() => {
       this.writeTimer = undefined;
-      this.options.store.writeFile();
+      this.detached(() => this.options.store.writeFile());
     }, this.options.writeMs);
     this.writeTimer.unref?.();
   }
 
   private scheduleIdleFlatten(): void {
     this.cancelIdleFlatten();
-    this.idleTimer = setTimeout(() => this.flattenNow(), this.options.idleMs);
+    this.idleTimer = setTimeout(() => this.detached(() => this.flattenNow()), this.options.idleMs);
     // Do not hold the process open just to wait for a flatten.
     this.idleTimer.unref?.();
+  }
+
+  /**
+   * Run persistence work that no caller is waiting on.
+   *
+   * A timer that throws takes the process down with it, and the file these
+   * touch is outside the server's control: it can be deleted, replaced, or
+   * hand-edited into invalid JSON mid-session. Losing the write is recoverable
+   * — the session state is still in the document and the sidecar log — while
+   * losing the server is not.
+   */
+  private detached(work: () => void): void {
+    try {
+      work();
+    } catch (error) {
+      console.error("re64: could not persist the session:", error);
+    }
   }
 
   private cancelIdleFlatten(): void {
@@ -151,6 +176,7 @@ export class SyncServer {
   }
 
   close(): void {
+    this.options.store.stopWatching();
     if (this.writeTimer) clearTimeout(this.writeTimer);
     this.writeTimer = undefined;
     this.cancelIdleFlatten();
