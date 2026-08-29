@@ -891,13 +891,22 @@ Two things fix it, and both are needed:
   tell "they added this" from "we deleted it". A watcher normally absorbs first,
   but correctness must not depend on one running.
 
-Noticing another writer is `ProjectStorage.watch`. It looks filesystem-shaped
-but is not: SQLite answers with `PRAGMA data_version`, which changes only when a
-*different* connection commits — no debounce, no spurious events, no platform
-differences. The filesystem implementation watches the **directory, not the
-file**, because a watch on a path follows the inode and every writer replaces it
-by renaming a temporary file over the target; a file watch goes deaf after the
-first write, including its own.
+Noticing another writer is `ProjectStorage.watch`, and **both implementations
+poll** — SQLite for `PRAGMA data_version`, which changes only when a *different*
+connection commits, and the filesystem one for mtime and size.
+
+Polling is the second answer, not the first. `fs.watch` was tried and is a trap
+here: a watch on a path follows the inode, and every writer replaces it by
+renaming a temporary file over the target, so the watch goes deaf after the
+first write — including its own. Watching the directory instead fixes that and
+inherits the rest: one save reports several times, needing a debounce tuned by
+guess; the reported filename is null on some platforms; and the latency depends
+on machine load, which showed up as tests that failed a few percent of the time
+rather than tests that were wrong. A `stat` every 150ms has none of that.
+
+This is affordable because **correctness does not depend on it** — a write folds
+in external changes whether or not anything is watching. Watching is only
+liveness: how soon a connected browser sees an edit someone made elsewhere.
 
 **Undo is scoped to its author.** The record is shared, so an unscoped `re64
 undo` let someone at the CLI silently revert what a browser user had just done.

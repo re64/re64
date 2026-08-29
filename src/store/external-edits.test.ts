@@ -57,7 +57,29 @@ const BACKENDS: Backend[] = [
   },
 ];
 
-/** Long enough for a directory event to coalesce, or a data_version poll. */
+/**
+ * Wait for something to become true, rather than for a fixed time.
+ *
+ * A directory event coalesces on its own schedule and `data_version` is polled
+ * on ours, so how long either takes depends on what else the machine is doing.
+ * A fixed sleep tuned on an idle machine fails a few percent of the time under
+ * a full suite — which is worse than a slow test, because it teaches you to
+ * re-run rather than to look.
+ */
+async function until(condition: () => boolean, what: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if (condition()) return;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+/**
+ * A fixed pause, only for asserting that something does *not* happen.
+ *
+ * There is no condition to poll for absence; the wait itself is the evidence.
+ */
 const settle = () => new Promise((r) => setTimeout(r, 400));
 
 describe.each(BACKENDS)("$name", (b) => {
@@ -85,9 +107,7 @@ describe.each(BACKENDS)("$name", (b) => {
     s.watchFile();
 
     asSomeoneElse((text) => text.replace('"Loop"', '"Renamed"'));
-    await settle();
-
-    expect(labelNames(s)).toContain("Renamed");
+    await until(() => labelNames(s).includes("Renamed"), "the rename to arrive");
     s.stopWatching();
   });
 
@@ -99,9 +119,7 @@ describe.each(BACKENDS)("$name", (b) => {
     asSomeoneElse((text) =>
       applyOps(text, [{ op: "label.delete", id: "lbl_2", layerId: "lay_a" }])
     );
-    await settle();
-
-    expect(labelNames(s)).not.toContain("Loop");
+    await until(() => !labelNames(s).includes("Loop"), "the deletion to arrive");
     s.stopWatching();
   });
 
@@ -129,7 +147,7 @@ describe.each(BACKENDS)("$name", (b) => {
     s.watchFile();
 
     asSomeoneElse((text) => text.replace('"Loop"', '"FromElsewhere"'));
-    await settle();
+    await until(() => labelNames(s).includes("FromElsewhere"), "the edit to arrive");
 
     const entry = s.flatten(1_000);
     expect(entry?.summary.join(" ")).toContain("FromElsewhere");
@@ -171,10 +189,13 @@ describe("a project caught mid-write", () => {
     expect((projectFromDoc(s.document()).layers[0].labels ?? []).length).toBe(2);
 
     storage.writeText(PROJECT.replace('"Loop"', '"Recovered"'));
-    await settle();
-    expect(
-      (projectFromDoc(s.document()).layers[0].labels ?? []).map((l) => l.name)
-    ).toContain("Recovered");
+    await until(
+      () =>
+        (projectFromDoc(s.document()).layers[0].labels ?? []).some(
+          (l) => l.name === "Recovered"
+        ),
+      "the valid content to be picked up"
+    );
     s.stopWatching();
   });
 });

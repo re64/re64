@@ -7,8 +7,7 @@
  * against.
  */
 
-import { appendFileSync, existsSync, readFileSync, unlinkSync, watch } from "node:fs";
-import { basename, dirname } from "node:path";
+import { appendFileSync, existsSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { writeFileAtomic } from "../fsutil.js";
 import { Change, decodeChanges, encodeChanges } from "../core/index.js";
 import {
@@ -70,8 +69,8 @@ function unframe(buffer: Buffer): StoredUpdate[] {
   return updates;
 }
 
-/** Long enough to coalesce a burst of save events, short enough to feel live. */
-const DEBOUNCE_MS = 120;
+/** Frequent enough to feel immediate, rare enough to cost nothing. */
+const POLL_MS = 150;
 
 export class FileStorage implements ProjectStorage {
   constructor(readonly paths: SessionPaths) {}
@@ -120,29 +119,41 @@ export class FileStorage implements ProjectStorage {
   }
 
   /**
-   * Watch the *directory*, not the file.
+   * Poll, rather than subscribe to filesystem events.
    *
-   * A watch on a path follows the inode behind it, and every writer here
-   * replaces that inode by renaming a temporary file over the target — so a
-   * file watch stops reporting after the first write, including our own.
+   * `fs.watch` was the obvious choice and the wrong one. A watch on a path
+   * follows the inode, and every writer here replaces it by renaming a
+   * temporary file over the target, so the watch goes deaf after the first
+   * write — including its own. Watching the directory instead fixes that but
+   * inherits the rest: a single save reports several times, needing a debounce
+   * tuned by guess; the event name is null on some platforms; and how long any
+   * of it takes depends on machine load, which made the tests flaky rather than
+   * wrong.
+   *
+   * Polling has none of that, costs one `stat` every 150ms, and is what the
+   * SQLite store does with `data_version` — so both answer "did someone else
+   * write?" the same way.
    */
   watch(onChange: () => void): () => void {
-    const dir = dirname(this.paths.project);
-    const file = basename(this.paths.project);
-    let timer: NodeJS.Timeout | undefined;
-
-    const watcher = watch(dir, (_event, name) => {
-      if (name !== null && name !== file) return;
-      // A single save reports more than once on most platforms.
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(onChange, DEBOUNCE_MS);
-      timer.unref?.();
-    });
-
-    return () => {
-      if (timer) clearTimeout(timer);
-      watcher.close();
+    const stamp = () => {
+      try {
+        const { mtimeMs, size } = statSync(this.paths.project);
+        return `${mtimeMs}:${size}`;
+      } catch {
+        return ""; // Mid-rename, or gone; the next poll settles it.
+      }
     };
+
+    let seen = stamp();
+    const timer = setInterval(() => {
+      const now = stamp();
+      if (now === seen || now === "") return;
+      seen = now;
+      onChange();
+    }, POLL_MS);
+    timer.unref?.();
+
+    return () => clearInterval(timer);
   }
 
   readOps(): Change[] {
