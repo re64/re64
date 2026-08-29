@@ -4,3 +4,5 @@ export * from "./sqlite-storage.js";
 export * from "./db.js";
 export * from "./project-store.js";
 export * from "./transfer.js";
+export * from "./blobs.js";
+export * from "./load.js";

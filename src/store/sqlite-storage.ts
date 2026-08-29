@@ -11,7 +11,9 @@
 
 import { Change } from "../core/index.js";
 import { DatabaseSync, openDatabase } from "./db.js";
+import { hashBytes, normalizeBlobName } from "./blobs.js";
 import { HistoryEntry, ProjectStorage, StoredUpdate, revOf } from "./storage.js";
+import { newId } from "../core/index.js";
 
 /** How often to notice another connection's commit. */
 const POLL_MS = 150;
@@ -125,6 +127,51 @@ export class SqliteStorage implements ProjectStorage {
         c.undone ? 1 : 0
       );
     }
+  }
+
+  /**
+   * Store bytes under the name the project uses for them.
+   *
+   * The same bytes arriving under a second name cost nothing but a row: the
+   * blob is shared, the name is not.
+   */
+  putBlob(name: string, bytes: Uint8Array): string {
+    const hash = hashBytes(bytes);
+    this.db
+      .prepare("INSERT OR IGNORE INTO blobs (hash, size, bytes) VALUES (?, ?, ?)")
+      .run(hash, bytes.length, bytes);
+    this.db
+      .prepare(
+        "INSERT INTO files (id, name, hash) VALUES (?, ?, ?) " +
+          "ON CONFLICT(name) DO UPDATE SET hash = excluded.hash"
+      )
+      .run(newId("fil"), normalizeBlobName(name), hash);
+    return hash;
+  }
+
+  /** The bytes a project name stands for, or undefined if it holds none. */
+  blob(name: string): Uint8Array | undefined {
+    const row = this.db
+      .prepare(
+        "SELECT b.bytes AS bytes FROM files f JOIN blobs b ON b.hash = f.hash WHERE f.name = ?"
+      )
+      .get(normalizeBlobName(name)) as { bytes: Uint8Array } | undefined;
+    return row ? new Uint8Array(row.bytes) : undefined;
+  }
+
+  /** What the project calls each file it holds bytes for. */
+  blobNames(): string[] {
+    return (this.db.prepare("SELECT name FROM files ORDER BY name").all() as {
+      name: string;
+    }[]).map((r) => r.name);
+  }
+
+  /** The content hash recorded for a name, for integrity checks. */
+  blobHash(name: string): string | undefined {
+    const row = this.db
+      .prepare("SELECT hash FROM files WHERE name = ?")
+      .get(normalizeBlobName(name)) as { hash: string } | undefined;
+    return row?.hash;
   }
 
   /**

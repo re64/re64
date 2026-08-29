@@ -12,7 +12,7 @@
  */
 
 /** Prefix marks what an id refers to, so a stray id in a diff is readable. */
-export type IdPrefix = "lbl" | "rgn" | "lay";
+export type IdPrefix = "lbl" | "rgn" | "lay" | "fil";
 
 const ID_CHARS = "0123456789abcdefghijklmnopqrstuvwxyz";
 

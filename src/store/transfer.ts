@@ -12,7 +12,9 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { writeFileAtomic } from "../fsutil.js";
-import { parseProject } from "../core/index.js";
+import { dirname, resolve } from "node:path";
+import { blobPaths, parseProject } from "../core/index.js";
+import { normalizeBlobName } from "./blobs.js";
 import { HistoryEntry } from "./storage.js";
 import { SqliteStorage } from "./sqlite-storage.js";
 
@@ -24,6 +26,8 @@ export function databasePathFor(projectPath: string): string {
 export interface ImportResult {
   databasePath: string;
   historyEntries: number;
+  /** The binaries brought in, by the name the project uses for them. */
+  files: string[];
 }
 
 /**
@@ -37,10 +41,19 @@ export function importProject(
   databasePath = databasePathFor(projectPath)
 ): ImportResult {
   const text = readFileSync(projectPath, "utf-8");
-  parseProject(text); // Refuse a file that is not a project, before creating anything.
+  const project = parseProject(text); // Refuse a non-project before creating anything.
+
+  // Read the binaries before the database exists, so a missing one fails the
+  // import rather than leaving a database that cannot be disassembled.
+  const baseDir = dirname(projectPath);
+  const wanted = blobPaths(project).map((name) => ({
+    name: normalizeBlobName(name),
+    bytes: new Uint8Array(readFileSync(resolve(baseDir, name))),
+  }));
 
   const storage = new SqliteStorage(databasePath);
   storage.initialize(text, Date.now());
+  for (const file of wanted) storage.putBlob(file.name, file.bytes);
 
   const historyPath = `${projectPath}.history`;
   let historyEntries = 0;
@@ -57,7 +70,7 @@ export function importProject(
   }
 
   storage.close();
-  return { databasePath, historyEntries };
+  return { databasePath, historyEntries, files: wanted.map((f) => f.name) };
 }
 
 export interface ExportResult {

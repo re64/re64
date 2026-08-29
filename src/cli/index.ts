@@ -29,7 +29,7 @@ import {
 import { loadProjectFile, nodeFileBytes } from "../node-files.js";
 import { hexDump } from "./hex.js";
 import { openProject } from "./edit.js";
-import { exportProject, importProject } from "../store/index.js";
+import { exportProject, importProject, loadProjectFromDatabase } from "../store/index.js";
 
 function parseAddress(value: string): number {
   const num = value.startsWith("0x") || value.startsWith("$")
@@ -353,6 +353,7 @@ program
   .command("disasm")
   .description("Disassemble code from entry points")
   .option("-p, --project <file>", "Project file (.re64)")
+  .option("-d, --db <file>", "Project database (.re64db), instead of -p")
   .option("-l, --layer <spec...>", layerHelp)
   .option("-e, --entry <addr...>", "Entry point addresses (default: use PRG load addresses)")
   .option("-r, --range <range>", "Only show instructions in range")
@@ -365,9 +366,10 @@ program
     // Layers declared on the command line have no project file behind them.
     let project: Project = { layers: [] };
 
-    if (options.project) {
-      // Load from project file
-      const loaded = loadProjectFile(options.project);
+    if (options.project || options.db) {
+      const loaded = options.db
+        ? loadProjectFromDatabase(options.db)
+        : loadProjectFile(options.project);
       map = loaded.map;
       prgEntries = loaded.prgEntries;
       userLabels = loaded.userLabels;
