@@ -22,16 +22,27 @@ import {
   parseProjectAddress,
   resolveOwningLayer,
 } from "../core/index.js";
-import { FileStorage, ProjectStore, pathsFor } from "../store/index.js";
+import {
+  FileStorage,
+  ProjectStore,
+  SqliteStorage,
+  loadProjectFromDatabase,
+  pathsFor,
+} from "../store/index.js";
 import { loadProjectFile } from "../node-files.js";
 
 export class ProjectEditor {
   private readonly store: ProjectStore;
+  private readonly isDatabase: boolean;
   private parsed?: Project;
   private loaded?: LoadedProject;
 
+  /** Takes either a project database or a plain project file. */
   constructor(private readonly projectPath: string) {
-    this.store = new ProjectStore(new FileStorage(pathsFor(projectPath)));
+    this.isDatabase = projectPath.endsWith("db");
+    this.store = new ProjectStore(
+      this.isDatabase ? new SqliteStorage(projectPath) : new FileStorage(pathsFor(projectPath))
+    );
   }
 
   /**
@@ -42,7 +53,9 @@ export class ProjectEditor {
    * address, so nothing in the JSON alone says where it sits.
    */
   owningLayerId(address: number): string {
-    const loaded = (this.loaded ??= loadProjectFile(this.projectPath));
+    const loaded = (this.loaded ??= this.isDatabase
+      ? loadProjectFromDatabase(this.projectPath)
+      : loadProjectFile(this.projectPath));
     const index = resolveOwningLayer(loaded, address);
     if (index === undefined) {
       throw new Error(
