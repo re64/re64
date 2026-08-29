@@ -7,3 +7,8 @@ public/app.js.map
 
 # Transient session state: Yjs updates awaiting a flatten.
 *.re64.session
+
+# Project databases; the exported .re64 is the tracked artefact
+*.re64db
+*.re64db-wal
+*.re64db-shm

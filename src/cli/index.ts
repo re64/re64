@@ -29,6 +29,7 @@ import {
 import { loadProjectFile, nodeFileBytes } from "../node-files.js";
 import { hexDump } from "./hex.js";
 import { openProject } from "./edit.js";
+import { exportProject, importProject } from "../store/index.js";
 
 function parseAddress(value: string): number {
   const num = value.startsWith("0x") || value.startsWith("$")
@@ -295,6 +296,41 @@ program
   .action((projectPath: string, options) => {
     const redone = openProject(projectPath).redo(options.any ? undefined : options.author);
     console.log(redone ? `Redid: ${redone}` : "Nothing to redo.");
+  });
+
+program
+  .command("import")
+  .description("Read a project file into a database, where editing happens")
+  .argument("<project>", "Project file (.re64)")
+  .option("-d, --db <path>", "Where to put the database (default: <project>db)")
+  .action((projectPath: string, options) => {
+    const { databasePath, historyEntries } = importProject(projectPath, options.db);
+    console.log(`Imported ${projectPath} into ${databasePath}`);
+    if (historyEntries > 0) {
+      console.log(`Carried ${historyEntries} history entr${historyEntries === 1 ? "y" : "ies"} across.`);
+    }
+  });
+
+program
+  .command("export")
+  .description("Write a database back out as a project file")
+  .argument("<database>", "Project database (.re64db)")
+  .option("-o, --out <path>", "Where to write it (default: the database path without 'db')")
+  .option("--check", "Report whether the export is stale, without writing")
+  .action((databasePath: string, options) => {
+    const out = options.out ?? databasePath.replace(/db$/, "");
+    if (out === databasePath) {
+      console.error("Refusing to overwrite the database; pass --out");
+      process.exit(1);
+    }
+    const { changed } = exportProject(databasePath, out, options.check === true);
+
+    if (options.check) {
+      console.log(changed ? `${out} is out of date` : `${out} is up to date`);
+      if (changed) process.exit(1);
+      return;
+    }
+    console.log(changed ? `Wrote ${out}` : `${out} was already up to date`);
   });
 
 program

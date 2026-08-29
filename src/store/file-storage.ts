@@ -110,6 +110,16 @@ export class FileStorage implements ProjectStorage {
   }
 
   /**
+   * A file offers no transaction, so this is a promise not kept.
+   *
+   * Left visible rather than hidden: the two writes it wraps really can come
+   * apart here, which is one of the reasons for moving off the filesystem.
+   */
+  transaction<T>(work: () => T): T {
+    return work();
+  }
+
+  /**
    * Watch the *directory*, not the file.
    *
    * A watch on a path follows the inode behind it, and every writer here

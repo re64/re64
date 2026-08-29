@@ -244,18 +244,20 @@ export class ProjectStore {
   ): { applied: number; descriptions: string[] } {
     if (ops.length === 0) return { applied: 0, descriptions: [] };
 
-    let text = this.storage.readText();
-    const changes: Change[] = [];
-    for (const op of ops) {
-      changes.push({ op, inverse: invertOp(text, op), author, at: now });
-      text = applyOp(text, op);
-    }
+    return this.storage.transaction(() => {
+      let text = this.storage.readText();
+      const changes: Change[] = [];
+      for (const op of ops) {
+        changes.push({ op, inverse: invertOp(text, op), author, at: now });
+        text = applyOp(text, op);
+      }
 
-    this.addAuthor(author);
-    this.applyThroughDocument(ops, author);
-    this.storage.writeOps([...this.storage.readOps(), ...changes]);
+      this.addAuthor(author);
+      this.applyThroughDocument(ops, author);
+      this.storage.writeOps([...this.storage.readOps(), ...changes]);
 
-    return { applied: ops.length, descriptions: ops.map(describeOp) };
+      return { applied: ops.length, descriptions: ops.map(describeOp) };
+    });
   }
 
   /**
@@ -287,15 +289,17 @@ export class ProjectStore {
     direction: (change: Change) => Op,
     undone: boolean
   ): string | null {
-    const log = this.storage.readOps();
-    for (let i = log.length - 1; i >= 0; i--) {
-      if (!wanted(log[i])) continue;
-      this.applyThroughDocument([direction(log[i])], log[i].author ?? "unknown");
-      log[i].undone = undone;
-      this.storage.writeOps(log);
-      return describeOp(log[i].op);
-    }
-    return null;
+    return this.storage.transaction(() => {
+      const log = this.storage.readOps();
+      for (let i = log.length - 1; i >= 0; i--) {
+        if (!wanted(log[i])) continue;
+        this.applyThroughDocument([direction(log[i])], log[i].author ?? "unknown");
+        log[i].undone = undone;
+        this.storage.writeOps(log);
+        return describeOp(log[i].op);
+      }
+      return null;
+    });
   }
 
   /**

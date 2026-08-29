@@ -66,6 +66,15 @@ export interface ProjectStorage {
   writeOps(changes: readonly Change[]): void;
 
   /**
+   * Run related writes as one, so a crash cannot land halfway.
+   *
+   * Applying an operation and recording how to undo it are two writes that
+   * must not come apart: a crash between them leaves the project edited with
+   * no way back. A filesystem cannot promise this and says so by doing nothing.
+   */
+  transaction<T>(work: () => T): T;
+
+  /**
    * Call back when another writer commits a change.
    *
    * The project is not owned exclusively: `re64 label set` writes it directly,

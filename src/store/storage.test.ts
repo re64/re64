@@ -3,6 +3,7 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileStorage, pathsFor } from "./file-storage.js";
+import { SqliteStorage } from "./sqlite-storage.js";
 import { ProjectStorage, revOf } from "./storage.js";
 
 /**
@@ -29,6 +30,14 @@ const BACKENDS: Backend[] = [
       const path = join(dir, "test.re64");
       writeFileSync(path, PROJECT, "utf-8");
       return new FileStorage(pathsFor(path));
+    },
+  },
+  {
+    name: "SqliteStorage",
+    open: (dir) => {
+      const store = new SqliteStorage(join(dir, "test.re64db"));
+      store.initialize(PROJECT, 0);
+      return store;
     },
   },
 ];
