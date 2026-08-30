@@ -36,6 +36,11 @@ So this is not "reject mid-instruction labels". It is a gap between what the
 model can represent and what the row builder can draw. Every other finding here
 is incompleteness; this is the only one that produces a *wrong* answer.
 
+**Since:** still unfixed, and now recorded in CLAUDE.md under known limitations
+so it is not rediscovered. It does announce itself now — the disassembler was
+already emitting an `overlap` warning naming both addresses, and every write
+returns the warnings it introduced, so this returns them instead of a bare `ok`.
+
 Note the same operation succeeded harmlessly at `$807F` (`CopyrightLine = *-$01`),
 resolving correctly in `LDA CopyrightLine,X` and damaging nothing — while also
 being invisible in the listing. Two outcomes, neither documented.
@@ -150,6 +155,9 @@ Fixed since this run, in commit order:
 Two bugs found while fixing those, neither visible from the run: `diffProjects`
 did not diff layers at all, and a stale browser tab could crash the server by
 asking for a project it did not hold.
+
+Trial 1's raw materials are in `trial1/`: the agent's own report, unedited, and
+the transcript of what it actually called.
 
 Still open: bulk `set_labels`, named constants, `export_project`, text-region
 rendering, and the mid-instruction correctness bug — which needs the renderer to

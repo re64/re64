@@ -714,6 +714,7 @@ export class Workspace {
    */
   private edit(caller: Caller, build: (loaded: LoadedProject) => Op[]): EditResult {
     const before = this.program().instructions.size;
+    const warnedBefore = new Set(this.program().warnings.map(describeWarning));
     const ops = build(this.program().loaded);
 
     const { descriptions } = this.room.store.runOps(
@@ -724,11 +725,24 @@ export class Workspace {
     );
     const after = this.program().instructions.size;
 
+    // What this edit broke, if it broke anything.
+    //
+    // A label one byte inside an instruction is legitimate 6502 and the model
+    // permits it, but the row builder cannot draw two streams claiming one
+    // byte, so the decode after it desynchronises into garbage. That is the
+    // only way to get a *wrong* disassembly rather than an incomplete one, and
+    // it used to return plain `ok`. The renderer still cannot cope; at least
+    // the caller is now told, at the moment it becomes true.
+    const introduced = this.program()
+      .warnings.map(describeWarning)
+      .filter((w) => !warnedBefore.has(w));
+
     return {
       ok: true,
       version: this.version(),
       did: descriptions,
       instructions: { before, after, delta: after - before },
+      ...(introduced.length ? { warnings: introduced } : {}),
     };
   }
 
@@ -772,6 +786,13 @@ export interface EditResult {
   version: string;
   did: string[];
   instructions: { before: number; after: number; delta: number };
+  /**
+   * Warnings this edit introduced, when it introduced any.
+   *
+   * Almost always absent. When present it usually means a decode now overlaps
+   * itself, which the listing cannot render and which nothing else would say.
+   */
+  warnings?: string[];
   /**
    * The span a region write actually took, inclusive at both ends.
    *

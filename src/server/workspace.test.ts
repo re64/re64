@@ -604,3 +604,21 @@ describe("who calls this", () => {
     expect(addresses).toEqual([...addresses].sort((a, b) => a - b));
   });
 });
+
+describe("an edit that breaks the decode", () => {
+  it("says so, at the moment it becomes true", () => {
+    // A label one byte inside an instruction is legitimate 6502 and the model
+    // allows it, but the row builder cannot draw two streams claiming one byte,
+    // so everything after resyncs into garbage. The renderer still cannot cope
+    // — this is the difference between a wrong answer and one that admits it.
+    const result = workspace.setLabel(agent, 0x8d5a, "b8D5A", "code");
+
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings!.some((w) => /overlaps instruction/.test(w))).toBe(true);
+  });
+
+  it("stays quiet when nothing broke", () => {
+    const result = workspace.setLabel(agent, 0x8870, "PerfectlyOrdinary", "function");
+    expect(result.warnings).toBeUndefined();
+  });
+});

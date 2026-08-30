@@ -1025,6 +1025,50 @@ The user id is one from `list_users`; the server does not verify it.
 
 ## Known Limitations & Future Features
 
+### A label inside an instruction corrupts the decode around it
+
+**Known, reproducible, and deferred.** The only defect found so far that
+produces a *wrong* disassembly rather than an incomplete one, and it reports
+success:
+
+```
+before   8D59  85 35      STA $35
+         8D5B  4C 8E 8D   JMP loc_8D8E
+
+set_label $8D5A  ->  {"ok": true, "delta": 1}
+
+after    8D59  85 35      STA $35
+         8D5B  4C                       |L|
+         8D5C  8E 8D CE   STX dat_CE8D
+```
+
+A label one byte into `STA $35` makes `$8D5A` an entry point, the walk decodes
+from there, and the second stream desynchronises the first: the `JMP` becomes an
+orphan byte and everything after it resyncs one byte late into garbage. The
+label itself is not rendered either.
+
+**Do not "fix" this by refusing mid-instruction labels.** Branching into the
+middle of an instruction is legitimate 6502 — a byte that is an operand on one
+path and an opcode on another — and the reference disassembly of Gridrunner uses
+it twice (`b8737 = *+$01`, `b8D5A = *+$01`). The model is right to permit
+overlapping decode. What cannot cope is `rows.ts`, which assumes one linear
+instruction stream and has no way to draw two claims on the same byte.
+
+Note that the same operation is harmless at `$807F` (`CopyrightLine = *-$01`),
+where it resolves correctly in `LDA CopyrightLine,X` and damages nothing — while
+still being invisible in the listing. Whether it corrupts anything depends on
+whether the second stream happens to resynchronise, which is why it cannot be
+left to chance.
+
+Fixing it properly means deciding how a row shows a byte that two instructions
+claim, and that is a rendering design question rather than a patch.
+
+Until then it at least announces itself. The disassembler already emits an
+`overlap` warning naming both addresses, so `list_warnings` shows it — and every
+write returns the warnings *it* introduced, so the caller learns at the moment
+it becomes true rather than never. That is the difference between a wrong answer
+and a wrong answer that says so.
+
 ### Text Region Rendering
 Text regions currently display raw bytes with `.TEXT` directive. Many C64 games use custom character sets with proprietary encodings (not standard PETSCII or screen codes). To properly decode text, one would need to analyze the game's character set glyph data.
 
