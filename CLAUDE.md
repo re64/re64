@@ -910,13 +910,36 @@ what a routine calls outbound needs the same. A wrong extent is not visibly
 wrong, so neither is guessed — an extent can be *declared* on `mark_function`,
 which is a different act from inferring one.
 
-Two decisions worth keeping. A `JSR` does **not** end a block: it is expected to
-return, and splitting there would make every block one call long while saying
-nothing. Who it called is recorded separately, so a routine that never returns
-does not silently make every caller look like it ends at the call. And a `ret`
-has no successor here — where an `RTS` goes back to is a property of the call,
-which is exactly why the call graph is a separate question rather than a bigger
-walk.
+**Control enters a block only at its start, never in the middle.** That is the
+whole point of the definition rather than an incidental property: it is what
+lets an analysis treat a block as one transfer function, with inputs fixed at
+entry and everything inside ignorable. SSA needs it outright, because phi-nodes
+sit at block entries and nowhere else.
+
+Holding it means splitting at more places than a loose definition would:
+
+- every jump and branch **target**, so nothing lands inside a run;
+- what follows a **branch**, which is reachable both ways;
+- what follows a **call**, because that is where the call returns to. A `JSR`
+  therefore ends a block. The looser convention treats a call as an opaque
+  instruction and keeps the run going, which puts the return edge in the middle
+  of a block. On this machine it earns its keep twice over: arguments travel in
+  A, X and Y with no calling convention, so "what does A hold after this call"
+  is precisely the question a boundary exists to ask.
+
+A `ret` has no successor here — where an `RTS` goes back to is a property of the
+call, which is why the call graph is a separate question rather than a bigger
+walk. A call's successor *is* recorded, as the address it returns to; that
+assumes it returns, which is stated rather than hidden, because a routine that
+never returns would otherwise make the rest of its caller look unreachable, and
+that is the worse lie.
+
+The invariant is asserted against Gridrunner: every control-flow edge lands on a
+block start, zero exceptions, data references excluded since reading a byte
+inside code is not control arriving there. It caught a real bug when first
+written — `JMP` to the immediately following address had its target discarded by
+a filter meant to remove fall-through, and a jump has no fall-through to remove.
+450 blocks, exits: 154 branch, 95 call, 69 jump, 70 fallthrough, 62 ret.
 
 An extent can be **declared**, though, which is a different thing from inferring
 one: somebody reading the code knows where the routine ends. `mark_function`

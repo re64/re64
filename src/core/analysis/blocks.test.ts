@@ -36,7 +36,7 @@ describe("splitting a program into blocks", () => {
     const first = blocks.find((b) => b.start === 0x1000)!;
     expect(first.exit).toBe("branch");
     // The target and the instruction after it.
-    expect(first.successors.sort()).toEqual([0x1004, 0x1005]);
+    expect([...first.successors].sort()).toEqual([0x1004, 0x1005]);
   });
 
   it("splits a straight run where something branches into its middle", () => {
@@ -51,7 +51,7 @@ describe("splitting a program into blocks", () => {
     expect(middle.end).toBe(0x1005);
   });
 
-  it("does not end a block at a call, and records who was called", () => {
+  it("ends a block at a call, so nothing returns into the middle of one", () => {
     //  JSR $1006 / LDA #$00 / RTS ... target: RTS
     const { index, entryPoints } = program(
       [0x20, 0x06, 0x10, 0xa9, 0x00, 0x60, 0x60],
@@ -60,11 +60,24 @@ describe("splitting a program into blocks", () => {
     const blocks = buildBlocks(index, entryPoints);
     const first = blocks.find((b) => b.start === 0x1000)!;
 
-    // A JSR is expected to return, so the run continues past it. Who it called
-    // is kept separately, so a routine that never returns does not make every
-    // caller's block look like it ends there.
+    expect(first.exit).toBe("call");
     expect(first.calls).toEqual([0x1006]);
-    expect(first.instructions.length).toBeGreaterThan(1);
+    // Its successor is where the call comes back to, which is a block start —
+    // so the return edge lands at an entry rather than inside a run.
+    expect(first.successors).toEqual([0x1003]);
+    expect(blocks.map((b) => b.start)).toContain(0x1003);
+  });
+
+  it("ends a block at a jump to the very next instruction", () => {
+    //  JMP $1003 / RTS — the target is also the following address.
+    const { index, entryPoints } = program([0x4c, 0x03, 0x10, 0x60]);
+    const blocks = buildBlocks(index, entryPoints);
+
+    // Filtering "the target that equals the next address" looks equivalent to
+    // removing fall-through and is not: a jump has none to remove, and this
+    // target was being discarded, leaving $1003 reachable mid-block.
+    expect(blocks.map((b) => b.start)).toContain(0x1003);
+    expect(blocks.find((b) => b.start === 0x1000)!.successors).toEqual([0x1003]);
   });
 
   it("gives a jump its target and nothing else", () => {
@@ -143,3 +156,53 @@ describe("with nothing decoded", () => {
     expect(buildBlocks(new InstructionIndex(new Map()), [0x1000])).toEqual([]);
   });
 });
+
+describe("the invariant the whole definition exists for", () => {
+  it("lets control enter a block only at its start, on a real program", () => {
+    // Every control-flow edge in Gridrunner must land on a block start. This is
+    // what makes a block a single transfer function: an analysis can treat its
+    // inputs as fixed at entry and ignore what happens inside. SSA needs it
+    // outright, since phi-nodes sit at block entries and nowhere else.
+    //
+    // Data references are excluded: reading a byte that happens to sit inside
+    // code is not control arriving there.
+    const map = new MemoryMap();
+    map.addLayer(new BytesLayer("test", ORG, new Uint8Array(GRIDRUNNER_SHAPED)));
+    const result = disassemble(map, { entryPoints: [ORG] });
+    const index = new InstructionIndex(result.instructions);
+    const starts = new Set(buildBlocks(index, [ORG]).map((b) => b.start));
+
+    for (const [target, refs] of result.references) {
+      if (!index.has(target)) continue;
+      if (refs.every((r) => r.type === "data")) continue;
+      expect(starts.has(target)).toBe(true);
+    }
+  });
+
+  it("holds where a branch lands in the middle of a run", () => {
+    //  BNE +3 / NOP / NOP / NOP / RTS
+    const { index, entryPoints } = program([0xd0, 0x03, 0xea, 0xea, 0xea, 0x60]);
+    const blocks = buildBlocks(index, entryPoints);
+
+    for (const block of blocks) {
+      // Nothing but the first instruction of a block is a branch target.
+      for (const instr of block.instructions.slice(1)) {
+        expect(blocks.some((b) => b.start === instr.address)).toBe(false);
+      }
+    }
+  });
+});
+
+/**
+ * A program with every shape that can break the invariant: a call, a jump to
+ * the following address, a branch backwards into a run, and a return.
+ */
+const GRIDRUNNER_SHAPED = [
+  0x20, 0x0c, 0x10, // 1000  JSR $100C     — call, returns into 1003
+  0xa9, 0x01,       // 1003  LDA #$01
+  0x4c, 0x08, 0x10, // 1005  JMP $1008     — jump to the very next address
+  0xea,             // 1008  NOP
+  0xd0, 0xf8,       // 1009  BNE $1003     — backwards into the middle of a run
+  0x60,             // 100B  RTS
+  0x60,             // 100C  RTS           — the callee
+];

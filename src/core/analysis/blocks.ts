@@ -19,14 +19,22 @@
 import { Instruction, getTargets } from "../arch/mos6502/instruction.js";
 
 /**
- * Where an instruction can send control *other than* onwards.
+ * Where an instruction can send control *other than* by simply continuing.
  *
- * `getTargets` answers the walk's question — everything to decode next — and so
- * includes the following address for anything that continues. That is the wrong
- * question here: taking it as "what jumps here" made every instruction a block
- * leader and every block one instruction long.
+ * `getTargets` answers the walk's question — everything to decode next — so it
+ * includes the following address for anything that continues. Taking that as
+ * "what jumps here" makes every instruction a leader.
+ *
+ * Decided by flow type rather than by comparing addresses. Filtering "the
+ * target that equals the next address" looks equivalent and is not: a `JMP` to
+ * the very next instruction has no fall-through to remove, so the comparison
+ * threw away a real jump target and left one address in Gridrunner reachable in
+ * the middle of a block.
  */
 function jumpTargets(instr: Instruction): number[] {
+  if (instr.flow === "jump") return getTargets(instr);
+  if (instr.flow === "ret" || instr.flow === "halt") return [];
+
   const next = instr.address + instr.bytes.length;
   return getTargets(instr).filter((t) => t !== next);
 }
@@ -49,10 +57,15 @@ export interface BasicBlock {
    * every caller's block look like it ends there.
    */
   readonly successors: readonly number[];
-  /** Subroutines this block calls, in the order it calls them. */
+  /**
+   * Subroutines this block calls.
+   *
+   * A block ends at a call, so there is at most one — kept as a list because
+   * an indirect call may resolve to several once anything can say so.
+   */
   readonly calls: readonly number[];
   /** How the last instruction leaves: what ended the block. */
-  readonly exit: "branch" | "jump" | "ret" | "halt" | "fallthrough";
+  readonly exit: "branch" | "jump" | "call" | "ret" | "halt" | "fallthrough";
 }
 
 /**
@@ -72,11 +85,22 @@ function leaders(instructions: InstructionIndex, entryPoints: readonly number[])
       if (instructions.has(target)) starts.add(target);
     }
 
-    // What follows a conditional branch is reachable both ways, so it begins a
-    // block. What follows a `JSR` does not: the call is expected to return, and
-    // splitting there would make every block one call long while saying nothing.
+    // What follows a branch is reachable both ways, and what follows a `JSR` is
+    // where the call returns to. Both begin blocks.
+    //
+    // Splitting at a call is what makes the invariant absolute: control enters
+    // a block only at its start, never in the middle. Without it a return edge
+    // lands mid-block, and any analysis that treats a block as one transfer
+    // function — SSA above all, where phi-nodes sit at block entries — is
+    // reasoning about a block that control can arrive inside.
+    //
+    // On this machine it earns its keep twice over: arguments travel in A, X
+    // and Y with no calling convention, so "what does A hold after this call"
+    // is precisely the question a boundary exists to ask.
     const after = instr.address + instr.bytes.length;
-    if (instr.flow === "branch" && instructions.has(after)) starts.add(after);
+    if ((instr.flow === "branch" || instr.flow === "call") && instructions.has(after)) {
+      starts.add(after);
+    }
     // Nothing is added after a jump, return or halt: whatever follows begins a
     // block only if something reaches it, and then a target above added it.
   }
@@ -122,6 +146,7 @@ export function buildBlocks(
       if (instr.flow === "ret") { exit = "ret"; break; }
       if (instr.flow === "halt") { exit = "halt"; break; }
       if (instr.flow === "branch") { exit = "branch"; break; }
+      if (instr.flow === "call") { exit = "call"; break; }
       // Another block begins here, so this one ends.
       if (starts.has(at)) { exit = "fallthrough"; break; }
       if (!instructions.has(at)) { exit = "fallthrough"; break; }
@@ -137,7 +162,11 @@ export function buildBlocks(
       successors.push(...jumpTargets(last), after);
     } else if (exit === "jump") {
       successors.push(...jumpTargets(last));
-    } else if (exit === "fallthrough") {
+    } else if (exit === "call" || exit === "fallthrough") {
+      // A call's successor is where it returns to. That assumes it returns,
+      // which is the ordinary case and stated rather than hidden: a routine
+      // that does not would make the rest of its caller look unreachable, and
+      // that is a worse lie than this one.
       successors.push(after);
     }
     // A return or a halt has no successor here. Where a `RTS` goes back to is a
