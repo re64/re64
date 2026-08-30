@@ -748,8 +748,10 @@ verified end to end, at the definition and at every call site. A separate MCP
 process would have had to become a client of this one to achieve that, which is
 the same thing with a hop in it.
 
-The transport is **stateless**: an agent cannot hold a websocket open across
-turns. That costs a fresh `McpServer` and transport per request, which is the
+The transport is **stateless**: what is turn-based is an agent's attention, not
+its socket — the client process is long-lived and could hold a stream, so this
+is a choice rather than a constraint, and the earlier wording claiming otherwise
+was wrong. It costs a fresh `McpServer` and transport per request, which is the
 SDK's own pattern for the mode — reusing one silently answers nothing after the
 first, so a test sends two requests to hold that.
 
@@ -802,6 +804,123 @@ CLI edits but not the human's would be blind to precisely what an agent most
 needs to see. It also means the log must be **append-only** — the old
 `DELETE`-and-reinsert renumbered every entry on each undo, so a held cursor
 silently came to mean something else.
+
+### Convergence is not atomicity
+
+Yjs guarantees that replicas which have seen the same updates hold the same
+state. That is all it guarantees. A `Y.Doc` transaction is **local batching** —
+it coalesces changes into one update and one `UndoManager` stack item. It is not
+a distributed transaction: no isolation, no rollback, nothing all-or-nothing
+across peers. On merge, fields resolve independently, with no knowledge that
+three of them were one thought.
+
+So three renames from one peer interleaved with one from another converge to a
+state where the group is partly superseded, and nothing in the document
+remembers there was a group.
+
+The consequence is the design rule: **grouping is a record of intent, and can
+never be a guarantee about state.** That is not a shortfall, because everything
+grouping is wanted for — review, undo, explanation — is about intent. It only
+looks like one if a transaction was expected.
+
+Two places this bites, both real today:
+
+- **The record is per-op, not per-action.** `runOps` appends one `Change` per
+  `Op`, so one `mark_function` producing two ops writes two rows and needs two
+  undos. The browser does not behave this way: `applyOpsToDoc` uses one
+  transaction, so `Y.UndoManager` treats a call as one unit. Browser undo is
+  per-action, CLI and agent undo is per-op. That asymmetry was not chosen.
+- **A stored inverse can revert someone else.** Inverses are computed when the
+  change is recorded. If A sets `$8870`, B then changes it, and A undoes, A's
+  inverse restores the value from before B — silently. Defensible as
+  last-writer-wins, surprising as behaviour, and it gets worse per-changeset.
+
+So grouped undo is **partial and reported**: skip any op whose target moved
+since, and say so — *"undid 2 of 3; $8870 was changed by marcus since, left
+alone."* Better than clobbering, better than refusing.
+
+Grouping lives in the ops log for now, since that is already unified across all
+four consumers and the transaction boundary exists but goes unrecorded. If the
+history ever has to travel with the project — export, a second server, an
+offline browser — it moves into the document as an **append-only** intent log,
+which is the one shape that merges without conflict precisely because nothing
+is ever overwritten.
+
+### Sessions are leases, and agents should have them
+
+A browser tab is a session: one connection, one client id, one undo stack. An
+agent is not. Its edits are attributed by a **string** passed to `runOps`, while
+a browser's are attributable at the struct level by Yjs client id — two
+mechanisms for one question. Undo compounds it: browser undo is scoped to the
+session, agent undo to the *author*, so two agents claiming one identity undo
+each other. And agents have no presence at all, so a person watching thirty
+names change sees nobody there.
+
+For a project whose premise is four consumers and none of them primary, that is
+the wrong asymmetry to leave in.
+
+The fix is to stop treating a session as an artifact of the transport. **A
+session is a server-side lease over a document, keyed by whoever presents a
+session handle, expiring on idle.** A browser gets one from its socket; an agent
+gets one from a header. Both then have a client id, presence, and
+session-scoped undo under the same rule.
+
+It is deliberately **not** a session that holds its own document. Agent ops
+still apply straight to the room. This is a session for attribution and
+presence, not isolation — isolation is what cloning a project is for.
+
+Sessions carry a **codename**, because a person reading a live transcript cannot
+track UUIDs.
+
+One consequence that outlives the lease: a session mints a Yjs client id which
+is stamped permanently into every struct it writes. The `sessions` table is
+therefore the only decoder for who a historical client id was, and **must not be
+pruned like a session store** — expiring the lease is not the same as forgetting
+what it wrote.
+
+**Open question, needs measuring before this is built.** MCP already separates
+identity from instance: `Mcp-Session-Id` is issued at `initialize` and returned
+on later requests, so N client instances get N sessions from one credential —
+no account per agent, exactly the "one user, many tabs" model. But whether N
+spawned agents are N MCP clients or one shared client is a property of the
+*host*, not the protocol, and it decides the design: with one shared client they
+share a session id and the handle has to come from the agent instead. Measure it
+— log `initialize` calls, point several agents at the server, count session ids.
+Do not guess.
+
+Note this also means "should agents have sessions" and "should MCP be stateful"
+are less independent than the stateless decision above assumed.
+
+### The experiments this is for
+
+Three, escalating, each adding one variable. The rare thing here is an
+**oracle**: `assets/gridrunner.asm` is 65KB of human reverse engineering, so
+there is a gold standard to compare against.
+
+1. **Expressiveness audit.** Give an agent the project *and* the human's
+   disassembly, and have it reproduce that through MCP. It is not a test of
+   whether the agent can reverse engineer — it has the answer — but of whether
+   the API can *say* what a person said. Score friction, not similarity. Already
+   known to find something: comments attach only to labels and regions, so the
+   human's instruction-level commentary has nowhere to live.
+2. **Convergence.** Five agents, no labels, only the disk image — on **five
+   independent clones**. Shared, they would see each other's names and converge
+   partly by contagion, which measures influence and calls it agreement. This is
+   the last moment it can be measured uncontaminated.
+3. **Collaboration.** Shared document, a chat, a person watching live. Chat
+   only — post, read, see who is here. **No claims, no leases, no work
+   assignment**, because whether agents invent claim-and-release is the finding;
+   pre-building it replaces the finding with an assumption.
+
+Two rules that make these produce measurements rather than anecdotes:
+
+- **Derive the gap list from the request log, not from what the agents report.**
+  They are unreliable narrators of their own difficulty: they invent tool names
+  and then describe the invention as a gap, and work silently around whatever
+  actually hurt. What was *tried* is ground truth.
+- **Only fix what blocks the next experiment.** Everything else becomes a list
+  and stays a list. Without that rule the first experiment's output consumes
+  every week that follows.
 
 ### Connecting a client
 
