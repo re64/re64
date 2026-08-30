@@ -766,8 +766,10 @@ export class Workspace {
     nextStart?: string;
   } {
     const { rows } = this.rows();
-    const from = start === undefined ? 0 : rows.findIndex((r) => r.address >= start);
-    const begin = from < 0 ? rows.length : from;
+    // The row *containing* the address, not the first one past it. A data row
+    // covers eight bytes, so asking for $808C used to skip to $8090 and leave
+    // out the row that was being checked.
+    const begin = start === undefined ? 0 : rowContaining(rows, start);
     const page = rows.slice(begin, begin + lines);
 
     const covered = new Set(page.map((r) => r.address));
@@ -958,6 +960,92 @@ export class Workspace {
         { op: "comment.set", id: newId("cmt"), layerId, address, placement, text } as Op,
       ];
     });
+  }
+
+  /**
+   * Write several comments as one action.
+   *
+   * The reference has more comments than labels, so the argument that made
+   * `set_labels` exist applies here at least as strongly: one round trip each
+   * is almost all protocol.
+   */
+  setComments(
+    caller: Caller,
+    comments: readonly { address: number; text: string; placement?: CommentPlacement }[]
+  ): EditResult {
+    if (comments.length === 0) throw new Error("Give at least one comment.");
+
+    for (const entry of comments) {
+      if ((entry.placement ?? "before") === "inline" && entry.text.includes("\n")) {
+        throw new Error(
+          `The comment for ${hex4(entry.address)} is inline, so it shares a row ` +
+            `with the instruction and cannot contain newlines.`
+        );
+      }
+    }
+
+    return this.edit(caller, (loaded) => {
+      const ops: Op[] = [];
+      let madeLayer: string | undefined;
+
+      for (const entry of comments) {
+        const placement = entry.placement ?? "before";
+        if (madeLayer !== undefined && !ownsAddress(loaded, entry.address)) {
+          ops.push({
+            op: "comment.set",
+            id: newId("cmt"),
+            layerId: madeLayer,
+            address: entry.address,
+            placement,
+            text: entry.text,
+          });
+          continue;
+        }
+
+        const owning = ensureOwningLayer(loaded, entry.address, this.room.projectId);
+        if (owning.create) {
+          ops.push(owning.create);
+          madeLayer = owning.layerId;
+          ops.push({
+            op: "comment.set",
+            id: newId("cmt"),
+            layerId: owning.layerId,
+            address: entry.address,
+            placement,
+            text: entry.text,
+          });
+        } else {
+          ops.push(commentSetOp(loaded, entry.address, placement, entry.text));
+        }
+      }
+
+      return ops;
+    });
+  }
+
+  /** Declare several constants as one action. */
+  setConstants(
+    caller: Caller,
+    constants: readonly { name: string; value: number }[]
+  ): EditResult {
+    if (constants.length === 0) throw new Error("Give at least one constant.");
+
+    for (const entry of constants) {
+      if (entry.value < 0 || entry.value > 0xff) {
+        throw new Error(
+          `${entry.name} names a byte, so its value must be $00-$FF; got ${entry.value}.`
+        );
+      }
+    }
+
+    return this.edit(caller, (loaded) =>
+      constants.map((entry) => ({
+        op: "constant.set",
+        id: loaded.constants.byName(entry.name)?.id ?? newId("cst"),
+        name: entry.name,
+        value: entry.value,
+      }))
+    );
   }
 
   removeComment(caller: Caller, address: number, placement?: CommentPlacement): EditResult {
@@ -1159,4 +1247,21 @@ export interface EditResult {
    * no other way to notice: the write succeeds and the region is a byte short.
    */
   covers?: string;
+}
+
+/**
+ * The index of the first row covering an address.
+ *
+ * Rows are address-ordered and several can share an address — a comment, a
+ * label, then the instruction — so this walks back to the first of them, and
+ * treats an address inside a multi-byte row as belonging to that row.
+ */
+function rowContaining(rows: readonly { address: number }[], address: number): number {
+  const after = rows.findIndex((r) => r.address > address);
+  const last = after < 0 ? rows.length - 1 : after - 1;
+  if (last < 0) return 0;
+
+  let first = last;
+  while (first > 0 && rows[first - 1].address === rows[last].address) first--;
+  return first;
 }

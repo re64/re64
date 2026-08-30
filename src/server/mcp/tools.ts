@@ -557,6 +557,61 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "set_comments",
+    "Write several comments in one call, as one action. Undo takes the batch " +
+      "back whole. A real disassembly carries more comments than labels, so " +
+      "one round trip each is almost all protocol.",
+    {
+      project,
+      comments: z
+        .array(
+          z.strictObject({
+            address,
+            text: z.string().min(1),
+            placement: z.enum(["before", "inline"]).optional(),
+          })
+        )
+        .min(1)
+        .max(500),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      comments: { address: number; text: string; placement?: "before" | "inline" }[];
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.setComments(caller, args.comments);
+    }
+  );
+
+  tool(
+    "set_constants",
+    "Declare several constants in one call, as one action. Declaring changes " +
+      "no listing; bind_constant is what makes an operand show a name.",
+    {
+      project,
+      constants: z
+        .array(z.strictObject({ name: z.string().min(1), value: address }))
+        .min(1)
+        .max(500),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      constants: { name: string; value: number }[];
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.setConstants(caller, args.constants);
+    }
+  );
+
+  tool(
     "remove_comment",
     "Delete the comment at an address. Give a placement to pick one when the " +
       "address carries both.",

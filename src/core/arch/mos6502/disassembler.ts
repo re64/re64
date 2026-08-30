@@ -97,7 +97,8 @@ function shouldDisassemble(regions: RegionLookup | undefined, address: number): 
 function extractJumptableEntries(
   reader: ByteReader,
   regions: RegionLookup,
-  warnings?: DisassemblyWarning[]
+  warnings?: DisassemblyWarning[],
+  references?: Map<number, Reference[]>
 ): number[] {
   const entries: number[] = [];
   const jumptables = regions.getJumptables();
@@ -118,6 +119,12 @@ function extractJumptableEntries(
       if (lo !== undefined && hi !== undefined) {
         const target = lo | (hi << 8);
         entries.push(target);
+        // A table entry refers to its target as surely as a JMP does, and this
+        // is the only kind of reference not written as an instruction. Without
+        // it, the pointer a C64 program reaches its own entry point through is
+        // invisible to `find_references`, which then reports no callers for the
+        // one address everything starts from.
+        if (references) addReference(references, target, "jump", addr);
       }
     }
   }
@@ -197,7 +204,7 @@ export function disassemble(
   // Build initial queue from explicit entry points plus jumptable entries
   const queue: number[] = [...options.entryPoints];
   if (regions) {
-    const jumptableEntries = extractJumptableEntries(reader, regions, warnings);
+    const jumptableEntries = extractJumptableEntries(reader, regions, warnings, references);
     queue.push(...jumptableEntries);
   }
 

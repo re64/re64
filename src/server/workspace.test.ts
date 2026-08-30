@@ -1054,3 +1054,76 @@ describe("saying how to read text", () => {
     expect(workspace.disassembly(0x8080, 2).lines.map((l) => l.text).join("\n")).toBe(once);
   });
 });
+
+describe("the last of trial 2's list", () => {
+  it("sees the pointer a jumptable holds as a reference", () => {
+    // The one thing in the binary pointing at the entry point is a table
+    // entry, not an instruction, so find_references reported no callers for
+    // the address everything starts from.
+    const blank = blankWorkspace();
+    blank.setRegion(agent, 0x8000, 0x8002, "jumptable", "initVector");
+
+    const { inbound } = blank.references(0x83c1, "in");
+    expect(inbound!.length).toBeGreaterThan(0);
+    expect(inbound![0].from).toBe("$8000");
+    expect(inbound![0].type).toBe("jump");
+  });
+
+  it("starts a listing at the row containing the address", () => {
+    // A data row covers eight bytes, so asking for $808C used to skip to
+    // $8090 and leave out the row being checked.
+    workspace.setRegion(agent, 0x8080, 0x8090, "data", "copyright");
+    expect(workspace.listing(0x808c, 2).start).toBe("$8088");
+  });
+
+  it("writes a batch of comments as one action", () => {
+    const result = workspace.setComments(agent, [
+      { address: 0x8015, text: "first" },
+      { address: 0x8016, text: "second", placement: "inline" },
+      { address: 0x8018, text: "third" },
+    ]);
+
+    expect(result.did).toHaveLength(3);
+    const rows = workspace.disassembly(0x8015, 8).lines.map((l) => l.text).join("\n");
+    expect(rows).toContain("; first");
+    expect(rows).toContain("; second");
+  });
+
+  it("makes one symbols layer for a batch of comments on unowned addresses", () => {
+    const blank = blankWorkspace();
+    blank.setComments(agent, [
+      { address: 0x02, text: "the player's column" },
+      { address: 0x03, text: "the player's row" },
+    ]);
+
+    expect(blank.describe().layers.filter((l) => l.name.includes("symbols"))).toHaveLength(1);
+  });
+
+  it("declares a batch of constants as one action", () => {
+    const result = workspace.setConstants(agent, [
+      { name: "GRID", value: 0x00 },
+      { name: "SHIP", value: 0x07 },
+      { name: "EXPLOSION1", value: 0x16 },
+    ]);
+
+    expect(result.did).toHaveLength(3);
+    expect(workspace.constants().total).toBe(3);
+  });
+
+  it("refuses a batch with a value that is not a byte, naming it", () => {
+    expect(() =>
+      workspace.setConstants(agent, [
+        { name: "FINE", value: 0x10 },
+        { name: "TOO_BIG", value: 0x100 },
+      ])
+    ).toThrow(/TOO_BIG/);
+  });
+
+  it("refuses an inline comment with newlines, naming the address", () => {
+    expect(() =>
+      workspace.setComments(agent, [
+        { address: 0x8015, text: "one\ntwo", placement: "inline" },
+      ])
+    ).toThrow(/\$8015.*inline/s);
+  });
+});

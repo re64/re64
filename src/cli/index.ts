@@ -105,7 +105,11 @@ const loadFile = makeFileLoader(nodeFileBytes());
  */
 function reportUndo(verb: string, outcome: UndoOutcome): void {
   if (!outcome.undone) {
-    console.log(`Nothing to ${verb === "Undid" ? "undo" : "redo"}.`);
+    const what = verb === "Undid" ? "undo" : "redo";
+    // The scope is the author, which is "cli" unless told otherwise — so an
+    // edit made in a browser or by an agent is invisible here, and the only
+    // way to discover that was reading the source.
+    console.log(`Nothing to ${what} for this author. Use --any to reach anyone's edit.`);
     return;
   }
 

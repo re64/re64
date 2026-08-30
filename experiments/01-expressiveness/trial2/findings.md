@@ -55,6 +55,18 @@ Both were wrong about *mechanism* while being right that something was badly
 broken. That is the same shape as trial 1's jumptable misdiagnosis, and it is
 what the transcript is for.
 
+## Status
+
+Everything below is done except two, both deferred deliberately: bringing bytes
+into a project via `add_layer`, and decoding a custom character set. The `pointer`
+region kind was not added — a two-byte `jumptable` already renders `.WORD` and
+queues its target, so it is a naming preference rather than a gap.
+
+Two bugs were found while fixing the rest, neither visible from this run:
+`primaryLabels` had never reached the listing at all, because `analyzeProgram`
+builds its index from labels alone; and `set_label` silently ignored a parameter
+that had only been added to `add_label`, which the strict schemas caught.
+
 ## Actionable, ranked
 
 ### Expressiveness gaps, largest first
