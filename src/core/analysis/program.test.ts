@@ -94,13 +94,34 @@ describe("what an agent can now ask", () => {
 });
 
 describe("what an agent still cannot ask", () => {
-  it("has no notion of where a function ends", () => {
-    // So "what does this routine call" and "what data does it touch" are not
-    // answerable — both need an extent, and there are no basic blocks, no
-    // dominators and no call graph. An honest gap beats a tool that guesses.
+  it("has blocks now, and still no notion of where a function ends", () => {
+    // Blocks were the thing four questions waited on, and they are the floor
+    // rather than the answer: grouping them into functions needs a call graph
+    // and dominators, neither of which exists. An honest gap beats a guess.
     const program = gridrunner();
+
+    expect(program.blocks.length).toBeGreaterThan(0);
     expect(program).not.toHaveProperty("functions");
-    expect(program).not.toHaveProperty("blocks");
+  });
+
+  it("gives each block one way in and one way out", () => {
+    const blocks = gridrunner().blocks;
+
+    // Every block is a real decode of its own bytes: no gaps, nothing borrowed.
+    for (const block of blocks) {
+      let at = block.start;
+      for (const instr of block.instructions) {
+        expect(instr.address).toBe(at);
+        at += instr.bytes.length;
+      }
+      expect(at).toBe(block.end);
+    }
+
+    // And a return leaves nowhere to go from here, which is what makes the
+    // call graph a separate question rather than a bigger walk.
+    for (const block of blocks.filter((b) => b.exit === "ret")) {
+      expect(block.successors).toEqual([]);
+    }
   });
 });
 

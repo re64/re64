@@ -12,6 +12,7 @@
  */
 
 import { InstructionIndex, disassemble } from "../arch/mos6502/disassembler.js";
+import { BasicBlock, buildBlocks } from "./blocks.js";
 import { DisassemblyWarning } from "../arch/mos6502/disassembler.js";
 import { Label, LabelIndex, createAutoLabel } from "../memory/label.js";
 import { LoadedProject } from "../project/loader.js";
@@ -42,6 +43,13 @@ export interface ProgramAnalysis {
   xrefs: XrefIndex;
   /** What an address references. */
   outbound: OutboundIndex;
+  /**
+   * Straight-line runs, which may intersect where a byte is read two ways.
+   *
+   * The model an instruction map cannot hold, and what function extents, the
+   * call graph and per-block reachability all wait on.
+   */
+  blocks: BasicBlock[];
   /** Every label, including the auto-generated ones the disassembly invented. */
   labels: LabelIndex;
   /**
@@ -142,9 +150,11 @@ export function analyzeProgram(
   labels.addLabels(autoLabels);
 
   const instructions = new InstructionIndex(result.instructions);
+  const blocks = buildBlocks(instructions, entryPoints);
 
   return {
     loaded,
+    blocks,
     entryPoints,
     instructions,
     xrefs: new XrefIndex(result.references),

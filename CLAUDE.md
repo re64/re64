@@ -899,9 +899,24 @@ So `src/core/analysis/program.ts` keeps what was being thrown away, and
 `InstructionIndex` into it would make every browser retain about 8MB it never
 reads.
 
-Two questions stay unanswered *by analysis* — a **function's extent**, and what
-a routine **calls outbound**. Both need basic blocks or a call graph, and a
-wrong extent is not visibly wrong, so neither is guessed.
+**Basic blocks exist** (`src/core/analysis/blocks.ts`): straight-line runs with
+one way in and one way out, each carrying its successors, what it calls, and how
+it leaves. 364 of them on Gridrunner, median three instructions. Derived and
+never stored, like the region tree.
+
+They are the floor for four things, not the answer to any of them yet. A
+function's extent still needs grouping blocks by a call graph and dominators;
+what a routine calls outbound needs the same. A wrong extent is not visibly
+wrong, so neither is guessed — an extent can be *declared* on `mark_function`,
+which is a different act from inferring one.
+
+Two decisions worth keeping. A `JSR` does **not** end a block: it is expected to
+return, and splitting there would make every block one call long while saying
+nothing. Who it called is recorded separately, so a routine that never returns
+does not silently make every caller look like it ends at the call. And a `ret`
+has no successor here — where an `RTS` goes back to is a property of the call,
+which is exactly why the call graph is a separate question rather than a bigger
+walk.
 
 An extent can be **declared**, though, which is a different thing from inferring
 one: somebody reading the code knows where the routine ends. `mark_function`
@@ -1150,6 +1165,34 @@ the reason this section exists.
 `find_undecoded` reports spans **nothing has explained** — not dead code. The
 distinction matters most on a fresh project, where almost everything is
 unexplained and none of it is dead.
+
+### Overlap needs the decoder, not just blocks
+
+Blocks are the right model for a byte read two ways — two runs whose ranges
+intersect, each internally consistent — and they are **not sufficient on their
+own**. The decoder never produces the second reading to put in one.
+
+The walk checks occupancy, finds the contested address already claimed, emits an
+`overlap` warning and skips. So on `D0 01 A9 60` — a `BNE` that lands on the
+`$A9`'s operand, the trick the reference uses twice — `$1002` decodes and `$1003`
+does not exist at all. Anything built on `InstructionIndex` inherits that,
+because `Map<address, Instruction>` is where "one reading per byte" actually
+lives.
+
+Making it work needs the decoder to keep both, and the shape of that is a real
+decision:
+
+- **Record the contested instruction and stop there.** Cheap, gives a footnote —
+  "this byte also decodes as `LDA #$60`" — and no second block.
+- **Follow the second reading as its own stream**, with its own occupancy so the
+  two do not fight. Gives a genuine second block and is what SSA or a call graph
+  would want later. More machinery, and it needs a bound so a pathological
+  binary cannot fork forever.
+
+Then rendering, which is the easy part once the model holds both: collect
+reachable blocks, sort by start, walk with a cursor, and any block starting
+behind the cursor is by construction a second reading of bytes already emitted —
+so it is emitted after, marked, with a warning naming what it overlaps.
 
 ### Flow into a non-code region stops, and says so
 
