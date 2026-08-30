@@ -10,6 +10,7 @@
 
 import { analyzeProgram } from "../analysis/program.js";
 import { describeWarning } from "../arch/mos6502/disassembler.js";
+import { decodeText } from "../c64/text.js";
 import {
   LabelIndex,
   Label,
@@ -377,8 +378,15 @@ export function analyze(
       if (bytes.length === 0) return;
       emitLabels(lineStart);
       const cols = bytesColumn(bytes).padEnd(23);
+      // A text row used to render the directive and nothing else, so declaring
+      // a span text made it strictly less readable than leaving it as data —
+      // which at least printed an ASCII column. It now shows the decoded
+      // string, in whatever encoding the region declares.
       const text = isText
-        ? `${hex4(lineStart)}  ${cols}  .TEXT`
+        ? `${hex4(lineStart)}  ${cols}  .TEXT "${decodeText(
+            bytes,
+            map.getRegionAt(lineStart)?.encoding ?? "ascii"
+          )}"`
         : `${hex4(lineStart)}  ${cols}  |${bytes
             .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : "."))
             .join("")}|`;

@@ -15,6 +15,7 @@
 
 import { CommentPlacement } from "../memory/comment.js";
 import { Label, LabelType } from "../memory/label.js";
+import { TextEncoding } from "../c64/text.js";
 import { RegionKind } from "../memory/region.js";
 import { LoadedProject } from "../project/loader.js";
 import { newId } from "../project/identity.js";
@@ -206,7 +207,8 @@ export function regionSetOp(
   end: number,
   kind: RegionKind,
   name?: string,
-  comment?: string
+  comment?: string,
+  encoding?: TextEncoding
 ): Op {
   const owner = loaded.map.layerAt(start);
   if (!owner || !owner.hasBytes) {
@@ -229,6 +231,7 @@ export function regionSetOp(
     kind,
     name,
     comment,
+    encoding,
   };
 }
 

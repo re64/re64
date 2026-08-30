@@ -636,6 +636,14 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       kind: z.enum(["code", "data", "text", "jumptable", "unknown"]),
       name: z.string().optional(),
       comment: z.string().optional(),
+      encoding: z
+        .enum(["ascii", "petscii", "screen"])
+        .optional()
+        .describe(
+          "How to read a text region: petscii for KERNAL strings, screen for " +
+            "bytes destined for screen RAM, ascii by default. Neither C64 " +
+            "encoding is ASCII, so the default misreads most C64 text."
+        ),
       expectVersion: z.string().optional(),
     },
     (args: {
@@ -646,6 +654,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       kind: "code" | "data" | "text" | "jumptable" | "unknown";
       name?: string;
       comment?: string;
+      encoding?: "ascii" | "petscii" | "screen";
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
@@ -659,7 +668,15 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       }
       const end = args.end ?? args.start + (args.length as number);
 
-      return space.setRegion(caller, args.start, end, args.kind, args.name, args.comment);
+      return space.setRegion(
+        caller,
+        args.start,
+        end,
+        args.kind,
+        args.name,
+        args.comment,
+        args.encoding
+      );
     }
   );
 

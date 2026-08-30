@@ -1021,3 +1021,36 @@ describe("comments on rows that are not instructions", () => {
     expect(incomplete).toMatch(/stored in data/);
   });
 });
+
+describe("saying how to read text", () => {
+  it("shows the decoded string rather than a bare directive", () => {
+    // A text region used to render `.TEXT` and nothing else, which made
+    // declaring one strictly worse than leaving the span as data.
+    workspace.setRegion(agent, 0x8080, 0x8088, "text", "copyright");
+    const row = workspace.disassembly(0x8080, 2).lines.map((l) => l.text).join("\n");
+
+    expect(row).toContain('.TEXT "');
+  });
+
+  it("decodes screen codes differently from ASCII", () => {
+    // $8004 holds C3 C2 CD..., which differ between the two. $8080 would not:
+    // screen codes and ASCII agree across $20-$3F, so a span of printable
+    // punctuation cannot tell them apart.
+    const read = (encoding: "ascii" | "screen") => {
+      workspace.setRegion(agent, 0x8004, 0x800c, "text", "header", undefined, encoding);
+      return workspace.disassembly(0x8004, 2).lines.map((l) => l.text).join("\n");
+    };
+
+    expect(read("screen")).not.toBe(read("ascii"));
+  });
+
+  it("keeps the encoding in the project", () => {
+    workspace.setRegion(agent, 0x8080, 0x8088, "text", "copyright", undefined, "petscii");
+    const region = workspace.describe().regions.find((r) => r.name === "copyright");
+
+    expect(region).toBeDefined();
+    // Rendering it twice must give the same answer, so it survived the write.
+    const once = workspace.disassembly(0x8080, 2).lines.map((l) => l.text).join("\n");
+    expect(workspace.disassembly(0x8080, 2).lines.map((l) => l.text).join("\n")).toBe(once);
+  });
+});

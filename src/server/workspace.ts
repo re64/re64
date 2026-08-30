@@ -43,7 +43,7 @@ import {
 } from "../core/index.js";
 import { projectFromDoc } from "../core/crdt/index.js";
 import { databaseFileBytes } from "../store/load.js";
-import { CommentPlacement, describeWarning } from "../core/index.js";
+import { CommentPlacement, TextEncoding, describeWarning } from "../core/index.js";
 import { FileStorage, ProjectStore, SqliteStorage } from "../store/index.js";
 import { nodeFileBytes } from "../node-files.js";
 
@@ -1013,7 +1013,8 @@ export class Workspace {
     end: number,
     kind: RegionKind,
     name?: string,
-    comment?: string
+    comment?: string,
+    encoding?: TextEncoding
   ): EditResult {
     if (end <= start) {
       throw new Error(
@@ -1042,7 +1043,7 @@ export class Workspace {
     }
 
     const result = this.edit(caller, (loaded) => [
-      regionSetOp(loaded, start, end, kind, name, comment),
+      regionSetOp(loaded, start, end, kind, name, comment, encoding),
     ]);
     return {
       ...result,

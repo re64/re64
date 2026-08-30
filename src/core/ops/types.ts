@@ -16,6 +16,7 @@
 
 import { CommentPlacement } from "../memory/comment.js";
 import { LabelType } from "../memory/label.js";
+import { TextEncoding } from "../c64/text.js";
 import { RegionKind } from "../memory/region.js";
 
 /** Set a label's fields, creating it if the id is new. */
@@ -46,6 +47,8 @@ export interface RegionSetOp {
   kind: RegionKind;
   name?: string;
   comment?: string;
+  /** How to read a text region's bytes. */
+  encoding?: TextEncoding;
 }
 
 export interface RegionDeleteOp {

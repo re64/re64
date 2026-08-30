@@ -26,7 +26,16 @@ const PROJECT = "assets/gridrunner.re64";
 // Above the first page an offset usually does mean "just inside this table" —
 // `droidXPositionArray-1,X` is the standard 1-indexed table trick — so those
 // are unchanged.
-const OUTPUT_SHA1 = "2f502c630636a7845fde2f0de1310a5ab4ff6efb";
+// Moved a second time: a text row now shows its decoded content.
+//
+// It used to render the `.TEXT` directive and nothing else, so declaring a
+// span text made the listing strictly *less* readable than leaving it as data,
+// which at least printed an ASCII column. Gridrunner's copyright line uses the
+// game's own character set, so ASCII gives `<= 1982` where the reference reads
+// `(c) 1982 HES` — wrong, but visibly wrong, which is what tells a reader the
+// encoding needs saying. PETSCII and screen codes are now sayable; a custom
+// charset still is not.
+const OUTPUT_SHA1 = "2bac7155ff760f325fbf832738907d4c55ad3c66";
 
 describe("gridrunner disassembly", () => {
   const result = analyze(loadProjectFile(PROJECT), { annotations: false });

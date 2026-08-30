@@ -12,6 +12,7 @@ import {
   createLabelUse,
   createUserLabel,
 } from "../memory/label.js";
+import { TextEncoding } from "../c64/text.js";
 import { Region, RegionKind, createUserRegion } from "../memory/region.js";
 import { derivedId } from "./identity.js";
 
@@ -135,6 +136,8 @@ export interface ProjectRegion {
   end: number | string;
   /** Region kind */
   kind: RegionKind;
+  /** How to read a `text` region's bytes. Default "ascii". */
+  encoding?: TextEncoding;
   /** Optional name/label for the region */
   name?: string;
   /** Optional comment */
@@ -304,7 +307,7 @@ export function projectRegionsToRegions(
     }
 
     const id = pr.id ?? derivedId("rgn", layerId, start, pr.kind);
-    return createUserRegion(id, start, end, pr.kind, pr.name, pr.comment);
+    return createUserRegion(id, start, end, pr.kind, pr.name, pr.comment, pr.encoding);
   });
 }
 

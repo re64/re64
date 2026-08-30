@@ -233,7 +233,8 @@ function regionEntryLine(
   end: number,
   kind: string,
   name?: string,
-  comment?: string
+  comment?: string,
+  encoding?: string
 ): string {
   const hex = (n: number) => "$" + n.toString(16).toUpperCase().padStart(4, "0");
   const parts = [
@@ -244,6 +245,10 @@ function regionEntryLine(
   ];
   if (name !== undefined) parts.push(`"name": ${JSON.stringify(name)}`);
   if (comment !== undefined) parts.push(`"comment": ${JSON.stringify(comment)}`);
+  // Absent means ASCII, recorded by absence like every other default here.
+  if (encoding !== undefined && encoding !== "ascii") {
+    parts.push(`"encoding": ${JSON.stringify(encoding)}`);
+  }
   return `${indent}{ ${parts.join(", ")} }`;
 }
 
@@ -438,6 +443,7 @@ export function upsertRegion(
     kind: string;
     name?: string;
     comment?: string;
+    encoding?: string;
   }
 ): string {
   const lines = raw.split("\n");
@@ -477,7 +483,8 @@ export function upsertRegion(
     region.end,
     region.kind,
     region.name,
-    region.comment
+    region.comment,
+    region.encoding
   );
 
   const at = findEntryById(lines, span, region.id);

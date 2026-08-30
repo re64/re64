@@ -203,6 +203,7 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
           kind: op.kind,
           name: op.name,
           comment: op.comment,
+          encoding: op.encoding,
         });
         break;
       }

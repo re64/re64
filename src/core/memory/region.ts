@@ -1,3 +1,4 @@
+import { TextEncoding } from "../c64/text.js";
 import { Label, createRegionLabel } from "./label.js";
 import { derivedId } from "../project/identity.js";
 
@@ -35,6 +36,14 @@ export interface Region {
   readonly name?: string;
   /** Optional comment */
   readonly comment?: string;
+  /**
+   * How to read the bytes of a `text` region.
+   *
+   * Defaults to ASCII, which is what this always assumed and is wrong for most
+   * C64 text: neither PETSCII nor screen codes are ASCII, so reading either
+   * that way produces confident nonsense.
+   */
+  readonly encoding?: TextEncoding;
 }
 
 /** Create a user-defined region */
@@ -44,9 +53,10 @@ export function createUserRegion(
   end: number,
   kind: RegionKind,
   name?: string,
-  comment?: string
+  comment?: string,
+  encoding?: TextEncoding
 ): Region {
-  return { id, start, end, kind, name, comment };
+  return { id, start, end, kind, name, comment, encoding };
 }
 
 /**

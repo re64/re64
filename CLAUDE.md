@@ -1183,6 +1183,32 @@ it becomes true rather than never. That is the difference between a wrong answer
 and a wrong answer that says so.
 
 ### Text Region Rendering
-Text regions currently display raw bytes with `.TEXT` directive. Many C64 games use custom character sets with proprietary encodings (not standard PETSCII or screen codes). To properly decode text, one would need to analyze the game's character set glyph data.
 
-**Future feature idea:** Allow custom renderers as JavaScript snippets in the project file. Users could define decoding functions that map bytes to display characters based on the game's specific charset. This would enable proper text display for games with custom fonts.
+A text region declares its **encoding**: `petscii`, `screen`, or `ascii`. Neither
+C64 encoding is ASCII — `$01` is `A` on the screen and a control code in
+PETSCII — so reading one as the other produces confident nonsense, which is what
+this did for every game that puts its strings in screen codes.
+
+Most of both encodings maps to plain ASCII. The graphics characters map to
+Unicode that already existed for other reasons — box drawing, block elements,
+card suits — plus the *Symbols for Legacy Computing* block added in Unicode 13
+for exactly this. **Graphics coverage is deliberately partial**: every code that
+carries text is exact, the common glyphs are there, and the rest renders `·`
+rather than guessing. A wrong glyph is worse than a visible gap, and text is
+what a reader is after.
+
+A text row now shows its decoded content rather than a bare `.TEXT` directive.
+That was not a missing feature so much as a defect: declaring a span text made
+the listing *less* readable than leaving it as data, which at least printed an
+ASCII column.
+
+**Still not solved: custom character sets.** Many C64 games ship their own glyph
+data — Gridrunner's copyright line reads `(c) 1982 HES` through the charset at
+`$2000` and `<= 1982` through any built-in encoding. Getting that right means
+either a byte-to-glyph mapping in the project file, or reading the game's own
+charset and matching glyph bitmaps against known shapes. The first is a schema
+addition and a decoder; the second is real work and would be the interesting
+version.
+
+What changed for the better meanwhile: the wrong answer is now *visible*.
+`<= 1982` is obviously not English, where a bare `.TEXT` said nothing at all.
