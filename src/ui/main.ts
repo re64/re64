@@ -399,8 +399,9 @@ async function edit(
     return;
   }
 
-  const address = currentAddress();
-  render(address ?? undefined);
+  const anchor = captureAnchor();
+  render();
+  restoreAnchor(anchor);
   setStatus(describe((analysis?.stats.instructions ?? 0) - before));
 }
 
@@ -431,25 +432,23 @@ function refreshEditButtons(): void {
 
 async function undoEdit(): Promise<void> {
   if (!session) return;
-  const address = currentAddress();
   const undone = session.undo();
   if (!undone) {
     setStatus("Nothing to undo");
     return;
   }
-  await repaint(address ?? undefined);
+  await repaint();
   setStatus(`Undid: ${undone}`);
 }
 
 async function redoEdit(): Promise<void> {
   if (!session) return;
-  const address = currentAddress();
   const redone = session.redo();
   if (!redone) {
     setStatus("Nothing to redo");
     return;
   }
-  await repaint(address ?? undefined);
+  await repaint();
   setStatus(`Redid: ${redone}`);
 }
 
@@ -491,16 +490,17 @@ function flushDeferredRepaint(): void {
   scheduleRepaint();
 }
 
-async function repaint(restoreAddress?: number): Promise<void> {
+async function repaint(): Promise<void> {
   if (!session) return;
-  const address = restoreAddress ?? currentAddress() ?? undefined;
+  const anchor = captureAnchor();
   try {
     await session.refresh();
   } catch (err) {
     setStatus(err instanceof Error ? err.message : "Could not apply a change", true);
     return;
   }
-  render(address);
+  render();
+  restoreAnchor(anchor);
 }
 
 // --- Navigation -------------------------------------------------------
@@ -971,6 +971,50 @@ async function loadDisassembly(restoreAddress?: number): Promise<void> {
  * Everything downstream of the project text is derived, so an edit just changes
  * the text and comes back through here — no network, no partial updates.
  */
+/**
+ * Where a line sits in the viewport, so a repaint can put it back there.
+ *
+ * Not the scroll offset: an edit can insert a line above the one you are
+ * looking at — naming a previously unnamed address does exactly that — and
+ * restoring a raw scrollTop would shift everything by a row. Anchoring on an
+ * address and its distance from the top of the viewport survives that.
+ */
+interface ViewportAnchor {
+  address: number;
+  offsetFromTop: number;
+}
+
+function captureAnchor(): ViewportAnchor | null {
+  if (!analysis) return null;
+  const address = currentAddress();
+  if (address === null) return null;
+
+  const line = analysis.lineForAddress[address];
+  if (line === undefined) return null;
+
+  const coords = disasmView.coordsAtPos(disasmView.state.doc.line(line + 1).from);
+  if (!coords) return null;
+
+  return {
+    address,
+    offsetFromTop: coords.top - disasmView.scrollDOM.getBoundingClientRect().top,
+  };
+}
+
+function restoreAnchor(anchor: ViewportAnchor | null): void {
+  if (!anchor || !analysis) return;
+  const line = analysis.lineForAddress[anchor.address];
+  if (line === undefined) return;
+
+  const pos = disasmView.state.doc.line(line + 1).from;
+  disasmView.dispatch({ selection: { anchor: pos } });
+
+  const coords = disasmView.coordsAtPos(pos);
+  if (!coords) return;
+  const now = coords.top - disasmView.scrollDOM.getBoundingClientRect().top;
+  disasmView.scrollDOM.scrollTop += now - anchor.offsetFromTop;
+}
+
 /** How long the last render spent in each phase, for the debug view. */
 const timings = { analyzeMs: 0, renderMs: 0 };
 
