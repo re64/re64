@@ -30,7 +30,11 @@ describe("gridrunner disassembly", () => {
       rows: 1846,
       arrows: 206,
       regions: 16,
-      labels: 597,
+      // 495, not the 597 this asserted before: the merged index counted every
+      // user label twice, once through the memory map and once directly. The
+      // rendered text never showed it because label rows dedupe by name, which
+      // is why the hash above is unchanged.
+      labels: 495,
     });
   });
 

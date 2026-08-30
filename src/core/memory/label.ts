@@ -188,6 +188,9 @@ export interface ResolvedLabel {
  * Multiple labels can exist at the same address.
  */
 export class LabelIndex {
+  /** Ids already held, so overlapping sources do not double-count. */
+  private readonly seen = new Set<string>();
+
   private byAddress = new Map<number, Label[]>();
   private all: Label[] = [];
 
@@ -214,6 +217,12 @@ export class LabelIndex {
   }
 
   addLabel(label: Label): void {
+    // Ignore one already held. The merged index is built from sources that
+    // overlap — a layer's labels arrive both through the memory map and
+    // directly — and the same label counted twice makes every total wrong.
+    if (this.seen.has(label.id)) return;
+    this.seen.add(label.id);
+
     this.all.push(label);
     const existing = this.byAddress.get(label.address);
     if (existing) {
