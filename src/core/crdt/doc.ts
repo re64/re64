@@ -42,6 +42,22 @@ export const BASE_CLIENT_ID = 0;
  */
 export type CrdtDoc = Y.Doc;
 
+/**
+ * Options every document is built with, without exception.
+ *
+ * `gc: false` keeps deleted content rather than only its tombstone, which is
+ * what makes point-in-time reconstruction possible at all. It must match on
+ * every peer: two documents that disagree about garbage collection can reach
+ * different conclusions about the same history, which is a corruption class
+ * rather than a merge conflict.
+ *
+ * The cost is that the document only grows. That is accepted for now — the
+ * growth warnings in the Yjs literature are written for text editing, where
+ * every character ever typed is a struct, and this document holds maps of
+ * scalars.
+ */
+const DOC_OPTIONS = { gc: false } as const;
+
 /** Root names. Declared up front because `Doc.toJSON()` only reports roots that have been accessed. */
 const ROOT_LAYERS = "layers";
 const ROOT_META = "meta";
@@ -65,7 +81,7 @@ function mapFrom(record: Record<string, unknown>): Y.Map<unknown> {
  * Deterministic: same input, same bytes, on every client.
  */
 export function docFromProject(project: Project): Y.Doc {
-  const doc = new Y.Doc();
+  const doc = new Y.Doc(DOC_OPTIONS);
   doc.clientID = BASE_CLIENT_ID;
 
   doc.transact(() => {
@@ -212,6 +228,31 @@ function sortedValues<T>(map: Y.Map<Y.Map<unknown>>, key: string): T[] {
         ? delta
         : String((a as { id?: string }).id).localeCompare(String((b as { id?: string }).id));
     });
+}
+
+/**
+ * A document with nothing in it, to be filled by syncing with a peer.
+ *
+ * This is how a participant should join: start empty and let the protocol
+ * deliver the state. Building a base locally instead — from JSON both sides
+ * are assumed to share — only works while those bytes are provably identical,
+ * and it fails silently when they are not, because both bases claim the same
+ * client id for different content.
+ */
+export function emptyDoc(): Y.Doc {
+  return new Y.Doc(DOC_OPTIONS);
+}
+
+/**
+ * Rebuild a document from its stored updates.
+ *
+ * Order does not matter — updates are commutative and idempotent — so the
+ * store owes no ordering guarantee and a replay may safely include duplicates.
+ */
+export function docFromUpdates(updates: readonly Uint8Array[]): Y.Doc {
+  const doc = emptyDoc();
+  for (const update of updates) Y.applyUpdate(doc, update, "load");
+  return doc;
 }
 
 /** The whole document as one update, for sending or storing. */

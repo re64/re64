@@ -232,15 +232,6 @@ export function startServer(options: ServerOptions): RunningServer {
     }
   });
 
-  // A session that never idles out would otherwise be lost on shutdown.
-  for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    process.on(signal, () => {
-      sync.flattenNow();
-      sync.close();
-      process.exit(0);
-    });
-  }
-
   const ready = new Promise<void>((resolve) => {
     server.listen(port, host, () => {
       if (!options.quiet) {
@@ -278,9 +269,18 @@ if (isMain) {
     console.error("usage: re64-server <project.re64> [--port N]");
     process.exit(1);
   }
-  startServer({
+  const running = startServer({
     projectPath: resolve(projectArg),
     port: portIndex >= 0 ? Number(args[portIndex + 1]) : 5164,
     host: "127.0.0.1",
   });
+
+  // Registered here rather than inside `startServer`, which the tests call
+  // repeatedly — a listener per server accumulates, and the first exit cuts off
+  // every other server's shutdown anyway. A process has one shutdown.
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => {
+      void running.close().finally(() => process.exit(0));
+    });
+  }
 }

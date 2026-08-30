@@ -1,20 +1,51 @@
 import { describe, it, expect } from "vitest";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * The CRDT library stays behind one door.
+ * Where the CRDT is allowed to be visible.
  *
- * Yjs is the merge layer, not the data model. Operations are the interface, and
- * everything above them — the disassembler, the view model, the CLI, the UI —
- * works with plain project objects. That is what keeps the choice reversible:
- * swapping Yjs for Automerge or Loro should touch one directory.
+ * The property worth protecting is that the **domain never sees a CRDT type**.
+ * The disassembler, the memory model, the operation vocabulary and the CLI must
+ * work whether or not anything is synchronised, and swapping Yjs for another
+ * library must not reach them.
  *
- * A `Y.Map` reaching `analyze()` would end that quietly, so it is asserted
- * rather than trusted.
+ * That is narrower than "only the adapter may touch Yjs". The wire protocol
+ * legitimately belongs in the server and the transport legitimately belongs in
+ * the client, and neither belongs inside the adapter. So this is an allowlist
+ * per package rather than one forbidden directory — and `src/ui/main.ts` being
+ * absent from the transport's list is the assertion that keeps the transport
+ * replaceable.
+ *
+ * It is a grep. It cannot follow a re-export chain, and it is not trying to be
+ * unbypassable — its job is to make a violation loud.
  */
 
-const ADAPTER = join("src", "core", "crdt");
+/** Package specifier → the only paths that may import it, as path prefixes. */
+const ALLOWED: { package: string; match: RegExp; only: string[] }[] = [
+  {
+    package: "yjs",
+    match: /["']yjs["']/,
+    only: [join("src", "core", "crdt")],
+  },
+  {
+    package: "y-protocols / lib0",
+    match: /["'](?:y-protocols|lib0)\//,
+    only: [join("src", "core", "crdt"), join("src", "server", "sync.ts")],
+  },
+  {
+    package: "y-websocket",
+    match: /["']y-websocket["']/,
+    only: [join("src", "ui", "doc-client.ts")],
+  },
+];
+
+/** Static imports, re-exports, `require`, and dynamic `import()`. */
+const IMPORTING = (specifier: RegExp) =>
+  new RegExp(
+    `(?:from\\s+|require\\(\\s*|import\\(\\s*)${specifier.source}`,
+    "m"
+  );
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
@@ -25,23 +56,39 @@ function sourceFiles(dir: string): string[] {
 }
 
 describe("the CRDT boundary", () => {
-  it("is the only place that imports yjs", () => {
-    const offenders = sourceFiles("src")
-      .filter((path) => !path.startsWith(ADAPTER))
-      .filter((path) => /from\s+["']yjs["']|require\(["']yjs["']\)/.test(readFileSync(path, "utf-8")));
+  const files = sourceFiles("src");
 
-    expect(offenders).toEqual([]);
-  });
+  for (const rule of ALLOWED) {
+    it(`keeps ${rule.package} inside ${rule.only.join(", ")}`, () => {
+      const pattern = IMPORTING(rule.match);
+      const offenders = files
+        .filter((path) => !rule.only.some((prefix) => path.startsWith(prefix)))
+        .filter((path) => pattern.test(readFileSync(path, "utf-8")));
 
-  it("is not re-exported from the core barrel", () => {
-    // Re-exporting would pull Yjs into every consumer's bundle and make the
-    // boundary meaningless even while no file imported it directly.
+      expect(offenders).toEqual([]);
+    });
+  }
+
+  it("is not reachable through a barrel the domain imports", () => {
+    // `src/ui` and `src/cli` import `../core/index.js`; if that carried the
+    // adapter, every rule above would be bypassable by one re-export.
     expect(readFileSync(join("src", "core", "index.ts"), "utf-8")).not.toContain("crdt");
+    // `src/store/index.ts` re-exports the project store, which does hold a
+    // document. Nothing in the UI imports it today — this says so out loud.
+    const uiFiles = files.filter((p) => p.startsWith(join("src", "ui")));
+    const reachingIntoStore = uiFiles.filter((p) =>
+      /from\s+["'][^"']*\/store\//.test(readFileSync(p, "utf-8"))
+    );
+    expect(reachingIntoStore).toEqual([]);
   });
 
-  it("keeps operations free of Yjs types", () => {
-    for (const path of sourceFiles(join("src", "core", "ops"))) {
-      expect(readFileSync(path, "utf-8")).not.toContain("yjs");
+  it("keeps operations free of the library that merges them", () => {
+    // An operation is a description of intent. It has to be expressible by the
+    // CLI, by an agent, and over HTTP, none of which have a document.
+    const opsFiles = files.filter((p) => p.startsWith(join("src", "core", "ops")));
+    expect(opsFiles.length).toBeGreaterThan(0);
+    for (const path of opsFiles) {
+      expect(readFileSync(path, "utf-8")).not.toMatch(/yjs|y-protocols|y-websocket/);
     }
   });
 });

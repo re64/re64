@@ -1,15 +1,18 @@
 import { describe, it, expect } from "vitest";
 import * as Y from "yjs";
 import {
+  BASE_CLIENT_ID,
   applyUpdate,
   diffSince,
   docFromProject,
+  docFromUpdates,
+  emptyDoc,
   encodeDoc,
   projectFromDoc,
   squashUpdates,
   stateVector,
 } from "./doc.js";
-import { applyOpToDoc, undoManagerFor } from "./ops.js";
+import { applyOpToDoc, applyOpsToDoc, undoManagerFor } from "./ops.js";
 import { Project } from "../project/project.js";
 import { Op } from "../ops/types.js";
 
@@ -89,6 +92,65 @@ describe("round trip", () => {
 
     const labels = projectFromDoc(doc).layers[1].labels!;
     expect(labels.map((l) => l.name)).toEqual(["Start", "Between", "Loop"]);
+  });
+});
+
+describe("joining without a shared base", () => {
+  it("starts empty and takes everything from a peer", () => {
+    // The safe way in. Building a base locally from JSON both sides are assumed
+    // to share only works while those bytes are provably identical, and fails
+    // silently when they are not.
+    const server = docFromProject(PROJECT);
+    const joining = emptyDoc();
+    expect(projectFromDoc(joining).layers).toEqual([]);
+
+    applyUpdate(joining, encodeDoc(server));
+    expect(projectFromDoc(joining)).toEqual(projectFromDoc(server));
+  });
+
+  it("takes its own client id, so its edits stay distinguishable", () => {
+    const joining = emptyDoc();
+    expect(joining.clientID).not.toBe(BASE_CLIENT_ID);
+  });
+
+  it("keeps deleted content, so history can be reconstructed", () => {
+    expect(emptyDoc().gc).toBe(false);
+    expect(docFromProject(PROJECT).gc).toBe(false);
+    expect(docFromUpdates([]).gc).toBe(false);
+  });
+});
+
+describe("rebuilding from stored updates", () => {
+  it("reaches the same state the updates came from", () => {
+    const original = docFromProject(PROJECT);
+    const rebuilt = docFromUpdates([encodeDoc(original)]);
+    expect(projectFromDoc(rebuilt)).toEqual(projectFromDoc(original));
+  });
+
+  it("does not care what order they are replayed in", () => {
+    const source = docFromProject(PROJECT);
+    const updates: Uint8Array[] = [];
+    source.on("update", (u: Uint8Array) => updates.push(u));
+
+    applyOpToDoc(source, {
+      op: "label.set", id: "lbl_b", layerId: "lay_p", address: 0x8000, name: "One",
+      type: "function",
+    });
+    applyOpToDoc(source, {
+      op: "label.set", id: "lbl_c", layerId: "lay_p", address: 0x8100, name: "Two",
+    });
+
+    const base = encodeDoc(docFromProject(PROJECT));
+    const forwards = docFromUpdates([base, ...updates]);
+    const backwards = docFromUpdates([base, ...[...updates].reverse()]);
+    expect(projectFromDoc(backwards)).toEqual(projectFromDoc(forwards));
+  });
+
+  it("is unbothered by a duplicate", () => {
+    const base = encodeDoc(docFromProject(PROJECT));
+    const once = docFromUpdates([base]);
+    const twice = docFromUpdates([base, base]);
+    expect(projectFromDoc(twice)).toEqual(projectFromDoc(once));
   });
 });
 
@@ -191,6 +253,57 @@ describe("undo", () => {
     undo.redo();
 
     expect(projectFromDoc(doc).layers[1].labels!.find((l) => l.id === "lbl_b")!.name).toBe("Mine");
+  });
+});
+
+describe("one action, one undo step", () => {
+  const names = (doc: ReturnType<typeof docFromProject>) =>
+    (projectFromDoc(doc).layers[1].labels ?? []).map((l) => l.name);
+
+  it("takes back a whole batch at once", () => {
+    // Promoting a label to a function sets its type and renames it. Undo has
+    // to take both or neither; pressing it twice for one action is a bug.
+    const doc = docFromProject(PROJECT);
+    const um = undoManagerFor(doc, "me");
+
+    applyOpsToDoc(
+      doc,
+      [
+        { op: "label.set", id: "lbl_c", layerId: "lay_p", address: 0x8100, name: "sub_8100",
+          type: "function" },
+        { op: "primary.set", address: 0x8100, labelId: "lbl_c" },
+      ],
+      "me"
+    );
+    expect(names(doc)).toContain("sub_8100");
+
+    um.undo();
+    expect(names(doc)).toContain("Loop");
+    expect(projectFromDoc(doc).primaryLabels?.["8100"]).toBeUndefined();
+  });
+
+  it("keeps two separate actions separate, however fast they were", () => {
+    // The UndoManager default merges anything within 500ms into one step,
+    // which is right for typing and wrong for deliberate edits.
+    const doc = docFromProject(PROJECT);
+    const um = undoManagerFor(doc, "me");
+
+    applyOpsToDoc(doc,
+      [{ op: "label.set", id: "lbl_b", layerId: "lay_p", address: 0x8000, name: "First",
+         type: "function" }], "me");
+    applyOpsToDoc(doc,
+      [{ op: "label.set", id: "lbl_c", layerId: "lay_p", address: 0x8100, name: "Second" }], "me");
+
+    um.undo();
+    expect(names(doc)).toContain("First");
+    expect(names(doc)).toContain("Loop");
+  });
+
+  it("does nothing when the batch is empty", () => {
+    const doc = docFromProject(PROJECT);
+    const before = hex(encodeDoc(doc));
+    applyOpsToDoc(doc, [], "me");
+    expect(hex(encodeDoc(doc))).toBe(before);
   });
 });
 

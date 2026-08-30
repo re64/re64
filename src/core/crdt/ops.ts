@@ -45,7 +45,27 @@ function assign(entry: Y.Map<unknown>, fields: Record<string, unknown>): void {
  * whose undo stack the change lands on.
  */
 export function applyOpToDoc(doc: Y.Doc, op: Op, origin: unknown = "local"): void {
+  doc.transact(() => applyOpInTransaction(doc, op), origin);
+}
+
+/**
+ * Apply a batch as **one** change.
+ *
+ * A transaction is the unit of undo, so operations that belong to a single
+ * action have to share one — promoting a label to a function both sets its type
+ * and renames `loc_8100` to `sub_8100`, and undo must take back both or
+ * neither. Applying them one at a time would leave the user pressing undo twice
+ * for something they did once.
+ */
+export function applyOpsToDoc(doc: Y.Doc, ops: readonly Op[], origin: unknown = "local"): void {
+  if (ops.length === 0) return;
   doc.transact(() => {
+    for (const op of ops) applyOpInTransaction(doc, op);
+  }, origin);
+}
+
+function applyOpInTransaction(doc: Y.Doc, op: Op): void {
+  {
     switch (op.op) {
       case "label.set": {
         const labels = childMap(layerById(doc, op.layerId), "labels");
@@ -100,7 +120,7 @@ export function applyOpToDoc(doc: Y.Doc, op: Op, origin: unknown = "local"): voi
         doc.getMap<string>("primaryLabels").delete(hex4(op.address));
         break;
     }
-  }, origin);
+  }
 }
 
 /**
@@ -117,6 +137,14 @@ export function undoManagerFor(doc: Y.Doc, origin: unknown = "local"): Y.UndoMan
       doc.getMap("primaryLabels"),
       doc.getMap("meta"),
     ],
-    { trackedOrigins: new Set([origin]) }
+    {
+      trackedOrigins: new Set([origin]),
+      // Zero, not the default 500ms. That default merges anything done inside
+      // half a second into one undo step, which is right for typing characters
+      // and wrong here: renaming two labels quickly are two deliberate actions
+      // and must undo separately. Grouping is expressed by sharing a
+      // transaction, not by happening to be close together in time.
+      captureTimeout: 0,
+    }
   );
 }
