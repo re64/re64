@@ -1,5 +1,12 @@
 # Experiment 1: expressiveness — findings
 
+**Trial 1** is below. **Trial 2**, run after ten of these were fixed, is in
+`trial2/findings.md` — it found one serious defect (a single write making a
+project unwritable through every interface) and a different, more advanced set of
+gaps. Each trial keeps the agent's own report beside the transcript it was
+written from.
+
+
 One agent, 97 requests over 7 minutes, 41 addresses named, `$8000`–`$8400` walked
 in order. The project went from 5 decoded instructions to 1475.
 
