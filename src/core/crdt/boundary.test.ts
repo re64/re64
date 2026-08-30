@@ -21,6 +21,9 @@ import { join } from "node:path";
  * unbypassable — its job is to make a violation loud.
  */
 
+/** Matches any test file, wherever it lives. */
+const TESTS = "\u0000tests";
+
 /** Package specifier → the only paths that may import it, as path prefixes. */
 const ALLOWED: { package: string; match: RegExp; only: string[] }[] = [
   {
@@ -36,7 +39,10 @@ const ALLOWED: { package: string; match: RegExp; only: string[] }[] = [
   {
     package: "y-websocket",
     match: /["']y-websocket["']/,
-    only: [join("src", "ui", "doc-client.ts")],
+    // One production file, plus tests — which connect a real provider on
+    // purpose. A hand-written stand-in would only prove the server agrees with
+    // itself; the point is that a stock client interoperates.
+    only: [join("src", "ui", "doc-client.ts"), TESTS],
   },
 ];
 
@@ -61,8 +67,12 @@ describe("the CRDT boundary", () => {
   for (const rule of ALLOWED) {
     it(`keeps ${rule.package} inside ${rule.only.join(", ")}`, () => {
       const pattern = IMPORTING(rule.match);
+      const permitted = (path: string) =>
+        rule.only.some((prefix) =>
+          prefix === TESTS ? path.endsWith(".test.ts") : path.startsWith(prefix)
+        );
       const offenders = files
-        .filter((path) => !rule.only.some((prefix) => path.startsWith(prefix)))
+        .filter((path) => !permitted(path))
         .filter((path) => pattern.test(readFileSync(path, "utf-8")));
 
       expect(offenders).toEqual([]);

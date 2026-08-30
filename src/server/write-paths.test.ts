@@ -2,14 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WebSocket } from "ws";
+import { WebsocketProvider } from "y-websocket";
 import { startServer, RunningServer } from "./index.js";
 import { FileStorage, pathsFor } from "../store/index.js";
 import {
   CrdtDoc,
   applyOpToDoc,
   applyUpdate,
-  docFromProject,
+  emptyDoc,
   encodeDoc,
   projectFromDoc,
 } from "../core/crdt/index.js";
@@ -86,30 +86,33 @@ async function putProject(raw: string, baseVersion?: string) {
   return { response, body: (await response.json()) as { ok?: boolean; error?: string; applied?: number; version?: string } };
 }
 
-/** A socket client mirroring the server's document. */
+/**
+ * A participant, using the client the browser will use.
+ *
+ * Empty document plus the standard handshake — the same shape a real client
+ * has, so these tests exercise the protocol rather than a stand-in for it.
+ */
 async function connect(author: string): Promise<{ doc: CrdtDoc; close(): Promise<void> }> {
-  const socket = new WebSocket(`ws://127.0.0.1:${server.port}/sync?author=${author}`);
-  const doc = docFromProject(parseProject(PROJECT));
+  const doc = emptyDoc();
+  const provider = new WebsocketProvider(`ws://127.0.0.1:${server.port}/sync`, "test", doc, {
+    params: { author },
+    disableBc: true,
+  });
 
   await new Promise<void>((resolve, reject) => {
-    socket.on("message", (data: Buffer) =>
-      applyUpdate(doc, new Uint8Array(data.subarray(1)), "remote")
-    );
-    socket.on("open", () => {
-      doc.clientID = Math.floor(Math.random() * 1e6) + 1;
-      socket.send(Buffer.concat([Buffer.from([0]), Buffer.from(encodeDoc(doc))]));
-      doc.on("update", (update: Uint8Array, origin: unknown) => {
-        if (origin === "remote") return;
-        socket.send(Buffer.concat([Buffer.from([1]), Buffer.from(update)]));
-      });
+    const timer = setTimeout(() => reject(new Error("timed out syncing")), 5_000);
+    provider.once("sync", () => {
+      clearTimeout(timer);
       resolve();
     });
-    socket.on("error", reject);
   });
 
   return {
     doc,
-    close: () => new Promise<void>((resolve) => (socket.on("close", () => resolve()), socket.close())),
+    close: async () => {
+      provider.disconnect();
+      provider.destroy();
+    },
   };
 }
 

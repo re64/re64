@@ -225,7 +225,11 @@ export function startServer(options: ServerOptions): RunningServer {
   });
 
   server.on("upgrade", (request, socket, head) => {
-    if (new URL(request.url ?? "/", "http://localhost").pathname === "/sync") {
+    // Prefix, not equality: a stock y-websocket client connects to
+    // `<serverUrl>/<room>`, so the room arrives as a path segment. Matching
+    // "/sync" exactly would reject every real client.
+    const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+    if (pathname === "/sync" || pathname.startsWith("/sync/")) {
       sync.handleUpgrade(request, socket, head);
     } else {
       socket.destroy();

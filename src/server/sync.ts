@@ -1,31 +1,40 @@
 /**
  * The sync relay.
  *
- * A minimal Yjs sync protocol over WebSocket: a joining client sends what it
- * has, the server sends back what it lacks, and from then on each update is
- * broadcast to everyone else on the same project.
+ * Speaks the standard Yjs protocol, so any y-websocket client can connect and
+ * so this is replaceable by Hocuspocus or y-sweet without touching the browser.
+ * The hand-rolled version it replaces was subtly wrong in a way that only
+ * mattered once a real client existed: it pushed its whole state unasked and
+ * never answered a client's own sync, which happens to work when both sides
+ * already agree and not otherwise.
+ *
+ * The protocol as documented in `y-protocols/sync`: the client opens with
+ * SyncStep1; the server answers SyncStep2 and then its own SyncStep1; the
+ * client answers SyncStep2. The server only ever replies — it never initiates.
  *
  * The relay does not understand the schema. It moves opaque updates and lets
- * the CRDT decide what merging means — the server still does not know what a
- * 6502 is. Only the flatten step needs the project format, and that lives in
- * the session store.
- *
- * The protocol is deliberately small rather than reusing y-websocket, because
- * the server also has to know when a session ends in order to flatten it.
+ * the CRDT decide what merging means; the server still does not know what a
+ * 6502 is.
  */
 
 import { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
+import * as awarenessProtocol from "y-protocols/awareness";
+import * as syncProtocol from "y-protocols/sync";
+import * as decoding from "lib0/decoding";
+import * as encoding from "lib0/encoding";
 import { ProjectStore } from "../store/index.js";
 
-/** First byte of every frame. */
-const enum Message {
-  /** "Here is what I have" — sent on join, answered with the difference. */
-  Sync = 0,
-  /** "Here is a change." */
-  Update = 1,
-}
+/**
+ * The outer envelope, matching y-websocket so a stock client interoperates.
+ *
+ * Sync messages carry their own sub-type inside; awareness is a separate
+ * channel because presence is not part of the document and must not be
+ * persisted with it.
+ */
+const MESSAGE_SYNC = 0;
+const MESSAGE_AWARENESS = 1;
 
 export interface SyncOptions {
   store: ProjectStore;
@@ -56,8 +65,15 @@ export class SyncServer {
   private readonly clients = new Set<WebSocket>();
   private idleTimer: NodeJS.Timeout | undefined;
   private writeTimer: NodeJS.Timeout | undefined;
+  private readonly awareness: awarenessProtocol.Awareness;
+  /** Which socket is responsible for each awareness entry, so a close clears it. */
+  private readonly awarenessOwners = new Map<number, WebSocket>();
 
   constructor(private readonly options: SyncOptions) {
+    this.awareness = new awarenessProtocol.Awareness(options.store.document());
+    // The server holds no presence of its own; it only relays.
+    this.awareness.setLocalState(null);
+
     this.wss.on("connection", (socket, request) => this.join(socket, request));
 
     // Relay every change to the shared document, not only the ones that
@@ -66,9 +82,33 @@ export class SyncServer {
     // on from a state the server has already moved past.
     options.store.onUpdate((update, origin) => {
       const from = origin instanceof WebSocket ? origin : undefined;
-      this.broadcast(frame(Message.Update, update), from);
+      const message = encoding.createEncoder();
+      encoding.writeVarUint(message, MESSAGE_SYNC);
+      syncProtocol.writeUpdate(message, update);
+      this.broadcast(encoding.toUint8Array(message), from);
       this.scheduleWrite();
     });
+
+    // Presence, relayed but never persisted. Who is looking at what is not part
+    // of the project and must not end up in its history.
+    this.awareness.on(
+      "update",
+      ({ added, updated, removed }: AwarenessChange, origin: unknown) => {
+        const changed = [...added, ...updated, ...removed];
+        for (const clientId of added) {
+          if (origin instanceof WebSocket) this.awarenessOwners.set(clientId, origin);
+        }
+        for (const clientId of removed) this.awarenessOwners.delete(clientId);
+
+        const message = encoding.createEncoder();
+        encoding.writeVarUint(message, MESSAGE_AWARENESS);
+        encoding.writeVarUint8Array(
+          message,
+          awarenessProtocol.encodeAwarenessUpdate(this.awareness, changed)
+        );
+        this.broadcast(encoding.toUint8Array(message));
+      }
+    );
 
     // Someone editing the file directly — the CLI, or an editor — is a
     // participant too. Their changes become operations on the shared document
@@ -88,34 +128,90 @@ export class SyncServer {
     const author =
       new URL(request.url ?? "/", "http://localhost").searchParams.get("author") ?? "anonymous";
 
+    socket.binaryType = "arraybuffer";
     this.clients.add(socket);
     this.options.store.addAuthor(author);
     this.cancelIdleFlatten();
 
-    // Hand the newcomer the current state; it replies with anything we lack.
-    socket.send(frame(Message.Sync, this.options.store.snapshot()));
+    // The server's own SyncStep1. It is a question, not an answer: "here is
+    // what I have, send me what I lack." The client's SyncStep1 arrives
+    // independently and is answered when it does.
+    const opening = encoding.createEncoder();
+    encoding.writeVarUint(opening, MESSAGE_SYNC);
+    syncProtocol.writeSyncStep1(opening, this.options.store.document());
+    send(socket, opening);
 
-    socket.on("message", (data: Buffer) => {
-      if (data.length < 1) return;
-      const payload = new Uint8Array(data.subarray(1));
+    if (this.awareness.getStates().size > 0) {
+      const states = encoding.createEncoder();
+      encoding.writeVarUint(states, MESSAGE_AWARENESS);
+      encoding.writeVarUint8Array(
+        states,
+        awarenessProtocol.encodeAwarenessUpdate(this.awareness, [
+          ...this.awareness.getStates().keys(),
+        ])
+      );
+      send(socket, states);
+    }
 
-      // Merging tags the update with this socket, and the document observer
-      // relays it onward to everyone else. One broadcast path, so an HTTP
-      // write and a socket edit are treated the same.
-      if (data[0] === Message.Sync || data[0] === Message.Update) {
-        this.options.store.merge(payload, socket);
-      }
+    socket.on("message", (data: ArrayBuffer | Buffer) => {
+      this.receive(socket, new Uint8Array(data as ArrayBuffer));
     });
 
-    socket.on("close", () => {
-      this.clients.delete(socket);
-      if (this.clients.size === 0) this.scheduleIdleFlatten();
-    });
-
+    socket.on("close", () => this.leave(socket));
     socket.on("error", () => socket.close());
   }
 
-  private broadcast(data: Buffer, except?: WebSocket): void {
+  private receive(socket: WebSocket, data: Uint8Array): void {
+    if (data.length === 0) return;
+    const decoder = decoding.createDecoder(data);
+    const reply = encoding.createEncoder();
+
+    switch (decoding.readVarUint(decoder)) {
+      case MESSAGE_SYNC: {
+        encoding.writeVarUint(reply, MESSAGE_SYNC);
+        // Tagging the origin with this socket is what stops the update being
+        // echoed back to its sender by the document observer.
+        syncProtocol.readSyncMessage(decoder, reply, this.options.store.document(), socket);
+        // An encoder holding only its type byte means there was nothing to say.
+        if (encoding.length(reply) > 1) send(socket, reply);
+        break;
+      }
+      case MESSAGE_AWARENESS: {
+        awarenessProtocol.applyAwarenessUpdate(
+          this.awareness,
+          decoding.readVarUint8Array(decoder),
+          socket
+        );
+        break;
+      }
+      default:
+        // An unknown envelope is a newer peer, not a broken one. Ignore it.
+        break;
+    }
+  }
+
+  private leave(socket: WebSocket): void {
+    this.clients.delete(socket);
+    // Presence outlives the socket by 30s otherwise, so a closed tab lingers in
+    // the participant list.
+    awarenessProtocol.removeAwarenessStates(
+      this.awareness,
+      [...this.controlledBy(socket)],
+      null
+    );
+    if (this.clients.size === 0) this.scheduleIdleFlatten();
+  }
+
+  /** Which awareness entries a socket is responsible for. */
+  private controlledBy(socket: WebSocket): number[] {
+    const owned: number[] = [];
+    for (const [clientId, meta] of this.awarenessOwners) {
+      if (meta === socket) owned.push(clientId);
+    }
+    return owned;
+  }
+
+  private broadcast(data: Uint8Array, except?: WebSocket): void {
     for (const client of this.clients) {
       if (client !== except && client.readyState === WebSocket.OPEN) client.send(data);
     }
@@ -179,6 +275,7 @@ export class SyncServer {
   }
 
   close(): void {
+    this.awareness.destroy();
     this.options.store.stopWatching();
     if (this.writeTimer) clearTimeout(this.writeTimer);
     this.writeTimer = undefined;
@@ -188,9 +285,13 @@ export class SyncServer {
   }
 }
 
-function frame(kind: Message, payload: Uint8Array): Buffer {
-  const out = Buffer.allocUnsafe(payload.length + 1);
-  out[0] = kind;
-  Buffer.from(payload).copy(out, 1);
-  return out;
+interface AwarenessChange {
+  added: number[];
+  updated: number[];
+  removed: number[];
+}
+
+/** Send an encoder's bytes, if the socket is still there to receive them. */
+function send(socket: WebSocket, encoder: encoding.Encoder): void {
+  if (socket.readyState === WebSocket.OPEN) socket.send(encoding.toUint8Array(encoder));
 }
