@@ -98,10 +98,14 @@ describe("speaking the protocol", () => {
         "set_label",
         "mark_function",
         "set_region",
+        "remove_region",
+        "mark_function",
+        "unmark_function",
         "undo",
       ])
     );
   });
+
 });
 
 describe("working on a project", () => {
@@ -240,6 +244,22 @@ describe("editing as an agent", () => {
       name: "blurb",
     });
     expect((value as { ok: boolean }).ok).toBe(true);
+  });
+
+  it("takes back a region and a function declaration", async () => {
+    await callTool("set_region", { start: "$8F00", end: "$8F20", kind: "text" });
+    const dropped = await callTool("remove_region", { start: "$8F00" });
+    expect(dropped.isError).toBe(false);
+
+    // $801B is reached by nothing, so the declaration is what decodes it —
+    // and withdrawing it puts those instructions back out of reach.
+    const marked = await callTool("mark_function", { address: "$801B" });
+    const gained = (marked.value as { instructions: { delta: number } }).instructions.delta;
+    const unmarked = await callTool("unmark_function", { address: "$801B" });
+    const lost = (unmarked.value as { instructions: { delta: number } }).instructions.delta;
+
+    expect(gained).toBeGreaterThan(0);
+    expect(lost).toBe(-gained);
   });
 
   it("says what is wrong rather than failing silently", async () => {

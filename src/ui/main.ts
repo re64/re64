@@ -479,6 +479,11 @@ function scheduleRepaint(): void {
   }
   if (repaintQueued) return;
   repaintQueued = true;
+  // A hidden tab gets no frames, so a remote edit arriving while nobody is
+  // looking waits here until the tab is looked at again. That is wanted —
+  // re-analysing for an invisible view is pure cost — but it does mean a
+  // background tab checked programmatically looks like a broken sync when the
+  // socket underneath it is fine.
   requestAnimationFrame(() => {
     repaintQueued = false;
     void repaint();

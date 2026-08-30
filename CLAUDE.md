@@ -4,16 +4,33 @@ This file provides guidance to Claude Code (claude.ai/claude-code) when working 
 
 ## Project Overview
 
-re64 is a C64 disassembler. The long-term goal is a collaborative web-based tool with CRDT support for real-time collaboration. Currently it's a local CLI tool in active development.
+re64 is an agentic-first, AI-enabled C64 disassembler. Reverse engineering a
+game is a long grind of recognising a routine, naming it, and moving on, and
+that is work an agent can do alongside a person rather than instead of one.
+
+Four consumers sit over one store, and none of them is the primary:
+
+| Consumer | For |
+|---|---|
+| CLI | database visibility, export, patching |
+| HTTP API | the low-level web surface |
+| Web UI | humans, interactively |
+| MCP | agents doing the workflows a human does in the UI |
+
+They share a document, not a file format, so an agent naming a subroutine and a
+person reading the same code see each other's work as it happens.
 
 ## Architecture
 
 ### Directory Structure
 
-- `src/core/` - Platform-agnostic code shared between CLI and future web UI
+- `src/core/` - Platform-agnostic analysis, model, and operations
+- `src/store/` - Persistence and the shared document
+- `src/client/` - Joining a session; DOM-free, so the browser and an agent share it
+- `src/server/` - HTTP, websocket, and `src/server/mcp/` for agents
+- `src/ui/` - The browser front end
 - `src/cli/` - Command-line interface using Commander
 - `assets/` - Example files and project configurations
-- Future: `src/server/` and `src/ui/` directories
 
 Keep core/ free of Node.js-specific APIs where possible to maintain web compatibility.
 
@@ -89,7 +106,13 @@ Tests live alongside source files with `.test.ts` suffix. Use vitest.
 
 ## Guidelines
 
-- Minimal dependencies - only add packages when clearly beneficial
+- Minimal dependencies - only add packages when clearly beneficial.
+  `@modelcontextprotocol/sdk` is the one place this was knowingly spent: **33 of
+  the 43 production packages exist only for it**, including `hono`, `cors`, and
+  `express-rate-limit`, which npm installs and this code never imports. Bought
+  anyway, because the protocol is the point of the MCP surface and
+  hand-rolling JSON-RPC framing would be re-implementing a spec that moves.
+  It is *dynamically* imported, so nothing pays for it until `/mcp` is used
 - Write unit tests for core functionality
 - Keep abstractions simple until complexity is needed
 - TypeScript strict mode is enabled
@@ -673,11 +696,121 @@ must anchor on the **label id**: several labels can share an address, so an
 address cannot identify one. Only the "naming a new address" case may key on an
 address, because no label exists there yet.
 
-Repaints otherwise coalesce on `requestAnimationFrame`. `analyze()` runs per
+Repaints otherwise coalesce on `requestAnimationFrame`. A hidden tab gets no
+frames, so a remote edit arriving while nobody is looking waits until the tab is
+looked at again — wanted, since re-analysing an invisible view is pure cost, but
+it makes a background tab inspected programmatically look like a broken sync
+when the socket under it is fine. That cost an hour once.
+
+`analyze()` runs per
 update with no incremental path — about 10–20ms for Gridrunner. If it ever
 exceeds ~30ms the UI will stutter under a collaborator regardless of how the
 document is updated, and that is the number to measure before optimising
 anything else.
+
+## Agents as a first-class consumer
+
+### The read side was the thing missing, not the write side
+
+The mutation side was already agent-shaped: `src/core/ops/` is a closed
+vocabulary of operations targeting objects by id, each with a computable
+inverse. The read side was not. `analyze()` computed the instruction map, the
+reference map, and the merged label index *including* the auto-generated
+`sub_`/`loc_`/`dat_` names — and then discarded all of it, returning rendered
+text rows with character offsets. Of seven questions an agent needs answered,
+exactly one had a reachable home.
+
+So `src/core/analysis/program.ts` keeps what was being thrown away, and
+`analyze()` renders over it. `AnalysisResult` is deliberately **unchanged**:
+`src/ui/main.ts` holds it for the life of the view, and folding an
+`InstructionIndex` into it would make every browser retain about 8MB it never
+reads.
+
+Two questions stay unanswered on purpose — a **function's extent**, and what a
+routine **calls outbound**. Both need basic blocks or a call graph. An explicit
+gap beats a tool that guesses, because a wrong extent is not visibly wrong.
+
+### The server analyses now, and that is a reversal
+
+The old rule was that the server does not know what a 6502 is. That was about
+*interactive latency* — do not round-trip to rename a label — and the browser
+still analyses locally and is untouched. But an agent has no local analysis, so
+the server grew one, cached per document version and computed only when a tool
+asks. It is lazy because it is synchronous: an uncached analysis on the event
+loop stalls every connected browser's socket, which is why the O(n²)
+`findOverlap` had to go first rather than after.
+
+### MCP lives inside the web server
+
+Not beside it. An agent's edit goes through the same `runOps` a click does and
+broadcasts on the same socket, so it lands in an open browser without a reload —
+verified end to end, at the definition and at every call site. A separate MCP
+process would have had to become a client of this one to achieve that, which is
+the same thing with a hop in it.
+
+The transport is **stateless**: an agent cannot hold a websocket open across
+turns. That costs a fresh `McpServer` and transport per request, which is the
+SDK's own pattern for the mode — reusing one silently answers nothing after the
+first, so a test sends two requests to hold that.
+
+**Identity rides on the `x-re64-user` header, never in a tool schema.** A model
+can omit a parameter, invent one, or claim to be someone else, and removing the
+parameter later breaks every schema carrying it. Real auth replaces
+`resolveCaller` and no tool changes. It is the same unverified claim the socket
+already accepts.
+
+### The tool vocabulary
+
+Orient, read, decide, act, catch up:
+
+| | |
+|---|---|
+| `list_projects`, `describe_project` | what is here, and how far along it is |
+| `read_disassembly`, `list_labels` | structured rows, never rendered text — an agent cannot use character offsets into a text column |
+| `find_references`, `find_unnamed` | who calls this, and what is worth naming next |
+| `set_label`, `remove_label`, `mark_function`, `unmark_function` | naming |
+| `set_region`, `remove_region` | exposed to agents **before** the web UI; the ops and the CLI already did this, so it was wiring rather than new capability |
+| `undo` | the same inverse the CLI and the browser use |
+| `changes_since` | what happened while the agent was not looking |
+
+Three things the tools say about themselves, because a confident wrong answer is
+worse than a gap:
+
+- **Every write returns an instruction delta.** `mark_function` on an address
+  nothing reaches reports `delta: 3` — the decision decoded three instructions
+  that were invisible before. That is the feedback that tells an agent its
+  judgement was worth something, and it is why the tool returns more than `ok`.
+- **`find_references` states its own blind spot on every answer.**
+  `extractReferences` handles absolute addressing only, so a routine reached
+  through zero-page or an indirect jump appears to have no callers. An agent
+  that trusted it silently would conclude the opposite of the truth.
+- **Auto-generated labels are marked `writable: false` and their ids withheld.**
+  Those ids are derived, not stored. Handing one to a model invites a write
+  carrying an identity nothing owns.
+
+### A change cursor, because the agent has no socket
+
+Statelessness removes the channel by which anything learns a project moved. A
+browser is pushed to; an agent would otherwise re-read the whole disassembly and
+diff it — roughly 25K tokens per poll on a 64K project, plus a full analysis
+each time. `changes_since(cursor)` returns what was recorded after that point
+with author and time, and the cursor to use next.
+
+This only works because attribution is **unified**: socket edits, HTTP writes,
+CLI writes, and agent writes all leave the same record. A feed showing agent and
+CLI edits but not the human's would be blind to precisely what an agent most
+needs to see. It also means the log must be **append-only** — the old
+`DELETE`-and-reinsert renumbered every entry on each undo, so a held cursor
+silently came to mean something else.
+
+### Connecting a client
+
+```
+claude mcp add --transport http re64 http://127.0.0.1:5164/mcp \
+  --header "X-Re64-User: <user id>"
+```
+
+The user id is one from `list_users`; the server does not verify it.
 
 ## Known Limitations & Future Features
 

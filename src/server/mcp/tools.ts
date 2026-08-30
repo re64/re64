@@ -251,6 +251,20 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "unmark_function",
+    "Take back a function declaration. An auto-shaped name is removed outright " +
+      "rather than left behind contradicting its own prefix; a name someone " +
+      "chose is kept and only its type is cleared.",
+    { project, address, expectVersion: z.string().optional() },
+    (args: { project?: string; address: number; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.unmarkFunction(caller, args.address);
+    }
+  );
+
+  tool(
     "set_region",
     "Say what a span of memory holds. Marking data stops it being disassembled " +
       "as garbage, and marking a jumptable decodes the code it points at, " +
@@ -277,6 +291,20 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.setRegion(caller, args.start, args.end, args.kind, args.name, args.comment);
+    }
+  );
+
+  tool(
+    "remove_region",
+    "Drop the region starting at an address, so the span falls back to whatever " +
+      "kind its layer declares. Identified by start, since that is what a reader " +
+      "of the disassembly can see.",
+    { project, start: address, expectVersion: z.string().optional() },
+    (args: { project?: string; start: number; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.removeRegion(caller, args.start);
     }
   );
 
