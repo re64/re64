@@ -429,3 +429,82 @@ describe("what is left to look at", () => {
     expect(big).toBeLessThan(all);
   });
 });
+
+describe("writing about an address", () => {
+  it("needs no label to carry a comment", () => {
+    // The gap this closes: a comment used to be a field on a label, so
+    // commenting an instruction meant inventing a name for it and putting a
+    // name in the listing that nobody wanted there.
+    const result = workspace.setComment(agent, 0x8015, "wait for the raster");
+
+    expect(result.ok).toBe(true);
+    const rows = workspace.disassembly(0x8015, 3).lines.map((l) => l.text);
+    expect(rows[0]).toContain("; wait for the raster");
+    expect(rows.join("\n")).not.toContain("wait for the raster:");
+  });
+
+  it("puts a comment above the label it introduces", () => {
+    workspace.setComment(agent, 0x8015, "the main loop");
+    const rows = workspace.disassembly(0x8015, 4).lines.map((l) => l.text);
+
+    const comment = rows.findIndex((r) => r.includes("; the main loop"));
+    const label = rows.findIndex((r) => r.includes(":"));
+    expect(comment).toBeGreaterThanOrEqual(0);
+    expect(comment).toBeLessThan(label);
+  });
+
+  it("puts an inline comment on the instruction's own row", () => {
+    workspace.setComment(agent, 0x8015, "counts up", "inline");
+    const row = workspace
+      .disassembly(0x8015, 4)
+      .lines.map((l) => l.text)
+      .find((r) => /INX|LDA|STA|JMP|JSR/.test(r));
+
+    expect(row).toMatch(/;\s*counts up$/);
+  });
+
+  it("refuses an inline comment that cannot fit on a row", () => {
+    expect(() => workspace.setComment(agent, 0x8015, "one\ntwo", "inline")).toThrow(
+      /cannot\s+contain newlines/is
+    );
+  });
+
+  it("revises a slot rather than stacking a second comment", () => {
+    workspace.setComment(agent, 0x8015, "first thought");
+    workspace.setComment(agent, 0x8015, "second thought");
+
+    const rows = workspace.disassembly(0x8015, 4).lines.map((l) => l.text);
+    expect(rows.join("\n")).toContain("second thought");
+    expect(rows.join("\n")).not.toContain("first thought");
+  });
+
+  it("renders a multi-line comment on its own rows", () => {
+    workspace.setComment(agent, 0x8015, "why this exists\nand what it assumes");
+    const rows = workspace.disassembly(0x8015, 5).lines.map((l) => l.text);
+
+    // One row per line, each still carrying the address column.
+    expect(rows.filter((r) => /^[0-9A-F]{4}\s+; /.test(r))).toHaveLength(2);
+  });
+
+  it("takes one back", () => {
+    workspace.setComment(agent, 0x8015, "temporary");
+    workspace.removeComment(agent, 0x8015);
+
+    const rows = workspace.disassembly(0x8015, 4).lines.map((l) => l.text);
+    expect(rows.join("\n")).not.toContain("temporary");
+  });
+
+  it("says so when there is nothing to remove", () => {
+    expect(() => workspace.removeComment(agent, 0x8016)).toThrow(/No comment at/);
+  });
+
+  it("undoes as one action alongside the label it came with", () => {
+    // set_label with a comment is one decision made of two operations.
+    workspace.setLabel(agent, 0x8450, "Considered", "function", "because of the timing");
+    workspace.undo(agent);
+
+    const rows = workspace.disassembly(0x8450, 3).lines.map((l) => l.text).join("\n");
+    expect(rows).not.toContain("Considered");
+    expect(rows).not.toContain("because of the timing");
+  });
+});

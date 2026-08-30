@@ -14,6 +14,7 @@
  * renames something cannot identify it by the name it is about to change.
  */
 
+import { CommentPlacement } from "../memory/comment.js";
 import { LabelType } from "../memory/label.js";
 import { RegionKind } from "../memory/region.js";
 
@@ -25,7 +26,6 @@ export interface LabelSetOp {
   address: number;
   name: string;
   type?: LabelType;
-  comment?: string;
 }
 
 export interface LabelDeleteOp {
@@ -52,6 +52,22 @@ export interface RegionDeleteOp {
   layerId: string;
 }
 
+/** Set a comment's text or placement, creating it if the id is new. */
+export interface CommentSetOp {
+  op: "comment.set";
+  id: string;
+  layerId: string;
+  address: number;
+  placement: CommentPlacement;
+  text: string;
+}
+
+export interface CommentDeleteOp {
+  op: "comment.delete";
+  id: string;
+  layerId: string;
+}
+
 /** Promote a label at an address, or clear the choice. */
 export interface PrimarySetOp {
   op: "primary.set";
@@ -69,6 +85,8 @@ export type Op =
   | LabelDeleteOp
   | RegionSetOp
   | RegionDeleteOp
+  | CommentSetOp
+  | CommentDeleteOp
   | PrimarySetOp
   | PrimaryClearOp;
 
@@ -124,6 +142,15 @@ export function describeOp(op: Op): string {
       return `set ${hex(op.start)}-${hex(op.end)} to ${op.kind}${op.name ? ` (${op.name})` : ""}`;
     case "region.delete":
       return `delete region ${op.id}`;
+    case "comment.set": {
+      // The text, not its length: a history entry saying "commented $8870" is
+      // no use when the question is which comment was lost.
+      const oneLine = op.text.replace(/\s+/g, " ").trim();
+      const shown = oneLine.length > 40 ? `${oneLine.slice(0, 39)}\u2026` : oneLine;
+      return `comment ${hex(op.address)} ${op.placement}: ${shown}`;
+    }
+    case "comment.delete":
+      return `delete comment ${op.id}`;
     case "primary.set":
       return `show ${op.labelId} at ${hex(op.address)}`;
     case "primary.clear":

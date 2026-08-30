@@ -14,11 +14,13 @@ import { FileLayer } from "../memory/file-layer.js";
 import { SymbolLayer } from "../memory/symbol-layer.js";
 import { MemoryMap } from "../memory/memory-map.js";
 import { LabelIndex } from "../memory/label.js";
+import { CommentIndex } from "../memory/comment.js";
 import { createC64PlatformLayer } from "../c64/symbols.js";
 import {
   Project,
   ProjectLayer,
   parseProjectAddress,
+  projectCommentsToComments,
   projectLabelsToLabels,
   projectRegionsToRegions,
 } from "./project.js";
@@ -40,6 +42,13 @@ export interface LoadedProject {
   prgEntries: number[];
   /** Every user label across all layers, for entry point collection. */
   userLabels: LabelIndex;
+  /**
+   * Everything written about an address, across all layers.
+   *
+   * Flat rather than per-layer because rendering asks "what is said about this
+   * address", and the answer does not depend on which layer holds it.
+   */
+  comments: CommentIndex;
   /**
    * Built layers in *declaration* order, so index i corresponds to
    * project.layers[i]. The map itself stores them in z-order (reversed, with
@@ -76,6 +85,7 @@ export function buildMemoryMap(
   const map = new MemoryMap();
   const prgEntries: number[] = [];
   const userLabels = new LabelIndex();
+  const comments = new CommentIndex();
   const layers: Layer[] = [];
 
   if (options.platform !== false) {
@@ -119,6 +129,7 @@ export function buildMemoryMap(
       layer.labels.push(...labels);
     }
     userLabels.addLabels(labels);
+    comments.addAll(projectCommentsToComments(decl, layerId));
 
     layers.push(layer);
     map.addLayer(layer);
@@ -128,5 +139,5 @@ export function buildMemoryMap(
     map.primaryLabels.set(parseProjectAddress(address), labelId);
   }
 
-  return { project, map, prgEntries, userLabels, layers };
+  return { project, map, prgEntries, userLabels, comments, layers };
 }

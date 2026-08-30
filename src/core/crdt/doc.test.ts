@@ -371,3 +371,46 @@ describe("what a flatten may and may not assume", () => {
     expect(starts).toEqual(["$8000", "$8080"]);
   });
 });
+
+describe("comments in the document", () => {
+  const project = {
+    name: "t",
+    layers: [
+      {
+        id: "lay_a",
+        type: "prg" as const,
+        path: "game.prg",
+        comments: [
+          { id: "cmt_1", address: "$8000", text: "why this exists" },
+          { id: "cmt_2", address: "$8004", placement: "inline" as const, text: "beside" },
+        ],
+      },
+    ],
+  };
+
+  it("survives the trip out and back", () => {
+    const back = projectFromDoc(docFromProject(project));
+    expect(back.layers[0].comments).toEqual(project.layers[0].comments);
+  });
+
+  it("orders them the same way on every peer", () => {
+    // Ordering has to be identical everywhere without anyone coordinating,
+    // because two peers rendering different orders is a visible disagreement
+    // about a document they have both fully synchronised.
+    const shuffled = {
+      ...project,
+      layers: [
+        { ...project.layers[0], comments: [...project.layers[0].comments].reverse() },
+      ],
+    };
+
+    expect(projectFromDoc(docFromProject(shuffled)).layers[0].comments).toEqual(
+      projectFromDoc(docFromProject(project)).layers[0].comments
+    );
+  });
+
+  it("leaves a layer with no comments without the key", () => {
+    const bare = { name: "t", layers: [{ id: "lay_a", type: "prg" as const, path: "g.prg" }] };
+    expect(projectFromDoc(docFromProject(bare)).layers[0].comments).toBeUndefined();
+  });
+});

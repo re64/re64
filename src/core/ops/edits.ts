@@ -13,6 +13,7 @@
  * from, not something a project may claim.
  */
 
+import { CommentPlacement } from "../memory/comment.js";
 import { Label, LabelType } from "../memory/label.js";
 import { RegionKind } from "../memory/region.js";
 import { LoadedProject } from "../project/loader.js";
@@ -50,8 +51,7 @@ export function labelSetOp(
   loaded: LoadedProject,
   address: number,
   name: string,
-  type?: LabelType,
-  comment?: string
+  type?: LabelType
 ): Op {
   const layerId = owningLayerId(loaded, address);
   const existing = projectLabelAt(loaded, layerId, address);
@@ -62,8 +62,55 @@ export function labelSetOp(
     address,
     name,
     type,
-    comment,
   };
+}
+
+/**
+ * Write a comment, replacing the one already in this slot if there is one.
+ *
+ * A slot is an address and a placement. Several comments may share an address
+ * — nothing forces a single choice the way operand rendering does for labels —
+ * but `set_comment` at the same place twice is one person revising, not two
+ * comments, so it targets the existing id rather than stacking a second.
+ * Adding a deliberate second is `placement` or another address.
+ */
+export function commentSetOp(
+  loaded: LoadedProject,
+  address: number,
+  placement: CommentPlacement,
+  text: string
+): Op {
+  const layerId = owningLayerId(loaded, address);
+  const layer = loaded.project.layers.find((l) => l.id === layerId);
+  const existing = layer?.comments?.find(
+    (c) => parseProjectAddress(c.address) === address && (c.placement ?? "before") === placement
+  );
+
+  return {
+    op: "comment.set",
+    id: existing?.id ?? newId("cmt"),
+    layerId,
+    address,
+    placement,
+    text,
+  };
+}
+
+/** Undefined when there is no comment in that slot to remove. */
+export function commentDeleteOp(
+  loaded: LoadedProject,
+  address: number,
+  placement?: CommentPlacement
+): Op | undefined {
+  const layerId = owningLayerId(loaded, address);
+  const layer = loaded.project.layers.find((l) => l.id === layerId);
+  const existing = layer?.comments?.find(
+    (c) =>
+      parseProjectAddress(c.address) === address &&
+      (placement === undefined || (c.placement ?? "before") === placement)
+  );
+
+  return existing?.id ? { op: "comment.delete", id: existing.id, layerId } : undefined;
 }
 
 /** Undefined when there is no project label to delete; a built-in is not one. */

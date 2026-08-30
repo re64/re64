@@ -13,15 +13,18 @@
 
 import {
   Project,
+  ProjectComment,
   ProjectLabel,
   ProjectRegion,
   parseProject,
   parseProjectAddress,
 } from "../project/project.js";
 import {
+  deleteComment,
   deleteLabel,
   deleteRegion,
   setPrimaryLabel,
+  upsertComment,
   upsertLabel,
   upsertRegion,
 } from "../project/serialize.js";
@@ -50,6 +53,14 @@ function findLabel(project: Project, id: string): Found<ProjectLabel> | undefine
 function findRegion(project: Project, id: string): Found<ProjectRegion> | undefined {
   for (const [layerIndex, layer] of project.layers.entries()) {
     const entry = layer.regions?.find((r) => r.id === id);
+    if (entry) return { layerIndex, entry };
+  }
+  return undefined;
+}
+
+function findComment(project: Project, id: string): Found<ProjectComment> | undefined {
+  for (const [layerIndex, layer] of project.layers.entries()) {
+    const entry = layer.comments?.find((c) => c.id === id);
     if (entry) return { layerIndex, entry };
   }
   return undefined;
@@ -88,6 +99,19 @@ export function applyOp(raw: string, op: Op): string {
     case "region.delete":
       return deleteRegion(raw, layerIndexOf(project, op.layerId), op.id);
 
+    case "comment.set":
+      return upsertComment(raw, layerIndexOf(project, op.layerId), {
+        id: op.id,
+        address: addressHex(op.address),
+        // "before" is the default and is written by absence, so a flatten
+        // produces the same text a hand-written file would.
+        ...(op.placement === "before" ? {} : { placement: op.placement }),
+        text: op.text,
+      });
+
+    case "comment.delete":
+      return deleteComment(raw, layerIndexOf(project, op.layerId), op.id);
+
     case "primary.set":
       return setPrimaryLabel(raw, op.address, op.labelId);
 
@@ -119,7 +143,6 @@ export function invertOp(raw: string, op: Op): Op {
         // Absent means "address"; passing undefined would leave whatever type
         // the op set in place instead of clearing it.
         type: found.entry.type ?? "address",
-        comment: found.entry.comment,
       };
     }
 
@@ -136,7 +159,34 @@ export function invertOp(raw: string, op: Op): Op {
         // Absent means "address"; passing undefined would leave whatever type
         // the op set in place instead of clearing it.
         type: found.entry.type ?? "address",
-        comment: found.entry.comment,
+      };
+    }
+
+    case "comment.set": {
+      const found = findComment(project, op.id);
+      // Setting an id that does not exist creates it, so its inverse deletes.
+      if (!found) return { op: "comment.delete", id: op.id, layerId: op.layerId };
+      return {
+        op: "comment.set",
+        id: op.id,
+        layerId: project.layers[found.layerIndex].id!,
+        address: parseProjectAddress(found.entry.address),
+        placement: found.entry.placement ?? "before",
+        text: found.entry.text,
+      };
+    }
+
+    case "comment.delete": {
+      const found = findComment(project, op.id);
+      // Deleting something absent is a no-op, and so is undoing it.
+      if (!found) return op;
+      return {
+        op: "comment.set",
+        id: op.id,
+        layerId: project.layers[found.layerIndex].id!,
+        address: parseProjectAddress(found.entry.address),
+        placement: found.entry.placement ?? "before",
+        text: found.entry.text,
       };
     }
 

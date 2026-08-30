@@ -267,6 +267,57 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "set_comment",
+    "Write a comment about an address. \"before\" gets its own rows above the " +
+      "label and may run to several lines; \"inline\" shares the instruction's " +
+      "row and cannot. Comments are their own objects, so an address needs no " +
+      "label to carry one. Writing the same slot twice revises it rather than " +
+      "stacking a second comment.",
+    {
+      project,
+      address,
+      text: z.string().min(1),
+      placement: z.enum(["before", "inline"]).optional().describe("Default before"),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      address: number;
+      text: string;
+      placement?: "before" | "inline";
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.setComment(caller, args.address, args.text, args.placement ?? "before");
+    }
+  );
+
+  tool(
+    "remove_comment",
+    "Delete the comment at an address. Give a placement to pick one when the " +
+      "address carries both.",
+    {
+      project,
+      address,
+      placement: z.enum(["before", "inline"]).optional(),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      address: number;
+      placement?: "before" | "inline";
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.removeComment(caller, args.address, args.placement);
+    }
+  );
+
+  tool(
     "mark_function",
     "Declare an address a subroutine, creating a label if there is none. " +
       "This makes it an entry point, so it is how code nothing references " +

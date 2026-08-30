@@ -11,7 +11,13 @@
  * only the lines that actually changed.
  */
 
-import { Project, ProjectLabel, ProjectRegion, parseProjectAddress } from "../project/project.js";
+import {
+  Project,
+  ProjectComment,
+  ProjectLabel,
+  ProjectRegion,
+  parseProjectAddress,
+} from "../project/project.js";
 import { Op } from "./types.js";
 
 interface Owned<T> {
@@ -39,11 +45,25 @@ function regionsById(project: Project): Map<string, Owned<ProjectRegion>> {
   return out;
 }
 
+function commentsById(project: Project): Map<string, Owned<ProjectComment>> {
+  const out = new Map<string, Owned<ProjectComment>>();
+  for (const layer of project.layers) {
+    for (const entry of layer.comments ?? []) {
+      if (entry.id) out.set(entry.id, { layerId: layer.id!, entry });
+    }
+  }
+  return out;
+}
+
 const sameLabel = (a: ProjectLabel, b: ProjectLabel) =>
   parseProjectAddress(a.address) === parseProjectAddress(b.address) &&
   a.name === b.name &&
-  (a.type ?? "address") === (b.type ?? "address") &&
-  a.comment === b.comment;
+  (a.type ?? "address") === (b.type ?? "address");
+
+const sameComment = (a: ProjectComment, b: ProjectComment) =>
+  parseProjectAddress(a.address) === parseProjectAddress(b.address) &&
+  (a.placement ?? "before") === (b.placement ?? "before") &&
+  a.text === b.text;
 
 const sameRegion = (a: ProjectRegion, b: ProjectRegion) =>
   parseProjectAddress(a.start) === parseProjectAddress(b.start) &&
@@ -65,12 +85,17 @@ export function diffProjects(from: Project, to: Project): Op[] {
   const afterLabels = labelsById(to);
   const beforeRegions = regionsById(from);
   const afterRegions = regionsById(to);
+  const beforeComments = commentsById(from);
+  const afterComments = commentsById(to);
 
   for (const [id, owned] of beforeLabels) {
     if (!afterLabels.has(id)) ops.push({ op: "label.delete", id, layerId: owned.layerId });
   }
   for (const [id, owned] of beforeRegions) {
     if (!afterRegions.has(id)) ops.push({ op: "region.delete", id, layerId: owned.layerId });
+  }
+  for (const [id, owned] of beforeComments) {
+    if (!afterComments.has(id)) ops.push({ op: "comment.delete", id, layerId: owned.layerId });
   }
 
   for (const [id, owned] of afterLabels) {
@@ -83,7 +108,21 @@ export function diffProjects(from: Project, to: Project): Op[] {
       address: parseProjectAddress(owned.entry.address),
       name: owned.entry.name,
       type: owned.entry.type,
-      comment: owned.entry.comment,
+    });
+  }
+
+  for (const [id, owned] of afterComments) {
+    const before = beforeComments.get(id);
+    if (before && before.layerId === owned.layerId && sameComment(before.entry, owned.entry)) {
+      continue;
+    }
+    ops.push({
+      op: "comment.set",
+      id,
+      layerId: owned.layerId,
+      address: parseProjectAddress(owned.entry.address),
+      placement: owned.entry.placement ?? "before",
+      text: owned.entry.text,
     });
   }
 

@@ -16,3 +16,9 @@ export {
   LABEL_RANK,
 } from "./label.js";
 export { Region, RegionKind, RegionIndex, createUserRegion } from "./region.js";
+export {
+  Comment,
+  CommentPlacement,
+  CommentIndex,
+  createComment,
+} from "./comment.js";

@@ -17,6 +17,7 @@ import {
   formatInstruction,
   InstructionIndex,
   ReferenceType,
+  CommentIndex,
   formatProject,
   parseProject,
   parseProjectAddress,
@@ -232,8 +233,8 @@ label
     const address = parseAddress(addressArg);
     const editor = openProject(projectPath);
     const layerId = editor.owningLayerId(address);
-    const op = editor.labelSetOp(layerId, address, name, options.type, options.comment);
-    console.log(editor.run([op], options.author ?? "cli", Date.now())[0]);
+    const ops = editor.labelSetOp(layerId, address, name, options.type, options.comment);
+    console.log(editor.run(ops, options.author ?? "cli", Date.now()).join("\n"));
   });
 
 label
@@ -401,6 +402,8 @@ program
     let map: MemoryMap;
     let prgEntries: number[] = [];
     let userLabels = new LabelIndex();
+    // Layers declared on the command line carry no annotations of their own.
+    let comments = new CommentIndex();
     // Layers declared on the command line have no project file behind them.
     let project: Project = { layers: [] };
 
@@ -411,6 +414,7 @@ program
       map = loaded.map;
       prgEntries = loaded.prgEntries;
       userLabels = loaded.userLabels;
+      comments = loaded.comments;
       project = loaded.project;
 
     } else {
@@ -474,7 +478,7 @@ program
     // range, two renderers. Annotations are off because nothing in a terminal
     // is clickable, so type tags and xref stubs would only be noise.
     const analysis = analyze(
-      { project, map, prgEntries, userLabels, layers: [] },
+      { project, map, prgEntries, userLabels, comments, layers: [] },
       {
         labelTolerance: parseInt(options.labelTolerance, 10) || 1,
         annotations: false,

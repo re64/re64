@@ -529,6 +529,47 @@ KERNAL entry points — render as plain grey names rather than links. They are
 named but have no bytes, and on 6502 they are common enough that making them
 clickable means constantly landing on an error.
 
+### Comments are objects, not a field on something else
+
+A comment has an id and an address, like everything else that can be edited.
+It was a field on a label, which meant a comment could not exist anywhere a
+label did not: commenting an instruction meant inventing a name for it and
+putting a name in the listing nobody wanted there. The field was also dead —
+stored, carried through the model, rendered nowhere, and used by no project.
+
+**Placement is the only axis**, `before` or `inline`, and length follows from
+it. A `before` comment owns its own rows and may run to several lines; an
+`inline` one shares a row with an instruction and therefore cannot. Treating
+"long" and "short" as a separate field would permit a long inline comment,
+which has no rendering.
+
+`before` renders *above* the label, because the comment introduces the routine
+and the label is its name — which is how a hand-written disassembly reads.
+
+**Every comment at an address is shown, and there is no index choosing one.**
+`primaryLabels` exists because operand rendering must substitute exactly one
+name for an address: a forced single choice, where concurrent promotions would
+otherwise both stand with nothing able to repair it. Nothing forces a choice
+here, so the same machinery would have no consumer. Two comments are both
+rendered, ordered by id — arbitrary, but stable and identical on every peer
+without coordination — and a second inline comment is indented under the first,
+where the redundancy is visible enough that whoever sees it removes one.
+
+Writing the same slot twice **revises** rather than stacking, since that is one
+person changing their mind rather than two comments.
+
+A **region's** `comment` is deliberately not this. It describes a span, is a
+property of the region object alongside its name, and is rendered in the memory
+map rather than in the disassembly. Different thing, different home.
+
+Comments belong to layers, like labels and regions, so reordering the stack
+moves them with the bytes they describe — and so a comment on zero page needs
+the same symbols layer a label there does.
+
+One consequence in the row builder: a data run breaks at a commented address as
+well as at a labelled one, or a comment written about an address inside a chunk
+would be swallowed by the row and appear nowhere.
+
 ### Label types are backend concepts; the UI exposes one
 
 The four label types are genuinely distinct concepts, even though the

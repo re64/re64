@@ -81,13 +81,34 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
           // "address" is the default and is recorded by absence, matching the
           // project file so a flatten produces the same text.
           type: op.type === "address" ? undefined : op.type,
-          comment: op.comment,
         });
         break;
       }
 
       case "label.delete":
         childMap(layerById(doc, op.layerId), "labels").delete(op.id);
+        break;
+
+      case "comment.set": {
+        const comments = childMap(layerById(doc, op.layerId), "comments");
+        let entry = comments.get(op.id);
+        if (!entry) {
+          entry = new Y.Map<unknown>();
+          comments.set(op.id, entry);
+        }
+        assign(entry, {
+          id: op.id,
+          address: hex4(op.address),
+          // "before" is the default and is recorded by absence, matching the
+          // project file so a flatten produces the same text.
+          placement: op.placement === "before" ? undefined : op.placement,
+          text: op.text,
+        });
+        break;
+      }
+
+      case "comment.delete":
+        childMap(layerById(doc, op.layerId), "comments").delete(op.id);
         break;
 
       case "region.set": {

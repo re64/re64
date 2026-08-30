@@ -1,3 +1,4 @@
+import { Comment, CommentPlacement, createComment } from "../memory/comment.js";
 import { Label, LabelType, createUserLabel } from "../memory/label.js";
 import { Region, RegionKind, createUserRegion } from "../memory/region.js";
 import { derivedId } from "./identity.js";
@@ -33,6 +34,23 @@ export interface ProjectLayer {
   labels?: ProjectLabel[];
   /** Regions carved out of this layer, overriding its default kind */
   regions?: ProjectRegion[];
+  /** Comments about addresses this layer owns */
+  comments?: ProjectComment[];
+}
+
+/**
+ * A comment in a project file.
+ *
+ * Owned by a layer for the same reason labels are: reordering the stack has to
+ * move an annotation with the bytes it describes.
+ */
+export interface ProjectComment {
+  /** Stable identity; derived from content when the file omits it. */
+  id?: string;
+  address: number | string;
+  /** Default "before". An inline comment shares the instruction's row. */
+  placement?: CommentPlacement;
+  text: string;
 }
 
 /** Label definition in a project file */
@@ -45,7 +63,14 @@ export interface ProjectLabel {
   name: string;
   /** Label type (default: "address") */
   type?: LabelType;
-  /** Optional comment */
+  /**
+   * Superseded by first-class comments, and read only so an older file does not
+   * lose one: the loader turns it into a `before` comment at the same address.
+   *
+   * It was stored, carried through the model, and rendered nowhere, so a
+   * comment could not exist anywhere a label did not — which made commenting an
+   * instruction mean inventing a name for it.
+   */
   comment?: string;
 }
 
@@ -136,6 +161,39 @@ export function projectLabelsToLabels(
     const id = pl.id ?? derivedId("lbl", layerId, address, pl.name);
     return createUserLabel(id, address, pl.name, type, pl.comment);
   });
+}
+
+/**
+ * Convert project comments to Comment objects.
+ *
+ * A legacy `comment` on a label becomes a `before` comment at its address, so
+ * an older file keeps what it said rather than dropping it silently.
+ */
+export function projectCommentsToComments(
+  layer: ProjectLayer,
+  layerId: string
+): Comment[] {
+  const comments = (layer.comments ?? []).map((pc) => {
+    const address = parseProjectAddress(pc.address);
+    const placement = pc.placement ?? "before";
+    const id = pc.id ?? derivedId("cmt", layerId, address, placement);
+    return createComment(id, address, placement, pc.text);
+  });
+
+  for (const label of layer.labels ?? []) {
+    if (!label.comment) continue;
+    const address = parseProjectAddress(label.address);
+    comments.push(
+      createComment(
+        derivedId("cmt", layerId, address, "from-label"),
+        address,
+        "before",
+        label.comment
+      )
+    );
+  }
+
+  return comments;
 }
 
 /** Convert project regions to Region objects */

@@ -14,7 +14,7 @@
 import type { Project } from "./project.js";
 
 /** Prefix marks what an id refers to, so a stray id in a diff is readable. */
-export type IdPrefix = "lbl" | "rgn" | "lay" | "fil";
+export type IdPrefix = "lbl" | "rgn" | "cmt" | "lay" | "fil";
 
 const ID_CHARS = "0123456789abcdefghijklmnopqrstuvwxyz";
 
@@ -85,6 +85,7 @@ export function withIds(project: Project, mint: (prefix: IdPrefix) => string = n
       ...withId,
       ...(layer.labels ? { labels: layer.labels.map((l) => give(l, "lbl")) } : {}),
       ...(layer.regions ? { regions: layer.regions.map((r) => give(r, "rgn")) } : {}),
+      ...(layer.comments ? { comments: layer.comments.map((c) => give(c, "cmt")) } : {}),
     };
   });
 

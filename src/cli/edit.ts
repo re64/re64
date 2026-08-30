@@ -18,6 +18,7 @@ import {
   Project,
   RegionKind,
   labelDeleteOp,
+  commentSetOp,
   labelSetOp,
   owningLayerId,
   parseProject,
@@ -66,8 +67,14 @@ export class ProjectEditor {
     name: string,
     type?: LabelType,
     comment?: string
-  ): Op {
-    return labelSetOp(this.loadedProject(), address, name, type, comment);
+  ): Op[] {
+    // A comment is about the address, not a field on the label, so naming and
+    // commenting are two operations in one action.
+    const loaded = this.loadedProject();
+    return [
+      labelSetOp(loaded, address, name, type),
+      ...(comment ? [commentSetOp(loaded, address, "before", comment)] : []),
+    ];
   }
 
   labelDeleteOp(_layerId: string, address: number): Op | undefined {

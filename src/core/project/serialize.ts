@@ -12,7 +12,7 @@
  * returned, so a botched splice throws instead of producing a corrupt file.
  */
 
-import { Project, ProjectLabel } from "./project.js";
+import { Project, ProjectComment, ProjectLabel } from "./project.js";
 import { parseProject, parseProjectAddress } from "./project.js";
 
 /** Serialize one object compactly on a single line: `{ "a": 1, "b": 2 }`. */
@@ -36,7 +36,7 @@ export function formatProject(project: Project): string {
   // Layer scalars expanded, its labels and regions one per line.
   const layers = project.layers
     .map((layer) => {
-      const { labels, regions, ...scalars } = layer;
+      const { labels, regions, comments, ...scalars } = layer;
       const parts = Object.entries(scalars)
         .filter(([, v]) => v !== undefined)
         .map(([k, v]) => `      ${JSON.stringify(k)}: ${JSON.stringify(v)}`);
@@ -52,6 +52,12 @@ export function formatProject(project: Project): string {
           .map((l) => `        ${compactObject(l as unknown as Record<string, unknown>)}`)
           .join(",\n");
         parts.push(`      "labels": [\n${body}\n      ]`);
+      }
+      if (comments?.length) {
+        const body = comments
+          .map((c) => `        ${compactObject(c as unknown as Record<string, unknown>)}`)
+          .join(",\n");
+        parts.push(`      "comments": [\n${body}\n      ]`);
       }
 
       return `    {\n${parts.join(",\n")}\n    }`;
@@ -604,4 +610,45 @@ export function migrateIds(
 /** Normalise trailing whitespace the way a written file should look. */
 export function normalizeProjectText(raw: string): string {
   return raw.endsWith("\n") ? raw : raw + "\n";
+}
+
+
+/**
+ * Add or update a comment, and delete one.
+ *
+ * These reserialise rather than editing lines in place, which is what the label
+ * and region equivalents do to keep a one-field change a one-line diff. Worth
+ * being explicit that the difference is deliberate and not an omission: the
+ * export is regenerated from the document on every write anyway, and the only
+ * caller that applies an operation to *text* reads the result to derive an
+ * inverse and throws it away. There is no layout here for anyone to lose.
+ */
+export function upsertComment(
+  raw: string,
+  layerIndex: number,
+  comment: ProjectComment
+): string {
+  const project = parseProject(raw);
+  const layer = project.layers[layerIndex];
+  if (!layer) {
+    throw new Error(`No layer at index ${layerIndex} to own a comment`);
+  }
+
+  const comments = (layer.comments ??= []);
+  const at = comments.findIndex((c) => c.id === comment.id);
+  if (at >= 0) comments[at] = comment;
+  else comments.push(comment);
+
+  return formatProject(project);
+}
+
+export function deleteComment(raw: string, layerIndex: number, id: string): string {
+  const project = parseProject(raw);
+  const layer = project.layers[layerIndex];
+  if (!layer?.comments) return raw;
+
+  layer.comments = layer.comments.filter((c) => c.id !== id);
+  if (layer.comments.length === 0) delete layer.comments;
+
+  return formatProject(project);
 }

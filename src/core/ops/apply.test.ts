@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { applyOp, applyOps, invertOp } from "./apply.js";
 import { Op } from "./types.js";
 import { parseProject } from "../project/project.js";
+import { formatProject } from "../project/serialize.js";
 
 const PROJECT = `{
   "name": "Test",
@@ -243,5 +244,98 @@ describe("errors", () => {
         name: "n",
       })
     ).toThrow(/No layer with id lay_missing/);
+  });
+});
+
+describe("comments through the text layer", () => {
+  const withComment = JSON.stringify(
+    {
+      name: "t",
+      layers: [
+        {
+          id: "lay_a",
+          type: "prg",
+          path: "game.prg",
+          comments: [{ id: "cmt_1", address: "$8000", text: "why" }],
+        },
+      ],
+    },
+    null,
+    2
+  );
+
+  it("adds one, and inverts to removing it", () => {
+    const empty = JSON.stringify(
+      { name: "t", layers: [{ id: "lay_a", type: "prg", path: "game.prg" }] },
+      null,
+      2
+    );
+    const op = {
+      op: "comment.set" as const,
+      id: "cmt_1",
+      layerId: "lay_a",
+      address: 0x8000,
+      placement: "before" as const,
+      text: "why",
+    };
+
+    const inverse = invertOp(empty, op);
+    expect(inverse).toEqual({ op: "comment.delete", id: "cmt_1", layerId: "lay_a" });
+
+    const after = applyOp(empty, op);
+    expect(after).toContain("why");
+    expect(applyOp(after, inverse)).not.toContain("why");
+  });
+
+  it("restores the previous text when one is overwritten", () => {
+    const op = {
+      op: "comment.set" as const,
+      id: "cmt_1",
+      layerId: "lay_a",
+      address: 0x8000,
+      placement: "before" as const,
+      text: "revised",
+    };
+
+    const inverse = invertOp(withComment, op);
+    expect(inverse).toMatchObject({ op: "comment.set", text: "why" });
+    expect(applyOp(applyOp(withComment, op), inverse)).toContain("why");
+  });
+
+  it("keeps an inline placement through a round trip", () => {
+    const op = {
+      op: "comment.set" as const,
+      id: "cmt_2",
+      layerId: "lay_a",
+      address: 0x8004,
+      placement: "inline" as const,
+      text: "beside",
+    };
+
+    const after = applyOp(withComment, op);
+    expect(after).toContain('"placement": "inline"');
+    // "before" is the default and is written by absence, matching the schema.
+    expect(after).not.toContain('"placement": "before"');
+  });
+
+  it("applied twice changes nothing the second time", () => {
+    // The property partial undo depends on: replaying an op forward must be a
+    // no-op when its effect is already present, or every comment would be
+    // reported as changed by someone else and never taken back.
+    //
+    // Normalised first, because a comment write reserialises. Every real
+    // caller already holds normalised text — both runOps and undo take theirs
+    // from formatProject(projectFromDoc(...)) — so this states the
+    // precondition rather than working around it.
+    const normalised = formatProject(parseProject(withComment));
+    const op = {
+      op: "comment.set" as const,
+      id: "cmt_1",
+      layerId: "lay_a",
+      address: 0x8000,
+      placement: "before" as const,
+      text: "why",
+    };
+    expect(applyOp(normalised, op)).toBe(normalised);
   });
 });

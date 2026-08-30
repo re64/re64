@@ -23,7 +23,13 @@
  */
 
 import * as Y from "yjs";
-import { Project, ProjectLabel, ProjectLayer, ProjectRegion } from "../project/project.js";
+import {
+  Project,
+  ProjectComment,
+  ProjectLabel,
+  ProjectLayer,
+  ProjectRegion,
+} from "../project/project.js";
 
 /**
  * Client id used while building the shared base.
@@ -87,7 +93,7 @@ export function docFromProject(project: Project): Y.Doc {
   doc.transact(() => {
     const layers = doc.getArray<Y.Map<unknown>>(ROOT_LAYERS);
     for (const layer of project.layers) {
-      const { labels, regions, ...scalars } = layer;
+      const { labels, regions, comments, ...scalars } = layer;
       const entry = mapFrom(scalars as Record<string, unknown>);
 
       // Keyed by id rather than held in an array: two people editing different
@@ -103,6 +109,12 @@ export function docFromProject(project: Project): Y.Doc {
         regionMap.set(region.id!, mapFrom(region as unknown as Record<string, unknown>));
       }
       entry.set("regions", regionMap);
+
+      const commentMap = new Y.Map<Y.Map<unknown>>();
+      for (const comment of [...(comments ?? [])].sort(byId)) {
+        commentMap.set(comment.id!, mapFrom(comment as unknown as Record<string, unknown>));
+      }
+      entry.set("comments", commentMap);
 
       layers.push([entry]);
     }
@@ -137,9 +149,11 @@ export function projectFromDoc(doc: Y.Doc): Project {
       const scalars = { ...(entry.toJSON() as Record<string, unknown>) };
       delete scalars.labels;
       delete scalars.regions;
+      delete scalars.comments;
 
       const labels = entry.get("labels") as Y.Map<Y.Map<unknown>> | undefined;
       const regions = entry.get("regions") as Y.Map<Y.Map<unknown>> | undefined;
+      const comments = entry.get("comments") as Y.Map<Y.Map<unknown>> | undefined;
 
       const layer = inOrder<ProjectLayer>(scalars, LAYER_FIELDS);
       const labelList = labels
@@ -152,8 +166,18 @@ export function projectFromDoc(doc: Y.Doc): Project {
             inOrder<ProjectRegion>(r as unknown as Record<string, unknown>, REGION_FIELDS)
           )
         : [];
+      // By address, then by id within one: several comments can share an
+      // address, and the order has to be identical on every peer without
+      // anyone coordinating.
+      const commentList = comments
+        ? sortedValues<ProjectComment>(comments, "address").map((c) =>
+            inOrder<ProjectComment>(c as unknown as Record<string, unknown>, COMMENT_FIELDS)
+          )
+        : [];
+
       if (labelList.length) layer.labels = labelList;
       if (regionList.length) layer.regions = regionList;
+      if (commentList.length) layer.comments = commentList;
       return layer;
     }),
   };
@@ -177,8 +201,11 @@ export function projectFromDoc(doc: Y.Doc): Project {
  * session would rewrite every line just to reorder "id" and "address", turning
  * a one-label edit into a whole-file diff.
  */
-const LABEL_FIELDS = ["id", "address", "name", "type", "comment"] as const;
+// A label no longer carries a comment: comments are their own objects. Read
+// from an older document, the key is simply absent.
+const LABEL_FIELDS = ["id", "address", "name", "type"] as const;
 const REGION_FIELDS = ["id", "start", "end", "kind", "name", "comment"] as const;
+const COMMENT_FIELDS = ["id", "address", "placement", "text"] as const;
 const LAYER_FIELDS = [
   "id",
   "type",

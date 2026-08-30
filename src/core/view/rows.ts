@@ -45,7 +45,7 @@ export const LABEL_TYPE_TAGS: Record<LabelType, string> = {
   address: "addr",
 };
 
-export type RowKind = "label" | "instruction" | "data" | "text" | "word";
+export type RowKind = "label" | "instruction" | "data" | "text" | "word" | "comment";
 
 /** One rendered line of the disassembly view. */
 export interface Row {
@@ -157,7 +157,30 @@ export function analyze(
   };
 
   /** Emit label rows, plus an inbound xref stub when references exist. */
+  /**
+   * What was written about this address, on its own rows above the label.
+   *
+   * Above the label rather than below it, because a comment introduces the
+   * routine and the label is its name — which is how the reference disassembly
+   * this is measured against reads.
+   *
+   * Every comment at the address is shown. There is no primary comment and no
+   * index choosing one: that machinery exists for labels because operand
+   * rendering must substitute exactly one name for an address, and nothing
+   * forces a choice here. Two comments are both shown, in id order, and the
+   * duplication is visible enough that whoever sees it removes one.
+   */
+  const emitComments = (addr: number) => {
+    for (const comment of loaded.comments.at(addr, "before")) {
+      for (const line of comment.text.split("\n")) {
+        const text = `${hex4(addr)}  ; ${line}`;
+        push({ address: addr, kind: "comment", text, tokens: [] });
+      }
+    }
+  };
+
   const emitLabels = (addr: number) => {
+    emitComments(addr);
     const here = allLabels.getLabelsAt(addr);
     // The built-in name is redundant wherever the project supplied one, and
     // rendering both would show CHROUT and ROM_CHROUT on consecutive rows.
@@ -255,7 +278,23 @@ export function analyze(
         }
       }
 
+      const inline = loaded.comments.at(addr, "inline");
+      if (inline.length > 0) text += `  ; ${inline[0].text}`;
       push({ address: addr, kind: "instruction", text, tokens, illegal: instr.illegal });
+
+      // A second inline comment has no room on the row it belongs to, so it
+      // goes underneath, indented to where the first one starts. Redundant by
+      // construction and meant to look it.
+      for (const extra of inline.slice(1)) {
+        const indent = " ".repeat(Math.max(0, text.length - extra.text.length - 2));
+        push({
+          address: addr,
+          kind: "comment",
+          text: `${indent}; ${extra.text}`,
+          tokens: [],
+        });
+      }
+
       addr += instr.bytes.length;
       continue;
     }
@@ -312,7 +351,10 @@ export function analyze(
       // Stop where a different strategy takes over, so every byte in the range
       // is claimed by exactly one branch of the outer dispatch.
       if (rowStrategy(map.getKindAt(addr) ?? "data") !== strategy) break;
-      if (bytes.length > 0 && allLabels.hasLabelAt(addr)) break;
+      // Break for a comment as well as a label, or one written about an
+      // address inside a data run would be swallowed by the row and never
+      // appear anywhere.
+      if (bytes.length > 0 && (allLabels.hasLabelAt(addr) || loaded.comments.has(addr))) break;
 
       const byte = map.readByte(addr);
       if (byte === undefined) {

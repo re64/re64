@@ -3,6 +3,7 @@ import { analyze } from "./rows.js";
 import { MemoryMap } from "../memory/memory-map.js";
 import { FileLayer } from "../memory/file-layer.js";
 import { LabelIndex, createUserLabel } from "../memory/label.js";
+import { CommentIndex } from "../memory/comment.js";
 import { createUserRegion, RegionKind } from "../memory/region.js";
 import { LoadedProject } from "../project/loader.js";
 
@@ -46,6 +47,7 @@ function project(
     map,
     prgEntries: [ORG],
     userLabels,
+    comments: new CommentIndex(),
     layers: [layer],
   };
 }

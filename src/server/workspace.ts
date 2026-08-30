@@ -25,6 +25,8 @@ import {
   buildMemoryMap,
   describeOp,
   labelDeleteOp,
+  commentDeleteOp,
+  commentSetOp,
   labelSetOp,
   makeFileLoader,
   markFunctionOps,
@@ -35,6 +37,7 @@ import {
 } from "../core/index.js";
 import { projectFromDoc } from "../core/crdt/index.js";
 import { databaseFileBytes } from "../store/load.js";
+import { CommentPlacement } from "../core/index.js";
 import { FileStorage, ProjectStore, SqliteStorage } from "../store/index.js";
 import { nodeFileBytes } from "../node-files.js";
 
@@ -510,9 +513,46 @@ export class Workspace {
     type?: LabelType,
     comment?: string
   ): EditResult {
+    // A comment given here is a comment about the address, not a field on the
+    // label — one action, two operations, so undo takes both back together.
     return this.edit(caller, (loaded) => [
-      labelSetOp(loaded, address, name, type, comment),
+      labelSetOp(loaded, address, name, type),
+      ...(comment ? [commentSetOp(loaded, address, "before", comment)] : []),
     ]);
+  }
+
+  /**
+   * Write a comment about an address.
+   *
+   * `before` owns its own rows above the label and may run to several lines;
+   * `inline` shares the instruction's row. Setting the same slot twice revises
+   * rather than stacking, since that is one person changing their mind.
+   */
+  setComment(
+    caller: Caller,
+    address: number,
+    text: string,
+    placement: CommentPlacement = "before"
+  ): EditResult {
+    if (placement === "inline" && text.includes("\n")) {
+      throw new Error(
+        "An inline comment shares a row with the instruction, so it cannot " +
+          "contain newlines. Use placement \"before\" for anything longer."
+      );
+    }
+    return this.edit(caller, (loaded) => [commentSetOp(loaded, address, placement, text)]);
+  }
+
+  removeComment(caller: Caller, address: number, placement?: CommentPlacement): EditResult {
+    return this.edit(caller, (loaded) => {
+      const op = commentDeleteOp(loaded, address, placement);
+      if (!op) {
+        throw new Error(
+          `No comment at ${hex4(address)}${placement ? ` (${placement})` : ""}.`
+        );
+      }
+      return [op];
+    });
   }
 
   removeLabel(caller: Caller, address: number): EditResult {

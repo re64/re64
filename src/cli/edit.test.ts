@@ -29,7 +29,7 @@ describe("editing a plain project file", () => {
     const editor = openProject(projectPath);
     const layerId = editor.owningLayerId(0x8100);
 
-    editor.run([editor.labelSetOp(layerId, 0x8100, "Renamed")], "cli", 1);
+    editor.run(editor.labelSetOp(layerId, 0x8100, "Renamed"), "cli", 1);
     expect(readFileSync(projectPath, "utf-8")).toContain("Renamed");
 
     editor.undo("cli");
@@ -47,7 +47,7 @@ describe("editing a database", () => {
     // Resolving the owning layer needs the PRG's load header, so this only
     // works because the binary came into the database too.
     const layerId = editor.owningLayerId(0x8100);
-    expect(editor.run([editor.labelSetOp(layerId, 0x8100, "NamedByAgent")], "agent-1", 1))
+    expect(editor.run(editor.labelSetOp(layerId, 0x8100, "NamedByAgent"), "agent-1", 1))
       .toEqual(["set $8100 to NamedByAgent"]);
 
     const out = join(dir, "out.re64");
@@ -61,7 +61,7 @@ describe("editing a database", () => {
 
     const editor = openProject(databasePath);
     editor.run(
-      [editor.labelSetOp(editor.owningLayerId(0x8100), 0x8100, "NamedByAgent")],
+      editor.labelSetOp(editor.owningLayerId(0x8100), 0x8100, "NamedByAgent"),
       "agent-1",
       1
     );
