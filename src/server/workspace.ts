@@ -357,16 +357,23 @@ export class Workspace {
 
   private summarise(label: Label): LabelSummary {
     const program = this.program();
+    // An auto label's id is derived from the fact that nothing named it, and
+    // handing one out invites an edit claiming an identity that means nothing.
+    // A platform label belongs to the built-in symbol layer, which no project
+    // owns, so a write to one is refused a layer down.
+    //
+    // Both were reported writable, which is worse than either gap: it is the
+    // field a reader uses to decide what it may edit, so it was planned
+    // against and then refused.
     const invented = label.source.kind === "auto";
+    const builtIn = label.source.kind === "platform";
     return {
       address: hex4(label.address),
       name: label.name,
       type: label.type,
       source: label.source.kind,
       references: program.xrefs.count(label.address),
-      // An auto label's id is derived from the fact that nothing named it.
-      // Handing it out invites an edit claiming an identity that means nothing.
-      writable: !invented,
+      writable: !invented && !builtIn,
     };
   }
 
@@ -461,6 +468,19 @@ export class Workspace {
     });
   }
 
+  /**
+   * Declare what a span holds.
+   *
+   * `end` is exclusive, and a caller that reads it as inclusive gets a region
+   * one byte short. That is silent for most kinds and fatal for a jumptable,
+   * where two bytes is the minimum that can hold anything: `$8000-$8001` is one
+   * byte, contains no address, decodes nothing, and returns ok. On a project
+   * with nothing else reachable that is the difference between the whole
+   * program and five instructions.
+   *
+   * So the span it actually took is reported back, and a jumptable too small to
+   * contain an address is refused rather than accepted and ignored.
+   */
   setRegion(
     caller: Caller,
     start: number,
@@ -469,9 +489,27 @@ export class Workspace {
     name?: string,
     comment?: string
   ): EditResult {
-    return this.edit(caller, (loaded) => [
+    if (end <= start) {
+      throw new Error(
+        `A region must cover at least one byte, and end is exclusive: ` +
+          `${hex4(start)}-${hex4(end)} covers none. Did you mean end ${hex4(start + 1)}?`
+      );
+    }
+    if (kind === "jumptable" && end - start < 2) {
+      throw new Error(
+        `A jumptable holds 16-bit addresses, so it needs at least two bytes: ` +
+          `${hex4(start)}-${hex4(end)} covers ${end - start}. Remember end is ` +
+          `exclusive — for one entry use end ${hex4(start + 2)}.`
+      );
+    }
+
+    const result = this.edit(caller, (loaded) => [
       regionSetOp(loaded, start, end, kind, name, comment),
     ]);
+    return {
+      ...result,
+      covers: `${hex4(start)}-${hex4(end - 1)} (${end - start} bytes)`,
+    };
   }
 
   removeRegion(caller: Caller, start: number): EditResult {
@@ -554,4 +592,11 @@ export interface EditResult {
   version: string;
   did: string[];
   instructions: { before: number; after: number; delta: number };
+  /**
+   * The span a region write actually took, inclusive at both ends.
+   *
+   * Stated because `end` is exclusive and a reader who assumed otherwise has
+   * no other way to notice: the write succeeds and the region is a byte short.
+   */
+  covers?: string;
 }

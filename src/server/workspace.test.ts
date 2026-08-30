@@ -316,3 +316,64 @@ describe("a project written by hand", () => {
     expect(blank.describe().counts.instructions).toBeGreaterThan(before);
   });
 });
+
+describe("saying what a span holds", () => {
+  it("starts decoding at a code region, named or not", () => {
+    // It used to seed only when the region carried a name, because only a
+    // named region generated the entry label that seeds the queue. So the
+    // declaration was inert exactly where it was needed — on a span nothing
+    // reaches — and the way through was to call it a subroutine and accept a
+    // fabricated name onto an address nobody wanted to name.
+    const blank = blankWorkspace();
+    expect(blank.describe().counts.instructions).toBe(5);
+
+    const result = blank.setRegion(agent, 0x8011, 0x8014, "code");
+
+    expect(result.instructions.delta).toBeGreaterThan(1000);
+    // And nothing appeared in the listing that nobody put there.
+    expect(blank.labels({ namePattern: "rgn_" }).total).toBe(0);
+  });
+
+  it("says which bytes it took, because end is exclusive", () => {
+    const result = workspace.setRegion(agent, 0x8f00, 0x8f20, "text");
+    expect(result.covers).toBe("$8F00-$8F1F (32 bytes)");
+  });
+
+  it("refuses a jumptable too small to hold an address", () => {
+    // $8000-$8001 is one byte. It contains no address, decodes nothing, and
+    // used to return ok — which on a project with nothing else reachable is
+    // the difference between the whole program and five instructions.
+    expect(() => workspace.setRegion(agent, 0x8000, 0x8001, "jumptable")).toThrow(
+      /at least two bytes.*end is\s+exclusive/is
+    );
+  });
+
+  it("refuses a region covering nothing", () => {
+    expect(() => workspace.setRegion(agent, 0x8000, 0x8000, "data")).toThrow(
+      /at least one byte/
+    );
+  });
+
+  it("follows a jumptable that covers a whole address", () => {
+    const blank = blankWorkspace();
+    const result = blank.setRegion(agent, 0x8000, 0x8002, "jumptable", "initVector");
+    expect(result.instructions.delta).toBeGreaterThan(1000);
+  });
+});
+
+describe("what a reader is told it may edit", () => {
+  it("does not claim a built-in symbol is writable", () => {
+    // The field a reader uses to decide what to edit. Platform labels belong
+    // to the built-in layer that no project owns, so a write is refused a
+    // layer down — after it has already been planned against.
+    const platform = workspace.labels({ source: "platform" }).labels[0];
+
+    expect(platform.source).toBe("platform");
+    expect(platform.writable).toBe(false);
+  });
+
+  it("still marks a project's own label writable", () => {
+    const own = workspace.labels({ source: "user" }).labels[0];
+    expect(own.writable).toBe(true);
+  });
+});

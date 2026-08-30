@@ -65,12 +65,27 @@ function entryPointsFor(loaded: LoadedProject, override?: number[]): number[] {
     .filter((l) => l.type === "entry" || l.type === "function" || l.type === "code")
     .map((l) => l.address);
 
+  // Declaring a span "code" starts decoding at its first address.
+  //
+  // It used to do nothing unless the region also carried a name, because only
+  // a named region generated the entry-typed label that seeds the queue. So
+  // "this is code" was inert exactly when it was most needed — on a span
+  // nothing reaches — and the only way through was to declare it a subroutine,
+  // which forces a fabricated sub_ name onto an address nobody wanted to name.
+  //
+  // An entry point rather than a label, so nothing appears in the listing that
+  // a person did not put there.
+  const fromCodeRegions = loaded.map
+    .getAllRegions()
+    .filter((r) => r.kind === "code")
+    .map((r) => r.start);
+
   if (override?.length) return override;
 
   const declared = project.entryPoints?.map(parseProjectAddress) ?? [];
-  if (declared.length > 0) return [...declared, ...fromLabels];
-  if (prgEntries.length > 0) return [...prgEntries, ...fromLabels];
-  return fromLabels;
+  if (declared.length > 0) return [...declared, ...fromLabels, ...fromCodeRegions];
+  if (prgEntries.length > 0) return [...prgEntries, ...fromLabels, ...fromCodeRegions];
+  return [...fromLabels, ...fromCodeRegions];
 }
 
 /**

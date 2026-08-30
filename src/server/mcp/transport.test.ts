@@ -274,6 +274,45 @@ describe("editing as an agent", () => {
     expect(lost).toBe(-gained);
   });
 
+  it("refuses an argument it never declared", async () => {
+    // A bare shape becomes a zod object that strips unknown keys, so this
+    // returned ok having quietly ignored both. For something probing what an
+    // API can do, "ok, did nothing" reads as a feature that exists and works.
+    const result = await callTool("set_region", {
+      start: "$8F00",
+      end: "$8F20",
+      kind: "text",
+      encoding: "petscii",
+      charset: "$2000",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/encoding|charset|unrecognized/i);
+  });
+
+  it("takes a length instead of an exclusive end", async () => {
+    const { value } = await callTool("set_region", {
+      start: "$8F00",
+      length: 32,
+      kind: "text",
+    });
+
+    expect((value as { covers: string }).covers).toBe("$8F00-$8F1F (32 bytes)");
+  });
+
+  it("insists on exactly one of end and length", async () => {
+    const neither = await callTool("set_region", { start: "$8F00", kind: "text" });
+    const both = await callTool("set_region", {
+      start: "$8F00",
+      end: "$8F20",
+      length: 32,
+      kind: "text",
+    });
+
+    expect(neither.isError).toBe(true);
+    expect(both.isError).toBe(true);
+  });
+
   it("says what is wrong rather than failing silently", async () => {
     const missing = await callTool("remove_label", { address: "$8F80" });
     expect(missing.isError).toBe(true);

@@ -39,7 +39,9 @@ const project = z.string().optional().describe("Which project; the only one if o
 interface Server {
   registerTool(
     name: string,
-    config: { title?: string; description: string; inputSchema?: Record<string, unknown> },
+    // A schema, not only a shape: the SDK accepts either, and only a schema
+    // can reject an argument the tool never declared.
+    config: { title?: string; description: string; inputSchema?: unknown },
     handler: (args: never) => Promise<{ content: { type: "text"; text: string }[] }>
   ): unknown;
 }
@@ -50,14 +52,25 @@ const json = (value: unknown) => ({
 
 export function registerTools(rawServer: unknown, context: () => McpContext): void {
   const server = rawServer as Server;
+  /**
+   * Register one tool, refusing arguments it does not declare.
+   *
+   * `registerTool` accepts a schema as well as a raw shape, and a bare shape
+   * becomes a zod object that *strips* unknown keys — so a call passing
+   * `charset` to `set_region` returned ok having quietly ignored it. For
+   * something probing what an API can do, "ok, did nothing" is the worst
+   * available answer: it reads as a feature that exists and works.
+   */
   const tool = (
     name: string,
     description: string,
     inputSchema: Record<string, unknown>,
     handler: (args: never) => unknown
   ) =>
-    server.registerTool(name, { description, inputSchema }, async (args: never) =>
-      json(await handler(args))
+    server.registerTool(
+      name,
+      { description, inputSchema: z.strictObject(inputSchema as z.ZodRawShape) },
+      async (args: never) => json(await handler(args))
     );
 
   // --- orienting ------------------------------------------------------
@@ -267,12 +280,22 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   tool(
     "set_region",
     "Say what a span of memory holds. Marking data stops it being disassembled " +
-      "as garbage, and marking a jumptable decodes the code it points at, " +
-      "which no control-flow walk can reach on its own.",
+      "as garbage, marking code starts decoding at its first address, and " +
+      "marking a jumptable decodes the code it points at, which no control-flow " +
+      "walk can reach on its own. Give start with either end (exclusive) or " +
+      "length; the reply says which bytes it actually took.",
     {
       project,
       start: address,
-      end: address,
+      end: address
+        .optional()
+        .describe("Exclusive: the first address AFTER the span. Give this or length."),
+      length: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe("How many bytes, as an alternative to end. No off-by-one to get wrong."),
       kind: z.enum(["code", "data", "text", "jumptable", "unknown"]),
       name: z.string().optional(),
       comment: z.string().optional(),
@@ -281,7 +304,8 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     (args: {
       project?: string;
       start: number;
-      end: number;
+      end?: number;
+      length?: number;
       kind: "code" | "data" | "text" | "jumptable" | "unknown";
       name?: string;
       comment?: string;
@@ -290,7 +314,15 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.setRegion(caller, args.start, args.end, args.kind, args.name, args.comment);
+
+      // Either, not neither and not both — two ways to say the same thing that
+      // disagree is worse than one way that is easy to misread.
+      if ((args.end === undefined) === (args.length === undefined)) {
+        throw new Error("Give exactly one of end (exclusive) or length.");
+      }
+      const end = args.end ?? args.start + (args.length as number);
+
+      return space.setRegion(caller, args.start, end, args.kind, args.name, args.comment);
     }
   );
 
