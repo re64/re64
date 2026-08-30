@@ -187,12 +187,40 @@ export interface ResolvedLabel {
  * Index for fast label lookup by address.
  * Multiple labels can exist at the same address.
  */
+/**
+ * Which label a particular site means.
+ *
+ * Keyed by the address of the *referring instruction*, not the target: the
+ * whole point is that two instructions touching one address can mean different
+ * names for it. The label it names knows its own target.
+ *
+ * One per site, on the same ground as a constant use — the 6502 has one operand
+ * per instruction — so there is no slot to disambiguate.
+ *
+ * Needed for more than nicknames. A C64 program overwrites memory with an
+ * overlay and switches banks under a fixed address, so what lives at an address
+ * genuinely depends on when and on machine state. This cannot express the
+ * differing *bytes* — the row model still gives an address one reading — but it
+ * lets each site say which of several names it meant.
+ */
+export interface LabelUse {
+  readonly id: string;
+  readonly address: number;
+  readonly labelId: string;
+}
+
+export function createLabelUse(id: string, address: number, labelId: string): LabelUse {
+  return { id, address, labelId };
+}
+
 export class LabelIndex {
   /** Ids already held, so overlapping sources do not double-count. */
   private readonly seen = new Set<string>();
 
   private byAddress = new Map<number, Label[]>();
   private all: Label[] = [];
+  /** Site address to label id: what this instruction calls the thing it names. */
+  private readonly uses = new Map<number, string>();
 
   /**
    * Explicit primary label per address, by id.
@@ -303,6 +331,25 @@ export class LabelIndex {
    * @param tolerance Maximum offset to consider (default 0 = exact match only)
    * @returns The resolved label with offset, or undefined if no match
    */
+  /** Record that the operand at `site` means a particular label. */
+  bindUse(site: number, labelId: string): void {
+    this.uses.set(site, labelId);
+  }
+
+  /**
+   * The label the operand at this site means, if it says.
+   *
+   * Undefined when nothing is bound *and* when the binding names a label that
+   * no longer exists — a dangling use falls back to the ordinary resolution
+   * rather than breaking, so deleting a label needs no sweep over the sites
+   * that referred to it.
+   */
+  labelForSite(site: number): Label | undefined {
+    const id = this.uses.get(site);
+    if (id === undefined) return undefined;
+    return this.all.find((l) => l.id === id);
+  }
+
   resolve(address: number, tolerance: number = 0): ResolvedLabel | undefined {
     // First, try exact match — explicit primary, then rank, then id
     const exact = this.byAddress.get(address);

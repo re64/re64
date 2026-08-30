@@ -265,9 +265,21 @@ export function analyze(
       // sites, so only an explicit binding puts a name here.
       const constant =
         instr.operand.type === "immediate" ? loaded.constants.nameAt(addr) : undefined;
+      // A site may say which of several labels at an address it means — the
+      // same zero-page byte is `randomValue` in one routine and `gridXPos` in
+      // another, and on a machine that switches banks under a fixed address
+      // that is the difference between two unrelated things.
+      const bound = allLabels.labelForSite(addr);
+      const resolveHere = bound
+        ? (target: number) =>
+            target === bound.address
+              ? { name: bound.name, offset: 0 }
+              : resolveLabel(target)
+        : resolveLabel;
+
       const operandStr = constant
         ? `#${constant}`
-        : formatOperand(instr.operand, resolveLabel);
+        : formatOperand(instr.operand, resolveHere);
       const mnemonicStart = prefix.length + marker.length;
 
       let text = `${prefix}${marker}${instr.mnemonic}`;

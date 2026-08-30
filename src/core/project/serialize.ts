@@ -18,6 +18,7 @@ import {
   ProjectConstant,
   ProjectConstantUse,
   ProjectLabel,
+  ProjectLabelUse,
   ProjectLayer,
 } from "./project.js";
 import { parseProject, parseProjectAddress } from "./project.js";
@@ -43,7 +44,7 @@ export function formatProject(project: Project): string {
   // Layer scalars expanded, its labels and regions one per line.
   const layers = project.layers
     .map((layer) => {
-      const { labels, regions, comments, constantUses, ...scalars } = layer;
+      const { labels, regions, comments, constantUses, labelUses, ...scalars } = layer;
       const parts = Object.entries(scalars)
         .filter(([, v]) => v !== undefined)
         .map(([k, v]) => `      ${JSON.stringify(k)}: ${JSON.stringify(v)}`);
@@ -65,6 +66,12 @@ export function formatProject(project: Project): string {
           .map((c) => `        ${compactObject(c as unknown as Record<string, unknown>)}`)
           .join(",\n");
         parts.push(`      "comments": [\n${body}\n      ]`);
+      }
+      if (labelUses?.length) {
+        const body = labelUses
+          .map((u) => `        ${compactObject(u as unknown as Record<string, unknown>)}`)
+          .join(",\n");
+        parts.push(`      "labelUses": [\n${body}\n      ]`);
       }
       if (constantUses?.length) {
         const body = constantUses
@@ -761,5 +768,33 @@ export function unbindConstant(raw: string, layerIndex: number, id: string): str
 
   layer.constantUses = layer.constantUses.filter((u) => u.id !== id);
   if (layer.constantUses.length === 0) delete layer.constantUses;
+  return formatProject(project);
+}
+
+
+/** Bind a site to a label, and release it. Idempotent, like the rest. */
+export function bindLabel(raw: string, layerIndex: number, use: ProjectLabelUse): string {
+  const project = parseProject(raw);
+  const layer = project.layers[layerIndex];
+  if (!layer) throw new Error(`No layer at index ${layerIndex} to own a label use`);
+
+  const uses = (layer.labelUses ??= []);
+  const at = uses.findIndex((u) => u.id === use.id);
+  if (at >= 0) {
+    if (uses[at].label === use.label && uses[at].address === use.address) return raw;
+    uses[at] = use;
+  } else {
+    uses.push(use);
+  }
+  return formatProject(project);
+}
+
+export function unbindLabel(raw: string, layerIndex: number, id: string): string {
+  const project = parseProject(raw);
+  const layer = project.layers[layerIndex];
+  if (!layer?.labelUses?.some((u) => u.id === id)) return raw;
+
+  layer.labelUses = layer.labelUses.filter((u) => u.id !== id);
+  if (layer.labelUses.length === 0) delete layer.labelUses;
   return formatProject(project);
 }

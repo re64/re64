@@ -5,7 +5,13 @@ import {
   createConstant,
   createConstantUse,
 } from "../memory/constant.js";
-import { Label, LabelType, createUserLabel } from "../memory/label.js";
+import {
+  Label,
+  LabelType,
+  LabelUse,
+  createLabelUse,
+  createUserLabel,
+} from "../memory/label.js";
 import { Region, RegionKind, createUserRegion } from "../memory/region.js";
 import { derivedId } from "./identity.js";
 
@@ -44,6 +50,21 @@ export interface ProjectLayer {
   comments?: ProjectComment[];
   /** Operands in this layer that mean a named constant */
   constantUses?: ProjectConstantUse[];
+  /** Operands in this layer that mean one particular label */
+  labelUses?: ProjectLabelUse[];
+}
+
+/**
+ * An operand that means one of several labels at an address.
+ *
+ * Keyed by the site — the instruction doing the referring — because the point
+ * is that two instructions touching one address can mean different names for
+ * it. Dangling means "fall back to the primary".
+ */
+export interface ProjectLabelUse {
+  id?: string;
+  address: number | string;
+  label: string;
 }
 
 /**
@@ -242,6 +263,14 @@ export function projectConstantUses(layer: ProjectLayer, layerId: string): Const
 }
 
 /** Convert project constants to Constant objects. */
+/** Convert a layer's label uses to LabelUse objects. */
+export function projectLabelUses(layer: ProjectLayer, layerId: string): LabelUse[] {
+  return (layer.labelUses ?? []).map((u) => {
+    const address = parseProjectAddress(u.address);
+    return createLabelUse(u.id ?? derivedId("lbl", layerId, address, "use"), address, u.label);
+  });
+}
+
 export function projectConstants(constants: readonly ProjectConstant[] = []): Constant[] {
   return constants.map((c) => {
     const value = parseProjectAddress(c.value);

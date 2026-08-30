@@ -68,6 +68,21 @@ export interface CommentDeleteOp {
   layerId: string;
 }
 
+/** Say that the operand at an address means one particular label. */
+export interface LabelBindOp {
+  op: "label.bind";
+  id: string;
+  layerId: string;
+  address: number;
+  labelId: string;
+}
+
+export interface LabelUnbindOp {
+  op: "label.unbind";
+  id: string;
+  layerId: string;
+}
+
 /** Declare that a name exists for a value, creating it if the id is new. */
 export interface ConstantSetOp {
   op: "constant.set";
@@ -137,6 +152,8 @@ export type Op =
   | RegionDeleteOp
   | CommentSetOp
   | CommentDeleteOp
+  | LabelBindOp
+  | LabelUnbindOp
   | ConstantSetOp
   | ConstantDeleteOp
   | ConstantBindOp
@@ -207,6 +224,10 @@ export function describeOp(op: Op): string {
     }
     case "comment.delete":
       return `delete comment ${op.id}`;
+    case "label.bind":
+      return `read ${hex(op.address)} as one particular label`;
+    case "label.unbind":
+      return `read ${op.id} by the usual rule again`;
     case "constant.set":
       return `define ${op.name} as $${op.value.toString(16).toUpperCase().padStart(2, "0")}`;
     case "constant.delete":

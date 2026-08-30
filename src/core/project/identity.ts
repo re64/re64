@@ -89,6 +89,7 @@ export function withIds(project: Project, mint: (prefix: IdPrefix) => string = n
       ...(layer.constantUses
         ? { constantUses: layer.constantUses.map((u) => give(u, "cst")) }
         : {}),
+      ...(layer.labelUses ? { labelUses: layer.labelUses.map((u) => give(u, "lbl")) } : {}),
     };
   });
 

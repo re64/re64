@@ -28,6 +28,7 @@ import {
   commentDeleteOp,
   commentSetOp,
   ensureOwningLayer,
+  labelAddOp,
   labelSetOp,
   owningLayerId,
   ownsAddress,
@@ -636,6 +637,102 @@ export class Workspace {
       }
 
       return ops;
+    });
+  }
+
+  /**
+   * Add a second name at an address rather than replacing the first.
+   *
+   * `set_label` renames, which is right for a correction. This is for an
+   * address that genuinely has two names — the reference calls `$08`
+   * `randomValue` throughout and `gridXPos` inside one routine, which is a
+   * finding about the program, not a nickname. Which one a given operand shows
+   * is then `bind_label`; without one, the primary wins.
+   */
+  addLabel(caller: Caller, address: number, name: string, type?: LabelType): EditResult {
+    return this.edit(caller, (loaded) => {
+      const already = loaded.map
+        .getLabels()
+        .getLabelsAt(address)
+        .find((l) => l.name === name);
+      if (already) throw new Error(`${hex4(address)} is already called ${name}.`);
+
+      const { layerId, create } = ensureOwningLayer(loaded, address, this.room.projectId);
+      return create
+        ? [create, { op: "label.set", id: newId("lbl"), layerId, address, name, type } as Op]
+        : [labelAddOp(loaded, address, name, type)];
+    });
+  }
+
+  /** Choose which of several names at an address is shown by default. */
+  setPrimaryLabel(caller: Caller, address: number, name: string): EditResult {
+    return this.edit(caller, (loaded) => {
+      const found = loaded.map
+        .getLabels()
+        .getLabelsAt(address)
+        .find((l) => l.name === name);
+      if (!found) throw new Error(`${hex4(address)} has no label called ${name}.`);
+      return [{ op: "primary.set", address, labelId: found.id }];
+    });
+  }
+
+  /**
+   * Say which label the operands in a span mean.
+   *
+   * Stored per site, not as a scope. A stored scope has to be reasoned about
+   * whenever code moves or a region changes; a binding attached to an
+   * instruction simply travels with it. The range is expanded here, so a caller
+   * can still say "throughout this routine" in one call.
+   */
+  bindLabel(
+    caller: Caller,
+    name: string,
+    target: number,
+    from: number,
+    to?: number
+  ): EditResult {
+    return this.edit(caller, (loaded) => {
+      const label = loaded.map
+        .getLabels()
+        .getLabelsAt(target)
+        .find((l) => l.name === name);
+      if (!label) throw new Error(`${hex4(target)} has no label called ${name}.`);
+
+      const end = to ?? from;
+      const sites = this.program()
+        .instructions.all()
+        .filter((i) => i.address >= from && i.address <= end)
+        .filter((i) => {
+          const operand = i.operand as { address?: number };
+          return operand.address === target;
+        });
+
+      if (sites.length === 0) {
+        throw new Error(
+          `No instruction between ${hex4(from)} and ${hex4(end)} refers to ${hex4(target)}.`
+        );
+      }
+
+      return sites.map((site) => {
+        const layerId = owningLayerId(loaded, site.address);
+        return {
+          op: "label.bind",
+          id: newId("lbl"),
+          layerId,
+          address: site.address,
+          labelId: label.id,
+        } as Op;
+      });
+    });
+  }
+
+  unbindLabel(caller: Caller, address: number): EditResult {
+    return this.edit(caller, (loaded) => {
+      const layerId = owningLayerId(loaded, address);
+      const layer = loaded.project.layers.find((l) => l.id === layerId);
+      const use = layer?.labelUses?.find((u) => parseProjectAddress(u.address) === address);
+      if (!use?.id) throw new Error(`No label is bound at ${hex4(address)}.`);
+      return [{ op: "label.unbind", id: use.id, layerId }];
     });
   }
 

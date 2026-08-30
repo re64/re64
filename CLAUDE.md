@@ -1074,6 +1074,37 @@ The user id is one from `list_users`; the server does not verify it.
 
 ## Known Limitations & Future Features
 
+### One interpretation per address, and where that runs out
+
+The row model is address-ordered with one row per address, so a byte gets one
+reading. Three things want more than that, and they are the same limitation
+wearing different clothes:
+
+- **Overlapping instructions**, where a byte is an operand on one path and an
+  opcode on another. Described below; the only case that currently produces a
+  *wrong* listing rather than an incomplete one.
+- **Overlays.** A C64 game loads a level over memory that held code a moment
+  ago. Both readings are correct, at different times.
+- **Bank switching.** `$D000` is VIC registers or character ROM depending on
+  `$01`. Same address, same instant, different contents.
+
+**Layers are not banks.** Shadowing is static z-order decided at analysis time —
+the top layer supplying a byte wins, always. Banking is runtime alternation,
+selected by state the disassembler does not model. Stacking two layers over
+`$D000` does not represent a bank; it hides one of them. Anyone reaching for
+layers to solve banking should stop here.
+
+What *is* solved is **naming**: a label use binds a site to one of several
+labels at an address, so `$08` can read `randomValue` in one routine and
+`gridXPos` in another, and `$D000` can be named for whichever bank the code
+around it assumes. That is the affordance overlays and banking most need, and it
+is worth having on its own — the reference disassembly uses a second name for one
+zero-page byte with no banking involved at all.
+
+Do not mistake it for a solution to the bytes. Whenever the byte problem is
+taken on, it is one piece of work covering all three, and it starts with what a
+row means.
+
 ### A label inside an instruction corrupts the decode around it
 
 **Known, reproducible, and deferred.** The only defect found so far that

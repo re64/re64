@@ -16,12 +16,14 @@ import {
   ProjectComment,
   ProjectConstantUse,
   ProjectLabel,
+  ProjectLabelUse,
   ProjectRegion,
   parseProject,
   parseProjectAddress,
 } from "../project/project.js";
 import {
   bindConstant,
+  bindLabel,
   deleteComment,
   deleteConstant,
   deleteLabel,
@@ -30,6 +32,7 @@ import {
   removeLayer,
   setPrimaryLabel,
   unbindConstant,
+  unbindLabel,
   upsertComment,
   upsertConstant,
   upsertLabel,
@@ -60,6 +63,14 @@ function findLabel(project: Project, id: string): Found<ProjectLabel> | undefine
 function findRegion(project: Project, id: string): Found<ProjectRegion> | undefined {
   for (const [layerIndex, layer] of project.layers.entries()) {
     const entry = layer.regions?.find((r) => r.id === id);
+    if (entry) return { layerIndex, entry };
+  }
+  return undefined;
+}
+
+function findLabelUse(project: Project, id: string): Found<ProjectLabelUse> | undefined {
+  for (const [layerIndex, layer] of project.layers.entries()) {
+    const entry = layer.labelUses?.find((u) => u.id === id);
     if (entry) return { layerIndex, entry };
   }
   return undefined;
@@ -131,6 +142,16 @@ export function applyOp(raw: string, op: Op): string {
 
     case "comment.delete":
       return deleteComment(raw, layerIndexOf(project, op.layerId), op.id);
+
+    case "label.bind":
+      return bindLabel(raw, layerIndexOf(project, op.layerId), {
+        id: op.id,
+        address: addressHex(op.address),
+        label: op.labelId,
+      });
+
+    case "label.unbind":
+      return unbindLabel(raw, layerIndexOf(project, op.layerId), op.id);
 
     case "constant.set":
       return upsertConstant(raw, { id: op.id, name: op.name, value: addressHex8(op.value) });
@@ -233,6 +254,30 @@ export function invertOp(raw: string, op: Op): Op {
         address: parseProjectAddress(found.entry.address),
         placement: found.entry.placement ?? "before",
         text: found.entry.text,
+      };
+    }
+
+    case "label.bind": {
+      const found = findLabelUse(project, op.id);
+      if (!found) return { op: "label.unbind", id: op.id, layerId: op.layerId };
+      return {
+        op: "label.bind",
+        id: op.id,
+        layerId: project.layers[found.layerIndex].id!,
+        address: parseProjectAddress(found.entry.address),
+        labelId: found.entry.label,
+      };
+    }
+
+    case "label.unbind": {
+      const found = findLabelUse(project, op.id);
+      if (!found) return op;
+      return {
+        op: "label.bind",
+        id: op.id,
+        layerId: project.layers[found.layerIndex].id!,
+        address: parseProjectAddress(found.entry.address),
+        labelId: found.entry.label,
       };
     }
 

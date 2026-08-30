@@ -17,6 +17,7 @@ import {
   ProjectConstant,
   ProjectConstantUse,
   ProjectLabel,
+  ProjectLabelUse,
   ProjectRegion,
   parseProjectAddress,
 } from "../project/project.js";
@@ -71,6 +72,19 @@ function usesById(project: Project): Map<string, Owned<ProjectConstantUse>> {
   }
   return out;
 }
+
+function labelUsesById(project: Project): Map<string, Owned<ProjectLabelUse>> {
+  const out = new Map<string, Owned<ProjectLabelUse>>();
+  for (const layer of project.layers) {
+    for (const entry of layer.labelUses ?? []) {
+      if (entry.id) out.set(entry.id, { layerId: layer.id!, entry });
+    }
+  }
+  return out;
+}
+
+const sameLabelUse = (a: ProjectLabelUse, b: ProjectLabelUse) =>
+  parseProjectAddress(a.address) === parseProjectAddress(b.address) && a.label === b.label;
 
 const sameUse = (a: ProjectConstantUse, b: ProjectConstantUse) =>
   parseProjectAddress(a.address) === parseProjectAddress(b.address) &&
@@ -130,6 +144,8 @@ export function diffProjects(from: Project, to: Project): Op[] {
   const afterComments = commentsById(to);
   const beforeUses = usesById(from);
   const afterUses = usesById(to);
+  const beforeLabelUses = labelUsesById(from);
+  const afterLabelUses = labelUsesById(to);
   const beforeConstants = new Map((from.constants ?? []).filter((c) => c.id).map((c) => [c.id!, c]));
   const afterConstants = new Map((to.constants ?? []).filter((c) => c.id).map((c) => [c.id!, c]));
 
@@ -144,6 +160,9 @@ export function diffProjects(from: Project, to: Project): Op[] {
   }
   for (const [id, owned] of beforeUses) {
     if (!afterUses.has(id)) ops.push({ op: "constant.unbind", id, layerId: owned.layerId });
+  }
+  for (const [id, owned] of beforeLabelUses) {
+    if (!afterLabelUses.has(id)) ops.push({ op: "label.unbind", id, layerId: owned.layerId });
   }
   // Declarations go after the sites that meant them, so nothing is left
   // pointing at a constant that has already gone.
@@ -172,6 +191,20 @@ export function diffProjects(from: Project, to: Project): Op[] {
       id,
       name: constant.name,
       value: parseProjectAddress(constant.value),
+    });
+  }
+
+  for (const [id, owned] of afterLabelUses) {
+    const before = beforeLabelUses.get(id);
+    if (before && before.layerId === owned.layerId && sameLabelUse(before.entry, owned.entry)) {
+      continue;
+    }
+    ops.push({
+      op: "label.bind",
+      id,
+      layerId: owned.layerId,
+      address: parseProjectAddress(owned.entry.address),
+      labelId: owned.entry.label,
     });
   }
 

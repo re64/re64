@@ -22,6 +22,13 @@ export class MemoryMap {
    * one layer's content.
    */
   primaryLabels = new Map<number, string>();
+  /**
+   * Which label each referring site means, by the site's own address.
+   *
+   * Held here rather than in a label index because `getLabels()` builds a new
+   * one on every call — the bindings have to outlive that.
+   */
+  labelUses = new Map<number, string>();
 
   getLayers(): readonly Layer[] {
     return this.layers;
@@ -101,6 +108,9 @@ export class MemoryMap {
       index.addLabels(layer.regions.generateLabels());
     }
     index.setPrimaryLabels(this.primaryLabels);
+    // Applied here rather than by the caller: this returns a fresh index every
+    // call, so anything set on the result is discarded.
+    for (const [site, labelId] of this.labelUses) index.bindUse(site, labelId);
 
     return index;
   }

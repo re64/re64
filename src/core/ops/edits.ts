@@ -115,6 +115,24 @@ export function labelSetOp(
 }
 
 /**
+ * Add a name at an address without replacing the one already there.
+ *
+ * `labelSetOp` reuses the id of the project label at that address, so it
+ * renames — which is right for correcting a name and wrong for the case the
+ * reference disassembly actually has, where `$08` is `randomValue` generally
+ * and `gridXPos` inside one routine. This is how a second name gets made.
+ */
+export function labelAddOp(
+  loaded: LoadedProject,
+  address: number,
+  name: string,
+  type?: LabelType
+): Op {
+  const layerId = owningLayerId(loaded, address);
+  return { op: "label.set", id: newId("lbl"), layerId, address, name, type };
+}
+
+/**
  * Write a comment, replacing the one already in this slot if there is one.
  *
  * A slot is an address and a placement. Several comments may share an address

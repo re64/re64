@@ -114,3 +114,4 @@ describe("the map carries the project's choice", () => {
     expect(map.getLabels().resolve(0xd016)?.label.name).toBe("SCROLX");
   });
 });
+

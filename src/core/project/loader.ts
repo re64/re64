@@ -13,7 +13,7 @@ import { BytesLayer, Layer } from "../memory/layer.js";
 import { FileLayer } from "../memory/file-layer.js";
 import { SymbolLayer } from "../memory/symbol-layer.js";
 import { MemoryMap } from "../memory/memory-map.js";
-import { LabelIndex } from "../memory/label.js";
+import { LabelIndex, LabelUse } from "../memory/label.js";
 import { CommentIndex } from "../memory/comment.js";
 import { ConstantIndex } from "../memory/constant.js";
 import { createC64PlatformLayer } from "../c64/symbols.js";
@@ -24,6 +24,7 @@ import {
   projectCommentsToComments,
   projectConstantUses,
   projectConstants,
+  projectLabelUses,
   projectLabelsToLabels,
   projectRegionsToRegions,
 } from "./project.js";
@@ -92,6 +93,8 @@ export function buildMemoryMap(
   const userLabels = new LabelIndex();
   const comments = new CommentIndex();
   const constants = new ConstantIndex();
+  // Held until the merged index exists: a site can name a label in any layer.
+  const labelUses: LabelUse[] = [];
   constants.declareAll(projectConstants(project.constants));
   const layers: Layer[] = [];
 
@@ -138,6 +141,10 @@ export function buildMemoryMap(
     userLabels.addLabels(labels);
     comments.addAll(projectCommentsToComments(decl, layerId));
     constants.bindAll(projectConstantUses(decl, layerId));
+    for (const use of projectLabelUses(decl, layerId)) {
+      userLabels.bindUse(use.address, use.labelId);
+      labelUses.push(use);
+    }
 
     layers.push(layer);
     map.addLayer(layer);
@@ -146,6 +153,10 @@ export function buildMemoryMap(
   for (const [address, labelId] of Object.entries(project.primaryLabels ?? {})) {
     map.primaryLabels.set(parseProjectAddress(address), labelId);
   }
+
+  // Onto the map, not onto an index it hands out: `getLabels()` builds a fresh
+  // one each call, so a binding set on the result would be thrown away.
+  for (const use of labelUses) map.labelUses.set(use.address, use.labelId);
 
   return { project, map, prgEntries, userLabels, comments, constants, layers };
 }

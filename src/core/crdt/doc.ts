@@ -29,6 +29,7 @@ import {
   ProjectConstant,
   ProjectConstantUse,
   ProjectLabel,
+  ProjectLabelUse,
   ProjectLayer,
   ProjectRegion,
 } from "../project/project.js";
@@ -96,7 +97,7 @@ export function docFromProject(project: Project): Y.Doc {
   doc.transact(() => {
     const layers = doc.getArray<Y.Map<unknown>>(ROOT_LAYERS);
     for (const layer of project.layers) {
-      const { labels, regions, comments, constantUses, ...scalars } = layer;
+      const { labels, regions, comments, constantUses, labelUses, ...scalars } = layer;
       const entry = mapFrom(scalars as Record<string, unknown>);
 
       // Keyed by id rather than held in an array: two people editing different
@@ -124,6 +125,12 @@ export function docFromProject(project: Project): Y.Doc {
         useMap.set(use.id!, mapFrom(use as unknown as Record<string, unknown>));
       }
       entry.set("constantUses", useMap);
+
+      const labelUseMap = new Y.Map<Y.Map<unknown>>();
+      for (const use of [...(labelUses ?? [])].sort(byId)) {
+        labelUseMap.set(use.id!, mapFrom(use as unknown as Record<string, unknown>));
+      }
+      entry.set("labelUses", labelUseMap);
 
       layers.push([entry]);
     }
@@ -169,11 +176,13 @@ export function projectFromDoc(doc: Y.Doc): Project {
       delete scalars.regions;
       delete scalars.comments;
       delete scalars.constantUses;
+      delete scalars.labelUses;
 
       const labels = entry.get("labels") as Y.Map<Y.Map<unknown>> | undefined;
       const regions = entry.get("regions") as Y.Map<Y.Map<unknown>> | undefined;
       const comments = entry.get("comments") as Y.Map<Y.Map<unknown>> | undefined;
       const uses = entry.get("constantUses") as Y.Map<Y.Map<unknown>> | undefined;
+      const labelUses = entry.get("labelUses") as Y.Map<Y.Map<unknown>> | undefined;
 
       const layer = inOrder<ProjectLayer>(scalars, LAYER_FIELDS);
       const labelList = labels
@@ -204,7 +213,14 @@ export function projectFromDoc(doc: Y.Doc): Project {
         : [];
 
       if (commentList.length) layer.comments = commentList;
+      const labelUseList = labelUses
+        ? sortedValues<ProjectLabelUse>(labelUses, "address").map((u) =>
+            inOrder<ProjectLabelUse>(u as unknown as Record<string, unknown>, LABEL_USE_FIELDS)
+          )
+        : [];
+
       if (useList.length) layer.constantUses = useList;
+      if (labelUseList.length) layer.labelUses = labelUseList;
       return layer;
     }),
   };
@@ -239,6 +255,7 @@ const LABEL_FIELDS = ["id", "address", "name", "type"] as const;
 const REGION_FIELDS = ["id", "start", "end", "kind", "name", "comment"] as const;
 const COMMENT_FIELDS = ["id", "address", "placement", "text"] as const;
 const USE_FIELDS = ["id", "address", "constant"] as const;
+const LABEL_USE_FIELDS = ["id", "address", "label"] as const;
 const CONSTANT_FIELDS = ["id", "name", "value"] as const;
 const LAYER_FIELDS = [
   "id",

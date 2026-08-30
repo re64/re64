@@ -862,3 +862,93 @@ describe("a region where there are no bytes", () => {
     expect(blank.labels({ namePattern: "StillWorks" }).total).toBe(1);
   });
 });
+
+describe("two names for one address", () => {
+  it("adds a second rather than renaming", () => {
+    workspace.setLabel(agent, 0x08, "randomValue");
+    workspace.addLabel(agent, 0x08, "gridXPos");
+
+    const names = workspace.labels({ source: "user" }).labels
+      .filter((l) => l.address === "$0008")
+      .map((l) => l.name);
+    expect(names).toContain("randomValue");
+    expect(names).toContain("gridXPos");
+  });
+
+  it("refuses the same name twice at one address", () => {
+    workspace.setLabel(agent, 0x08, "randomValue");
+    expect(() => workspace.addLabel(agent, 0x08, "randomValue")).toThrow(/already called/);
+  });
+
+  it("shows the primary where no site says otherwise", () => {
+    const blank = blankWorkspace();
+    blank.markFunction(agent, 0x8011);
+    blank.setLabel(agent, 0x08, "randomValue");
+    blank.addLabel(agent, 0x08, "gridXPos");
+    blank.setPrimaryLabel(agent, 0x08, "randomValue");
+
+    const rows = blank.disassembly(0x8011, 900).lines.map((l) => l.text).join("\n");
+    expect(rows).toContain("randomValue");
+    expect(rows).not.toContain("gridXPos");
+  });
+
+  it("shows the bound name at the site that says so", () => {
+    const blank = blankWorkspace();
+    blank.markFunction(agent, 0x8011);
+    blank.setLabel(agent, 0x08, "randomValue");
+    blank.addLabel(agent, 0x08, "gridXPos");
+    blank.setPrimaryLabel(agent, 0x08, "randomValue");
+
+    // Find a site that touches $08 and bind just that one.
+    const site = blank
+      .program()
+      .instructions.all()
+      .find((i) => (i.operand as { address?: number }).address === 0x08)!;
+    blank.bindLabel(agent, "gridXPos", 0x08, site.address);
+
+    expect(blank.disassembly(site.address, 1).lines[0].text).toContain("gridXPos");
+    // Everywhere else still says the primary.
+    // `address` on a line is a hex string, not a number.
+    const here = `$${site.address.toString(16).toUpperCase().padStart(4, "0")}`;
+    const elsewhere = blank
+      .disassembly(0x8011, 900)
+      .lines.filter((l) => l.address !== here)
+      .map((l) => l.text)
+      .join("\n");
+    expect(elsewhere).not.toContain("gridXPos");
+  });
+
+  it("binds a whole span in one call", () => {
+    const blank = blankWorkspace();
+    blank.markFunction(agent, 0x8011);
+    blank.setLabel(agent, 0x08, "randomValue");
+    blank.addLabel(agent, 0x08, "gridXPos");
+
+    const result = blank.bindLabel(agent, "gridXPos", 0x08, 0x8011, 0x8fff);
+    expect(result.did.length).toBeGreaterThan(1);
+  });
+
+  it("says when a span refers to nothing", () => {
+    workspace.setLabel(agent, 0x08, "randomValue");
+    expect(() => workspace.bindLabel(agent, "randomValue", 0x08, 0x8011, 0x8012)).toThrow(
+      /No instruction between/
+    );
+  });
+
+  it("falls back to the primary when the bound label is deleted", () => {
+    const blank = blankWorkspace();
+    blank.markFunction(agent, 0x8011);
+    blank.setLabel(agent, 0x08, "randomValue");
+    blank.addLabel(agent, 0x08, "gridXPos");
+    const site = blank
+      .program()
+      .instructions.all()
+      .find((i) => (i.operand as { address?: number }).address === 0x08)!;
+    blank.bindLabel(agent, "gridXPos", 0x08, site.address);
+
+    blank.removeLabel(agent, 0x08);
+
+    // A dangling use resolves by the ordinary rule rather than breaking.
+    expect(() => blank.disassembly(site.address, 1)).not.toThrow();
+  });
+});

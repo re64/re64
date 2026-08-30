@@ -296,6 +296,88 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "add_label",
+    "Add a SECOND name at an address, rather than renaming the one there. For " +
+      "an address that genuinely has two — the reference calls $08 " +
+      "randomValue throughout and gridXPos inside one routine, which is a " +
+      "finding about the program. Which name an operand shows is bind_label; " +
+      "without one, the primary wins.",
+    {
+      project,
+      address,
+      name: z.string().min(1),
+      type: z.enum(["entry", "function", "code", "address"]).optional(),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      address: number;
+      name: string;
+      type?: LabelType;
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.addLabel(caller, args.address, args.name, args.type);
+    }
+  );
+
+  tool(
+    "set_primary_label",
+    "Choose which of several names at an address is shown where nothing says " +
+      "otherwise.",
+    { project, address, name: z.string().min(1), expectVersion: z.string().optional() },
+    (args: { project?: string; address: number; name: string; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.setPrimaryLabel(caller, args.address, args.name);
+    }
+  );
+
+  tool(
+    "bind_label",
+    "Say which name the operands referring to an address mean, over a span. " +
+      "Give `from` alone for one instruction, or `from` and `to` for a whole " +
+      "routine. Stored per site, so a binding travels with its instruction " +
+      "rather than with a range that may stop being the right one.",
+    {
+      project,
+      target: address.describe("The address being referred to"),
+      name: z.string().min(1).describe("Which of its labels these sites mean"),
+      from: address.describe("First instruction to bind"),
+      to: address.optional().describe("Last instruction; just `from` if omitted"),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      target: number;
+      name: string;
+      from: number;
+      to?: number;
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.bindLabel(caller, args.name, args.target, args.from, args.to);
+    }
+  );
+
+  tool(
+    "unbind_label",
+    "Let the operand at an address resolve by the usual rule again.",
+    { project, address, expectVersion: z.string().optional() },
+    (args: { project?: string; address: number; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.unbindLabel(caller, args.address);
+    }
+  );
+
+  tool(
     "remove_label",
     "Remove the label at an address. Only labels this project declares; a " +
       "built-in name is not one of them.",

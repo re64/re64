@@ -132,6 +132,11 @@ export function analyzeProgram(
   const labels = new LabelIndex();
   labels.addLabels(map.getLabels().getAllLabels());
   labels.addLabels(userLabels.getAllLabels());
+  // Carried across explicitly. This index is built fresh from labels alone, so
+  // both of these were being dropped — which meant promoting a label changed
+  // what `getLabels()` returned and nothing about what anyone saw.
+  labels.setPrimaryLabels(map.primaryLabels);
+  for (const [site, labelId] of map.labelUses) labels.bindUse(site, labelId);
 
   const autoLabels = autoLabelsFor(result.references, labels, labelTolerance);
   labels.addLabels(autoLabels);
