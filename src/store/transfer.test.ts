@@ -43,8 +43,8 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("importing a project file", () => {
   it("stores the text exactly, blank lines and all", () => {
-    const { databasePath } = importProject(projectPath);
-    const storage = new SqliteStorage(databasePath);
+    const { databasePath, projectId } = importProject(projectPath);
+    const storage = new SqliteStorage(databasePath, projectId);
     expect(storage.readText()).toBe(PROJECT);
     storage.close();
   });
@@ -62,10 +62,10 @@ describe("importing a project file", () => {
       "utf-8"
     );
 
-    const { databasePath, historyEntries } = importProject(projectPath);
+    const { databasePath, projectId, historyEntries } = importProject(projectPath);
     expect(historyEntries).toBe(2);
 
-    const storage = new SqliteStorage(databasePath);
+    const storage = new SqliteStorage(databasePath, projectId);
     expect(storage.history().map((e) => e.authors[0])).toEqual(["alice", "bob"]);
     storage.close();
   });
@@ -80,7 +80,7 @@ describe("importing a project file", () => {
 
 describe("exporting", () => {
   it("round-trips byte for byte", () => {
-    const { databasePath } = importProject(projectPath);
+    const { databasePath, projectId } = importProject(projectPath);
     const out = join(dir, "out.re64");
 
     expect(exportProject(databasePath, out).changed).toBe(true);
@@ -88,7 +88,7 @@ describe("exporting", () => {
   });
 
   it("reports nothing to do when the file already matches", () => {
-    const { databasePath } = importProject(projectPath);
+    const { databasePath, projectId } = importProject(projectPath);
     const out = join(dir, "out.re64");
     exportProject(databasePath, out);
 
@@ -96,11 +96,11 @@ describe("exporting", () => {
   });
 
   it("notices a stale export without writing one", () => {
-    const { databasePath } = importProject(projectPath);
+    const { databasePath, projectId } = importProject(projectPath);
     const out = join(dir, "out.re64");
     exportProject(databasePath, out);
 
-    const storage = new SqliteStorage(databasePath);
+    const storage = new SqliteStorage(databasePath, projectId);
     storage.writeText(PROJECT.replace("Loop", "Renamed"));
     storage.close();
 
@@ -111,8 +111,8 @@ describe("exporting", () => {
   });
 
   it("writes the history beside the project", () => {
-    const { databasePath } = importProject(projectPath);
-    const storage = new SqliteStorage(databasePath);
+    const { databasePath, projectId } = importProject(projectPath);
+    const storage = new SqliteStorage(databasePath, projectId);
     storage.appendHistory({ at: 7, authors: ["alice"], summary: ["did a thing"] });
     storage.close();
 

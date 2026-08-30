@@ -18,6 +18,7 @@ import { WebsocketProvider } from "y-websocket";
 let dir: string;
 let server: RunningServer;
 let base: string;
+let project: string;
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "re64-dbmode-"));
@@ -25,7 +26,7 @@ beforeEach(async () => {
   copyFileSync("assets/gridrunner.re64", projectPath);
   copyFileSync("assets/gridrunner.prg", join(dir, "gridrunner.prg"));
 
-  const { databasePath } = importProject(projectPath);
+  const { databasePath, projectId } = importProject(projectPath);
   // Nothing left on disk but the database.
   rmSync(projectPath);
   rmSync(join(dir, "gridrunner.prg"));
@@ -33,6 +34,7 @@ beforeEach(async () => {
   server = startServer({ projectPath: databasePath, port: 0, host: "127.0.0.1", quiet: true });
   await server.ready;
   base = `http://127.0.0.1:${server.port}`;
+  project = projectId;
 });
 
 afterEach(async () => {
@@ -42,18 +44,18 @@ afterEach(async () => {
 
 describe("a server given a database", () => {
   it("serves the project text", async () => {
-    const body = (await (await fetch(`${base}/api/project`)).json()) as { raw: string };
+    const body = (await (await fetch(`${base}/api/project?project=${project}`)).json()) as { raw: string };
     expect(body.raw).toContain('"name": "Gridrunner"');
   });
 
   it("serves a binary that is not on disk", async () => {
-    const res = await fetch(`${base}/api/blob?path=gridrunner.prg`);
+    const res = await fetch(`${base}/api/blob?path=gridrunner.prg&project=${project}`);
     expect(res.status).toBe(200);
     expect((await res.arrayBuffer()).byteLength).toBe(4098);
   });
 
   it("labels it immutable, because the name maps to bytes that cannot change", async () => {
-    const res = await fetch(`${base}/api/blob?path=gridrunner.prg`);
+    const res = await fetch(`${base}/api/blob?path=gridrunner.prg&project=${project}`);
     expect(res.headers.get("cache-control")).toContain("immutable");
     // The tag is the content hash, so it is right by construction rather than
     // by remembering to update it.
@@ -61,12 +63,12 @@ describe("a server given a database", () => {
   });
 
   it("reports a file it does not hold", async () => {
-    const res = await fetch(`${base}/api/blob?path=absent.prg`);
+    const res = await fetch(`${base}/api/blob?path=absent.prg&project=${project}`);
     expect(res.status).toBe(404);
   });
 
   it("reports its own state, which a browser cannot see otherwise", async () => {
-    const body = (await (await fetch(`${base}/api/debug`)).json()) as Record<string, unknown>;
+    const body = (await (await fetch(`${base}/api/debug?project=${project}`)).json()) as Record<string, unknown>;
     expect(body.storage).toBe("sqlite");
     expect(body.clients).toBe(0);
     expect(body.version).toEqual(expect.any(String));
@@ -75,24 +77,24 @@ describe("a server given a database", () => {
   });
 
   it("offers the users a session can claim to be", async () => {
-    const body = (await (await fetch(`${base}/api/users`)).json()) as {
+    const body = (await (await fetch(`${base}/api/users?project=${project}`)).json()) as {
       users: { id: string; name: string }[];
     };
     expect(body.users.map((u) => u.name)).toContain("you");
   });
 
   it("records a session, and who it says it is", async () => {
-    const before = (await (await fetch(`${base}/api/debug`)).json()) as { sessions: number };
+    const before = (await (await fetch(`${base}/api/debug?project=${project}`)).json()) as { sessions: number };
     expect(before.sessions).toBe(0);
 
     const doc = emptyDoc();
-    const provider = new WebsocketProvider(base.replace("http", "ws") + "/sync", "p", doc, {
+    const provider = new WebsocketProvider(base.replace("http", "ws") + "/sync", project, doc, {
       params: { author: "usr_you", session: "sess-under-test" },
       disableBc: true,
     });
     await new Promise<void>((resolve) => provider.once("sync", () => resolve()));
 
-    const after = (await (await fetch(`${base}/api/debug`)).json()) as { sessions: number };
+    const after = (await (await fetch(`${base}/api/debug?project=${project}`)).json()) as { sessions: number };
     expect(after.sessions).toBe(1);
 
     provider.disconnect();
@@ -100,11 +102,11 @@ describe("a server given a database", () => {
   });
 
   it("accepts an edit and keeps it", async () => {
-    const before = (await (await fetch(`${base}/api/project`)).json()) as {
+    const before = (await (await fetch(`${base}/api/project?project=${project}`)).json()) as {
       raw: string;
       version: string;
     };
-    const res = await fetch(`${base}/api/project`, {
+    const res = await fetch(`${base}/api/project?project=${project}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -114,7 +116,7 @@ describe("a server given a database", () => {
     });
     expect(res.status).toBe(200);
 
-    const after = (await (await fetch(`${base}/api/project`)).json()) as { raw: string };
+    const after = (await (await fetch(`${base}/api/project?project=${project}`)).json()) as { raw: string };
     expect(after.raw).toContain("RenamedOverHttp");
   });
 });

@@ -144,9 +144,9 @@ describe("a project that carries its own binaries", () => {
     const projectPath = join(dir, "gridrunner.re64");
     copyFileSync("assets/gridrunner.re64", projectPath);
     copyFileSync("assets/gridrunner.prg", join(dir, "gridrunner.prg"));
-    const { databasePath } = importProject(projectPath);
+    const { databasePath, projectId } = importProject(projectPath);
 
-    const storage = new SqliteStorage(databasePath);
+    const storage = new SqliteStorage(databasePath, projectId);
     storage.writeText(storage.readText().replace("gridrunner.prg", "renamed.prg"));
     storage.close();
 

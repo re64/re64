@@ -12,7 +12,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { writeFileAtomic } from "../fsutil.js";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { blobPaths, parseProject } from "../core/index.js";
 import { normalizeBlobName } from "./blobs.js";
 import { HistoryEntry } from "./storage.js";
@@ -38,6 +38,7 @@ const STARTER_USERS = [
 
 export interface ImportResult {
   databasePath: string;
+  projectId: string;
   historyEntries: number;
   /** The binaries brought in, by the name the project uses for them. */
   files: string[];
@@ -51,7 +52,8 @@ export interface ImportResult {
  */
 export function importProject(
   projectPath: string,
-  databasePath = databasePathFor(projectPath)
+  databasePath = databasePathFor(projectPath),
+  projectId = basename(projectPath).replace(/\.re64$/, "")
 ): ImportResult {
   const text = readFileSync(projectPath, "utf-8");
   const project = parseProject(text); // Refuse a non-project before creating anything.
@@ -64,8 +66,8 @@ export function importProject(
     bytes: new Uint8Array(readFileSync(resolve(baseDir, name))),
   }));
 
-  const storage = new SqliteStorage(databasePath);
-  storage.initialize(text, Date.now());
+  const storage = new SqliteStorage(databasePath, projectId);
+  storage.initialize(text, Date.now(), projectId);
   for (const file of wanted) storage.putBlob(file.name, file.bytes);
   for (const user of STARTER_USERS) storage.addUser(user);
 
@@ -84,7 +86,7 @@ export function importProject(
   }
 
   storage.close();
-  return { databasePath, historyEntries, files: wanted.map((f) => f.name) };
+  return { databasePath, projectId, historyEntries, files: wanted.map((f) => f.name) };
 }
 
 export interface ExportResult {
@@ -103,9 +105,13 @@ export interface ExportResult {
 export function exportProject(
   databasePath: string,
   projectPath: string,
-  dryRun = false
+  dryRun = false,
+  projectId?: string
 ): ExportResult {
-  const storage = new SqliteStorage(databasePath);
+  const storage = new SqliteStorage(
+    databasePath,
+    projectId ?? new SqliteStorage(databasePath).projects()[0]?.id
+  );
   const text = storage.readText();
   const history = storage.history();
   storage.close();

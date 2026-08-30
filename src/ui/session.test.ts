@@ -18,17 +18,19 @@ import { ProjectSession } from "./session.js";
 let dir: string;
 let server: RunningServer;
 let origin: string;
+let project: string;
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "re64-ui-"));
   const projectPath = join(dir, "gridrunner.re64");
   copyFileSync("assets/gridrunner.re64", projectPath);
   copyFileSync("assets/gridrunner.prg", join(dir, "gridrunner.prg"));
-  const { databasePath } = importProject(projectPath);
+  const { databasePath, projectId } = importProject(projectPath);
 
   server = startServer({ projectPath: databasePath, port: 0, host: "127.0.0.1", quiet: true });
   await server.ready;
   origin = `http://127.0.0.1:${server.port}`;
+  project = projectId;
 });
 
 afterEach(async () => {
@@ -36,7 +38,7 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const open = () => ProjectSession.open({ origin, author: "tester" });
+const open = () => ProjectSession.open({ origin, project, author: "tester" });
 const labelAt = (s: ProjectSession, address: number) =>
   s.loaded.map.getLabels().getLabelsAt(address)[0]?.name;
 

@@ -47,7 +47,8 @@ export class ProjectSession {
     private readonly client: DocClient,
     public loaded: LoadedProject,
     private readonly blobs: Map<string, Uint8Array>,
-    private readonly origin: string
+    private readonly origin: string,
+    private readonly project: string
   ) {}
 
   /**
@@ -60,7 +61,13 @@ export class ProjectSession {
   static async open(options: OpenOptions = {}): Promise<ProjectSession> {
     const client = await DocClient.open(options);
     const blobs = new Map<string, Uint8Array>();
-    const session = new ProjectSession(client, null as never, blobs, options.origin ?? "");
+    const session = new ProjectSession(
+      client,
+      null as never,
+      blobs,
+      options.origin ?? "",
+      options.project ?? ""
+    );
 
     await session.fetchMissingBlobs(projectFromDoc(client.doc));
     session.loaded = session.build();
@@ -95,7 +102,10 @@ export class ProjectSession {
     const wanted = blobPaths(project).filter((p) => !this.blobs.has(p));
     await Promise.all(
       wanted.map(async (path) => {
-        const res = await fetch(`${this.origin}/api/blob?path=${encodeURIComponent(path)}`);
+        const res = await fetch(
+          `${this.origin}/api/blob?path=${encodeURIComponent(path)}` +
+            (this.project ? `&project=${encodeURIComponent(this.project)}` : "")
+        );
         if (!res.ok) {
           const detail = await res.json().catch(() => ({}));
           throw new Error(detail.error ?? `could not load ${path}`);

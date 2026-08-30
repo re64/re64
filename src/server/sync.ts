@@ -71,6 +71,11 @@ export class SyncServer {
   /** Which socket is responsible for each awareness entry, so a close clears it. */
   private readonly awarenessOwners = new Map<number, WebSocket>();
 
+  /** The project this relay is for. */
+  get store(): ProjectStore {
+    return this.options.store;
+  }
+
   constructor(private readonly options: SyncOptions) {
     this.awareness = new awarenessProtocol.Awareness(options.store.document());
     // The server holds no presence of its own; it only relays.

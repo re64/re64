@@ -41,7 +41,9 @@ export class ProjectEditor {
   constructor(private readonly projectPath: string) {
     this.isDatabase = projectPath.endsWith("db");
     this.store = new ProjectStore(
-      this.isDatabase ? new SqliteStorage(projectPath) : new FileStorage(pathsFor(projectPath))
+      this.isDatabase
+        ? new SqliteStorage(projectPath, new SqliteStorage(projectPath).projects()[0]?.id)
+        : new FileStorage(pathsFor(projectPath))
     );
   }
 

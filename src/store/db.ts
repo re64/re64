@@ -48,7 +48,7 @@ function sqlite(): typeof import("node:sqlite") {
   return cached;
 }
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -56,46 +56,54 @@ CREATE TABLE IF NOT EXISTS meta (
   value TEXT NOT NULL
 );
 
--- The exported form, derived from the document. Kept so disasm and git have
--- something to read without building one.
-CREATE TABLE IF NOT EXISTS project (
-  id         INTEGER PRIMARY KEY CHECK (id = 1),
+-- One row per project. The doc column is the exported form, derived from the
+-- document and kept so disasm and git have something to read without one.
+CREATE TABLE IF NOT EXISTS projects (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
   doc        TEXT NOT NULL,
   rev        TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
 
 -- The project, as the CRDT records it. This is the truth; everything else in
 -- this file is derived from it and can be rebuilt.
 CREATE TABLE IF NOT EXISTS updates (
-  seq     INTEGER PRIMARY KEY AUTOINCREMENT,
-  payload BLOB NOT NULL
+  seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  payload    BLOB NOT NULL
 );
+CREATE INDEX IF NOT EXISTS updates_by_project ON updates (project_id, seq);
 
 -- A merged update covering everything up to seq_upto. NOT compaction: the rows
 -- it covers are still there. It exists so loading is not proportional to every
 -- edit ever made, which matters because the CLI runs in a fresh process.
 CREATE TABLE IF NOT EXISTS snapshots (
-  seq_upto INTEGER PRIMARY KEY,
-  payload  BLOB NOT NULL
+  project_id TEXT NOT NULL,
+  seq_upto   INTEGER NOT NULL,
+  payload    BLOB NOT NULL,
+  PRIMARY KEY (project_id, seq_upto)
 );
 
 CREATE TABLE IF NOT EXISTS history (
-  seq     INTEGER PRIMARY KEY AUTOINCREMENT,
-  at      INTEGER NOT NULL,
-  authors TEXT NOT NULL,
-  summary TEXT NOT NULL
+  seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  at         INTEGER NOT NULL,
+  authors    TEXT NOT NULL,
+  summary    TEXT NOT NULL
 );
 
 -- Every operation with its inverse. Durable rather than per-session, because
 -- 're64 undo' runs in a fresh process with nothing else to remember.
 CREATE TABLE IF NOT EXISTS ops (
-  seq     INTEGER PRIMARY KEY AUTOINCREMENT,
-  op      TEXT NOT NULL,
-  inverse TEXT NOT NULL,
-  author  TEXT,
-  at      INTEGER,
-  undone  INTEGER NOT NULL DEFAULT 0
+  seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  op         TEXT NOT NULL,
+  inverse    TEXT NOT NULL,
+  author     TEXT,
+  at         INTEGER,
+  undone     INTEGER NOT NULL DEFAULT 0
 );
 
 -- Binaries, by content. Deduplicated, and a hash is what lets a project say
@@ -119,6 +127,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS sessions (
   id            TEXT PRIMARY KEY,
   user_id       TEXT,
+  project_id    TEXT,
   client_id     INTEGER,
   started_at    INTEGER NOT NULL,
   last_seen_at  INTEGER NOT NULL
@@ -130,11 +139,14 @@ CREATE TABLE IF NOT EXISTS blobs (
   bytes BLOB NOT NULL
 );
 
--- What the project calls them. A name is project-local; the bytes are not.
+-- What each project calls them. A name is project-local; the bytes are not, so
+-- two projects annotating the same game share one row in blobs.
 CREATE TABLE IF NOT EXISTS files (
-  id   TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
-  hash TEXT NOT NULL REFERENCES blobs(hash)
+  id         TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  hash       TEXT NOT NULL REFERENCES blobs(hash),
+  UNIQUE (project_id, name)
 );
 `;
 

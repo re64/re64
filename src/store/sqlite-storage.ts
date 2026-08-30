@@ -24,84 +24,115 @@ import { newId } from "../core/index.js";
 /** How often to notice another connection's commit. */
 const POLL_MS = 150;
 
+/** The project every store opens unless told otherwise. */
+export const DEFAULT_PROJECT = "default";
+
 export class SqliteStorage implements ProjectStorage {
   private readonly db: DatabaseSync;
   private inTransaction = false;
 
-  constructor(path: string) {
+  /**
+   * One project inside one database.
+   *
+   * The database holds many; this is a handle on one of them. Everything below
+   * is scoped by `projectId`, and the blobs table deliberately is not — the
+   * bytes of a game are the same bytes whoever is annotating them.
+   */
+  constructor(
+    path: string,
+    readonly projectId: string = DEFAULT_PROJECT
+  ) {
     this.db = openDatabase(path);
   }
 
-  /** Create the single project row, for `re64 import`. */
-  initialize(text: string, now: number): void {
+  /** Every project this database holds. */
+  projects(): { id: string; name: string }[] {
+    return this.db.prepare("SELECT id, name FROM projects ORDER BY name").all() as {
+      id: string;
+      name: string;
+    }[];
+  }
+
+  /** Create the project row, for `re64 import`. */
+  initialize(text: string, now: number, name = this.projectId): void {
     this.db
-      .prepare("INSERT OR REPLACE INTO project (id, doc, rev, updated_at) VALUES (1, ?, ?, ?)")
-      .run(text, revOf(text), now);
+      .prepare(
+        "INSERT INTO projects (id, name, doc, rev, created_at, updated_at) " +
+          "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET " +
+          "doc = excluded.doc, rev = excluded.rev, updated_at = excluded.updated_at"
+      )
+      .run(this.projectId, name, text, revOf(text), now, now);
   }
 
   exists(): boolean {
-    return this.db.prepare("SELECT 1 FROM project WHERE id = 1").get() !== undefined;
+    return (
+      this.db.prepare("SELECT 1 FROM projects WHERE id = ?").get(this.projectId) !== undefined
+    );
   }
 
   readText(): string {
-    const row = this.db.prepare("SELECT doc FROM project WHERE id = 1").get() as
+    const row = this.db.prepare("SELECT doc FROM projects WHERE id = ?").get(this.projectId) as
       | { doc: string }
       | undefined;
-    if (row === undefined) throw new Error("This database holds no project");
+    if (row === undefined) throw new Error(`No project called "${this.projectId}"`);
     return row.doc;
   }
 
   writeText(text: string): void {
     this.db
-      .prepare("UPDATE project SET doc = ?, rev = ?, updated_at = ? WHERE id = 1")
-      .run(text, revOf(text), Date.now());
+      .prepare("UPDATE projects SET doc = ?, rev = ?, updated_at = ? WHERE id = ?")
+      .run(text, revOf(text), Date.now(), this.projectId);
   }
 
   rev(): string {
-    const row = this.db.prepare("SELECT rev FROM project WHERE id = 1").get() as
+    const row = this.db.prepare("SELECT rev FROM projects WHERE id = ?").get(this.projectId) as
       | { rev: string }
       | undefined;
     return row?.rev ?? "";
   }
 
   appendUpdate(update: Uint8Array): void {
-    this.db.prepare("INSERT INTO updates (payload) VALUES (?)").run(update);
+    this.db.prepare("INSERT INTO updates (project_id, payload) VALUES (?, ?)")
+      .run(this.projectId, update);
   }
 
   readUpdates(afterSeq = 0): StoredUpdate[] {
     const rows = this.db
-      .prepare("SELECT seq, payload FROM updates WHERE seq > ? ORDER BY seq")
-      .all(afterSeq) as { seq: number; payload: Uint8Array }[];
+      .prepare("SELECT seq, payload FROM updates WHERE project_id = ? AND seq > ? ORDER BY seq")
+      .all(this.projectId, afterSeq) as { seq: number; payload: Uint8Array }[];
     return rows.map((r) => ({ seq: r.seq, update: new Uint8Array(r.payload) }));
   }
 
   hasUpdates(): boolean {
-    return this.db.prepare("SELECT 1 FROM updates LIMIT 1").get() !== undefined;
+    return this.db.prepare("SELECT 1 FROM updates WHERE project_id = ? LIMIT 1").get(this.projectId) !== undefined;
   }
 
   readSnapshot(): StoredSnapshot | undefined {
     const row = this.db
-      .prepare("SELECT seq_upto, payload FROM snapshots ORDER BY seq_upto DESC LIMIT 1")
-      .get() as { seq_upto: number; payload: Uint8Array } | undefined;
+      .prepare(
+        "SELECT seq_upto, payload FROM snapshots WHERE project_id = ? " +
+          "ORDER BY seq_upto DESC LIMIT 1"
+      )
+      .get(this.projectId) as { seq_upto: number; payload: Uint8Array } | undefined;
     return row ? { seqUpto: row.seq_upto, update: new Uint8Array(row.payload) } : undefined;
   }
 
   writeSnapshot(snapshot: StoredSnapshot): void {
     this.db
-      .prepare("INSERT OR REPLACE INTO snapshots (seq_upto, payload) VALUES (?, ?)")
-      .run(snapshot.seqUpto, snapshot.update);
+      .prepare("INSERT OR REPLACE INTO snapshots (project_id, seq_upto, payload) VALUES (?, ?, ?)")
+      .run(this.projectId, snapshot.seqUpto, snapshot.update);
   }
 
   appendHistory(entry: HistoryEntry): void {
     this.db
-      .prepare("INSERT INTO history (at, authors, summary) VALUES (?, ?, ?)")
-      .run(entry.at, JSON.stringify(entry.authors), JSON.stringify(entry.summary));
+      .prepare("INSERT INTO history (project_id, at, authors, summary) VALUES (?, ?, ?, ?)")
+      .run(this.projectId, entry.at, JSON.stringify(entry.authors), JSON.stringify(entry.summary));
   }
 
   history(): HistoryEntry[] {
     const rows = this.db
-      .prepare("SELECT at, authors, summary FROM history ORDER BY seq")
-      .all() as { at: number; authors: string; summary: string }[];
+      .prepare("SELECT at, authors, summary FROM history WHERE project_id = ? ORDER BY seq")
+      .all(this.projectId) as { at: number; authors: string; summary: string }[];
     return rows.map((r) => ({
       at: r.at,
       authors: JSON.parse(r.authors) as string[],
@@ -111,8 +142,10 @@ export class SqliteStorage implements ProjectStorage {
 
   readOps(): Change[] {
     const rows = this.db
-      .prepare("SELECT op, inverse, author, at, undone FROM ops ORDER BY seq")
-      .all() as { op: string; inverse: string; author: string | null; at: number | null; undone: number }[];
+      .prepare(
+        "SELECT op, inverse, author, at, undone FROM ops WHERE project_id = ? ORDER BY seq"
+      )
+      .all(this.projectId) as { op: string; inverse: string; author: string | null; at: number | null; undone: number }[];
     return rows.map((r) => ({
       op: JSON.parse(r.op),
       inverse: JSON.parse(r.inverse),
@@ -127,12 +160,13 @@ export class SqliteStorage implements ProjectStorage {
     // do better — an insert plus a flag update — but the caller does not know
     // which entries changed, and inventing that distinction here would put the
     // two implementations out of step.
-    this.db.exec("DELETE FROM ops");
+    this.db.prepare("DELETE FROM ops WHERE project_id = ?").run(this.projectId);
     const insert = this.db.prepare(
-      "INSERT INTO ops (op, inverse, author, at, undone) VALUES (?, ?, ?, ?, ?)"
+      "INSERT INTO ops (project_id, op, inverse, author, at, undone) VALUES (?, ?, ?, ?, ?, ?)"
     );
     for (const c of changes) {
       insert.run(
+        this.projectId,
         JSON.stringify(c.op),
         JSON.stringify(c.inverse),
         c.author ?? null,
@@ -165,10 +199,11 @@ export class SqliteStorage implements ProjectStorage {
   startSession(id: string, userId: string | undefined, now: number): void {
     this.db
       .prepare(
-        "INSERT INTO sessions (id, user_id, started_at, last_seen_at) VALUES (?, ?, ?, ?) " +
+        "INSERT INTO sessions (id, user_id, project_id, started_at, last_seen_at) " +
+          "VALUES (?, ?, ?, ?, ?) " +
           "ON CONFLICT(id) DO UPDATE SET last_seen_at = excluded.last_seen_at"
       )
-      .run(id, userId ?? null, now, now);
+      .run(id, userId ?? null, this.projectId, now, now);
   }
 
   /** Bind the Yjs client id, once the traffic reveals it. */
@@ -199,10 +234,10 @@ export class SqliteStorage implements ProjectStorage {
       .run(hash, bytes.length, bytes);
     this.db
       .prepare(
-        "INSERT INTO files (id, name, hash) VALUES (?, ?, ?) " +
-          "ON CONFLICT(name) DO UPDATE SET hash = excluded.hash"
+        "INSERT INTO files (id, project_id, name, hash) VALUES (?, ?, ?, ?) " +
+          "ON CONFLICT(project_id, name) DO UPDATE SET hash = excluded.hash"
       )
-      .run(newId("fil"), normalizeBlobName(name), hash);
+      .run(newId("fil"), this.projectId, normalizeBlobName(name), hash);
     return hash;
   }
 
@@ -210,15 +245,18 @@ export class SqliteStorage implements ProjectStorage {
   blob(name: string): Uint8Array | undefined {
     const row = this.db
       .prepare(
-        "SELECT b.bytes AS bytes FROM files f JOIN blobs b ON b.hash = f.hash WHERE f.name = ?"
+        "SELECT b.bytes AS bytes FROM files f JOIN blobs b ON b.hash = f.hash " +
+          "WHERE f.project_id = ? AND f.name = ?"
       )
-      .get(normalizeBlobName(name)) as { bytes: Uint8Array } | undefined;
+      .get(this.projectId, normalizeBlobName(name)) as { bytes: Uint8Array } | undefined;
     return row ? new Uint8Array(row.bytes) : undefined;
   }
 
   /** What the project calls each file it holds bytes for. */
   blobNames(): string[] {
-    return (this.db.prepare("SELECT name FROM files ORDER BY name").all() as {
+    return (this.db
+      .prepare("SELECT name FROM files WHERE project_id = ? ORDER BY name")
+      .all(this.projectId) as {
       name: string;
     }[]).map((r) => r.name);
   }
@@ -226,8 +264,8 @@ export class SqliteStorage implements ProjectStorage {
   /** The content hash recorded for a name, for integrity checks. */
   blobHash(name: string): string | undefined {
     const row = this.db
-      .prepare("SELECT hash FROM files WHERE name = ?")
-      .get(normalizeBlobName(name)) as { hash: string } | undefined;
+      .prepare("SELECT hash FROM files WHERE project_id = ? AND name = ?")
+      .get(this.projectId, normalizeBlobName(name)) as { hash: string } | undefined;
     return row?.hash;
   }
 

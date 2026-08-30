@@ -14,7 +14,13 @@ import { readFileSync } from "node:fs";
 import { existsSync } from "node:fs";
 import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { FileStorage, ProjectStore, SqliteStorage, pathsFor } from "../store/index.js";
+import {
+  DEFAULT_PROJECT,
+  FileStorage,
+  ProjectStore,
+  SqliteStorage,
+  pathsFor,
+} from "../store/index.js";
 import { diffProjects, parseProject } from "../core/index.js";
 import { SyncServer } from "./sync.js";
 import { applyOpToDoc, projectFromDoc } from "../core/crdt/index.js";
@@ -91,23 +97,59 @@ export function startServer(options: ServerOptions): RunningServer {
     process.exit(1);
   }
 
-  // A database or a plain project file, both served identically. The database
-  // is the one that carries its own binaries.
-  const database = projectPath.endsWith("db") ? new SqliteStorage(projectPath) : undefined;
-  const storage = database ?? new FileStorage(pathsFor(projectPath));
-  const store = new ProjectStore(storage);
-  const sync = new SyncServer({
-    store,
-    // Long enough that a page reload rejoins the same session rather than
-    // splitting one piece of work across two history entries.
-    idleMs: 30_000,
-    // The file should track a live session closely enough that git, the CLI,
-    // and an editor open on it all see the work as it happens.
-    writeMs: 1_500,
-    onSession: (sessionId, userId) => database?.startSession(sessionId, userId, Date.now()),
-    onFlatten: (summary) =>
-      console.log(`flattened ${summary.length} change${summary.length === 1 ? "" : "s"}`),
-  });
+  const isDatabase = projectPath.endsWith("db");
+
+  /**
+   * One relay per project, made when someone first asks for it.
+   *
+   * Kept separate rather than making a single relay multi-tenant: a project has
+   * its own document, its own participants and its own idle timer, and sharing
+   * one relay between them would mean threading a room through every one of
+   * those. Nothing is shared between projects except the database file and the
+   * blobs inside it.
+   */
+  const rooms = new Map<string, { sync: SyncServer; storage: SqliteStorage | FileStorage }>();
+
+  function room(requested: string): { sync: SyncServer; storage: SqliteStorage | FileStorage } {
+    // A plain project file holds exactly one project, so every room name means
+    // the same thing. Honouring them separately would open two relays over one
+    // file, each unaware of the other.
+    const projectId = isDatabase ? requested : DEFAULT_PROJECT;
+    const existing = rooms.get(projectId);
+    if (existing) return existing;
+
+    const storage = isDatabase
+      ? new SqliteStorage(projectPath, projectId)
+      : new FileStorage(pathsFor(projectPath));
+    const sync = new SyncServer({
+      store: new ProjectStore(storage),
+      // Long enough that a page reload rejoins the same session rather than
+      // splitting one piece of work across two history entries.
+      idleMs: 30_000,
+      // The export should track a live session closely enough that the CLI and
+      // git see the work without anyone asking.
+      writeMs: 1_500,
+      onSession: (sessionId, userId) =>
+        storage instanceof SqliteStorage
+          ? storage.startSession(sessionId, userId, Date.now())
+          : undefined,
+      onFlatten: (summary) =>
+        console.log(`${projectId}: recorded ${summary.length} change${summary.length === 1 ? "" : "s"}`),
+    });
+
+    const made = { sync, storage };
+    rooms.set(projectId, made);
+    return made;
+  }
+
+  /** Which project a request is about; the only one, unless it says otherwise. */
+  const projectOf = (url: URL) => url.searchParams.get("project") ?? defaultProject();
+
+  function defaultProject(): string {
+    if (!isDatabase) return DEFAULT_PROJECT;
+    const first = new SqliteStorage(projectPath).projects()[0];
+    return first?.id ?? DEFAULT_PROJECT;
+  }
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -115,11 +157,20 @@ export function startServer(options: ServerOptions): RunningServer {
 
     try {
       // --- API ---------------------------------------------------------
+      if (path === "/api/projects" && req.method === "GET") {
+        const listed = isDatabase ? new SqliteStorage(projectPath).projects() : [];
+        return sendJson(res, 200, {
+          projects: listed.length ? listed : [{ id: defaultProject(), name: projectPath }],
+        });
+      }
+
       if (path === "/api/project" && req.method === "GET") {
+        const { storage, sync } = room(projectOf(url));
         return sendJson(res, 200, {
           path: projectPath,
+          project: projectOf(url),
           raw: storage.readText(),
-          version: store.version(),
+          version: sync.store.version(),
         });
       }
 
@@ -133,6 +184,8 @@ export function startServer(options: ServerOptions): RunningServer {
         // Checked against the document, not the file: during a live session the
         // file is stale by design, so comparing it would let a whole-document
         // write silently overwrite edits that had already merged.
+        const { sync } = room(projectOf(url));
+        const store = sync.store;
         const current = store.version();
         if (baseVersion !== undefined && baseVersion !== current) {
           return sendJson(res, 409, {
@@ -169,7 +222,11 @@ export function startServer(options: ServerOptions): RunningServer {
         if (!requested) {
           return sendJson(res, 400, { error: "path parameter required" });
         }
-        const bytes = database ? database.blob(requested) : fromDisk(projectPath, requested);
+        const { storage } = room(projectOf(url));
+        const bytes =
+          storage instanceof SqliteStorage
+            ? storage.blob(requested)
+            : fromDisk(projectPath, requested);
         if (bytes === undefined) {
           return sendJson(res, 404, { error: `no such file: ${requested}` });
         }
@@ -181,36 +238,46 @@ export function startServer(options: ServerOptions): RunningServer {
           "content-length": bytes.length,
           // Content-addressed and immutable: a name maps to bytes that never
           // change under it, so a reload need not refetch a 174KB disk image.
-          "cache-control": database ? "public, max-age=31536000, immutable" : "no-store",
-          ...(database ? { etag: `"${database.blobHash(requested) ?? ""}"` } : {}),
+          "cache-control":
+            storage instanceof SqliteStorage
+              ? "public, max-age=31536000, immutable"
+              : "no-store",
+          ...(storage instanceof SqliteStorage
+            ? { etag: `"${storage.blobHash(requested) ?? ""}"` }
+            : {}),
         });
         res.end(bytes);
         return;
       }
 
       if (path === "/api/users" && req.method === "GET") {
-        return sendJson(res, 200, { users: database?.users() ?? [] });
+        const { storage } = room(projectOf(url));
+        return sendJson(res, 200, {
+          users: storage instanceof SqliteStorage ? storage.users() : [],
+        });
       }
 
       if (path === "/api/export" && req.method === "POST") {
         // Writing the project out is a deliberate act now, not a save. The
         // document was already everyone's the moment the edit landed.
-        const ops = store.writeFile();
+        const ops = room(projectOf(url)).sync.store.writeFile();
         return sendJson(res, 200, { ok: true, changed: ops.length > 0 });
       }
 
       if (path === "/api/debug" && req.method === "GET") {
+        const { sync, storage } = room(projectOf(url));
         return sendJson(res, 200, {
-          storage: database ? "sqlite" : "file",
+          storage: isDatabase ? "sqlite" : "file",
           path: projectPath,
+          project: projectOf(url),
           clients: sync.clientCount,
-          sessions: database?.sessions().length ?? 0,
-          ...store.debug(),
+          sessions: storage instanceof SqliteStorage ? storage.sessions().length : 0,
+          ...sync.store.debug(),
         });
       }
 
       if (path === "/api/history" && req.method === "GET") {
-        return sendJson(res, 200, { entries: store.history() });
+        return sendJson(res, 200, { entries: room(projectOf(url)).sync.store.history() });
       }
 
       // --- Static ------------------------------------------------------
@@ -242,11 +309,15 @@ export function startServer(options: ServerOptions): RunningServer {
     // `<serverUrl>/<room>`, so the room arrives as a path segment. Matching
     // "/sync" exactly would reject every real client.
     const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
-    if (pathname === "/sync" || pathname.startsWith("/sync/")) {
-      sync.handleUpgrade(request, socket, head);
-    } else {
+    if (pathname !== "/sync" && !pathname.startsWith("/sync/")) {
       socket.destroy();
+      return;
     }
+    // The room is the path segment a stock client appends. This is the only
+    // place a project is chosen for a socket, and it happens before the
+    // handshake, which is where an access check would go.
+    const requested = pathname.slice("/sync/".length);
+    room(requested || defaultProject()).sync.handleUpgrade(request, socket, head);
   });
 
   const ready = new Promise<void>((resolve) => {
@@ -266,8 +337,10 @@ export function startServer(options: ServerOptions): RunningServer {
       return (server.address() as { port: number } | null)?.port ?? port;
     },
     async close() {
-      sync.flattenNow();
-      sync.close();
+      for (const { sync } of rooms.values()) {
+        sync.flattenNow();
+        sync.close();
+      }
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };

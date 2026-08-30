@@ -95,6 +95,7 @@
         border: 1px solid var(--panel);
       }
       #here .dot.me { box-shadow: 0 0 0 1.5px var(--fg); }
+      #which,
       #who {
         background: var(--bg);
         color: var(--fg);
@@ -357,6 +358,7 @@
     <div id="app">
       <header>
         <span class="brand">re64</span>
+        <select id="which" title="Which project you are editing"></select>
         <div class="tabs">
           <button class="tab active" data-tab="disasm">Disassembly</button>
           <button class="tab" data-tab="project">Project</button>

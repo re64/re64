@@ -35,8 +35,14 @@ export function databaseFileBytes(storage: SqliteStorage): FileBytes {
   };
 }
 
-export function loadProjectFromDatabase(databasePath: string): LoadedProject {
-  const storage = new SqliteStorage(databasePath);
+export function loadProjectFromDatabase(
+  databasePath: string,
+  projectId?: string
+): LoadedProject {
+  const storage = new SqliteStorage(
+    databasePath,
+    projectId ?? new SqliteStorage(databasePath).projects()[0]?.id
+  );
   try {
     return buildMemoryMap(
       parseProject(storage.readText()),

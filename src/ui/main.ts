@@ -842,6 +842,41 @@ interface User {
 
 let users: User[] = [];
 let me: User | undefined;
+let projects: { id: string; name: string }[] = [];
+let currentProject: string | undefined;
+
+/** Which project this window is showing. The URL wins, then the first offered. */
+async function loadProjects(): Promise<void> {
+  try {
+    const res = await fetch("/api/projects");
+    projects = res.ok
+      ? ((await res.json()) as { projects: { id: string; name: string }[] }).projects
+      : [];
+  } catch {
+    projects = [];
+  }
+
+  const wanted = new URLSearchParams(location.search).get("project");
+  currentProject = projects.find((p) => p.id === wanted)?.id ?? projects[0]?.id;
+
+  const picker = $("#which") as HTMLSelectElement;
+  picker.innerHTML = "";
+  for (const project of projects) {
+    const option = document.createElement("option");
+    option.value = project.id;
+    option.textContent = project.name;
+    option.selected = project.id === currentProject;
+    picker.appendChild(option);
+  }
+  // Nothing to choose between is not worth a control.
+  picker.style.display = projects.length > 1 ? "" : "none";
+}
+
+$("#which").addEventListener("change", (event) => {
+  const url = new URL(location.href);
+  url.searchParams.set("project", (event.target as HTMLSelectElement).value);
+  location.assign(url.toString());
+});
 
 /**
  * Who you are editing as.
@@ -914,8 +949,9 @@ function renderPresence(): void {
 async function loadDisassembly(restoreAddress?: number): Promise<void> {
   try {
     session?.close();
+    await loadProjects();
     await loadUsers();
-    session = await ProjectSession.open({ author: me?.id });
+    session = await ProjectSession.open({ project: currentProject, author: me?.id });
   } catch (err) {
     setStatus(err instanceof Error ? err.message : "Could not load the project", true);
     return;
@@ -1080,6 +1116,7 @@ async function renderDebug(): Promise<void> {
     // independent undo stacks, and they can conflict with each other.
     ["session", d.sessionId],
     ["connection", d.status, d.status === "connected" ? "good" : "warn"],
+    ["project", currentProject ?? "—"],
     ["editing as", me ? `${me.name} (${me.id})` : "nobody — no users defined"],
     ["participants", String(d.participants)],
     ["can undo", d.undo.canUndo ? (d.undo.next ?? "yes") : "no"],
