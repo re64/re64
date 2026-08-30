@@ -66,7 +66,7 @@ describe("what an agent can now ask", () => {
     expect(program.instructions.has(0x8011)).toBe(true);
     // Deliberately the decoded set, not the queue's visited set — that includes
     // addresses reached and then rejected.
-    expect(program.instructions.size).toBe(1449);
+    expect(program.instructions.size).toBe(1480);
   });
 
   it("where disassembly started", () => {

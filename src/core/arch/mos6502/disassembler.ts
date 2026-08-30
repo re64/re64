@@ -11,6 +11,8 @@ import { Region, RegionKind } from "../../memory/region.js";
 export interface RegionLookup {
   /** Effective kind at an address, or undefined where nothing is mapped. */
   getKindAt(address: number): RegionKind | undefined;
+  /** The region covering an address, for finding where non-code ends. */
+  getRegionAt(address: number): Region | undefined;
   /** Jumptable regions across the whole map, for entry point extraction. */
   getJumptables(): readonly Region[];
 }
@@ -219,8 +221,22 @@ export function disassemble(
     }
     visited.add(address);
 
-    // Skip if this address is not in a code region
+    // Not instructions here — but execution does not stop.
+    //
+    // A region says how to *read* bytes. It says nothing about control flow,
+    // and conflating the two was never decided: `kind !== "code"` stopped
+    // decoding, and stopped the walk with it. So declaring the $EA filler
+    // between two routines as data — which is how a hand-written listing shows
+    // it, and which leaves a program that still runs — silently deleted
+    // everything downstream of it. Execution runs through those NOPs.
+    //
+    // Resuming after the span needs no decoding inside it: whatever follows is
+    // where flow arrives. That also gets the inline-data-after-JSR idiom right,
+    // where a routine reads bytes past its own return address and resumes
+    // beyond them.
     if (!shouldDisassemble(regions, address)) {
+      const region = regions?.getRegionAt(address);
+      if (region && region.end > address) queue.push(region.end);
       continue;
     }
 
@@ -262,12 +278,15 @@ export function disassemble(
       addReference(references, ref.target, ref.type, address);
     }
 
-    // Queue targets for further disassembly
+    // Queue targets for further disassembly.
+    //
+    // Not filtered by region here: the loop decides what to do with an address
+    // that is not code, and it now continues past it rather than dropping it.
+    // Filtering in both places meant a fall-through into data never reached the
+    // one that knew how to carry on.
     const targets = getTargets(instr);
     for (const target of targets) {
-      if (!visited.has(target) && shouldDisassemble(regions, target)) {
-        queue.push(target);
-      }
+      if (!visited.has(target)) queue.push(target);
     }
   }
 

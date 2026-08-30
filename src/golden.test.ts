@@ -35,7 +35,17 @@ const PROJECT = "assets/gridrunner.re64";
 // `(c) 1982 HES` — wrong, but visibly wrong, which is what tells a reader the
 // encoding needs saying. PETSCII and screen codes are now sayable; a custom
 // charset still is not.
-const OUTPUT_SHA1 = "2bac7155ff760f325fbf832738907d4c55ad3c66";
+// Moved a third time: control flow now continues past a non-code region.
+//
+// A region says how to *read* bytes and nothing about control flow, but
+// `kind !== "code"` stopped decoding and stopped the walk with it. So the data
+// table `laserFrameRateForLevel` at $8CF6-$8D18 hid the routine immediately
+// after it — `PlayNewLevelSounds`, which this very project names and the human
+// reference documents, entered by falling through the table's end.
+//
+// 31 instructions appeared and none were lost, which is the shape a fix of this
+// kind should have. Checked address by address before re-pinning.
+const OUTPUT_SHA1 = "9169165ccb7177e6c02eda5723fd7b73b05bdbae";
 
 describe("gridrunner disassembly", () => {
   const result = analyze(loadProjectFile(PROJECT), { annotations: false });
@@ -47,15 +57,15 @@ describe("gridrunner disassembly", () => {
 
   it("holds its shape", () => {
     expect(result.stats).toMatchObject({
-      instructions: 1449,
-      rows: 1846,
-      arrows: 206,
+      instructions: 1480,
+      rows: 1872,
+      arrows: 208,
       regions: 16,
       // 495, not the 597 this asserted before: the merged index counted every
       // user label twice, once through the memory map and once directly. The
       // rendered text never showed it because label rows dedupe by name, which
       // is why the hash above is unchanged.
-      labels: 495,
+      labels: 502,
     });
   });
 

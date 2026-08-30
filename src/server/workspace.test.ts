@@ -68,7 +68,9 @@ describe("orienting in a project never seen before", () => {
 
     expect(described.entryPoints).toContain("$8011");
     expect(described.layers.map((l) => l.name)).toContain("gridrunner");
-    expect(described.counts.instructions).toBe(1449);
+    // 1480, not 1449: control flow now continues past a non-code region, so
+    // the routine hidden behind laserFrameRateForLevel decodes.
+    expect(described.counts.instructions).toBe(1480);
     // The distinction that matters: chosen names mean something was understood.
     expect(described.counts.namedByHand).toBeGreaterThan(0);
     expect(described.counts.namedAutomatically).toBeGreaterThan(0);
@@ -1129,46 +1131,47 @@ describe("the last of trial 2's list", () => {
 });
 
 describe("an edit that cuts code off", () => {
-  it("says so, instead of hiding it in the delta", () => {
-    // Declaring the $EA filler between two routines as data — exactly what the
-    // reference listing shows — breaks fall-through into the main game loop and
-    // deletes two thirds of the program. It returned ok, and reported the loss
-    // in the same field, shape and tone as a useful gain.
+  it("stays quiet about the bytes it was asked to stop decoding", () => {
+    // Declaring the $EA filler between two routines as data — which is how a
+    // hand-written listing shows it — costs exactly those NOPs and nothing
+    // else, now that control flow continues past a non-code region. Counting
+    // them as orphans made every ordinary region report a loss.
     const blank = blankWorkspace();
     blank.setRegion(agent, 0x8000, 0x8002, "jumptable");
 
     const result = blank.setRegion(agent, 0x8361, 0x8370, "data", "filler");
 
-    expect(result.instructions.delta).toBeLessThan(-500);
+    expect(result.instructions.delta).toBe(-15);
+    expect(result.orphaned).toBeUndefined();
+  });
+
+  it("says so when something outside the span stops decoding", () => {
+    // The whole program hangs off one JMP. Calling it data takes everything
+    // with it, which delta reports in the same field, shape and tone as a
+    // useful gain.
+    const blank = blankWorkspace();
+    blank.setRegion(agent, 0x8011, 0x8014, "code");
+
+    const result = blank.setRegion(agent, 0x8011, 0x8014, "data");
+
+    expect(result.instructions.delta).toBeLessThan(-1000);
     expect(result.orphaned).toBeDefined();
-    expect(result.orphaned!.instructions).toBeGreaterThan(500);
+    expect(result.orphaned!.instructions).toBeGreaterThan(1000);
+    expect(result.orphaned!.hint).toContain("set_region");
   });
 
-  it("names the address that lost its predecessor, not the lowest casualty", () => {
-    // Everything else stopped decoding because it was reached from there.
-    // Reporting the lowest address names a victim rather than the wound.
+  it("names an address outside the span, not one inside it", () => {
     const blank = blankWorkspace();
-    blank.setRegion(agent, 0x8000, 0x8002, "jumptable");
+    blank.setRegion(agent, 0x8011, 0x8014, "code");
 
-    const result = blank.setRegion(agent, 0x8361, 0x8370, "data");
-    expect(result.orphaned!.firstAt).toBe("$8370");
-    expect(result.orphaned!.hint).toContain("$8370");
-  });
-
-  it("suggests a repair that works", () => {
-    const blank = blankWorkspace();
-    blank.setRegion(agent, 0x8000, 0x8002, "jumptable");
-    blank.setRegion(agent, 0x8361, 0x8370, "data");
-
-    const repaired = blank.setRegion(agent, 0x8370, 0x8373, "code");
-    expect(repaired.instructions.delta).toBeGreaterThan(500);
-    expect(repaired.orphaned).toBeUndefined();
+    const { orphaned } = blank.setRegion(agent, 0x8011, 0x8014, "data");
+    const at = parseInt(orphaned!.firstAt.slice(1), 16);
+    expect(at).toBeGreaterThanOrEqual(0x8014);
   });
 
   it("stays quiet when an edit costs nothing", () => {
     const blank = blankWorkspace();
-    const result = blank.setRegion(agent, 0x8011, 0x8015, "code");
-    expect(result.orphaned).toBeUndefined();
+    expect(blank.setRegion(agent, 0x8011, 0x8015, "code").orphaned).toBeUndefined();
   });
 });
 

@@ -1107,6 +1107,40 @@ The user id is one from `list_users`; the server does not verify it.
 
 ## Known Limitations & Future Features
 
+### A region says how to read bytes, not that execution stops
+
+These were one decision in the code and are two decisions in fact. The walk
+tested `kind !== "code"` and both stopped decoding *and* dropped the address —
+so declaring the `$EA` filler between two routines as data, which is exactly
+how a hand-written listing shows it and which leaves a program that still runs,
+silently deleted everything downstream. Execution runs through those NOPs.
+
+Now a non-code region stops the bytes being decoded and control flow resumes at
+the region's end. That needs no decoding inside the span: whatever follows is
+where flow arrives. It also gets the inline-data-after-`JSR` idiom right, where
+a routine reads bytes past its own return address and resumes beyond them.
+
+Filtering happened in two places — once when queueing a target and once in the
+loop — so a fall-through into data never reached the one that knew how to carry
+on. The loop decides now, and it is the only place that does.
+
+On the reference project this decoded 31 instructions that were previously
+invisible and lost none: `PlayNewLevelSounds` sits immediately after the data
+table `laserFrameRateForLevel`, is named by the project *and* the human
+reference, and was reachable only by falling through the table's end. That is
+the shape a fix of this kind should have, and it was checked address by address
+before the golden was re-pinned.
+
+**An edit that stops code decoding says so separately from `delta`.** A
+catastrophic loss used to arrive in the same field, shape and tone as a useful
+gain, and every tool description here teaches a reader that a positive delta is
+the reward for a good decision. `orphaned` names the first casualty *outside* the
+span written — bytes inside it are the point of the edit, not a loss — and
+suggests the `code` region that restores it. It makes no claim about *how* the
+address was reached: fall-through is the usual cause, but the same report
+follows from removing a jump's only decoding, and asserting a mechanism it
+cannot check would be a guess in the one message meant to be trusted.
+
 ### One interpretation per address, and where that runs out
 
 The row model is address-ordered with one row per address, so a byte gets one

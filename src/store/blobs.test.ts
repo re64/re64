@@ -97,7 +97,7 @@ describe("a project that carries its own binaries", () => {
 
     rmSync(join(dir, "gridrunner.prg"));
     const loaded = loadProjectFromDatabase(databasePath);
-    expect(analyze(loaded, { annotations: false }).stats.instructions).toBe(1449);
+    expect(analyze(loaded, { annotations: false }).stats.instructions).toBe(1480);
   });
 
   it("brings a whole disk image across, not the file inside it", () => {

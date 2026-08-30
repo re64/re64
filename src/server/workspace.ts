@@ -1234,7 +1234,13 @@ export class Workspace {
     affecting?: { start: number; end: number }
   ): { orphaned?: { instructions: number; firstAt: string; hint: string } } {
     const now = this.program().instructions;
-    const lost = [...decodedBefore].filter((a) => !now.has(a)).sort((a, b) => a - b);
+    // Bytes inside the span just written are not a loss: no longer decoding
+    // what was declared data is the point of the edit, not a casualty of it.
+    // Counting them made every ordinary region report an orphan.
+    const lost = [...decodedBefore]
+      .filter((a) => !now.has(a))
+      .filter((a) => !affecting || a < affecting.start || a >= affecting.end)
+      .sort((a, b) => a - b);
     if (lost.length === 0) return {};
 
     // The fall-through point, not the lowest casualty. Marking a span data
@@ -1242,19 +1248,22 @@ export class Workspace {
     // lost its only predecessor; everything else that stopped decoding did so
     // because it was reached from there. Reporting the lowest address instead
     // names a victim rather than the wound.
-    const orphan =
-      (affecting && lost.find((a) => a >= affecting.end)) ??
-      lost.find((a) => !affecting || a < affecting.start) ??
-      lost[0];
+    // The fall-through point first: marking a span data stops the walk at its
+    // end, so the instruction after it is the one that lost its predecessor,
+    // and everything else stopped because it was reached from there.
+    const orphan = (affecting && lost.find((a) => a >= affecting.end)) ?? lost[0];
 
     return {
       orphaned: {
         instructions: lost.length,
         firstAt: hex4(orphan),
+        // No claim about *how* it was reached. Fall-through is the usual
+        // cause, but the same report follows from removing a jump's only
+        // decoding, and asserting a mechanism this cannot check would be a
+        // confident guess in the one message meant to be trusted.
         hint:
-          `Nothing reaches ${hex4(orphan)} any more — execution used to fall ` +
-          `through into it. If that code is still code, declare it: ` +
-          `set_region start ${hex4(orphan)} kind "code".`,
+          `Nothing reaches ${hex4(orphan)} any more. If that code is still ` +
+          `code, declare it: set_region start ${hex4(orphan)} kind "code".`,
       },
     };
   }
