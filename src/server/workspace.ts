@@ -27,7 +27,9 @@ import {
   labelDeleteOp,
   commentDeleteOp,
   commentSetOp,
+  ensureOwningLayer,
   labelSetOp,
+  newId,
   makeFileLoader,
   markFunctionOps,
   parseProject,
@@ -515,9 +517,42 @@ export class Workspace {
   ): EditResult {
     // A comment given here is a comment about the address, not a field on the
     // label — one action, two operations, so undo takes both back together.
-    return this.edit(caller, (loaded) => [
-      labelSetOp(loaded, address, name, type),
-      ...(comment ? [commentSetOp(loaded, address, "before", comment)] : []),
+    return this.edit(caller, (loaded) => {
+      const { layerId, create } = ensureOwningLayer(loaded, address, this.room.projectId);
+      const label: Op = create
+        ? { op: "label.set", id: newId("lbl"), layerId, address, name, type }
+        : labelSetOp(loaded, address, name, type);
+
+      return [
+        ...(create ? [create] : []),
+        label,
+        ...(comment
+          ? [
+              create
+                ? ({
+                    op: "comment.set",
+                    id: newId("cmt"),
+                    layerId,
+                    address,
+                    placement: "before",
+                    text: comment,
+                  } as Op)
+                : commentSetOp(loaded, address, "before", comment),
+            ]
+          : []),
+      ];
+    });
+  }
+
+  /**
+   * Add a symbols layer by name.
+   *
+   * Rarely needed: naming an address that no layer owns creates one. This is
+   * for choosing the name, or for keeping a second set of names separate.
+   */
+  addSymbolsLayer(caller: Caller, name: string): EditResult {
+    return this.edit(caller, () => [
+      { op: "layer.add", id: newId("lay"), layerType: "symbols", name, index: 0 } as Op,
     ]);
   }
 
@@ -540,7 +575,14 @@ export class Workspace {
           "contain newlines. Use placement \"before\" for anything longer."
       );
     }
-    return this.edit(caller, (loaded) => [commentSetOp(loaded, address, placement, text)]);
+    return this.edit(caller, (loaded) => {
+      const { layerId, create } = ensureOwningLayer(loaded, address, this.room.projectId);
+      if (!create) return [commentSetOp(loaded, address, placement, text)];
+      return [
+        create,
+        { op: "comment.set", id: newId("cmt"), layerId, address, placement, text } as Op,
+      ];
+    });
   }
 
   removeComment(caller: Caller, address: number, placement?: CommentPlacement): EditResult {

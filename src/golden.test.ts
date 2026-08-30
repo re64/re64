@@ -14,7 +14,19 @@ import { loadProjectFile } from "./node-files.js";
  */
 
 const PROJECT = "assets/gridrunner.re64";
-const OUTPUT_SHA1 = "bad43dce3f919744596d89085551bf47a10679d2";
+// Moved once, deliberately: fuzzy label matching is now off below $0100.
+//
+// Eighteen zero-page operands used to borrow a neighbour's name — `$1A`
+// rendered as `laserAndPodInterval+1`, `$2A` as `clearScreenLineLoPtr-1`. The
+// human reference names those addresses `leftLaserYPosition` and
+// `droidsLeftToKill`: separate variables, not offsets into anything. Every byte
+// in zero page is its own thing, so a near miss there is a wrong answer rather
+// than a helpful approximation, and `$1A` says less but says nothing false.
+//
+// Above the first page an offset usually does mean "just inside this table" —
+// `droidXPositionArray-1,X` is the standard 1-indexed table trick — so those
+// are unchanged.
+const OUTPUT_SHA1 = "2f502c630636a7845fde2f0de1310a5ab4ff6efb";
 
 describe("gridrunner disassembly", () => {
   const result = analyze(loadProjectFile(PROJECT), { annotations: false });

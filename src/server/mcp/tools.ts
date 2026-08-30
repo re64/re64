@@ -267,6 +267,25 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "add_layer",
+    "Add a symbols layer: names for addresses that hold no loaded bytes — zero " +
+      "page variables, I/O registers, KERNAL entry points. Usually unnecessary, " +
+      "because naming or commenting such an address creates one on demand. Use " +
+      "this to give it a name of your choosing, or to add a second.",
+    {
+      project,
+      name: z.string().min(1),
+      expectVersion: z.string().optional(),
+    },
+    (args: { project?: string; name: string; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.addSymbolsLayer(caller, args.name);
+    }
+  );
+
+  tool(
     "set_comment",
     "Write a comment about an address. \"before\" gets its own rows above the " +
       "label and may run to several lines; \"inline\" shares the instruction's " +

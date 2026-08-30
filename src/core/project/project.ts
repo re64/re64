@@ -248,11 +248,12 @@ export function parseProject(json: string): Project {
       }
     }
     if (layer.type === "symbols") {
-      // A symbol layer with no labels contributes nothing; that is almost
-      // always a mistake rather than an intent.
-      if (!layer.labels?.length) {
-        throw new Error("Layer type 'symbols' requires a non-empty 'labels' array");
-      }
+      // An empty symbols layer used to be refused, on the grounds that a layer
+      // contributing nothing is almost always a mistake. That stopped being
+      // true once one could be created deliberately: `add_layer` makes an empty
+      // one to be filled, and naming an address that no layer owns creates one
+      // in the same action as the label going into it. It supplies no bytes and
+      // no names, so it is inert rather than wrong.
       if (layer.regions?.length) {
         throw new Error("Layer type 'symbols' cannot have regions: it supplies no bytes");
       }

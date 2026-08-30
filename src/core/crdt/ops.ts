@@ -111,6 +111,34 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         childMap(layerById(doc, op.layerId), "comments").delete(op.id);
         break;
 
+      case "layer.add": {
+        const layers = doc.getArray<Y.Map<unknown>>("layers");
+        // Already there: two participants naming an unowned address at the
+        // same moment both decide to create one. The check narrows the window
+        // rather than closing it — the array is a sequence, so two genuinely
+        // concurrent inserts both land. Harmless, since ownership resolves to
+        // the first, and visible enough to be tidied up.
+        const existing = layers.toArray().some((l) => l.get("id") === op.id);
+        if (existing) break;
+
+        const entry = new Y.Map<unknown>();
+        entry.set("id", op.id);
+        entry.set("type", op.layerType);
+        entry.set("name", op.name);
+        entry.set("labels", new Y.Map<Y.Map<unknown>>());
+        entry.set("regions", new Y.Map<Y.Map<unknown>>());
+        entry.set("comments", new Y.Map<Y.Map<unknown>>());
+        layers.insert(Math.max(0, Math.min(op.index ?? 0, layers.length)), [entry]);
+        break;
+      }
+
+      case "layer.remove": {
+        const layers = doc.getArray<Y.Map<unknown>>("layers");
+        const at = layers.toArray().findIndex((l) => l.get("id") === op.id);
+        if (at >= 0) layers.delete(at, 1);
+        break;
+      }
+
       case "region.set": {
         const regions = childMap(layerById(doc, op.layerId), "regions");
         let entry = regions.get(op.id);

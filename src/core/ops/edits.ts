@@ -22,6 +22,50 @@ import { parseProjectAddress } from "../project/project.js";
 import { resolveOwningLayer } from "../project/ownership.js";
 import { Op } from "./types.js";
 
+/**
+ * Make sure some layer can own an annotation at this address.
+ *
+ * Returns the operation that creates a symbols layer when nothing owns the
+ * address and no symbols layer exists to take it, and the id to write into.
+ *
+ * The refusal this replaces named the fix and gave no way to perform it: "add a
+ * layer of type symbols" with no tool that could. On a 6502 program every
+ * variable lives in zero page, so it made naming roughly half of what a person
+ * contributes impossible.
+ *
+ * Creating rather than relaxing ownership. The rule that annotations belong to
+ * the layer supplying their bytes is what makes reordering the stack move them
+ * with the content they describe; loosening it to let anything hold anything
+ * would bring back exactly the bug it prevents. A symbols layer is the model's
+ * own answer for an address with no bytes, and it already exists — the built-in
+ * C64 table is one.
+ */
+export function ensureOwningLayer(
+  loaded: LoadedProject,
+  address: number,
+  projectName?: string
+): { layerId: string; create?: Op } {
+  try {
+    return { layerId: owningLayerId(loaded, address) };
+  } catch (err) {
+    if (!(err instanceof Error) || !err.message.startsWith("No layer owns")) throw err;
+  }
+
+  const id = newId("lay");
+  return {
+    layerId: id,
+    create: {
+      op: "layer.add",
+      id,
+      layerType: "symbols",
+      name: `${projectName ?? "project"} symbols`,
+      // The bottom of the stack: it supplies no bytes so it shadows nothing,
+      // and ownership resolves to the first symbols layer declared.
+      index: 0,
+    },
+  };
+}
+
 /** The layer an annotation at this address belongs to. */
 export function owningLayerId(loaded: LoadedProject, address: number): string {
   const index = resolveOwningLayer(loaded, address);

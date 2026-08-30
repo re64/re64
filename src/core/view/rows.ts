@@ -128,7 +128,14 @@ export function analyze(
   const result = { references: program.xrefs.raw(), warnings: program.warnings };
 
   const resolveLabel = (addr: number) => {
-    const resolved = allLabels.resolve(addr, labelTolerance);
+    // Never fuzzy in zero page. Every byte there is its own variable, so a
+    // neighbour's name is not a near miss but a different thing entirely:
+    // `$0B` rendered as `previousYPosition-1`, and `$02` as `dat_0003-1`,
+    // which is less readable than the address it replaced. Above the first
+    // page an offset usually means "just inside this table", which is worth
+    // showing.
+    const tolerance = addr < 0x0100 ? 0 : labelTolerance;
+    const resolved = allLabels.resolve(addr, tolerance);
     return resolved
       ? { name: resolved.label.name, offset: resolved.offset }
       : undefined;

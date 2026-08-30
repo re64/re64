@@ -68,6 +68,28 @@ export interface CommentDeleteOp {
   layerId: string;
 }
 
+/**
+ * Add a layer, at a position in the declaration order.
+ *
+ * Only `symbols` for now, which is what naming an address outside the loaded
+ * bytes needs — zero page, I/O registers, KERNAL entry points. A layer that
+ * supplies bytes would have to say where they come from, and nothing needs
+ * that through an operation yet.
+ */
+export interface LayerAddOp {
+  op: "layer.add";
+  id: string;
+  layerType: "symbols";
+  name: string;
+  /** Where in declaration order; the bottom of the stack when omitted. */
+  index?: number;
+}
+
+export interface LayerRemoveOp {
+  op: "layer.remove";
+  id: string;
+}
+
 /** Promote a label at an address, or clear the choice. */
 export interface PrimarySetOp {
   op: "primary.set";
@@ -87,6 +109,8 @@ export type Op =
   | RegionDeleteOp
   | CommentSetOp
   | CommentDeleteOp
+  | LayerAddOp
+  | LayerRemoveOp
   | PrimarySetOp
   | PrimaryClearOp;
 
@@ -151,6 +175,10 @@ export function describeOp(op: Op): string {
     }
     case "comment.delete":
       return `delete comment ${op.id}`;
+    case "layer.add":
+      return `add ${op.layerType} layer ${op.name}`;
+    case "layer.remove":
+      return `remove layer ${op.id}`;
     case "primary.set":
       return `show ${op.labelId} at ${hex(op.address)}`;
     case "primary.clear":

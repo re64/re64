@@ -12,7 +12,7 @@
  * returned, so a botched splice throws instead of producing a corrupt file.
  */
 
-import { Project, ProjectComment, ProjectLabel } from "./project.js";
+import { Project, ProjectComment, ProjectLabel, ProjectLayer } from "./project.js";
 import { parseProject, parseProjectAddress } from "./project.js";
 
 /** Serialize one object compactly on a single line: `{ "a": 1, "b": 2 }`. */
@@ -650,5 +650,33 @@ export function deleteComment(raw: string, layerIndex: number, id: string): stri
   layer.comments = layer.comments.filter((c) => c.id !== id);
   if (layer.comments.length === 0) delete layer.comments;
 
+  return formatProject(project);
+}
+
+
+/**
+ * Insert a layer into the declaration order, and remove one.
+ *
+ * Reserialises, like the comment writers and for the same reason: a structural
+ * change to the layer array has no small diff to preserve, and every caller
+ * that applies operations to text is reading the result to derive an inverse.
+ */
+export function insertLayer(raw: string, layer: ProjectLayer, index?: number): string {
+  const project = parseProject(raw);
+  // Idempotent, like every other write here. Undo checks whether replaying an
+  // operation forward changes anything: if it does, something else has been
+  // here since and the stored inverse no longer means what it said. A layer
+  // insert that appended a duplicate instead of doing nothing failed that
+  // check, so creating a layer could never be undone.
+  if (project.layers.some((l) => l.id === layer.id)) return raw;
+
+  const at = index ?? 0;
+  project.layers.splice(Math.max(0, Math.min(at, project.layers.length)), 0, layer);
+  return formatProject(project);
+}
+
+export function removeLayer(raw: string, id: string): string {
+  const project = parseProject(raw);
+  project.layers = project.layers.filter((l) => l.id !== id);
   return formatProject(project);
 }

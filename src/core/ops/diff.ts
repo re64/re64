@@ -81,6 +81,28 @@ const sameRegion = (a: ProjectRegion, b: ProjectRegion) =>
 export function diffProjects(from: Project, to: Project): Op[] {
   const ops: Op[] = [];
 
+  // Layers first, and only symbols layers, which are the only kind an
+  // operation can add. A layer holding bytes is a change to what the project
+  // *is*, not an annotation, and arrives by another route.
+  //
+  // Order matters in both directions: a new layer has to exist before a label
+  // can be put in it, and a removed one has to be emptied before it goes. This
+  // was missing entirely, so a label written into a freshly created layer
+  // produced an operation naming a layer the file did not have.
+  const fromLayers = new Map(from.layers.filter((l) => l.id).map((l) => [l.id!, l]));
+  const toLayers = new Map(to.layers.filter((l) => l.id).map((l) => [l.id!, l]));
+
+  for (const [id, layer] of toLayers) {
+    if (fromLayers.has(id) || layer.type !== "symbols") continue;
+    ops.push({
+      op: "layer.add",
+      id,
+      layerType: "symbols",
+      name: layer.name ?? id,
+      index: to.layers.findIndex((l) => l.id === id),
+    });
+  }
+
   const beforeLabels = labelsById(from);
   const afterLabels = labelsById(to);
   const beforeRegions = regionsById(from);
@@ -152,6 +174,11 @@ export function diffProjects(from: Project, to: Project): Op[] {
     if (beforePrimary[address] !== labelId) {
       ops.push({ op: "primary.set", address: parseProjectAddress(address), labelId });
     }
+  }
+
+  for (const [id, layer] of fromLayers) {
+    if (toLayers.has(id) || layer.type !== "symbols") continue;
+    ops.push({ op: "layer.remove", id });
   }
 
   return ops;

@@ -200,10 +200,14 @@ describe("project schema", () => {
     expect(() => parseProject(ok)).not.toThrow();
   });
 
-  it("requires a symbol layer to carry labels and no regions", () => {
-    const empty = JSON.stringify({ layers: [{ type: "symbols" }] });
-    expect(() => parseProject(empty)).toThrow(/non-empty 'labels'/);
+  it("accepts a symbol layer with nothing in it yet", () => {
+    // Refused once, as a layer contributing nothing. It is now something a
+    // caller creates deliberately — and something that exists for an instant
+    // between adding a layer and putting the first name into it.
+    expect(() => parseProject(JSON.stringify({ layers: [{ type: "symbols" }] }))).not.toThrow();
+  });
 
+  it("requires a symbol layer to have no regions", () => {
     const withRegions = JSON.stringify({
       layers: [
         {

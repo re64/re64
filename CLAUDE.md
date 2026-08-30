@@ -529,6 +529,47 @@ KERNAL entry points — render as plain grey names rather than links. They are
 named but have no bytes, and on 6502 they are common enough that making them
 clickable means constantly landing on an error.
 
+### Naming what has no bytes
+
+`set_label` on zero page used to be refused with "add a layer of type symbols"
+— advice the API had no tool to follow. On a 6502 program every variable lives
+in zero page, so it made roughly half of what a person contributes to a listing
+impossible to say.
+
+The model already had the answer: a `symbols` layer names addresses with no
+loaded bytes, and the built-in C64 table is one. So naming or commenting an
+address nothing owns **creates one**, in the same action, and says so in the
+result. `add_layer` exists for choosing its name or keeping a second set apart.
+
+Creating rather than relaxing ownership. The rule that an annotation belongs to
+the layer supplying its bytes is what makes reordering the stack move
+annotations with the content they describe; letting anything hold anything
+would bring back precisely the bug it prevents.
+
+Two things this needed that were missing and would have been missed:
+
+- **`diffProjects` did not diff layers.** It compared labels, regions and
+  comments only, so a label written into a freshly created layer produced an
+  operation naming a layer the exported file did not have. Layer additions come
+  first and removals last, since a label needs its layer to exist and a layer
+  must be empty before it goes.
+- **`insertLayer` was not idempotent.** Undo checks whether replaying an
+  operation forward changes anything — if it does, someone else has been there
+  and the stored inverse no longer means what it said. An insert that appended a
+  duplicate rather than doing nothing failed that check, so creating a layer
+  could never be undone.
+
+An empty symbols layer is now legal. It used to be refused as "almost always a
+mistake", which stopped being true when one could be created deliberately and
+exists for an instant between adding the layer and putting the first name in it.
+
+**Fuzzy label matching is off below `$0100`.** Every byte in zero page is its
+own variable, so a neighbour's name is not a near miss but a different thing:
+`$1A` rendered as `laserAndPodInterval+1` where the reference calls it
+`leftLaserYPosition`. The raw address says less and says nothing false. Above
+the first page an offset usually does mean "just inside this table", so those
+stay.
+
 ### Comments are objects, not a field on something else
 
 A comment has an id and an address, like everything else that can be edited.

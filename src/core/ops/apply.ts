@@ -23,6 +23,8 @@ import {
   deleteComment,
   deleteLabel,
   deleteRegion,
+  insertLayer,
+  removeLayer,
   setPrimaryLabel,
   upsertComment,
   upsertLabel,
@@ -112,6 +114,16 @@ export function applyOp(raw: string, op: Op): string {
     case "comment.delete":
       return deleteComment(raw, layerIndexOf(project, op.layerId), op.id);
 
+    case "layer.add":
+      return insertLayer(
+        raw,
+        { id: op.id, type: op.layerType, name: op.name, labels: [] },
+        op.index
+      );
+
+    case "layer.remove":
+      return removeLayer(raw, op.id);
+
     case "primary.set":
       return setPrimaryLabel(raw, op.address, op.labelId);
 
@@ -187,6 +199,26 @@ export function invertOp(raw: string, op: Op): Op {
         address: parseProjectAddress(found.entry.address),
         placement: found.entry.placement ?? "before",
         text: found.entry.text,
+      };
+    }
+
+    case "layer.add":
+      // Adding a layer that is already there is a no-op, and so is undoing it.
+      return project.layers.some((l) => l.id === op.id)
+        ? op
+        : { op: "layer.remove", id: op.id };
+
+    case "layer.remove": {
+      const index = project.layers.findIndex((l) => l.id === op.id);
+      if (index < 0) return op;
+      const layer = project.layers[index];
+      return {
+        op: "layer.add",
+        id: op.id,
+        // Only symbols layers can be added, so only those can be put back.
+        layerType: "symbols",
+        name: layer.name ?? op.id,
+        index,
       };
     }
 

@@ -508,3 +508,67 @@ describe("writing about an address", () => {
     expect(rows).not.toContain("because of the timing");
   });
 });
+
+describe("naming what holds no bytes", () => {
+  it("creates a layer to hold the name, rather than refusing", () => {
+    // The refusal this replaces named the fix and offered no way to do it:
+    // "add a layer of type symbols" with nothing that could. On a 6502 program
+    // every variable lives in zero page, so roughly half of what a person
+    // contributes to a listing could not be said at all.
+    const blank = blankWorkspace();
+    const result = blank.setLabel(agent, 0x02, "currentXPosition");
+
+    expect(result.did.some((d) => d.includes("symbols layer"))).toBe(true);
+    expect(blank.labels({ namePattern: "currentXPosition" }).total).toBe(1);
+  });
+
+  it("uses the operand name once it has one", () => {
+    const blank = blankWorkspace();
+    blank.markFunction(agent, 0x8011);
+    blank.setLabel(agent, 0x0c, "previousYPosition");
+
+    // Somewhere in the decoded program something touches $0C; the name has to
+    // reach the operand column, which is the whole point of naming it.
+    const rows = blank.disassembly(0x8011, 400).lines.map((l) => l.text).join("\n");
+    expect(rows).toContain("previousYPosition");
+  });
+
+  it("makes only one layer, however many addresses are named", () => {
+    const blank = blankWorkspace();
+    blank.setLabel(agent, 0x02, "currentXPosition");
+    blank.setLabel(agent, 0x03, "currentYPosition");
+    blank.setLabel(agent, 0x04, "currentCharacter");
+
+    const symbols = blank.describe().layers.filter((l) => l.name.includes("symbols"));
+    expect(symbols).toHaveLength(1);
+  });
+
+  it("takes the layer back with the label that caused it", () => {
+    // One decision, two operations: undo must not leave an orphan layer.
+    const blank = blankWorkspace();
+    const before = blank.describe().layers.length;
+
+    blank.setLabel(agent, 0x02, "currentXPosition");
+    blank.undo(agent);
+
+    expect(blank.describe().layers).toHaveLength(before);
+    expect(blank.labels({ namePattern: "currentXPosition" }).total).toBe(0);
+  });
+
+  it("comments an address that holds no bytes too", () => {
+    const blank = blankWorkspace();
+    const result = blank.setComment(agent, 0x02, "the player's column");
+
+    expect(result.did.some((d) => d.includes("symbols layer"))).toBe(true);
+  });
+
+  it("lets a caller name the layer itself", () => {
+    const blank = blankWorkspace();
+    blank.addSymbolsLayer(agent, "hardware");
+
+    expect(blank.describe().layers.map((l) => l.name)).toContain("hardware");
+    // And the next unowned name goes into it rather than making another.
+    blank.setLabel(agent, 0x02, "currentXPosition");
+    expect(blank.describe().layers.filter((l) => l.name === "hardware")).toHaveLength(1);
+  });
+});

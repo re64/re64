@@ -214,3 +214,22 @@ describe("document shape", () => {
     expect(withTags.rows.some((r) => r.text.includes("[fn]"))).toBe(true);
   });
 });
+
+describe("naming in zero page", () => {
+  it("never borrows a neighbour's name", () => {
+    // Every byte in zero page is its own variable, so an adjacent label is not
+    // a near miss but a different thing. `$0B` rendering as
+    // `previousYPosition-1` is less readable than the address it replaced.
+    const loaded = project([0xa5, 0x0c, 0xa5, 0x0b, 0x60], {
+      labels: [{ address: 0x0c, name: "previousYPosition" }],
+    });
+
+    const text = analyze(loaded, { labelTolerance: 1 })
+      .rows.map((r) => r.text)
+      .join("\n");
+
+    expect(text).toContain("LDA previousYPosition");
+    expect(text).toContain("LDA $0B");
+    expect(text).not.toContain("previousYPosition-1");
+  });
+});
