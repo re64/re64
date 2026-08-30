@@ -23,6 +23,7 @@ import {
   analyzeProgram,
   blobPaths,
   buildMemoryMap,
+  describeOp,
   labelDeleteOp,
   labelSetOp,
   makeFileLoader,
@@ -320,6 +321,40 @@ export class Workspace {
       // An auto label's id is derived from the fact that nothing named it.
       // Handing it out invites an edit claiming an identity that means nothing.
       writable: !invented,
+    };
+  }
+
+  /**
+   * What has happened since a reader last looked.
+   *
+   * The substitute for the socket an agent cannot hold. Without it the only way
+   * to notice a change is to read the whole disassembly again and diff it —
+   * tens of thousands of tokens and a full re-analysis, to discover a label was
+   * renamed.
+   *
+   * The cursor is stable: entries are appended and never renumbered, so a
+   * position held across an undo still means what it meant.
+   */
+  changesSince(cursor = 0, limit = 100): {
+    cursor: number;
+    changes: { seq: number; did: string; by?: string; at?: number; undone?: boolean }[];
+    truncated: boolean;
+  } {
+    const found = this.room.storage.readOps(cursor);
+    const page = found.slice(0, limit);
+
+    return {
+      // Where to resume: the last entry actually returned, not the last that
+      // exists, or a truncated page would silently skip the remainder.
+      cursor: page.at(-1)?.seq ?? cursor,
+      truncated: found.length > limit,
+      changes: page.map((change) => ({
+        seq: change.seq,
+        did: describeOp(change.op),
+        by: change.author,
+        at: change.at,
+        ...(change.undone ? { undone: true } : {}),
+      })),
     };
   }
 

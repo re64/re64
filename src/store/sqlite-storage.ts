@@ -15,6 +15,7 @@ import { hashBytes, normalizeBlobName } from "./blobs.js";
 import {
   HistoryEntry,
   ProjectStorage,
+  StoredChange,
   StoredSnapshot,
   StoredUpdate,
   revOf,
@@ -140,27 +141,32 @@ export class SqliteStorage implements ProjectStorage {
     }));
   }
 
-  readOps(): Change[] {
+  readOps(afterSeq = 0): StoredChange[] {
     const rows = this.db
       .prepare(
-        "SELECT op, inverse, author, at, undone FROM ops WHERE project_id = ? ORDER BY seq"
+        "SELECT seq, op, inverse, author, at, undone FROM ops " +
+          "WHERE project_id = ? AND seq > ? ORDER BY seq"
       )
-      .all(this.projectId) as { op: string; inverse: string; author: string | null; at: number | null; undone: number }[];
+      .all(this.projectId, afterSeq) as {
+      seq: number;
+      op: string;
+      inverse: string;
+      author: string | null;
+      at: number | null;
+      undone: number;
+    }[];
+
     return rows.map((r) => ({
-      op: JSON.parse(r.op),
-      inverse: JSON.parse(r.inverse),
+      seq: r.seq,
+      op: JSON.parse(r.op) as Change["op"],
+      inverse: JSON.parse(r.inverse) as Change["inverse"],
       ...(r.author === null ? {} : { author: r.author }),
       ...(r.at === null ? {} : { at: r.at }),
       ...(r.undone ? { undone: true } : {}),
     }));
   }
 
-  writeOps(changes: readonly Change[]): void {
-    // Rewritten whole to match the interface a file could offer. A table could
-    // do better — an insert plus a flag update — but the caller does not know
-    // which entries changed, and inventing that distinction here would put the
-    // two implementations out of step.
-    this.db.prepare("DELETE FROM ops WHERE project_id = ?").run(this.projectId);
+  appendOps(changes: readonly Change[]): void {
     const insert = this.db.prepare(
       "INSERT INTO ops (project_id, op, inverse, author, at, undone) VALUES (?, ?, ?, ?, ?, ?)"
     );
@@ -174,6 +180,12 @@ export class SqliteStorage implements ProjectStorage {
         c.undone ? 1 : 0
       );
     }
+  }
+
+  markUndone(seq: number, undone: boolean): void {
+    this.db
+      .prepare("UPDATE ops SET undone = ? WHERE project_id = ? AND seq = ?")
+      .run(undone ? 1 : 0, this.projectId, seq);
   }
 
   /** Everyone who can be picked in the interface. */

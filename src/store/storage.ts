@@ -46,6 +46,11 @@ export interface StoredUpdate {
  * edit ever made), which matters because `re64 label set` runs in a fresh
  * process that would otherwise replay the entire history to rename one thing.
  */
+/** A recorded change, with the cursor position that identifies it. */
+export interface StoredChange extends Change {
+  seq: number;
+}
+
 export interface StoredSnapshot {
   seqUpto: number;
   update: Uint8Array;
@@ -79,14 +84,23 @@ export interface ProjectStorage {
   history(): HistoryEntry[];
 
   /**
-   * The undo record: every operation with its inverse, oldest first.
+   * The undo record and the change feed: every operation with its inverse,
+   * oldest first.
    *
    * Durable rather than per-session, because `re64 undo` runs in a new process
    * each time and has nothing else to remember. Undone entries stay as
    * tombstones so redo has something to aim at.
+   *
+   * **Append-only, and the sequence numbers are stable.** They used to be
+   * rewritten wholesale on every undo, which renumbered everything — fine for
+   * an undo stack read from the end, useless as a cursor. An agent cannot hold
+   * a socket, so this feed is how it learns that anything changed, and a
+   * cursor that silently means something else after an undo is worse than none.
    */
-  readOps(): Change[];
-  writeOps(changes: readonly Change[]): void;
+  appendOps(changes: readonly Change[]): void;
+  readOps(afterSeq?: number): StoredChange[];
+  /** Flip the tombstone on one entry, leaving its position alone. */
+  markUndone(seq: number, undone: boolean): void;
 
   /**
    * Run related writes as one, so a crash cannot land halfway.

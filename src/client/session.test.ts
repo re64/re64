@@ -3,7 +3,8 @@ import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer, RunningServer } from "../server/index.js";
-import { importProject } from "../store/index.js";
+import { SqliteStorage, importProject } from "../store/index.js";
+import { describeOp } from "../core/index.js";
 import { ProjectSession } from "./session.js";
 
 /**
@@ -19,6 +20,7 @@ let dir: string;
 let server: RunningServer;
 let origin: string;
 let project: string;
+let databaseUnderTest: string;
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "re64-ui-"));
@@ -31,6 +33,7 @@ beforeEach(async () => {
   await server.ready;
   origin = `http://127.0.0.1:${server.port}`;
   project = projectId;
+  databaseUnderTest = databasePath;
 });
 
 afterEach(async () => {
@@ -164,6 +167,57 @@ describe("two sessions, as two tabs would be", () => {
     expect(labelAt(a, 0x81a2)).toBe("FromB");
     a.close();
     b.close();
+  });
+});
+
+describe("what the record says afterwards", () => {
+  it("attributes an edit made over the socket, which used to leave no trace", async () => {
+    // Only CLI edits were ever recorded. A browser could rename a hundred
+    // labels and the history would know a session happened and nothing else.
+    const session = await open();
+    session.setLabel(0x8100, "ByAParticipant", undefined);
+    await settle();
+
+    const storage = new SqliteStorage(databaseUnderTest, project);
+    const recorded = storage.readOps();
+    storage.close();
+
+    expect(recorded.length).toBeGreaterThan(0);
+    expect(recorded.at(-1)).toMatchObject({ author: "tester" });
+    expect(describeOp(recorded.at(-1)!.op)).toContain("ByAParticipant");
+    session.close();
+  });
+
+  it("records an inverse, so the CLI can take it back", async () => {
+    const session = await open();
+    session.setLabel(0x8100, "Reversible", undefined);
+    await settle();
+
+    const storage = new SqliteStorage(databaseUnderTest, project);
+    const recorded = storage.readOps().at(-1)!;
+    storage.close();
+
+    expect(recorded.inverse).toMatchObject({ op: "label.set", name: "InitializeGame" });
+    session.close();
+  });
+
+  it("hands out stable positions, so a reader can ask what it has missed", async () => {
+    const session = await open();
+    session.setLabel(0x8100, "First", undefined);
+    await settle();
+
+    const storage = new SqliteStorage(databaseUnderTest, project);
+    const cursor = storage.readOps().at(-1)!.seq;
+
+    session.setLabel(0x81a2, "Second", "function");
+    await settle();
+
+    const since = storage.readOps(cursor);
+    storage.close();
+
+    expect(since).toHaveLength(1);
+    expect(describeOp(since[0].op)).toContain("Second");
+    session.close();
   });
 });
 

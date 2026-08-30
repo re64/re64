@@ -77,6 +77,8 @@ export class SyncServer {
   private readonly sessionOf = new Map<WebSocket, string>();
   /** Client ids already bound to a session; binding is idempotent but noisy. */
   private readonly knownClients = new Set<number>();
+  /** Which user each socket claims to be, for attributing what it sends. */
+  private readonly userOf = new Map<WebSocket, string>();
 
   /** The project this relay is for. */
   get store(): ProjectStore {
@@ -118,6 +120,12 @@ export class SyncServer {
       this.broadcast(encoding.toUint8Array(message), from);
       this.scheduleWrite();
     });
+
+    // Only this layer can say who an update came from: it holds the socket, the
+    // socket carries a session, and the session claims a user.
+    options.store.attributeWith((origin) =>
+      origin instanceof WebSocket ? this.userOf.get(origin) : undefined
+    );
 
     // Presence, relayed but never persisted. Who is looking at what is not part
     // of the project and must not end up in its history.
@@ -165,6 +173,7 @@ export class SyncServer {
       this.options.onSession?.(sessionId, author);
       this.sessionOf.set(socket, sessionId);
     }
+    this.userOf.set(socket, author);
 
     socket.binaryType = "arraybuffer";
     this.clients.add(socket);
@@ -231,6 +240,7 @@ export class SyncServer {
   private leave(socket: WebSocket): void {
     this.clients.delete(socket);
     this.sessionOf.delete(socket);
+    this.userOf.delete(socket);
     // Presence outlives the socket by 30s otherwise, so a closed tab lingers in
     // the participant list.
     awarenessProtocol.removeAwarenessStates(

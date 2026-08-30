@@ -185,6 +185,52 @@ describe("editing", () => {
   });
 });
 
+describe("catching up after being away", () => {
+  it("reports what happened since a position", () => {
+    workspace.setLabel(agent, 0x8f00, "First");
+    const { cursor } = workspace.changesSince();
+
+    workspace.setLabel(agent, 0x8f10, "Second");
+    const since = workspace.changesSince(cursor);
+
+    expect(since.changes).toHaveLength(1);
+    expect(since.changes[0].did).toContain("Second");
+    expect(since.changes[0].by).toBe("usr_agent");
+  });
+
+  it("returns nothing when nothing has happened", () => {
+    workspace.setLabel(agent, 0x8f00, "Only");
+    const { cursor } = workspace.changesSince();
+    expect(workspace.changesSince(cursor).changes).toEqual([]);
+  });
+
+  it("keeps positions stable across an undo", () => {
+    // The reason the log is append-only. It used to be rewritten wholesale on
+    // every undo, renumbering everything, so a held cursor silently came to
+    // mean something else.
+    workspace.setLabel(agent, 0x8f00, "First");
+    const { cursor } = workspace.changesSince();
+    workspace.setLabel(agent, 0x8f10, "Second");
+
+    workspace.undo(agent);
+
+    const since = workspace.changesSince(cursor);
+    expect(since.changes[0].did).toContain("Second");
+    expect(since.changes[0].undone).toBe(true);
+  });
+
+  it("resumes from the last entry it returned, not the last that exists", () => {
+    for (let i = 0; i < 5; i++) workspace.setLabel(agent, 0x8f00 + i * 0x10, `L${i}`);
+
+    const page = workspace.changesSince(0, 2);
+    expect(page.truncated).toBe(true);
+    expect(page.changes).toHaveLength(2);
+
+    const next = workspace.changesSince(page.cursor, 2);
+    expect(next.changes[0].did).toContain("L2");
+  });
+});
+
 describe("the cache", () => {
   it("does not re-analyse when nothing changed", () => {
     const first = workspace.program();

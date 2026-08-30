@@ -13,6 +13,7 @@ import { Change, decodeChanges, encodeChanges } from "../core/index.js";
 import {
   HistoryEntry,
   ProjectStorage,
+  StoredChange,
   StoredSnapshot,
   StoredUpdate,
   revOf,
@@ -149,17 +150,30 @@ export class FileStorage implements ProjectStorage {
     return () => {};
   }
 
-  readOps(): Change[] {
-    return existsSync(this.paths.ops)
-      ? decodeChanges(readFileSync(this.paths.ops, "utf-8"))
-      : [];
+  readOps(afterSeq = 0): StoredChange[] {
+    if (!existsSync(this.paths.ops)) return [];
+    // Position in the file is the sequence number. Nothing is ever removed and
+    // order never changes, so it is as stable as a table's would be.
+    return decodeChanges(readFileSync(this.paths.ops, "utf-8"))
+      .map((change, index) => ({ ...change, seq: index + 1 }))
+      .filter((change) => change.seq > afterSeq);
   }
 
-  writeOps(changes: readonly Change[]): void {
-    // Rewritten whole rather than appended: undo flips a flag on an existing
-    // entry, which an append-only file cannot express. A table can, and this
-    // becomes an insert plus an update once one is behind it.
-    writeFileAtomic(this.paths.ops, encodeChanges(changes));
+  appendOps(changes: readonly Change[]): void {
+    appendFileSync(this.paths.ops, encodeChanges(changes), "utf-8");
+  }
+
+  markUndone(seq: number, undone: boolean): void {
+    // A rewrite, because a line in the middle changed. Order is preserved, so
+    // the sequence numbers this hands out afterwards are the same ones.
+    const all = this.readOps();
+    const target = all.find((change) => change.seq === seq);
+    if (!target) return;
+    target.undone = undone;
+    writeFileAtomic(
+      this.paths.ops,
+      encodeChanges(all.map(({ seq: _seq, ...change }) => change))
+    );
   }
 
   appendHistory(entry: HistoryEntry): void {
