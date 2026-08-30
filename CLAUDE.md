@@ -914,10 +914,14 @@ there is a gold standard to compare against.
 
 Two rules that make these produce measurements rather than anecdotes:
 
-- **Derive the gap list from the request log, not from what the agents report.**
-  They are unreliable narrators of their own difficulty: they invent tool names
-  and then describe the invention as a gap, and work silently around whatever
-  actually hurt. What was *tried* is ground truth.
+- **Take the agents' reports and the request log together.** A report carries
+  what a log cannot: intent, what they expected to find, why something was
+  awkward. The log carries what a report cannot, because an agent is an
+  unreliable narrator of its own difficulty — it invents a tool name and then
+  describes the invention as a gap, and works silently around whatever actually
+  hurt. Read the reports for what to look for and the log for whether it
+  happened. Where they disagree the log wins; but the report is what makes a
+  line in the log mean anything.
 - **Only fix what blocks the next experiment.** Everything else becomes a list
   and stays a list. Without that rule the first experiment's output consumes
   every week that follows.
