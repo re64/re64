@@ -28,6 +28,7 @@ import { McpEndpoint, createMcpEndpoint } from "./mcp/transport.js";
 import { Caller, resolveCaller } from "./mcp/identity.js";
 import { registerTools } from "./mcp/tools.js";
 import { McpLog, defaultMcpLogPath, openMcpLog } from "./mcp/log.js";
+import { SessionLeases, sessionKeyOf } from "./sessions.js";
 import { applyOpToDoc, projectFromDoc } from "../core/crdt/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -190,6 +191,12 @@ export function startServer(options: ServerOptions): RunningServer {
   let endpoint: Promise<McpEndpoint | undefined> | undefined;
   let callerFor: () => Caller = () => ({ userId: "agent", label: "agent" });
 
+  /**
+   * Agent sessions, held here rather than per project: one caller working
+   * across two projects is one session, the same way one browser tab would be.
+   */
+  const leases = new SessionLeases();
+
   const mcpLog: McpLog = openMcpLog(
     options.mcpLog === undefined ? defaultMcpLogPath(projectPath) : options.mcpLog
   );
@@ -229,7 +236,23 @@ export function startServer(options: ServerOptions): RunningServer {
             error: "The MCP endpoint is unavailable; its SDK could not be loaded",
           });
         }
-        callerFor = () => resolveCaller(req, url, room(projectOf(url)).storage);
+        callerFor = () => {
+          const { storage } = room(projectOf(url));
+          const who = resolveCaller(req, url, storage);
+          const { key, explicit } = sessionKeyOf(req.headers, who.userId);
+          const lease = leases.claim(key, who);
+          // Idempotent, and re-run per request so `last_seen_at` tracks a lease
+          // that is still being used rather than one that was once opened.
+          if (storage instanceof SqliteStorage) {
+            storage.startSession(lease.id, lease.userId, Date.now(), lease.codename);
+          }
+          return {
+            ...who,
+            sessionId: lease.id,
+            codename: lease.codename,
+            sharedSession: !explicit,
+          };
+        };
         // The transport wants the parsed body; a GET or DELETE carries none.
         const raw = req.method === "POST" ? await readBody(req) : "";
         return endpoint.handle(req, res, raw ? JSON.parse(raw) : undefined);

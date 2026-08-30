@@ -208,14 +208,15 @@ export class SqliteStorage implements ProjectStorage {
    *
    * Idempotent: a reconnect keeps the same row and only moves `last_seen_at`.
    */
-  startSession(id: string, userId: string | undefined, now: number): void {
+  startSession(id: string, userId: string | undefined, now: number, codename?: string): void {
     this.db
       .prepare(
-        "INSERT INTO sessions (id, user_id, project_id, started_at, last_seen_at) " +
-          "VALUES (?, ?, ?, ?, ?) " +
-          "ON CONFLICT(id) DO UPDATE SET last_seen_at = excluded.last_seen_at"
+        "INSERT INTO sessions (id, user_id, project_id, codename, started_at, last_seen_at) " +
+          "VALUES (?, ?, ?, ?, ?, ?) " +
+          "ON CONFLICT(id) DO UPDATE SET last_seen_at = excluded.last_seen_at, " +
+          "codename = COALESCE(excluded.codename, sessions.codename)"
       )
-      .run(id, userId ?? null, this.projectId, now, now);
+      .run(id, userId ?? null, this.projectId, codename ?? null, now, now);
   }
 
   /** Bind the Yjs client id, once the traffic reveals it. */
@@ -238,12 +239,27 @@ export class SqliteStorage implements ProjectStorage {
     return row ? { sessionId: row.id, userId: row.user_id } : undefined;
   }
 
-  sessions(): { id: string; userId: string | null; clientId: number | null }[] {
+  sessions(): {
+    id: string;
+    userId: string | null;
+    clientId: number | null;
+    codename: string | null;
+  }[] {
     return (
       this.db
-        .prepare("SELECT id, user_id, client_id FROM sessions ORDER BY started_at")
-        .all() as { id: string; user_id: string | null; client_id: number | null }[]
-    ).map((r) => ({ id: r.id, userId: r.user_id, clientId: r.client_id }));
+        .prepare("SELECT id, user_id, client_id, codename FROM sessions ORDER BY started_at")
+        .all() as {
+        id: string;
+        user_id: string | null;
+        client_id: number | null;
+        codename: string | null;
+      }[]
+    ).map((r) => ({
+      id: r.id,
+      userId: r.user_id,
+      clientId: r.client_id,
+      codename: r.codename,
+    }));
   }
 
   /**

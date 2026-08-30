@@ -101,7 +101,7 @@ export async function createMcpEndpoint(options: {
             ...describeRequest(body),
             at: new Date(started).toISOString(),
             ms: Date.now() - started,
-            caller: safeCaller(options.context),
+            ...safeCaller(options.context),
             session: header(request, "mcp-session-id"),
             bytes: watching.bytes(),
             ...replyOf(watching.text(), { truncated: watching.truncated() }),
@@ -135,12 +135,18 @@ interface Transport {
   close(): Promise<void>;
 }
 
-/** The caller, if resolving one does not itself fail. */
-function safeCaller(context: () => McpContext): string | undefined {
+/**
+ * The caller, if resolving one does not itself fail.
+ *
+ * Resolving claims a lease, which touches storage — so a transcript must not
+ * be the thing that turns a working request into a failed one.
+ */
+function safeCaller(context: () => McpContext): Partial<McpLogEntry> {
   try {
-    return context().caller.userId;
+    const { userId, sessionId, codename } = context().caller;
+    return { caller: userId, sessionId, codename };
   } catch {
-    return undefined;
+    return {};
   }
 }
 

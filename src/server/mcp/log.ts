@@ -27,6 +27,14 @@ export interface McpLogEntry {
   ms: number;
   /** Who claimed to be calling. */
   caller?: string;
+  /**
+   * The lease it was working under, and its handle.
+   *
+   * The handle is what makes a five-agent transcript readable: "basalt renamed
+   * $8870" can be followed by eye, a session id cannot.
+   */
+  sessionId?: string;
+  codename?: string;
   /** JSON-RPC method: `tools/call`, `initialize`, `tools/list`. */
   method?: string;
   /** For `tools/call`, the tool asked for — which may not exist. */

@@ -118,6 +118,48 @@ describe("the transcript", () => {
     expect(entry.session).toBe("sess-abc");
   });
 
+  it("names the session a call worked under", async () => {
+    await call("list_projects");
+
+    const [entry] = transcript();
+    expect(entry.sessionId).toMatch(/^ses_/);
+    expect(entry.codename).toMatch(/^[a-z]+$/);
+  });
+
+  it("separates two agents sharing one credential", async () => {
+    // One identity, many sessions — the property that stops two agents
+    // undoing each other's work. Distinct MCP session ids, one user.
+    await rpc(
+      "tools/call",
+      { name: "list_projects", arguments: {} },
+      { "mcp-session-id": "agent-one" }
+    );
+    await rpc(
+      "tools/call",
+      { name: "list_projects", arguments: {} },
+      { "mcp-session-id": "agent-two" }
+    );
+
+    const entries = transcript().filter((e) => e.tool === "list_projects");
+    expect(entries).toHaveLength(2);
+    expect(entries[0].caller).toBe(entries[1].caller);
+    expect(entries[0].sessionId).not.toBe(entries[1].sessionId);
+    expect(entries[0].codename).not.toBe(entries[1].codename);
+  });
+
+  it("keeps one agent on one session across calls", async () => {
+    for (let i = 0; i < 3; i++) {
+      await rpc(
+        "tools/call",
+        { name: "list_projects", arguments: {} },
+        { "mcp-session-id": "steady" }
+      );
+    }
+
+    const ids = new Set(transcript().map((e) => e.sessionId));
+    expect(ids.size).toBe(1);
+  });
+
   it("can be turned off", async () => {
     await server.close();
     server = startServer({

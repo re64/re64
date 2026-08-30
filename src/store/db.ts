@@ -48,7 +48,7 @@ function sqlite(): typeof import("node:sqlite") {
   return cached;
 }
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -129,6 +129,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   user_id       TEXT,
   project_id    TEXT,
   client_id     INTEGER,
+  -- The handle a person reads. Kept after the lease lapses: a transcript is
+  -- read long afterwards, and "basalt renamed this" has to still resolve.
+  codename      TEXT,
   started_at    INTEGER NOT NULL,
   last_seen_at  INTEGER NOT NULL
 );
@@ -150,6 +153,26 @@ CREATE TABLE IF NOT EXISTS files (
 );
 `;
 
+/**
+ * Bring an older database up to the current shape.
+ *
+ * `CREATE TABLE IF NOT EXISTS` does nothing to a table that already exists, so
+ * a column added later never reaches a database made before it. Additive only:
+ * every migration here must be a column an older build simply ignores, which
+ * keeps a database readable by both and means this never has to run backwards.
+ */
+function addMissingColumns(db: DatabaseSync): void {
+  const wanted: [table: string, column: string, type: string][] = [
+    ["sessions", "codename", "TEXT"],
+  ];
+
+  for (const [table, column, type] of wanted) {
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (columns.some((c) => c.name === column)) continue;
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+}
+
 export function openDatabase(path: string): DatabaseSync {
   const db = new (sqlite().DatabaseSync)(path);
 
@@ -161,6 +184,7 @@ export function openDatabase(path: string): DatabaseSync {
   // lock; the writes here are milliseconds long.
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec(SCHEMA);
+  addMissingColumns(db);
 
   const found = db
     .prepare("SELECT value FROM meta WHERE key = 'schema_version'")
