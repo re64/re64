@@ -167,6 +167,67 @@ describe("two sessions, as two tabs would be", () => {
   });
 });
 
+describe("as a headless participant", () => {
+  it("keeps the model current without being asked", async () => {
+    // What separates this from the CLI: an agent holding a session sees what
+    // other people do, rather than re-reading on a hunch.
+    const a = await open();
+    const b = await open();
+
+    a.setLabel(0x8100, "FromA", undefined);
+    await b.settled();
+
+    expect(labelAt(b, 0x8100)).toBe("FromA");
+    a.close();
+    b.close();
+  });
+
+  it("says when it has caught up", async () => {
+    const a = await open();
+    const b = await open();
+
+    a.setLabel(0x8100, "One", undefined);
+    a.setLabel(0x81a2, "Two", "function");
+    await b.settled();
+
+    expect(labelAt(b, 0x8100)).toBe("One");
+    expect(labelAt(b, 0x81a2)).toBe("Two");
+    a.close();
+    b.close();
+  });
+
+  it("notifies after the model is rebuilt, not merely when the document moved", async () => {
+    // A listener firing on the raw update would read the previous
+    // disassembly, which is the whole reason to have this seam.
+    const a = await open();
+    const b = await open();
+
+    const seen: (string | undefined)[] = [];
+    b.onChange(() => seen.push(labelAt(b, 0x8100)));
+
+    a.setLabel(0x8100, "Observed", undefined);
+    await b.settled();
+
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.at(-1)).toBe("Observed");
+    a.close();
+    b.close();
+  });
+
+  it("counts what it has seen", async () => {
+    const a = await open();
+    const b = await open();
+    expect(b.debug().changes).toBe(0);
+
+    a.setLabel(0x8100, "Counted", undefined);
+    await b.settled();
+
+    expect(b.debug().changes).toBeGreaterThan(0);
+    a.close();
+    b.close();
+  });
+});
+
 describe("presence", () => {
   it("shows nobody until someone says who they are", async () => {
     const session = await open();

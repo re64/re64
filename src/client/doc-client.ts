@@ -103,7 +103,8 @@ export class DocClient {
 
   /** Connect and wait for the first sync, so callers start from real content. */
   static async open(options: OpenOptions = {}): Promise<DocClient> {
-    const { project = "project", author = "anonymous", origin = location.origin } = options;
+    const { project = "project", author = "anonymous" } = options;
+    const origin = options.origin ?? pageOrigin();
     const sessionId = newSessionId();
     const doc = emptyDoc();
     const url = `${origin.replace(/^http/, "ws")}/sync`;
@@ -203,7 +204,21 @@ function describe(item: { meta: Map<unknown, unknown> } | undefined): string | u
   return typeof description === "string" ? description : undefined;
 }
 
-/** Identifies this tab for the life of the page; not persisted. */
+/**
+ * Where the server is, when nobody said.
+ *
+ * A browser knows because it came from there. Anything else has to say, and
+ * failing loudly is better than defaulting to somewhere plausible and wrong.
+ */
+function pageOrigin(): string {
+  const page = (globalThis as { location?: { origin: string } }).location;
+  if (!page) {
+    throw new Error("No server origin given, and no page to take one from");
+  }
+  return page.origin;
+}
+
+/** Identifies this session for as long as it lasts; not persisted. */
 function newSessionId(): string {
   return crypto.randomUUID();
 }

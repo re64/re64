@@ -36,12 +36,17 @@ export interface SessionDebug {
   blobs: { path: string; bytes: number }[];
   /** How long the last rebuild took: projection, map, and layer construction. */
   lastBuildMs: number;
+  /** How many document changes this session has seen, local or remote. */
+  changes: number;
   participants: number;
   undo: { canUndo: boolean; canRedo: boolean; next: string | undefined };
 }
 
 export class ProjectSession {
   private lastBuildMs = 0;
+  private changeCount = 0;
+  private readonly listeners: (() => void)[] = [];
+  private refreshing: Promise<void> | undefined;
 
   private constructor(
     private readonly client: DocClient,
@@ -71,10 +76,35 @@ export class ProjectSession {
 
     await session.fetchMissingBlobs(projectFromDoc(client.doc));
     session.loaded = session.build();
+
+    // From here the model follows the document by itself. Refreshes are
+    // serialised because rebuilding is async — a burst of updates would
+    // otherwise interleave two rebuilds and leave the later one's result
+    // overwritten by the earlier one's.
+    client.onChange(() => {
+      session.changeCount++;
+      session.refreshing = (session.refreshing ?? Promise.resolve())
+        .then(() => session.refresh())
+        .then(() => {
+          for (const listener of session.listeners) listener();
+        })
+        .catch(() => {
+          // A rebuild can fail if a referenced blob cannot be fetched. The
+          // model keeps its last good state rather than being torn down.
+        });
+    });
+
     return session;
   }
 
-  /** Re-derive the model. Call after the document changes. */
+  /**
+   * Re-derive the model from the document.
+   *
+   * Called automatically whenever the document changes, so `loaded` is normally
+   * current without anyone asking. It stays public because a caller that has
+   * just made an edit may want to read the result on the next line rather than
+   * wait for the notification.
+   */
   async refresh(): Promise<void> {
     const project = projectFromDoc(this.client.doc);
     // A remote edit can introduce a layer whose bytes are not here yet.
@@ -82,8 +112,31 @@ export class ProjectSession {
     this.loaded = this.build();
   }
 
+  /**
+   * Called after the model has been brought up to date, not merely when the
+   * document changed.
+   *
+   * The distinction matters for anything acting on the result: a listener that
+   * fired on the raw update would see the old disassembly, and a listener that
+   * re-derived for itself would do the work twice.
+   */
   onChange(listener: () => void): void {
-    this.client.onChange(listener);
+    this.listeners.push(listener);
+  }
+
+  /**
+   * Resolve once nothing has changed for a moment.
+   *
+   * What an agent usually wants after making an edit, or before reading: it
+   * lets a burst of remote changes land as one instead of reacting to each.
+   */
+  async settled(quietMs = 150): Promise<void> {
+    let seen = this.changeCount;
+    for (;;) {
+      await new Promise((resolve) => setTimeout(resolve, quietMs));
+      if (this.changeCount === seen) return;
+      seen = this.changeCount;
+    }
   }
 
   onPresence(listener: () => void): void {
@@ -107,7 +160,7 @@ export class ProjectSession {
             (this.project ? `&project=${encodeURIComponent(this.project)}` : "")
         );
         if (!res.ok) {
-          const detail = await res.json().catch(() => ({}));
+          const detail = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(detail.error ?? `could not load ${path}`);
         }
         this.blobs.set(path, new Uint8Array(await res.arrayBuffer()));
@@ -211,6 +264,7 @@ export class ProjectSession {
       status: this.client.status,
       blobs: [...this.blobs].map(([path, data]) => ({ path, bytes: data.length })),
       lastBuildMs: this.lastBuildMs,
+      changes: this.changeCount,
       participants: this.client.participants().length,
       undo: {
         canUndo: this.client.canUndo,

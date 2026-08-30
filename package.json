@@ -13,7 +13,8 @@
     ".": {
       "types": "./dist/core/index.d.ts",
       "import": "./dist/core/index.js"
-    }
+    },
+    "./client": "./dist/client/index.js"
   },
   "scripts": {
     "build": "tsc",

@@ -42,7 +42,7 @@ const ALLOWED: { package: string; match: RegExp; only: string[] }[] = [
     // One production file, plus tests — which connect a real provider on
     // purpose. A hand-written stand-in would only prove the server agrees with
     // itself; the point is that a stock client interoperates.
-    only: [join("src", "ui", "doc-client.ts"), TESTS],
+    only: [join("src", "client", "doc-client.ts"), TESTS],
   },
 ];
 

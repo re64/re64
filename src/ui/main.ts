@@ -25,7 +25,7 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { json } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { analyze, buildMapView } from "../core/index.js";
-import { ProjectSession } from "./session.js";
+import { ProjectSession } from "../client/index.js";
 import type SlSplitPanel from "@shoelace-style/shoelace/dist/components/split-panel/split-panel.js";
 // Registers <sl-split-panel>. Components are imported individually so the
 // bundle carries only what is used.
@@ -437,7 +437,8 @@ async function undoEdit(): Promise<void> {
     setStatus("Nothing to undo");
     return;
   }
-  await repaint();
+  await session.settled(0);
+  repaint();
   setStatus(`Undid: ${undone}`);
 }
 
@@ -448,7 +449,8 @@ async function redoEdit(): Promise<void> {
     setStatus("Nothing to redo");
     return;
   }
-  await repaint();
+  await session.settled(0);
+  repaint();
   setStatus(`Redid: ${redone}`);
 }
 
@@ -490,15 +492,9 @@ function flushDeferredRepaint(): void {
   scheduleRepaint();
 }
 
-async function repaint(): Promise<void> {
+function repaint(): void {
   if (!session) return;
   const anchor = captureAnchor();
-  try {
-    await session.refresh();
-  } catch (err) {
-    setStatus(err instanceof Error ? err.message : "Could not apply a change", true);
-    return;
-  }
   render();
   restoreAnchor(anchor);
 }
