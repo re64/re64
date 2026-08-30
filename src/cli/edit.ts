@@ -17,10 +17,12 @@ import {
   Op,
   Project,
   RegionKind,
-  newId,
+  labelDeleteOp,
+  labelSetOp,
+  owningLayerId,
   parseProject,
-  parseProjectAddress,
-  resolveOwningLayer,
+  regionDeleteOp,
+  regionSetOp,
 } from "../core/index.js";
 import {
   FileStorage,
@@ -47,75 +49,42 @@ export class ProjectEditor {
     );
   }
 
-  /**
-   * The layer that should own an annotation at an address, by id.
-   *
-   * Loads the project properly rather than guessing from the schema: a PRG
-   * layer's range comes from the file's load header, not from any declared
-   * address, so nothing in the JSON alone says where it sits.
-   */
-  owningLayerId(address: number): string {
-    const loaded = (this.loaded ??= this.isDatabase
+  private loadedProject(): LoadedProject {
+    return (this.loaded ??= this.isDatabase
       ? loadProjectFromDatabase(this.projectPath)
       : loadProjectFile(this.projectPath));
-    const index = resolveOwningLayer(loaded, address);
-    if (index === undefined) {
-      throw new Error(
-        `No layer owns ${address.toString(16).toUpperCase()}. Add a layer of ` +
-          `type "symbols" to name addresses outside the loaded bytes.`
-      );
-    }
-    const id = loaded.project.layers[index].id;
-    if (!id) throw new Error(`Layer ${index} has no id; run: re64 migrate ${this.projectPath}`);
-    return id;
   }
 
-  project(): Project {
-    return (this.parsed ??= parseProject(this.store.text()));
+  owningLayerId(address: number): string {
+    return owningLayerId(this.loadedProject(), address);
   }
 
-  /** A label.set op, reusing the id already at that address if there is one. */
   labelSetOp(
-    layerId: string,
+    _layerId: string,
     address: number,
     name: string,
     type?: LabelType,
     comment?: string
   ): Op {
-    const layer = this.project().layers.find((l) => l.id === layerId);
-    const existing = layer?.labels?.find((l) => parseProjectAddress(l.address) === address);
-    return { op: "label.set", id: existing?.id ?? newId("lbl"), layerId, address, name, type, comment };
+    return labelSetOp(this.loadedProject(), address, name, type, comment);
   }
 
-  /** A label.delete op, or undefined when nothing is named there. */
-  labelDeleteOp(layerId: string, address: number): Op | undefined {
-    const layer = this.project().layers.find((l) => l.id === layerId);
-    const existing = layer?.labels?.find((l) => parseProjectAddress(l.address) === address);
-    return existing?.id ? { op: "label.delete", id: existing.id, layerId } : undefined;
+  labelDeleteOp(_layerId: string, address: number): Op | undefined {
+    return labelDeleteOp(this.loadedProject(), address);
   }
 
-  /** A region.set op, reusing the id of a region with the same start. */
   regionSetOp(
-    layerId: string,
+    _layerId: string,
     start: number,
     end: number,
     kind: RegionKind,
     name?: string
   ): Op {
-    const layer = this.project().layers.find((l) => l.id === layerId);
-    const existing = layer?.regions?.find((r) => parseProjectAddress(r.start) === start);
-    return { op: "region.set", id: existing?.id ?? newId("rgn"), layerId, start, end, kind, name };
+    return regionSetOp(this.loadedProject(), start, end, kind, name);
   }
 
-  /** A region.delete op for whichever layer declares a region starting there. */
   regionDeleteOp(start: number): Op | undefined {
-    for (const layer of this.project().layers) {
-      const found = layer.regions?.find((r) => parseProjectAddress(r.start) === start);
-      if (found?.id && layer.id) {
-        return { op: "region.delete", id: found.id, layerId: layer.id };
-      }
-    }
-    return undefined;
+    return regionDeleteOp(this.loadedProject(), start);
   }
 
   run(ops: readonly Op[], author: string, now: number): string[] {

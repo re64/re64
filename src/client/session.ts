@@ -22,8 +22,12 @@ import {
   blobPaths,
   buildMemoryMap,
   describeOp,
+  labelDeleteOp,
+  labelSetOp,
   makeFileLoader,
-  newId,
+  RegionKind,
+  regionDeleteOp,
+  regionSetOp,
   resolveOwningLayer,
 } from "../core/index.js";
 import { projectFromDoc } from "../core/crdt/index.js";
@@ -194,19 +198,6 @@ export class ProjectSession {
     return resolveOwningLayer(this.loaded, address);
   }
 
-  private layerIdFor(address: number): string {
-    const index = this.layerFor(address);
-    if (index === undefined) {
-      throw new Error(
-        `No layer owns $${address.toString(16).toUpperCase()}. Add a layer of ` +
-          `type "symbols" to name addresses outside the loaded bytes.`
-      );
-    }
-    const id = this.loaded.project.layers[index].id;
-    if (!id) throw new Error("Project has no ids; run: re64 migrate");
-    return id;
-  }
-
   /** Apply operations as one undoable action. */
   private run(ops: readonly Op[]): void {
     if (ops.length === 0) return;
@@ -215,25 +206,24 @@ export class ProjectSession {
   }
 
   setLabel(address: number, name: string, type: ProjectLabel["type"] | undefined): void {
-    // Reuse the id already at this address so a rename keeps its identity
-    // rather than replacing the label with a new one.
-    const existing = this.loaded.map.getLabels().getLabelsAt(address)[0];
-    this.run([
-      {
-        op: "label.set",
-        id: existing?.id ?? newId("lbl"),
-        layerId: this.layerIdFor(address),
-        address,
-        name,
-        type,
-      },
-    ]);
+    // The identity rule lives in core/ops/edits, because it used to live here
+    // *and* in the CLI and the two disagreed: this one reused whatever label
+    // resolved at the address, which includes the built-in platform names.
+    this.run([labelSetOp(this.loaded, address, name, type)]);
   }
 
   removeLabel(address: number): void {
-    const existing = this.loaded.map.getLabels().getLabelsAt(address)[0];
-    if (!existing) return;
-    this.run([{ op: "label.delete", id: existing.id, layerId: this.layerIdFor(address) }]);
+    const op = labelDeleteOp(this.loaded, address);
+    if (op) this.run([op]);
+  }
+
+  setRegion(start: number, end: number, kind: RegionKind, name?: string): void {
+    this.run([regionSetOp(this.loaded, start, end, kind, name)]);
+  }
+
+  removeRegion(start: number): void {
+    const op = regionDeleteOp(this.loaded, start);
+    if (op) this.run([op]);
   }
 
   undo(): string | undefined {

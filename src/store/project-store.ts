@@ -47,6 +47,18 @@ export class ProjectStore {
   private readonly authors = new Set<string>();
   private readonly listeners: ((update: Uint8Array, origin: unknown) => void)[] = [];
   /**
+   * How many times the document has changed in this process.
+   *
+   * A cache key, and deliberately not `version()`: that hashes the whole
+   * projection, so it charges real work on every *hit* to discover nothing
+   * happened. This is conservative in the safe direction — a change that turns
+   * out to be a no-op invalidates unnecessarily, but nothing is ever missed.
+   *
+   * Process-local, which is all a process-local cache needs. `version()`
+   * remains the content-addressed identity for anything crossing a boundary.
+   */
+  private changed = 0;
+  /**
    * What this session has changed so far.
    *
    * Accumulated as the file is written rather than derived at the end: the file
@@ -84,6 +96,7 @@ export class ProjectStore {
     // process that dies here has lost nothing.
     this.doc.on("update", (update: Uint8Array, origin: unknown) => {
       if (origin === "load") return;
+      this.changed++;
       this.storage.appendUpdate(update);
       this.dirty = true;
       for (const listener of this.listeners) listener(update, origin);
@@ -178,6 +191,12 @@ export class ProjectStore {
       ops: { total: ops.length, undone: ops.filter((c) => c.undone).length },
       history: this.storage.history().length,
     };
+  }
+
+  /** A counter that moves whenever the document does. See `changed`. */
+  get docVersion(): number {
+    this.document();
+    return this.changed;
   }
 
   /** The project as stored, without going through the document. */
