@@ -889,13 +889,15 @@ export class Workspace {
    *
    * `end` is exclusive, and a caller that reads it as inclusive gets a region
    * one byte short. That is silent for most kinds and fatal for a jumptable,
-   * where two bytes is the minimum that can hold anything: `$8000-$8001` is one
-   * byte, contains no address, decodes nothing, and returns ok. On a project
-   * with nothing else reachable that is the difference between the whole
-   * program and five instructions.
+   * where every entry is two bytes: `$8000-$8001` is one byte, contains no
+   * address, decodes nothing, and returns ok. On a project with nothing else
+   * reachable that is the difference between the whole program and five
+   * instructions.
    *
-   * So the span it actually took is reported back, and a jumptable too small to
-   * contain an address is refused rather than accepted and ignored.
+   * So the span it actually took is reported back, and an odd-length jumptable
+   * is refused. Odd rather than merely too-short, because the off-by-one is the
+   * same mistake at every size and the extractor drops a trailing odd byte
+   * without saying so.
    */
   setRegion(
     caller: Caller,
@@ -911,11 +913,23 @@ export class Workspace {
           `${hex4(start)}-${hex4(end)} covers none. Did you mean end ${hex4(start + 1)}?`
       );
     }
-    if (kind === "jumptable" && end - start < 2) {
+    if (kind === "jumptable" && (end - start) % 2 !== 0) {
+      // Every entry is two bytes, so an odd span is an off-by-one at any size,
+      // not only the one-byte case. The extractor reads pairs while
+      // `addr + 1 < end`, so an odd byte is dropped in silence: a five-entry
+      // table declared one byte short yields four entries and reports success.
+      const bytes = end - start;
+      const entries = (n: number) => `${hex4(start + n * 2)} (${n} ${n === 1 ? "entry" : "entries"})`;
+      // Only ends that would hold something: proposing a region of nothing is
+      // noise in the one message that has to be read carefully.
+      const suggestions = [
+        ...((bytes - 1) / 2 >= 1 ? [entries((bytes - 1) / 2)] : []),
+        entries((bytes + 1) / 2),
+      ];
       throw new Error(
-        `A jumptable holds 16-bit addresses, so it needs at least two bytes: ` +
-          `${hex4(start)}-${hex4(end)} covers ${end - start}. Remember end is ` +
-          `exclusive — for one entry use end ${hex4(start + 2)}.`
+        `A jumptable holds 16-bit addresses, so it covers an even number of ` +
+          `bytes; ${hex4(start)}-${hex4(end)} covers ${bytes}. Remember end is ` +
+          `exclusive — did you mean end ${suggestions.join(" or ")}?`
       );
     }
 

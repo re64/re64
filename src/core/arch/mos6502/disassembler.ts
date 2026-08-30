@@ -19,7 +19,8 @@ export interface RegionLookup {
 export type DisassemblyWarning =
   | { type: "undefined"; address: number }
   | { type: "truncated"; address: number; needed: number; available: number }
-  | { type: "overlap"; address: number; existingAddress: number };
+  | { type: "overlap"; address: number; existingAddress: number }
+  | { type: "oddJumptable"; address: number; bytes: number };
 
 /** A warning as a line someone can read. */
 export function describeWarning(w: DisassemblyWarning): string {
@@ -31,6 +32,11 @@ export function describeWarning(w: DisassemblyWarning): string {
       return `${hex(w.address)}: truncated instruction (needed ${w.needed}, got ${w.available})`;
     case "overlap":
       return `${hex(w.address)}: overlaps instruction at ${hex(w.existingAddress)}`;
+    case "oddJumptable":
+      return (
+        `${hex(w.address)}: jumptable covers ${w.bytes} bytes, which is odd — ` +
+        `the last byte is not part of any entry and is being ignored`
+      );
   }
 }
 
@@ -88,11 +94,23 @@ function shouldDisassemble(regions: RegionLookup | undefined, address: number): 
  * Extract entry points from jumptable regions.
  * Reads 16-bit little-endian addresses from each jumptable region.
  */
-function extractJumptableEntries(reader: ByteReader, regions: RegionLookup): number[] {
+function extractJumptableEntries(
+  reader: ByteReader,
+  regions: RegionLookup,
+  warnings?: DisassemblyWarning[]
+): number[] {
   const entries: number[] = [];
   const jumptables = regions.getJumptables();
 
   for (const table of jumptables) {
+    // A file can already hold one — the write path refuses new ones, but
+    // refusing to *load* a project over it would make it unopenable. Say so
+    // instead, since the dropped byte is otherwise invisible.
+    const span = table.end - table.start;
+    if (span % 2 !== 0) {
+      warnings?.push({ type: "oddJumptable", address: table.start, bytes: span });
+    }
+
     // Read 16-bit addresses (little-endian) from the table
     for (let addr = table.start; addr + 1 < table.end; addr += 2) {
       const lo = reader.readByte(addr);
@@ -179,7 +197,7 @@ export function disassemble(
   // Build initial queue from explicit entry points plus jumptable entries
   const queue: number[] = [...options.entryPoints];
   if (regions) {
-    const jumptableEntries = extractJumptableEntries(reader, regions);
+    const jumptableEntries = extractJumptableEntries(reader, regions, warnings);
     queue.push(...jumptableEntries);
   }
 

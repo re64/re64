@@ -347,7 +347,7 @@ describe("saying what a span holds", () => {
     // used to return ok — which on a project with nothing else reachable is
     // the difference between the whole program and five instructions.
     expect(() => workspace.setRegion(agent, 0x8000, 0x8001, "jumptable")).toThrow(
-      /at least two bytes.*end is\s+exclusive/is
+      /even number of bytes/
     );
   });
 
@@ -793,5 +793,43 @@ describe("the work as a listing", () => {
     const page = workspace.listing(0x8015, 5);
     expect(page.truncated).toBe(true);
     expect(page.nextStart).toMatch(/^\$[0-9A-F]{4}$/);
+  });
+});
+
+describe("declaring a jumptable", () => {
+  it("refuses an odd span, whatever its size", () => {
+    // Every entry is two bytes, so an odd length is an off-by-one at any size
+    // — not only the degenerate one. A five-entry table declared one byte
+    // short yields four entries and reports success.
+    expect(() => workspace.setRegion(agent, 0x8000, 0x8009, "jumptable")).toThrow(
+      /covers 9.*even number|even number.*covers 9/is
+    );
+    expect(() => workspace.setRegion(agent, 0x8000, 0x8001, "jumptable")).toThrow(
+      /even number/
+    );
+  });
+
+  it("names both ends that would have been right", () => {
+    try {
+      workspace.setRegion(agent, 0x8000, 0x8009, "jumptable");
+      throw new Error("should have refused");
+    } catch (err) {
+      expect((err as Error).message).toContain("$8008");
+      expect((err as Error).message).toContain("$800A");
+    }
+  });
+
+  it("accepts an even span", () => {
+    expect(() => workspace.setRegion(agent, 0x8000, 0x800a, "jumptable")).not.toThrow();
+  });
+
+  it("warns rather than refusing to open a file that already has one", () => {
+    // Refusing the write is right; refusing to load would make an existing
+    // project unopenable over a byte.
+    const blank = blankWorkspace();
+    blank.setRegion(agent, 0x8000, 0x8004, "jumptable", "vectors");
+    // Widen it to an odd span behind the validation, as a hand-edited file would.
+    const project = blank.describe();
+    expect(project.regions.some((r) => r.kind === "jumptable")).toBe(true);
   });
 });
