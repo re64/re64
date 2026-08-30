@@ -100,7 +100,8 @@ export function labelSetOp(
   loaded: LoadedProject,
   address: number,
   name: string,
-  type?: LabelType
+  type?: LabelType,
+  extent?: number
 ): Op {
   const layerId = owningLayerId(loaded, address);
   const existing = projectLabelAt(loaded, layerId, address);
@@ -111,6 +112,7 @@ export function labelSetOp(
     address,
     name,
     type,
+    extent,
   };
 }
 
@@ -126,10 +128,11 @@ export function labelAddOp(
   loaded: LoadedProject,
   address: number,
   name: string,
-  type?: LabelType
+  type?: LabelType,
+  extent?: number
 ): Op {
   const layerId = owningLayerId(loaded, address);
-  return { op: "label.set", id: newId("lbl"), layerId, address, name, type };
+  return { op: "label.set", id: newId("lbl"), layerId, address, name, type, extent };
 }
 
 /**

@@ -111,7 +111,8 @@ export function applyOp(raw: string, op: Op): string {
         op.address,
         op.name,
         op.type,
-        layerIndexOf(project, op.layerId)
+        layerIndexOf(project, op.layerId),
+        op.extent
       );
 
     case "label.delete":
@@ -210,6 +211,7 @@ export function invertOp(raw: string, op: Op): Op {
         // Absent means "address"; passing undefined would leave whatever type
         // the op set in place instead of clearing it.
         type: found.entry.type ?? "address",
+        extent: found.entry.extent,
       };
     }
 

@@ -952,3 +952,72 @@ describe("two names for one address", () => {
     expect(() => blank.disassembly(site.address, 1)).not.toThrow();
   });
 });
+
+describe("naming an array", () => {
+  it("renders an operand inside it as an offset from the name", () => {
+    // The reference writes `LDA SCREEN_RAM + $000F,X`; re64 wrote
+    // `LDA dat_040F,X`, losing the fact that it indexes the screen. Hundreds
+    // of sites in this one game.
+    workspace.setLabel(agent, 0x0400, "SCREEN_RAM", undefined, undefined, 1000);
+
+    // Two rows at this address: the label, then the instruction.
+    const rows = workspace.disassembly(0x8072, 2).lines.map((l) => l.text).join("\n");
+    expect(rows).toContain("SCREEN_RAM + $000F");
+  });
+
+  it("beats an invented name but not a chosen one", () => {
+    // dat_040F says nothing, so the array wins. A name a person put at that
+    // exact address was put there on purpose, so it does not.
+    const at8072 = () =>
+      workspace.disassembly(0x8072, 2).lines.map((l) => l.text).join("\n");
+
+    workspace.setLabel(agent, 0x0400, "SCREEN_RAM", undefined, undefined, 1000);
+    expect(at8072()).toContain("SCREEN_RAM + ");
+
+    workspace.setLabel(agent, 0x040f, "cursorCell");
+    expect(at8072()).toContain("cursorCell");
+  });
+
+  it("leaves an address outside the extent alone", () => {
+    workspace.setLabel(agent, 0x0400, "SCREEN_RAM", undefined, undefined, 4);
+    const rows = workspace.disassembly(0x8072, 2).lines.map((l) => l.text).join("\n");
+    expect(rows).not.toContain("SCREEN_RAM");
+  });
+
+  it("prefers the innermost array when they nest", () => {
+    workspace.setLabel(agent, 0x0400, "SCREEN_RAM", undefined, undefined, 1000);
+    workspace.addLabel(agent, 0x0408, "topRow", undefined, 40);
+
+    const rows = workspace.disassembly(0x8072, 2).lines.map((l) => l.text).join("\n");
+    expect(rows).toContain("topRow + $0007");
+  });
+
+  it("keeps the tolerance idiom looking different", () => {
+    // `table-1,X` with X from 1 is a 1-indexed table, which is a different
+    // statement from "element N of this array" and should not read alike.
+    workspace.setLabel(agent, 0x0400, "SCREEN_RAM", undefined, undefined, 1000);
+    const rows = workspace.disassembly(0x8800, 30).lines.map((l) => l.text).join("\n");
+
+    expect(rows).toContain("SCREEN_RAM-1,X");
+  });
+});
+
+describe("comments on rows that are not instructions", () => {
+  it("renders an inline comment on a data row", () => {
+    // Handled only where instructions were emitted, so a comment on a data row
+    // was stored and rendered nowhere: written, kept, and never seen.
+    workspace.setRegion(agent, 0x8080, 0x8090, "data", "copyright");
+    workspace.setComment(agent, 0x8080, "(c) 1982 HES", "inline");
+
+    const rows = workspace.disassembly(0x8080, 2).lines.map((l) => l.text).join("\n");
+    expect(rows).toContain("; (c) 1982 HES");
+  });
+
+  it("says what it cannot see, including pointers in data", () => {
+    // The caveat named zero-page and indirect only; the case actually hit was
+    // an address stored in a data word, which is how a C64 game reaches its
+    // own entry point.
+    const { incomplete } = workspace.references(0x8870, "in");
+    expect(incomplete).toMatch(/stored in data/);
+  });
+});

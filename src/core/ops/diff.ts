@@ -61,7 +61,8 @@ function commentsById(project: Project): Map<string, Owned<ProjectComment>> {
 const sameLabel = (a: ProjectLabel, b: ProjectLabel) =>
   parseProjectAddress(a.address) === parseProjectAddress(b.address) &&
   a.name === b.name &&
-  (a.type ?? "address") === (b.type ?? "address");
+  (a.type ?? "address") === (b.type ?? "address") &&
+  a.extent === b.extent;
 
 function usesById(project: Project): Map<string, Owned<ProjectConstantUse>> {
   const out = new Map<string, Owned<ProjectConstantUse>>();
@@ -180,6 +181,7 @@ export function diffProjects(from: Project, to: Project): Op[] {
       address: parseProjectAddress(owned.entry.address),
       name: owned.entry.name,
       type: owned.entry.type,
+      extent: owned.entry.extent,
     });
   }
 

@@ -336,9 +336,10 @@ export class Workspace {
       // reader that trusts this will otherwise conclude a routine has no
       // callers when it has several.
       incomplete:
-        "Inbound references cover absolute addressing only. Zero-page and " +
-        "indirect targets are not recorded, so a routine reached that way " +
-        "appears to have no callers.",
+        "Inbound references cover absolute addressing only. Zero-page targets, " +
+        "indirect jumps, and addresses stored in data — a pointer read by " +
+        "JMP ($8000), or a split lo/hi table — are not recorded, so something " +
+        "reached that way appears to have no callers at all.",
     };
   }
 
@@ -548,15 +549,16 @@ export class Workspace {
     address: number,
     name: string,
     type?: LabelType,
-    comment?: string
+    comment?: string,
+    extent?: number
   ): EditResult {
     // A comment given here is a comment about the address, not a field on the
     // label — one action, two operations, so undo takes both back together.
     return this.edit(caller, (loaded) => {
       const { layerId, create } = ensureOwningLayer(loaded, address, this.room.projectId);
       const label: Op = create
-        ? { op: "label.set", id: newId("lbl"), layerId, address, name, type }
-        : labelSetOp(loaded, address, name, type);
+        ? { op: "label.set", id: newId("lbl"), layerId, address, name, type, extent }
+        : labelSetOp(loaded, address, name, type, extent);
 
       return [
         ...(create ? [create] : []),
@@ -649,7 +651,13 @@ export class Workspace {
    * finding about the program, not a nickname. Which one a given operand shows
    * is then `bind_label`; without one, the primary wins.
    */
-  addLabel(caller: Caller, address: number, name: string, type?: LabelType): EditResult {
+  addLabel(
+    caller: Caller,
+    address: number,
+    name: string,
+    type?: LabelType,
+    extent?: number
+  ): EditResult {
     return this.edit(caller, (loaded) => {
       const already = loaded.map
         .getLabels()
@@ -659,8 +667,11 @@ export class Workspace {
 
       const { layerId, create } = ensureOwningLayer(loaded, address, this.room.projectId);
       return create
-        ? [create, { op: "label.set", id: newId("lbl"), layerId, address, name, type } as Op]
-        : [labelAddOp(loaded, address, name, type)];
+        ? [
+            create,
+            { op: "label.set", id: newId("lbl"), layerId, address, name, type, extent } as Op,
+          ]
+        : [labelAddOp(loaded, address, name, type, extent)];
     });
   }
 

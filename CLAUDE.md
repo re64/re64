@@ -529,6 +529,39 @@ KERNAL entry points — render as plain grey names rather than links. They are
 named but have no bytes, and on 6502 they are common enough that making them
 clickable means constantly landing on an error.
 
+### An operand inside a named array
+
+The reference writes `LDA SCREEN_RAM + $000F,X`; re64 wrote `LDA dat_040F,X`,
+losing that the operand indexes the screen at all. Forty-one sites in this one
+game, and every screen coordinate had to be recovered by hex arithmetic.
+
+The mechanism was already there and already applied to loads and stores —
+`LDA droidXPositionArray-1,X` has always rendered. What stopped it was
+`labelTolerance`, which defaults to **1**. Raising it is the wrong fix: a
+distance threshold has no notion of whether an offset means anything, and at a
+window wide enough to reach `$040F` from `$0400`, every address in the program
+would borrow whatever name happened to be near it. That is the mistake that was
+just removed from zero page.
+
+So a label may declare an **extent** — how many bytes the name covers. Inside
+it, an operand renders as `NAME + $000F`; outside, nothing. Either the operand
+indexes that array or it does not, and there is no threshold to tune.
+
+Two rules that took running it to find:
+
+- **An extent beats an invented name, not a chosen one.** `dat_040F` is an exact
+  match and would win by ordinary resolution, but it says nothing where
+  `SCREEN_RAM + $000F` says which screen cell. A label a person put at that exact
+  address stays, because they put it there on purpose.
+- **Innermost wins** where arrays nest, so a row inside a screen is named for the
+  row.
+
+Extent does not replace tolerance. `table-1,X` encodes an operand *before* the
+label — the 1-indexed table idiom — which no extent covers, so the ±1 window
+stays. The two render differently on purpose: `NAME + $000F` says "element N of
+this array", `NAME-1` says "just before this label", and they should not look
+alike.
+
 ### Constants: a value has no single meaning
 
 A label names an address and an address means one thing. A constant names a

@@ -107,6 +107,14 @@ export interface ProjectLabel {
   /** Label type (default: "address") */
   type?: LabelType;
   /**
+   * How many bytes this name covers, when it names an array.
+   *
+   * An operand inside it renders as `SCREEN_RAM + $000F` rather than a bare
+   * address — which is what makes a screen coordinate readable without doing
+   * hex arithmetic on every line.
+   */
+  extent?: number;
+  /**
    * Superseded by first-class comments, and read only so an older file does not
    * lose one: the loader turns it into a `before` comment at the same address.
    *
@@ -217,7 +225,7 @@ export function projectLabelsToLabels(
     const address = parseProjectAddress(pl.address);
     const type = pl.type ?? "address";
     const id = pl.id ?? derivedId("lbl", layerId, address, pl.name);
-    return createUserLabel(id, address, pl.name, type, pl.comment);
+    return createUserLabel(id, address, pl.name, type, pl.comment, pl.extent);
   });
 }
 

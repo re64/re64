@@ -39,6 +39,20 @@ export interface Label {
   readonly type: LabelType;
   /** Source of this label */
   readonly source: LabelSource;
+  /**
+   * How many bytes this name covers, when it names an array rather than a spot.
+   *
+   * An operand inside the extent renders as `SCREEN_RAM + $000F` instead of a
+   * bare address, which is how the reference disassembly reads and what makes a
+   * screen coordinate recoverable without hex arithmetic on every line.
+   *
+   * Extent rather than a wider `labelTolerance`, because tolerance is a
+   * distance with no notion of whether the offset means anything: at a window
+   * wide enough to reach `$040F` from `$0400`, every address in the program
+   * would borrow whatever name happened to be near it. An extent says this
+   * operand indexes that array, which is either true or not.
+   */
+  readonly extent?: number;
   /** Optional user comment */
   readonly comment?: string;
 }
@@ -121,7 +135,8 @@ export function createUserLabel(
   address: number,
   name: string,
   type: LabelType,
-  comment?: string
+  comment?: string,
+  extent?: number
 ): Label {
   if (address < 0 || address > 0x10000) {
     throw new Error("Label address must be in range 0x0000-0x10000");
@@ -133,6 +148,7 @@ export function createUserLabel(
     type,
     source: { kind: "user", auto: false },
     comment,
+    extent,
   };
 }
 
@@ -181,6 +197,14 @@ export interface ResolvedLabel {
   label: Label;
   /** Offset from the label address (0 for exact match, negative if address < label) */
   offset: number;
+  /**
+   * True when the address falls inside the label's declared extent.
+   *
+   * Rendered differently from a tolerance match, because the two say different
+   * things: inside an extent means "element N of this array", a tolerance match
+   * means "just before this label", which is the 1-indexed table idiom.
+   */
+  within?: boolean;
 }
 
 /**
@@ -350,12 +374,40 @@ export class LabelIndex {
     return this.all.find((l) => l.id === id);
   }
 
+  /**
+   * The innermost label whose declared extent covers this address.
+   *
+   * Innermost so a nested array wins over the one containing it.
+   */
+  private containing(address: number): ResolvedLabel | undefined {
+    let best: ResolvedLabel | undefined;
+    for (const label of this.all) {
+      if (label.extent === undefined) continue;
+      const offset = address - label.address;
+      if (offset <= 0 || offset >= label.extent) continue;
+      if (!best || label.extent < best.label.extent!) {
+        best = { label, offset, within: true };
+      }
+    }
+    return best;
+  }
+
   resolve(address: number, tolerance: number = 0): ResolvedLabel | undefined {
     // First, try exact match — explicit primary, then rank, then id
     const exact = this.byAddress.get(address);
     if (exact && exact.length > 0) {
-      return { label: this.getLabelsAt(address)[0], offset: 0 };
+      const best = this.getLabelsAt(address)[0];
+      // ...unless the only name here is one the disassembler invented and
+      // something else says this address is inside a named array. `dat_040F`
+      // says nothing; `SCREEN_RAM + $000F` says which screen cell it is. A
+      // name a person chose still wins — they named that exact spot on purpose.
+      if (best.source.kind !== "auto") return { label: best, offset: 0 };
+      const inside = this.containing(address);
+      return inside ?? { label: best, offset: 0 };
     }
+
+    const inside = this.containing(address);
+    if (inside) return inside;
 
     // If no tolerance, we're done
     if (tolerance <= 0) {

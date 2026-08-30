@@ -26,6 +26,8 @@ export interface LabelSetOp {
   address: number;
   name: string;
   type?: LabelType;
+  /** Bytes this name covers, when it names an array rather than a spot. */
+  extent?: number;
 }
 
 export interface LabelDeleteOp {

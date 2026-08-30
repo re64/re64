@@ -40,6 +40,8 @@ export interface LabelResolution {
   name: string;
   /** Offset from the label (0 for exact match) */
   offset: number;
+  /** True when the address is inside a label that names an array. */
+  within?: boolean;
 }
 
 /** Label resolver function type - returns label name with offset, or undefined */
@@ -49,11 +51,17 @@ export type LabelResolver = (address: number) => LabelResolution | undefined;
 function formatLabelWithOffset(resolution: LabelResolution): string {
   if (resolution.offset === 0) {
     return resolution.name;
-  } else if (resolution.offset > 0) {
-    return `${resolution.name}+${resolution.offset}`;
-  } else {
-    return `${resolution.name}${resolution.offset}`; // offset is negative, includes minus sign
   }
+  // Inside a named array: `SCREEN_RAM + $000F`, spaced and in hex, because the
+  // offset is a screen coordinate and reads as one. A tolerance match is a
+  // different statement — "just before this label", the 1-indexed table idiom —
+  // and keeps the tight decimal form so the two do not look alike.
+  if (resolution.within) {
+    return `${resolution.name} + $${hex16(resolution.offset)}`;
+  }
+  return resolution.offset > 0
+    ? `${resolution.name}+${resolution.offset}`
+    : `${resolution.name}${resolution.offset}`;
 }
 
 /** Format an operand as a string, optionally resolving labels */

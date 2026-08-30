@@ -236,13 +236,26 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
 
   tool(
     "set_label",
-    "Name an address, or rename what is already there.",
+    "Name an address, or rename what is already there. Give `extent` when the " +
+      "name covers an array, so operands inside it read as NAME + offset. " +
+      "Note that type \"function\" also makes the address an entry point, so " +
+      "code only reachable from there starts decoding.",
     {
       project,
       address,
       name: z.string().min(1),
       type: z.enum(["entry", "function", "code", "address"]).optional(),
       comment: z.string().optional(),
+      extent: z
+        .number()
+        .int()
+        .min(1)
+        .max(0x10000)
+        .optional()
+        .describe(
+          "Bytes this name covers, when it names an array rather than a spot. " +
+            "An operand inside it renders as NAME + $000F instead of a bare address."
+        ),
       expectVersion: z
         .string()
         .optional()
@@ -254,12 +267,20 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       name: string;
       type?: "entry" | "function" | "code" | "address";
       comment?: string;
+      extent?: number;
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.setLabel(caller, args.address, args.name, args.type, args.comment);
+      return space.setLabel(
+        caller,
+        args.address,
+        args.name,
+        args.type,
+        args.comment,
+        args.extent
+      );
     }
   );
 
@@ -307,6 +328,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       address,
       name: z.string().min(1),
       type: z.enum(["entry", "function", "code", "address"]).optional(),
+      extent: z.number().int().min(1).max(0x10000).optional().describe("Bytes this name covers, when it names an array: an operand inside it renders as NAME + $000F instead of a bare address"),
       expectVersion: z.string().optional(),
     },
     (args: {
@@ -314,12 +336,13 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       address: number;
       name: string;
       type?: LabelType;
+      extent?: number;
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.addLabel(caller, args.address, args.name, args.type);
+      return space.addLabel(caller, args.address, args.name, args.type, args.extent);
     }
   );
 
@@ -595,7 +618,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "as garbage, marking code starts decoding at its first address, and " +
       "marking a jumptable decodes the code it points at, which no control-flow " +
       "walk can reach on its own. Give start with either end (exclusive) or " +
-      "length; the reply says which bytes it actually took.",
+      "length; the reply says which bytes it actually took. The span must lie " +
+      "in a layer that supplies bytes — a region says how to read bytes, so " +
+      "there has to be something there to read.",
     {
       project,
       start: address,

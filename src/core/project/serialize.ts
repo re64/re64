@@ -197,15 +197,17 @@ function labelEntryLine(
   id: string,
   address: number,
   name: string,
-  type?: ProjectLabel["type"]
+  type?: ProjectLabel["type"],
+  extent?: number
 ): string {
   const addr = "$" + address.toString(16).toUpperCase().padStart(4, "0");
   // "address" is the default; recorded by absence, not written out.
   const typePart =
     type && type !== "address" ? `, "type": ${JSON.stringify(type)}` : "";
+  const extentPart = extent === undefined ? "" : `, "extent": ${extent}`;
   return (
     `${indent}{ "id": ${JSON.stringify(id)}, "address": ${JSON.stringify(addr)}, ` +
-    `"name": ${JSON.stringify(name)}${typePart} }`
+    `"name": ${JSON.stringify(name)}${typePart}${extentPart} }`
   );
 }
 
@@ -309,7 +311,8 @@ export function upsertLabel(
   address: number,
   name: string,
   type: ProjectLabel["type"] | undefined,
-  layerIndex: number
+  layerIndex: number,
+  extent?: number
 ): string {
   const lines = raw.split("\n");
   const layer = findLayerSpan(lines, layerIndex);
@@ -328,6 +331,7 @@ export function upsertLabel(
       address: "$" + address.toString(16).toUpperCase().padStart(4, "0"),
       name,
       ...(type && type !== "address" ? { type } : {}),
+      ...(extent === undefined ? {} : { extent }),
     });
     return formatProject(project);
   }
@@ -361,11 +365,25 @@ export function upsertLabel(
         ? line.replace(/"type"\s*:\s*"[^"]*"/, `"type": ${JSON.stringify(type)}`)
         : line.replace(/\s*\}/, `, "type": ${JSON.stringify(type)} }`);
     }
+    // Absent extent is absent from the line, the way an "address" type is.
+    if (extent === undefined) {
+      line = line.replace(/\s*,\s*"extent"\s*:\s*\d+/, "");
+    } else {
+      line = /"extent"\s*:/.test(line)
+        ? line.replace(/"extent"\s*:\s*\d+/, `"extent": ${extent}`)
+        : line.replace(/\s*\}/, `, "extent": ${extent} }`);
+    }
     lines[target] = line;
   } else {
     const last = lastEntryLine(lines, span);
     const indent = /^(\s*)/.exec(lines[last] === lines[span.open] ? "        {" : lines[last])![1];
-    insertEntry(lines, span, labelEntryLine(indent, id, address, name, type), address, addressOfLine);
+    insertEntry(
+      lines,
+      span,
+      labelEntryLine(indent, id, address, name, type, extent),
+      address,
+      addressOfLine
+    );
   }
 
   const updated = lines.join("\n");

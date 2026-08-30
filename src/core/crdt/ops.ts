@@ -81,6 +81,7 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
           // "address" is the default and is recorded by absence, matching the
           // project file so a flatten produces the same text.
           type: op.type === "address" ? undefined : op.type,
+          extent: op.extent,
         });
         break;
       }

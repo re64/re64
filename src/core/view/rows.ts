@@ -138,7 +138,7 @@ export function analyze(
     const tolerance = addr < 0x0100 ? 0 : labelTolerance;
     const resolved = allLabels.resolve(addr, tolerance);
     return resolved
-      ? { name: resolved.label.name, offset: resolved.offset }
+      ? { name: resolved.label.name, offset: resolved.offset, within: resolved.within }
       : undefined;
   };
 
@@ -184,6 +184,26 @@ export function analyze(
         const text = `${hex4(addr)}  ; ${line}`;
         push({ address: addr, kind: "comment", text, tokens: [] });
       }
+    }
+  };
+
+  /**
+   * Append an inline comment to a row, whatever kind of row it is.
+   *
+   * These used to be handled only where instructions are emitted, so a comment
+   * written on a data or text row was stored and rendered nowhere — a comment
+   * someone wrote that nobody would ever see, with nothing saying so.
+   */
+  const withInline = (addr: number, text: string): string => {
+    const inline = loaded.comments.at(addr, "inline");
+    return inline.length > 0 ? `${text}  ; ${inline[0].text}` : text;
+  };
+
+  /** Any further inline comments, underneath and aligned to the first. */
+  const emitExtraInline = (addr: number, text: string) => {
+    for (const extra of loaded.comments.at(addr, "inline").slice(1)) {
+      const indent = " ".repeat(Math.max(0, text.length - extra.text.length - 2));
+      push({ address: addr, kind: "comment", text: `${indent}; ${extra.text}`, tokens: [] });
     }
   };
 
@@ -305,22 +325,12 @@ export function analyze(
         }
       }
 
-      const inline = loaded.comments.at(addr, "inline");
-      if (inline.length > 0) text += `  ; ${inline[0].text}`;
+      text = withInline(addr, text);
       push({ address: addr, kind: "instruction", text, tokens, illegal: instr.illegal });
-
       // A second inline comment has no room on the row it belongs to, so it
       // goes underneath, indented to where the first one starts. Redundant by
       // construction and meant to look it.
-      for (const extra of inline.slice(1)) {
-        const indent = " ".repeat(Math.max(0, text.length - extra.text.length - 2));
-        push({
-          address: addr,
-          kind: "comment",
-          text: `${indent}; ${extra.text}`,
-          tokens: [],
-        });
-      }
+      emitExtraInline(addr, text);
 
       addr += instr.bytes.length;
       continue;
@@ -342,14 +352,16 @@ export function analyze(
             : `${resolved.name}${resolved.offset > 0 ? "+" : ""}${resolved.offset}`
           : `$${hex4(target)}`;
         const prefix = `${hex4(addr)}  ${bytesColumn([lo, hi]).padEnd(8)}  .WORD `;
+        const wordText = withInline(addr, `${prefix}${shown}`);
         push({
           address: addr,
           kind: "word",
-          text: `${prefix}${shown}`,
+          text: wordText,
           tokens: [
             { start: prefix.length, end: prefix.length + shown.length, kind: "operand", target },
           ],
         });
+        emitExtraInline(addr, wordText);
       }
       addr += 2;
       continue;
@@ -370,7 +382,13 @@ export function analyze(
         : `${hex4(lineStart)}  ${cols}  |${bytes
             .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : "."))
             .join("")}|`;
-      push({ address: lineStart, kind: isText ? "text" : "data", text, tokens: [] });
+      push({
+        address: lineStart,
+        kind: isText ? "text" : "data",
+        text: withInline(lineStart, text),
+        tokens: [],
+      });
+      emitExtraInline(lineStart, withInline(lineStart, text));
       bytes.length = 0;
     };
 
