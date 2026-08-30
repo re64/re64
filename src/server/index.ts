@@ -187,6 +187,13 @@ export function startServer(options: ServerOptions): RunningServer {
         return;
       }
 
+      if (path === "/api/export" && req.method === "POST") {
+        // Writing the project out is a deliberate act now, not a save. The
+        // document was already everyone's the moment the edit landed.
+        const ops = store.writeFile();
+        return sendJson(res, 200, { ok: true, changed: ops.length > 0 });
+      }
+
       if (path === "/api/debug" && req.method === "GET") {
         return sendJson(res, 200, {
           storage: database ? "sqlite" : "file",

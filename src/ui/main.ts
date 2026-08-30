@@ -343,10 +343,16 @@ function beginLabelEdit(target: EditTarget): void {
   disasmView.dispatch({ effects: setEdit.of(target) });
 }
 
+/** True while an inline label editor is open, so repaints hold off. */
+function editingLabel(): boolean {
+  return disasmView.state.field(editField) !== null;
+}
+
 function endLabelEdit(): void {
-  if (disasmView.state.field(editField) === null) return;
+  if (!editingLabel()) return;
   disasmView.dispatch({ effects: setEdit.of(null) });
   disasmView.focus();
+  flushDeferredRepaint();
 }
 
 async function commitLabelEdit(target: EditTarget, value: string): Promise<void> {
@@ -372,20 +378,22 @@ async function commitLabelEdit(target: EditTarget, value: string): Promise<void>
 
 
 /**
- * Apply an edit to the local model, repaint, then persist.
+ * Apply an edit and repaint.
  *
- * The repaint happens before the save so a rename is instant; a failed save
- * surfaces in the status line rather than blocking the view.
+ * There is no save. The edit lands in the shared document and is already
+ * everyone's; the repaint is this browser catching up with itself through the
+ * same path a collaborator's edit takes.
  */
 async function edit(
-  change: (s: ProjectSession) => Promise<void>,
+  change: (s: ProjectSession) => void,
   describe: (delta: number) => string
 ): Promise<void> {
   if (!session) return;
   const before = analysis?.stats.instructions ?? 0;
 
   try {
-    await change(session);
+    change(session);
+    await session.refresh();
   } catch (err) {
     setStatus(err instanceof Error ? err.message : "Edit failed", true);
     return;
@@ -394,12 +402,6 @@ async function edit(
   const address = currentAddress();
   render(address ?? undefined);
   setStatus(describe((analysis?.stats.instructions ?? 0) - before));
-
-  try {
-    await session.save();
-  } catch (err) {
-    setStatus(err instanceof Error ? err.message : "Could not save", true);
-  }
 }
 
 /**
@@ -430,43 +432,75 @@ function refreshEditButtons(): void {
 async function undoEdit(): Promise<void> {
   if (!session) return;
   const address = currentAddress();
-  const undone = await session.undo();
+  const undone = session.undo();
   if (!undone) {
     setStatus("Nothing to undo");
     return;
   }
-  render(address ?? undefined);
+  await repaint(address ?? undefined);
   setStatus(`Undid: ${undone}`);
-  await saveAndRefresh();
 }
 
 async function redoEdit(): Promise<void> {
   if (!session) return;
   const address = currentAddress();
-  const redone = await session.redo();
+  const redone = session.redo();
   if (!redone) {
     setStatus("Nothing to redo");
     return;
   }
-  render(address ?? undefined);
+  await repaint(address ?? undefined);
   setStatus(`Redid: ${redone}`);
-  await saveAndRefresh();
 }
 
 /**
- * Save, then bring the debug pane up to date.
+ * Repaint once per frame, and not at all while a label is being typed.
  *
- * `render` snapshots before the save it is about to trigger, so without this
- * the pane reports work as unsaved a moment after it landed — a debug view that
- * lies is worse than none.
+ * Deferring during an edit is the blunt fix and the deliberate one. A repaint
+ * replaces the document and rebuilds decorations, which destroys an open inline
+ * editor — a collaborator renaming something would pull the field out from
+ * under you mid-word. The disassembly view is not a collaborative text buffer
+ * and should not start behaving like one.
+ *
+ * It also makes a latent bug unreachable: `LabelEditWidget.eq` compares by
+ * label name, so a remote rename of the address being edited would rebuild the
+ * widget even if the editor state survived. Anyone removing this deferral has
+ * to fix that too — anchored on the label id, since several labels can share
+ * an address.
  */
-async function saveAndRefresh(): Promise<void> {
-  try {
-    await session!.save();
-  } catch (err) {
-    setStatus(err instanceof Error ? err.message : "Could not save", true);
+let repaintQueued = false;
+let repaintDeferred = false;
+
+function scheduleRepaint(): void {
+  if (editingLabel()) {
+    repaintDeferred = true;
+    return;
   }
-  if (currentTab === "debug") void renderDebug();
+  if (repaintQueued) return;
+  repaintQueued = true;
+  requestAnimationFrame(() => {
+    repaintQueued = false;
+    void repaint();
+  });
+}
+
+/** Catch up on whatever arrived while a label was being edited. */
+function flushDeferredRepaint(): void {
+  if (!repaintDeferred) return;
+  repaintDeferred = false;
+  scheduleRepaint();
+}
+
+async function repaint(restoreAddress?: number): Promise<void> {
+  if (!session) return;
+  const address = restoreAddress ?? currentAddress() ?? undefined;
+  try {
+    await session.refresh();
+  } catch (err) {
+    setStatus(err instanceof Error ? err.message : "Could not apply a change", true);
+    return;
+  }
+  render(address);
 }
 
 // --- Navigation -------------------------------------------------------
@@ -783,7 +817,7 @@ const projectView = new EditorView({
       keymap.of([
         ...defaultKeymap,
         ...historyKeymap,
-        { key: "Mod-s", run: () => (void saveProjectFile(), true) },
+        { key: "Mod-s", run: () => (void exportProjectFile(), true) },
       ]),
       oneDark,
       EditorView.theme({
@@ -803,11 +837,15 @@ let session: ProjectSession | null = null;
 /** Fetch the project and its bytes, then analyse in the browser. */
 async function loadDisassembly(restoreAddress?: number): Promise<void> {
   try {
+    session?.close();
     session = await ProjectSession.open();
   } catch (err) {
     setStatus(err instanceof Error ? err.message : "Could not load the project", true);
     return;
   }
+
+  // Every change arrives through the same door from here, whoever caused it.
+  session.onChange(() => scheduleRepaint());
   render(restoreAddress);
 }
 
@@ -835,10 +873,6 @@ function render(restoreAddress?: number): void {
   // The map is derived from the same model, so it never lags the disassembly.
   renderMap(buildMapView(loadedProject).layers);
 
-  projectView.dispatch({
-    changes: { from: 0, to: projectView.state.doc.length, insert: session!.raw },
-  });
-
   disasmView.dispatch({
     changes: { from: 0, to: disasmView.state.doc.length, insert: rows.map((r) => r.text).join("\n") },
     effects: setRows.of(rows),
@@ -858,20 +892,28 @@ function render(restoreAddress?: number): void {
   if (currentTab === "debug") void renderDebug();
 }
 
-async function saveProjectFile(): Promise<void> {
+function showExportedProject(): void {
+  if (!session) return;
+  projectView.dispatch({
+    changes: {
+      from: 0,
+      to: projectView.state.doc.length,
+      insert: session.exportedText(),
+    },
+  });
+}
+
+/** Write the project out as a file. A deliberate act now, not a save. */
+async function exportProjectFile(): Promise<void> {
   if (!session) return;
   try {
-    await session.replaceText(projectView.state.doc.toString());
+    const res = await fetch("/api/export", { method: "POST" });
+    if (!res.ok) {
+      throw new Error(((await res.json()) as { error?: string }).error ?? "export failed");
+    }
+    setStatus("Exported");
   } catch (err) {
-    setStatus(err instanceof Error ? err.message : "Project file is invalid", true);
-    return;
-  }
-  render(currentAddress() ?? undefined);
-  try {
-    await session.save();
-    setStatus("Project saved");
-  } catch (err) {
-    setStatus(err instanceof Error ? err.message : "Could not save", true);
+    setStatus(err instanceof Error ? err.message : "Could not export", true);
   }
 }
 
@@ -952,27 +994,18 @@ async function renderDebug(): Promise<void> {
   const stats = analysis?.stats;
   let html = "";
 
-  html += "<h3>Undo</h3>";
-  if (d.changes.length === 0) {
-    html += '<p class="empty">Nothing edited this session.</p>';
-  } else {
-    html +=
-      "<ol>" +
-      [...d.changes]
-        .reverse()
-        .map((c) => {
-          const marker = c.next ? '<span class="marker">▸</span>' : "<span></span>";
-          const when = `<span class="when">${c.at ? ago(c.at) : ""}</span>`;
-          const text = `<span${c.undone ? ' class="undone"' : ""}>${escapeHtml(c.description)}</span>`;
-          return `<li>${marker}${when}${text}</li>`;
-        })
-        .join("") +
-      "</ol>";
-    html += definitions([
-      ["depth", String(d.changes.length)],
-      ["undone", String(d.changes.filter((c) => c.undone).length)],
-    ]);
-  }
+  html += "<h3>This session</h3>";
+  html += definitions([
+    // Not "this user": two tabs are two sessions, two client ids and two
+    // independent undo stacks, and they can conflict with each other.
+    ["session", d.sessionId],
+    ["connection", d.status, d.status === "connected" ? "good" : "warn"],
+    ["can undo", d.undo.canUndo ? (d.undo.next ?? "yes") : "no"],
+    ["can redo", d.undo.canRedo ? "yes" : "no"],
+    ...d.blobs.map(
+      (b) => [`blob ${b.path}`, `${b.bytes.toLocaleString()} bytes`] as [string, string]
+    ),
+  ]);
 
   html += "<h3>Analysis</h3>";
   html += definitions([
@@ -985,20 +1018,6 @@ async function renderDebug(): Promise<void> {
     ["regions", stats ? String(stats.regions) : "—"],
     ["arrows", stats ? `${stats.arrows} (${stats.arrowsDemoted} demoted)` : "—"],
     ["warnings", String(analysis?.warnings.length ?? 0)],
-  ]);
-
-  html += "<h3>This browser</h3>";
-  html += definitions([
-    ["project", `${d.bytes.toLocaleString()} bytes`],
-    ["version seen", d.version],
-    ["unsaved", d.unsavedEdits ? "yes" : "no", d.unsavedEdits ? "warn" : undefined],
-    ["last saved", ago(d.savedAt)],
-    ...(d.lastSaveError
-      ? ([["last save error", d.lastSaveError, "bad"]] as [string, string, string][])
-      : []),
-    ...d.blobs.map(
-      (b) => [`blob ${b.path}`, `${b.bytes.toLocaleString()} bytes`] as [string, string]
-    ),
   ]);
 
   html += "<h3>Server</h3>";
@@ -1015,7 +1034,6 @@ async function renderDebug(): Promise<void> {
       ["connected clients", String(sv.clients)],
       ["document version", sv.version],
       // A version this browser does not share means someone else has edited.
-      ["agrees with us", sv.version === d.version ? "yes" : "no", sv.version === d.version ? "good" : "warn"],
       ["exported revision", sv.storedRev],
       ["unflattened session", sv.dirty ? "yes" : "no"],
       ["authors this session", sv.authors.length ? sv.authors.join(", ") : "—"],
@@ -1035,9 +1053,12 @@ async function renderDebug(): Promise<void> {
     html += definitions([
       ["operations recorded", String(sv.ops.total)],
       ["marked undone", String(sv.ops.undone)],
-      ["flattened sessions", String(sv.history)],
-      // Worth stating plainly: the two stacks are unrelated today.
-      ["shared with this browser", "no — the stack above is session-local", "warn"],
+      ["recorded sessions", String(sv.history)],
+      // Two different features, deliberately. This one reverts by applying an
+      // inverse as a new edit, which is the only thing that works in a CLI
+      // process that starts, edits and exits; the stack above reverts structs
+      // and needs a live document.
+      ["reaches this session's stack", "no — that one is the document's", "warn"],
     ]);
   }
 
@@ -1216,7 +1237,12 @@ function showTab(name: TabName): void {
     $(`#${id}`).style.display = id === name ? "" : "none";
   }
   if (name === "disasm") disasmView.focus();
-  else if (name === "project") projectView.focus();
+  else if (name === "project") {
+    // Filled on show rather than kept in step: it is a view of what would be
+    // exported, and regenerating it cannot promise the file's own layout.
+    showExportedProject();
+    projectView.focus();
+  }
   else void renderDebug();
 }
 
@@ -1278,7 +1304,7 @@ $("#redo").addEventListener("click", () => void redoEdit());
 $("#reload").addEventListener("click", () => {
   void loadDisassembly(currentAddress() ?? undefined);
 });
-$("#save").addEventListener("click", () => void saveProjectFile());
+$("#save").addEventListener("click", () => void exportProjectFile());
 
 $("#goto").addEventListener("keydown", (e) => {
   if ((e as KeyboardEvent).key !== "Enter") return;

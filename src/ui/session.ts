@@ -1,110 +1,88 @@
 /**
  * The project as the browser holds it.
  *
- * The client owns the model: edits apply to its own copy of the project text,
- * the map is rebuilt and re-analysed locally (~16ms), and only the save crosses
- * the wire. Nothing waits on the network to show a rename.
+ * A `Y.Doc` is the truth here, exactly as it is on the server — the two are the
+ * same document, kept in step by the transport. The model is derived from it
+ * (`projectFromDoc` → `buildMemoryMap`) and re-derived whenever it changes,
+ * whoever changed it.
  *
- * The text is the edit surface rather than the parsed object because the
- * serialiser edits lines in place — that is what keeps a one-label rename to a
- * one-line diff in git.
+ * There is no save. An edit is applied to the document and is already
+ * everyone's; the whole-document PUT this replaces could only ever refuse a
+ * concurrent edit, never merge one.
+ *
+ * The exported project text is derived on demand for the read-only view. It is
+ * not the edit surface, and nothing here parses it.
  */
 
 import {
-  Change,
   LoadedProject,
   Op,
-  applyOp,
+  ProjectLabel,
+  Project,
   blobPaths,
   buildMemoryMap,
   describeOp,
-  invertOp,
   makeFileLoader,
   newId,
-  parseProject,
-  ProjectLabel,
   resolveOwningLayer,
 } from "../core/index.js";
+import { projectFromDoc } from "../core/crdt/index.js";
+import { ConnectionStatus, DocClient, OpenOptions } from "./doc-client.js";
 
 /** What the debug view reports. Read-only; nothing acts on it. */
 export interface SessionDebug {
-  version: string;
-  bytes: number;
+  sessionId: string;
+  status: ConnectionStatus;
   blobs: { path: string; bytes: number }[];
-  /** How long the last rebuild took: parse, map, and layer construction. */
+  /** How long the last rebuild took: projection, map, and layer construction. */
   lastBuildMs: number;
-  savedAt: number | undefined;
-  lastSaveError: string | undefined;
-  unsavedEdits: number;
-  changes: {
-    description: string;
-    undone: boolean;
-    at: number | undefined;
-    /** True for the entry undo would revert next. */
-    next: boolean;
-  }[];
+  undo: { canUndo: boolean; canRedo: boolean; next: string | undefined };
 }
 
 export class ProjectSession {
   private lastBuildMs = 0;
-  private savedAt: number | undefined;
-  private lastSaveError: string | undefined;
-  private savedRaw: string;
 
   private constructor(
-    public raw: string,
-    private version: string,
+    private readonly client: DocClient,
     public loaded: LoadedProject,
     private readonly blobs: Map<string, Uint8Array>,
-    /** Edits made this session, each with the operation that undoes it. */
-    private changes: Change[] = []
-  ) {
-    this.savedRaw = raw;
-  }
+    private readonly origin: string
+  ) {}
 
   /**
-   * A snapshot for the debug view.
+   * Connect, wait for the document, then fetch the bytes it refers to.
    *
-   * Deliberately a copy: a panel that could reach into the live arrays would
-   * be able to corrupt an undo stack by being looked at.
+   * The order matters and is the opposite of what it was. The browser cannot
+   * know which binaries a project needs until the document has arrived, so the
+   * first paint waits on a socket round trip rather than on a fetch.
    */
-  debug(): SessionDebug {
-    const nextUndo = [...this.changes].reverse().find((c) => !c.undone);
-    return {
-      version: this.version,
-      bytes: this.raw.length,
-      blobs: [...this.blobs].map(([path, data]) => ({ path, bytes: data.length })),
-      lastBuildMs: this.lastBuildMs,
-      savedAt: this.savedAt,
-      lastSaveError: this.lastSaveError,
-      unsavedEdits: this.raw === this.savedRaw ? 0 : 1,
-      changes: this.changes.map((c) => ({
-        description: describeOp(c.op),
-        undone: c.undone === true,
-        at: c.at,
-        next: c === nextUndo,
-      })),
-    };
-  }
-
-  /** Fetch the project and every byte it references, then build the map. */
-  static async open(): Promise<ProjectSession> {
-    const res = await fetch("/api/project");
-    if (!res.ok) throw new Error("could not load the project file");
-    const { raw, version } = (await res.json()) as { raw: string; version: string };
-
+  static async open(options: OpenOptions = {}): Promise<ProjectSession> {
+    const client = await DocClient.open(options);
     const blobs = new Map<string, Uint8Array>();
-    const session = new ProjectSession(raw, version, null as never, blobs);
-    await session.fetchMissingBlobs(parseProject(raw));
-    session.loaded = session.build(raw);
+    const session = new ProjectSession(client, null as never, blobs, options.origin ?? "");
+
+    await session.fetchMissingBlobs(projectFromDoc(client.doc));
+    session.loaded = session.build();
     return session;
   }
 
-  private async fetchMissingBlobs(project: ReturnType<typeof parseProject>): Promise<void> {
+  /** Re-derive the model. Call after the document changes. */
+  async refresh(): Promise<void> {
+    const project = projectFromDoc(this.client.doc);
+    // A remote edit can introduce a layer whose bytes are not here yet.
+    await this.fetchMissingBlobs(project);
+    this.loaded = this.build();
+  }
+
+  onChange(listener: () => void): void {
+    this.client.onChange(listener);
+  }
+
+  private async fetchMissingBlobs(project: Project): Promise<void> {
     const wanted = blobPaths(project).filter((p) => !this.blobs.has(p));
     await Promise.all(
       wanted.map(async (path) => {
-        const res = await fetch(`/api/blob?path=${encodeURIComponent(path)}`);
+        const res = await fetch(`${this.origin}/api/blob?path=${encodeURIComponent(path)}`);
         if (!res.ok) {
           const detail = await res.json().catch(() => ({}));
           throw new Error(detail.error ?? `could not load ${path}`);
@@ -114,24 +92,25 @@ export class ProjectSession {
     );
   }
 
-  private build(raw: string): LoadedProject {
+  private build(): LoadedProject {
     const started = performance.now();
     try {
-      return this.buildNow(raw);
+      return buildMemoryMap(
+        projectFromDoc(this.client.doc),
+        makeFileLoader((path) => {
+          const bytes = this.blobs.get(path);
+          if (!bytes) throw new Error(`no bytes fetched for ${path}`);
+          return bytes;
+        })
+      );
     } finally {
       this.lastBuildMs = performance.now() - started;
     }
   }
 
-  private buildNow(raw: string): LoadedProject {
-    return buildMemoryMap(
-      parseProject(raw),
-      makeFileLoader((path) => {
-        const bytes = this.blobs.get(path);
-        if (!bytes) throw new Error(`no bytes fetched for ${path}`);
-        return bytes;
-      })
-    );
+  /** The project as it would be exported, for the read-only view. */
+  exportedText(): string {
+    return JSON.stringify(projectFromDoc(this.client.doc), null, 2) + "\n";
   }
 
   /** Which layer owns an address, or undefined if nothing does. */
@@ -139,7 +118,6 @@ export class ProjectSession {
     return resolveOwningLayer(this.loaded, address);
   }
 
-  /** The id of the layer that owns an address. */
   private layerIdFor(address: number): string {
     const index = this.layerFor(address);
     if (index === undefined) {
@@ -153,77 +131,18 @@ export class ProjectSession {
     return id;
   }
 
-  /**
-   * Apply a text edit and rebuild the model.
-   *
-   * Rebuilding is synchronous unless the edit introduced a layer whose bytes
-   * have not been fetched yet, which only a hand-edit of the raw JSON can do.
-   */
-  private async apply(next: string): Promise<void> {
-    await this.fetchMissingBlobs(parseProject(next));
-    this.loaded = this.build(next);
-    this.raw = next;
+  /** Apply operations as one undoable action. */
+  private run(ops: readonly Op[]): void {
+    if (ops.length === 0) return;
+    this.client.labelNextChange(ops.map(describeOp).join(", "));
+    this.client.apply(ops);
   }
 
-  /**
-   * Run operations, recording each with the inverse that undoes it.
-   *
-   * Inverses are computed as the batch runs, because each has to see the state
-   * its own operation saw.
-   */
-  async run(ops: readonly Op[]): Promise<void> {
-    let text = this.raw;
-    const recorded: Change[] = [];
-    for (const op of ops) {
-      recorded.push({ op, inverse: invertOp(text, op), at: Date.now() });
-      text = applyOp(text, op);
-    }
-    await this.apply(text);
-    // A fresh edit discards anything that was undone, as every editor does.
-    this.changes = this.changes.filter((c) => !c.undone).concat(recorded);
-  }
-
-  /** What undo would revert, or undefined if there is nothing. */
-  undoDescription(): string | undefined {
-    const next = [...this.changes].reverse().find((c) => !c.undone);
-    return next && describeOp(next.op);
-  }
-
-  /** What redo would reapply. */
-  redoDescription(): string | undefined {
-    const next = [...this.changes].reverse().find((c) => c.undone);
-    return next && describeOp(next.op);
-  }
-
-  async undo(): Promise<string | undefined> {
-    for (let i = this.changes.length - 1; i >= 0; i--) {
-      if (this.changes[i].undone) continue;
-      await this.apply(applyOp(this.raw, this.changes[i].inverse));
-      this.changes[i].undone = true;
-      return describeOp(this.changes[i].op);
-    }
-    return undefined;
-  }
-
-  async redo(): Promise<string | undefined> {
-    for (let i = this.changes.length - 1; i >= 0; i--) {
-      if (!this.changes[i].undone) continue;
-      await this.apply(applyOp(this.raw, this.changes[i].op));
-      this.changes[i].undone = false;
-      return describeOp(this.changes[i].op);
-    }
-    return undefined;
-  }
-
-  async setLabel(
-    address: number,
-    name: string,
-    type: ProjectLabel["type"] | undefined
-  ): Promise<void> {
+  setLabel(address: number, name: string, type: ProjectLabel["type"] | undefined): void {
     // Reuse the id already at this address so a rename keeps its identity
     // rather than replacing the label with a new one.
     const existing = this.loaded.map.getLabels().getLabelsAt(address)[0];
-    await this.run([
+    this.run([
       {
         op: "label.set",
         id: existing?.id ?? newId("lbl"),
@@ -235,37 +154,49 @@ export class ProjectSession {
     ]);
   }
 
-  async removeLabel(address: number): Promise<void> {
+  removeLabel(address: number): void {
     const existing = this.loaded.map.getLabels().getLabelsAt(address)[0];
     if (!existing) return;
-    await this.run([
-      { op: "label.delete", id: existing.id, layerId: this.layerIdFor(address) },
-    ]);
+    this.run([{ op: "label.delete", id: existing.id, layerId: this.layerIdFor(address) }]);
   }
 
-  /** Replace the whole document, as the raw JSON editor does. */
-  async replaceText(next: string): Promise<void> {
-    await this.apply(next);
+  undo(): string | undefined {
+    const description = this.client.describeUndo();
+    if (!this.client.canUndo) return undefined;
+    this.client.undo();
+    return description ?? "the last change";
   }
 
-  /**
-   * Persist. A stale base version means the file changed underneath — someone
-   * edited it in another editor — so the server refuses rather than clobbering.
-   */
-  async save(): Promise<void> {
-    const res = await fetch("/api/project", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ raw: this.raw, baseVersion: this.version }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      this.lastSaveError = body.error ?? "could not save the project";
-      throw new Error(this.lastSaveError);
-    }
-    this.version = body.version;
-    this.savedAt = Date.now();
-    this.savedRaw = this.raw;
-    this.lastSaveError = undefined;
+  redo(): string | undefined {
+    const description = this.client.describeRedo();
+    if (!this.client.canRedo) return undefined;
+    this.client.redo();
+    return description ?? "the last change";
+  }
+
+  undoDescription(): string | undefined {
+    return this.client.canUndo ? (this.client.describeUndo() ?? "the last change") : undefined;
+  }
+
+  redoDescription(): string | undefined {
+    return this.client.canRedo ? (this.client.describeRedo() ?? "the last change") : undefined;
+  }
+
+  debug(): SessionDebug {
+    return {
+      sessionId: this.client.sessionId,
+      status: this.client.status,
+      blobs: [...this.blobs].map(([path, data]) => ({ path, bytes: data.length })),
+      lastBuildMs: this.lastBuildMs,
+      undo: {
+        canUndo: this.client.canUndo,
+        canRedo: this.client.canRedo,
+        next: this.undoDescription(),
+      },
+    };
+  }
+
+  close(): void {
+    this.client.destroy();
   }
 }

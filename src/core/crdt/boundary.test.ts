@@ -84,8 +84,11 @@ describe("the CRDT boundary", () => {
     // adapter, every rule above would be bypassable by one re-export.
     expect(readFileSync(join("src", "core", "index.ts"), "utf-8")).not.toContain("crdt");
     // `src/store/index.ts` re-exports the project store, which does hold a
-    // document. Nothing in the UI imports it today — this says so out loud.
-    const uiFiles = files.filter((p) => p.startsWith(join("src", "ui")));
+    // document. No UI *source* file may reach it — the browser talks to the
+    // server, not to storage. Its tests may, because they stand a server up.
+    const uiFiles = files
+      .filter((p) => p.startsWith(join("src", "ui")))
+      .filter((p) => !p.endsWith(".test.ts"));
     const reachingIntoStore = uiFiles.filter((p) =>
       /from\s+["'][^"']*\/store\//.test(readFileSync(p, "utf-8"))
     );

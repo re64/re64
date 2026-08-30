@@ -1,210 +1,186 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { readFileSync } from "node:fs";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { startServer, RunningServer } from "../server/index.js";
+import { importProject } from "../store/index.js";
 import { ProjectSession } from "./session.js";
 
 /**
- * The browser's copy of the project, and its undo stack.
+ * The browser's half of the system, against a real server.
  *
- * These edits are not text the user typed — they are model operations, each
- * carrying the one that reverses it. Nothing here had a test, which for undo is
- * the wrong thing to leave unproven: a wrong inverse silently corrupts a
- * project rather than failing loudly.
- *
- * The network is stubbed rather than mocked away entirely, so `open` runs the
- * real fetch-and-build path the browser runs.
+ * Previously this stubbed the network and drove a text buffer. It cannot any
+ * more, and should not: the document arrives over a socket and the thing worth
+ * testing is that it does. These are the tests that would have caught the
+ * browser never being wired to the sync endpoint at all.
  */
 
-const PROJECT = readFileSync("assets/gridrunner.re64", "utf-8");
-const PRG = readFileSync("assets/gridrunner.prg");
+let dir: string;
+let server: RunningServer;
+let origin: string;
 
-let saved: { raw: string; baseVersion: string } | undefined;
+beforeEach(async () => {
+  dir = mkdtempSync(join(tmpdir(), "re64-ui-"));
+  const projectPath = join(dir, "gridrunner.re64");
+  copyFileSync("assets/gridrunner.re64", projectPath);
+  copyFileSync("assets/gridrunner.prg", join(dir, "gridrunner.prg"));
+  const { databasePath } = importProject(projectPath);
 
-beforeEach(() => {
-  saved = undefined;
-  let stored = PROJECT;
-
-  vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
-    const url = new URL(input, "http://localhost");
-
-    if (url.pathname === "/api/project" && init?.method === "PUT") {
-      saved = JSON.parse(String(init.body));
-      stored = saved!.raw;
-      return new Response(JSON.stringify({ ok: true, version: "v2", applied: 1 }));
-    }
-    if (url.pathname === "/api/project") {
-      return new Response(JSON.stringify({ raw: stored, version: "v1" }));
-    }
-    if (url.pathname === "/api/blob") {
-      return new Response(new Uint8Array(PRG));
-    }
-    return new Response("not found", { status: 404 });
-  });
+  server = startServer({ projectPath: databasePath, port: 0, host: "127.0.0.1", quiet: true });
+  await server.ready;
+  origin = `http://127.0.0.1:${server.port}`;
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(async () => {
+  await server.close();
+  rmSync(dir, { recursive: true, force: true });
+});
 
+const open = () => ProjectSession.open({ origin, author: "tester" });
 const labelAt = (s: ProjectSession, address: number) =>
   s.loaded.map.getLabels().getLabelsAt(address)[0]?.name;
 
-describe("undo", () => {
-  it("puts the text back exactly, byte for byte", async () => {
-    const session = await ProjectSession.open();
-    await session.setLabel(0x8100, "Renamed", undefined);
-    expect(session.raw).not.toBe(PROJECT);
-
-    expect(await session.undo()).toBe("set $8100 to Renamed");
-    expect(session.raw).toBe(PROJECT);
+describe("joining a project", () => {
+  it("arrives with the document and analyses it", async () => {
+    const session = await open();
+    expect(session.loaded.project.layers.length).toBeGreaterThan(0);
+    expect(labelAt(session, 0x8100)).toBe("InitializeGame");
+    session.close();
   });
 
-  it("rebuilds the model, not just the text", async () => {
-    // The whole point of undo here: the disassembly has to follow.
-    const session = await ProjectSession.open();
-    const before = labelAt(session, 0x8100);
+  it("fetches the binaries the document turned out to need", async () => {
+    // The order is the opposite of what it was: the browser cannot know which
+    // files a project references until the document has arrived.
+    const session = await open();
+    expect(session.debug().blobs.map((b) => b.path)).toEqual(["gridrunner.prg"]);
+    session.close();
+  });
 
-    await session.setLabel(0x8100, "Renamed", undefined);
+  it("reports itself connected", async () => {
+    const session = await open();
+    expect(session.debug().status).toBe("connected");
+    session.close();
+  });
+});
+
+describe("editing", () => {
+  it("shows a rename without waiting for anything", async () => {
+    const session = await open();
+    session.setLabel(0x8100, "Renamed", undefined);
+    await session.refresh();
     expect(labelAt(session, 0x8100)).toBe("Renamed");
-
-    await session.undo();
-    expect(labelAt(session, 0x8100)).toBe(before);
+    session.close();
   });
 
-  it("walks back through a series of edits, most recent first", async () => {
-    const session = await ProjectSession.open();
-    await session.setLabel(0x8100, "One", undefined);
-    await session.setLabel(0x81a2, "Two", undefined);
-
-    expect(await session.undo()).toBe("set $81A2 to Two");
-    expect(await session.undo()).toBe("set $8100 to One");
-    expect(session.raw).toBe(PROJECT);
-  });
-
-  it("reports there is nothing left rather than throwing", async () => {
-    const session = await ProjectSession.open();
-    expect(await session.undo()).toBeUndefined();
-  });
-
-  it("restores a label it deleted, with its type and position", async () => {
-    const session = await ProjectSession.open();
-    await session.removeLabel(0x8100);
+  it("removes a label", async () => {
+    const session = await open();
+    session.removeLabel(0x8100);
+    await session.refresh();
     expect(labelAt(session, 0x8100)).not.toBe("InitializeGame");
+    session.close();
+  });
+});
 
-    await session.undo();
-    expect(session.raw).toBe(PROJECT);
+describe("undo", () => {
+  it("takes back the last edit and says what it took", async () => {
+    const session = await open();
+    session.setLabel(0x8100, "Renamed", undefined);
+    await session.refresh();
+
+    expect(session.undo()).toContain("$8100");
+    await session.refresh();
+    expect(labelAt(session, 0x8100)).toBe("InitializeGame");
+    session.close();
   });
 
-  it("names what it would revert before doing it", async () => {
-    const session = await ProjectSession.open();
+  it("reports there is nothing to take back", async () => {
+    const session = await open();
     expect(session.undoDescription()).toBeUndefined();
+    expect(session.undo()).toBeUndefined();
+    session.close();
+  });
 
-    await session.setLabel(0x8100, "Renamed", undefined);
-    expect(session.undoDescription()).toBe("set $8100 to Renamed");
+  it("redoes what it undid, and stops", async () => {
+    const session = await open();
+    session.setLabel(0x8100, "Renamed", undefined);
+    await session.refresh();
+    session.undo();
+    await session.refresh();
+
+    expect(session.redo()).toContain("$8100");
+    await session.refresh();
+    expect(labelAt(session, 0x8100)).toBe("Renamed");
+    expect(session.redo()).toBeUndefined();
+    session.close();
   });
 });
 
-describe("redo", () => {
-  it("reapplies what was undone", async () => {
-    const session = await ProjectSession.open();
-    await session.setLabel(0x8100, "Renamed", undefined);
-    const edited = session.raw;
+describe("two sessions, as two tabs would be", () => {
+  it("each sees the other's edits", async () => {
+    const a = await open();
+    const b = await open();
 
-    await session.undo();
-    expect(await session.redo()).toBe("set $8100 to Renamed");
-    expect(session.raw).toBe(edited);
+    a.setLabel(0x8100, "FromA", undefined);
+    await settle();
+    await b.refresh();
+
+    expect(labelAt(b, 0x8100)).toBe("FromA");
+    a.close();
+    b.close();
   });
 
-  it("has nothing to reapply until something is undone", async () => {
-    const session = await ProjectSession.open();
-    await session.setLabel(0x8100, "Renamed", undefined);
-    expect(session.redoDescription()).toBeUndefined();
-    expect(await session.redo()).toBeUndefined();
+  it("are separate peers with separate undo, even as the same person", async () => {
+    // Two tabs are two client ids. Neither may take back the other's work,
+    // which is why undo is scoped to the session and not to whoever is there.
+    const a = await open();
+    const b = await open();
+
+    a.setLabel(0x8100, "FromA", undefined);
+    await settle();
+    await b.refresh();
+
+    expect(b.undoDescription()).toBeUndefined();
+    expect(b.undo()).toBeUndefined();
+
+    await settle();
+    await b.refresh();
+    expect(labelAt(b, 0x8100)).toBe("FromA");
+    a.close();
+    b.close();
   });
 
-  it("is discarded by a fresh edit, as every editor does", async () => {
-    const session = await ProjectSession.open();
-    await session.setLabel(0x8100, "One", undefined);
-    await session.undo();
+  it("merges edits made at the same time", async () => {
+    const a = await open();
+    const b = await open();
 
-    await session.setLabel(0x81a2, "Two", undefined);
-    expect(session.redoDescription()).toBeUndefined();
-  });
-});
+    a.setLabel(0x8100, "FromA", undefined);
+    b.setLabel(0x81a2, "FromB", undefined);
+    await settle();
+    await a.refresh();
 
-describe("the debug snapshot", () => {
-  it("reports an empty stack before anything is edited", async () => {
-    const session = await ProjectSession.open();
-    const d = session.debug();
-    expect(d.changes).toEqual([]);
-    expect(d.savedAt).toBeUndefined();
-    expect(d.unsavedEdits).toBe(0);
-  });
-
-  it("marks the entry undo would take next", async () => {
-    const session = await ProjectSession.open();
-    await session.setLabel(0x8100, "One", undefined);
-    await session.setLabel(0x81a2, "Two", undefined);
-
-    const marked = session.debug().changes.filter((c) => c.next);
-    expect(marked).toHaveLength(1);
-    expect(marked[0].description).toBe("set $81A2 to Two");
-  });
-
-  it("keeps an undone entry visible rather than dropping it", async () => {
-    // Redo needs it, and a debug view that hides it would misreport the depth.
-    const session = await ProjectSession.open();
-    await session.setLabel(0x8100, "One", undefined);
-    await session.undo();
-
-    const d = session.debug();
-    expect(d.changes).toHaveLength(1);
-    expect(d.changes[0].undone).toBe(true);
-    expect(d.changes.filter((c) => c.next)).toHaveLength(0);
-  });
-
-  it("notices unsaved work, and that it has been saved", async () => {
-    const session = await ProjectSession.open();
-    await session.setLabel(0x8100, "Renamed", undefined);
-    expect(session.debug().unsavedEdits).toBe(1);
-
-    await session.save();
-    expect(session.debug().unsavedEdits).toBe(0);
-    expect(session.debug().savedAt).toBeTypeOf("number");
-  });
-
-  it("cannot be used to corrupt the stack it describes", async () => {
-    const session = await ProjectSession.open();
-    await session.setLabel(0x8100, "Renamed", undefined);
-
-    session.debug().changes.length = 0;
-    expect(session.undoDescription()).toBe("set $8100 to Renamed");
-  });
-
-  it("reports the blobs it fetched and how big they are", async () => {
-    const session = await ProjectSession.open();
-    const blobs = session.debug().blobs;
-    expect(blobs.map((b) => b.path)).toEqual(["gridrunner.prg"]);
-    expect(blobs[0].bytes).toBe(4098);
+    expect(labelAt(a, 0x8100)).toBe("FromA");
+    expect(labelAt(a, 0x81a2)).toBe("FromB");
+    a.close();
+    b.close();
   });
 });
 
-describe("saving", () => {
-  it("sends the text it holds, against the version it loaded", async () => {
-    const session = await ProjectSession.open();
-    await session.setLabel(0x8100, "Renamed", undefined);
-    await session.save();
-
-    expect(saved?.baseVersion).toBe("v1");
-    expect(saved?.raw).toContain("Renamed");
+describe("the exported view", () => {
+  it("shows what would be written out", async () => {
+    const session = await open();
+    const text = session.exportedText();
+    expect(JSON.parse(text).layers).toBeInstanceOf(Array);
+    expect(text).toContain("InitializeGame");
+    session.close();
   });
 
-  it("keeps an undo to a one-line diff", async () => {
-    // The property the whole serializer exists for, checked from the browser's
-    // side: an edit and its undo must not reflow the file.
-    const session = await ProjectSession.open();
-    await session.setLabel(0x8100, "Renamed", undefined);
-
-    const before = PROJECT.split("\n");
-    const after = session.raw.split("\n");
-    expect(after.length).toBe(before.length);
-    expect(before.filter((l, i) => l !== after[i])).toHaveLength(1);
+  it("follows an edit", async () => {
+    const session = await open();
+    session.setLabel(0x8100, "Renamed", undefined);
+    await session.refresh();
+    expect(session.exportedText()).toContain("Renamed");
+    session.close();
   });
 });
+
+const settle = () => new Promise((r) => setTimeout(r, 250));
