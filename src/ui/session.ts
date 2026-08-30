@@ -26,7 +26,31 @@ import {
   resolveOwningLayer,
 } from "../core/index.js";
 
+/** What the debug view reports. Read-only; nothing acts on it. */
+export interface SessionDebug {
+  version: string;
+  bytes: number;
+  blobs: { path: string; bytes: number }[];
+  /** How long the last rebuild took: parse, map, and layer construction. */
+  lastBuildMs: number;
+  savedAt: number | undefined;
+  lastSaveError: string | undefined;
+  unsavedEdits: number;
+  changes: {
+    description: string;
+    undone: boolean;
+    at: number | undefined;
+    /** True for the entry undo would revert next. */
+    next: boolean;
+  }[];
+}
+
 export class ProjectSession {
+  private lastBuildMs = 0;
+  private savedAt: number | undefined;
+  private lastSaveError: string | undefined;
+  private savedRaw: string;
+
   private constructor(
     public raw: string,
     private version: string,
@@ -34,7 +58,34 @@ export class ProjectSession {
     private readonly blobs: Map<string, Uint8Array>,
     /** Edits made this session, each with the operation that undoes it. */
     private changes: Change[] = []
-  ) {}
+  ) {
+    this.savedRaw = raw;
+  }
+
+  /**
+   * A snapshot for the debug view.
+   *
+   * Deliberately a copy: a panel that could reach into the live arrays would
+   * be able to corrupt an undo stack by being looked at.
+   */
+  debug(): SessionDebug {
+    const nextUndo = [...this.changes].reverse().find((c) => !c.undone);
+    return {
+      version: this.version,
+      bytes: this.raw.length,
+      blobs: [...this.blobs].map(([path, data]) => ({ path, bytes: data.length })),
+      lastBuildMs: this.lastBuildMs,
+      savedAt: this.savedAt,
+      lastSaveError: this.lastSaveError,
+      unsavedEdits: this.raw === this.savedRaw ? 0 : 1,
+      changes: this.changes.map((c) => ({
+        description: describeOp(c.op),
+        undone: c.undone === true,
+        at: c.at,
+        next: c === nextUndo,
+      })),
+    };
+  }
 
   /** Fetch the project and every byte it references, then build the map. */
   static async open(): Promise<ProjectSession> {
@@ -64,6 +115,15 @@ export class ProjectSession {
   }
 
   private build(raw: string): LoadedProject {
+    const started = performance.now();
+    try {
+      return this.buildNow(raw);
+    } finally {
+      this.lastBuildMs = performance.now() - started;
+    }
+  }
+
+  private buildNow(raw: string): LoadedProject {
     return buildMemoryMap(
       parseProject(raw),
       makeFileLoader((path) => {
@@ -199,7 +259,13 @@ export class ProjectSession {
       body: JSON.stringify({ raw: this.raw, baseVersion: this.version }),
     });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error ?? "could not save the project");
+    if (!res.ok) {
+      this.lastSaveError = body.error ?? "could not save the project";
+      throw new Error(this.lastSaveError);
+    }
     this.version = body.version;
+    this.savedAt = Date.now();
+    this.savedRaw = this.raw;
+    this.lastSaveError = undefined;
   }
 }

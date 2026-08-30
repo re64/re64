@@ -125,6 +125,44 @@ export class ProjectStore {
       .slice(0, 12);
   }
 
+  /**
+   * What the server knows about this project, for the debug view.
+   *
+   * Nothing here is load-bearing; it exists because the interesting state — the
+   * CRDT document, the crash log, the undo record — lives on this side and is
+   * otherwise invisible from a browser.
+   */
+  debug(): {
+    version: string;
+    baseRev: string;
+    storedRev: string;
+    dirty: boolean;
+    authors: string[];
+    pendingOps: number;
+    updates: { count: number; stale: number };
+    ops: { total: number; undone: number };
+    history: number;
+  } {
+    const updates = this.storage.readUpdates();
+    const ops = this.storage.readOps();
+    return {
+      version: this.version(),
+      baseRev: this.baseRev,
+      storedRev: this.storage.rev(),
+      dirty: this.dirty,
+      authors: [...this.authors].sort(),
+      pendingOps: this.sessionOps.length,
+      updates: {
+        count: updates.length,
+        // Recorded against text that has since changed, so they will not be
+        // replayed. A non-zero count here means someone wrote around the doc.
+        stale: updates.filter((u) => u.baseRev !== this.baseRev).length,
+      },
+      ops: { total: ops.length, undone: ops.filter((c) => c.undone).length },
+      history: this.storage.history().length,
+    };
+  }
+
   /** The project as stored, without going through the document. */
   text(): string {
     return this.storage.readText();

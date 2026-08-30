@@ -409,6 +409,24 @@ async function edit(
  * JSON editor. These are model edits — a rename, a region retype — and each
  * carries the operation that reverses it.
  */
+/**
+ * Keep the undo and redo buttons in step with what is actually available.
+ *
+ * The title carries what would happen, since a bare arrow says nothing about
+ * whether pressing it reverts a rename or a deletion.
+ */
+function refreshEditButtons(): void {
+  const undoable = session?.undoDescription();
+  const redoable = session?.redoDescription();
+  const undo = $("#undo") as HTMLButtonElement;
+  const redo = $("#redo") as HTMLButtonElement;
+
+  undo.disabled = undoable === undefined;
+  redo.disabled = redoable === undefined;
+  undo.title = undoable ? `Undo: ${undoable}` : "Nothing to undo";
+  redo.title = redoable ? `Redo: ${redoable}` : "Nothing to redo";
+}
+
 async function undoEdit(): Promise<void> {
   if (!session) return;
   const address = currentAddress();
@@ -419,11 +437,7 @@ async function undoEdit(): Promise<void> {
   }
   render(address ?? undefined);
   setStatus(`Undid: ${undone}`);
-  try {
-    await session.save();
-  } catch (err) {
-    setStatus(err instanceof Error ? err.message : "Could not save", true);
-  }
+  await saveAndRefresh();
 }
 
 async function redoEdit(): Promise<void> {
@@ -436,11 +450,23 @@ async function redoEdit(): Promise<void> {
   }
   render(address ?? undefined);
   setStatus(`Redid: ${redone}`);
+  await saveAndRefresh();
+}
+
+/**
+ * Save, then bring the debug pane up to date.
+ *
+ * `render` snapshots before the save it is about to trigger, so without this
+ * the pane reports work as unsaved a moment after it landed — a debug view that
+ * lies is worse than none.
+ */
+async function saveAndRefresh(): Promise<void> {
   try {
-    await session.save();
+    await session!.save();
   } catch (err) {
     setStatus(err instanceof Error ? err.message : "Could not save", true);
   }
+  if (currentTab === "debug") void renderDebug();
 }
 
 // --- Navigation -------------------------------------------------------
@@ -791,9 +817,15 @@ async function loadDisassembly(restoreAddress?: number): Promise<void> {
  * Everything downstream of the project text is derived, so an edit just changes
  * the text and comes back through here — no network, no partial updates.
  */
+/** How long the last render spent in each phase, for the debug view. */
+const timings = { analyzeMs: 0, renderMs: 0 };
+
 function render(restoreAddress?: number): void {
+  const startedRender = performance.now();
   const loadedProject = session!.loaded;
+  const startedAnalyze = performance.now();
   const result = analyze(loadedProject);
+  timings.analyzeMs = performance.now() - startedAnalyze;
   analysis = {
     name: loadedProject.project.name ?? "untitled",
     ...result,
@@ -820,6 +852,10 @@ function render(restoreAddress?: number): void {
     (analysis.warnings.length ? ` · ${analysis.warnings.length} warnings` : "");
 
   if (restoreAddress !== undefined) goToAddress(restoreAddress, false);
+
+  timings.renderMs = performance.now() - startedRender;
+  refreshEditButtons();
+  if (currentTab === "debug") void renderDebug();
 }
 
 async function saveProjectFile(): Promise<void> {
@@ -838,6 +874,183 @@ async function saveProjectFile(): Promise<void> {
     setStatus(err instanceof Error ? err.message : "Could not save", true);
   }
 }
+
+// --- Debug pane -------------------------------------------------------
+
+/**
+ * What the application currently believes, in one place.
+ *
+ * The interesting state is split across two machines: the undo stack, the
+ * analysis timings and the fetched blobs are the browser's, while the CRDT
+ * document, the crash log and the durable undo record are the server's and
+ * invisible from here without asking. So this reads both and says which is
+ * which — a value that disagrees with its counterpart is the thing worth
+ * seeing.
+ */
+interface ServerDebug {
+  storage: string;
+  path: string;
+  clients: number;
+  version: string;
+  baseRev: string;
+  storedRev: string;
+  dirty: boolean;
+  authors: string[];
+  pendingOps: number;
+  updates: { count: number; stale: number };
+  ops: { total: number; undone: number };
+  history: number;
+}
+
+let serverDebug: ServerDebug | { error: string } | undefined;
+
+/**
+ * Everything here can carry project content — label names, file paths — so it
+ * is escaped rather than trusted. The rest of this file builds DOM and sets
+ * `textContent`; a table of forty key/value rows is where that stops paying.
+ */
+function escapeHtml(value: string): string {
+  return value.replace(
+    /[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!
+  );
+}
+
+const ms = (value: number) => `${value.toFixed(1)} ms`;
+const ago = (at: number | undefined) =>
+  at === undefined ? "never" : `${Math.round((Date.now() - at) / 1000)}s ago`;
+
+function definitions(rows: [string, string, string?][]): string {
+  return (
+    "<dl>" +
+    rows
+      .map(
+        ([term, value, cls]) =>
+          `<dt>${escapeHtml(term)}</dt><dd${cls ? ` class="${cls}"` : ""}>${escapeHtml(value)}</dd>`
+      )
+      .join("") +
+    "</dl>"
+  );
+}
+
+async function renderDebug(): Promise<void> {
+  const pane = $("#debug");
+  if (!session) {
+    pane.innerHTML = '<p class="empty">No project loaded.</p>';
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/debug");
+    serverDebug = res.ok
+      ? ((await res.json()) as ServerDebug)
+      : { error: `server replied ${res.status}` };
+  } catch (err) {
+    serverDebug = { error: err instanceof Error ? err.message : "unreachable" };
+  }
+
+  const d = session.debug();
+  const stats = analysis?.stats;
+  let html = "";
+
+  html += "<h3>Undo</h3>";
+  if (d.changes.length === 0) {
+    html += '<p class="empty">Nothing edited this session.</p>';
+  } else {
+    html +=
+      "<ol>" +
+      [...d.changes]
+        .reverse()
+        .map((c) => {
+          const marker = c.next ? '<span class="marker">▸</span>' : "<span></span>";
+          const when = `<span class="when">${c.at ? ago(c.at) : ""}</span>`;
+          const text = `<span${c.undone ? ' class="undone"' : ""}>${escapeHtml(c.description)}</span>`;
+          return `<li>${marker}${when}${text}</li>`;
+        })
+        .join("") +
+      "</ol>";
+    html += definitions([
+      ["depth", String(d.changes.length)],
+      ["undone", String(d.changes.filter((c) => c.undone).length)],
+    ]);
+  }
+
+  html += "<h3>Analysis</h3>";
+  html += definitions([
+    ["analyze", ms(timings.analyzeMs)],
+    ["build map", ms(d.lastBuildMs)],
+    ["render total", ms(timings.renderMs)],
+    ["rows", stats ? String(stats.rows) : "—"],
+    ["instructions", stats ? String(stats.instructions) : "—"],
+    ["labels", stats ? String(stats.labels) : "—"],
+    ["regions", stats ? String(stats.regions) : "—"],
+    ["arrows", stats ? `${stats.arrows} (${stats.arrowsDemoted} demoted)` : "—"],
+    ["warnings", String(analysis?.warnings.length ?? 0)],
+  ]);
+
+  html += "<h3>This browser</h3>";
+  html += definitions([
+    ["project", `${d.bytes.toLocaleString()} bytes`],
+    ["version seen", d.version],
+    ["unsaved", d.unsavedEdits ? "yes" : "no", d.unsavedEdits ? "warn" : undefined],
+    ["last saved", ago(d.savedAt)],
+    ...(d.lastSaveError
+      ? ([["last save error", d.lastSaveError, "bad"]] as [string, string, string][])
+      : []),
+    ...d.blobs.map(
+      (b) => [`blob ${b.path}`, `${b.bytes.toLocaleString()} bytes`] as [string, string]
+    ),
+  ]);
+
+  html += "<h3>Server</h3>";
+  if (serverDebug === undefined || "error" in serverDebug) {
+    html += definitions([
+      ["reachable", "no", "bad"],
+      ["detail", serverDebug?.error ?? "not asked", "bad"],
+    ]);
+  } else {
+    const sv = serverDebug;
+    html += definitions([
+      ["storage", sv.storage],
+      ["path", sv.path],
+      ["connected clients", String(sv.clients)],
+      ["document version", sv.version],
+      // A version this browser does not share means someone else has edited.
+      ["agrees with us", sv.version === d.version ? "yes" : "no", sv.version === d.version ? "good" : "warn"],
+      ["stored revision", sv.storedRev],
+      // The stored text lagging the document is normal mid-session: writes are
+      // debounced. It only matters if it never catches up.
+      ["document written out", sv.baseRev === sv.storedRev ? "yes" : "pending", sv.baseRev === sv.storedRev ? undefined : "warn"],
+      ["unflattened session", sv.dirty ? "yes" : "no"],
+      ["authors this session", sv.authors.length ? sv.authors.join(", ") : "—"],
+      ["operations pending flatten", String(sv.pendingOps)],
+    ]);
+
+    html += "<h3>CRDT</h3>";
+    html += definitions([
+      ["held by", "the server; this browser has no document"],
+      ["crash-log updates", String(sv.updates.count)],
+      // Recorded against text that has since changed, so they are dropped
+      // rather than replayed. Non-zero means someone wrote around the document.
+      ["unreplayable", String(sv.updates.stale), sv.updates.stale ? "warn" : undefined],
+    ]);
+
+    html += "<h3>Durable undo (server)</h3>";
+    html += definitions([
+      ["operations recorded", String(sv.ops.total)],
+      ["marked undone", String(sv.ops.undone)],
+      ["flattened sessions", String(sv.history)],
+      // Worth stating plainly: the two stacks are unrelated today.
+      ["shared with this browser", "no — the stack above is session-local", "warn"],
+    ]);
+  }
+
+  pane.innerHTML = html;
+}
+
+$("#debug").addEventListener("click", (event) => {
+  if ((event.target as HTMLElement).closest("h3")) void renderDebug();
+});
 
 // --- Shortcuts dialog -------------------------------------------------
 
@@ -994,17 +1207,21 @@ function renderRegions(nodes: RegionNode[]): HTMLElement {
 
 // --- Wiring -----------------------------------------------------------
 
-type TabName = "disasm" | "project";
+type TabName = "disasm" | "project" | "debug";
+
+let currentTab: TabName = "disasm";
 
 function showTab(name: TabName): void {
+  currentTab = name;
   for (const tab of Array.from(document.querySelectorAll(".tab"))) {
     tab.classList.toggle("active", tab.getAttribute("data-tab") === name);
   }
-  for (const id of ["disasm", "project"] as const) {
+  for (const id of ["disasm", "project", "debug"] as const) {
     $(`#${id}`).style.display = id === name ? "" : "none";
   }
   if (name === "disasm") disasmView.focus();
   else if (name === "project") projectView.focus();
+  else void renderDebug();
 }
 
 for (const tab of Array.from(document.querySelectorAll(".tab"))) {
@@ -1060,6 +1277,8 @@ split.addEventListener("sl-reposition", () => {
 });
 
 $("#back").addEventListener("click", goBack);
+$("#undo").addEventListener("click", () => void undoEdit());
+$("#redo").addEventListener("click", () => void redoEdit());
 $("#reload").addEventListener("click", () => {
   void loadDisassembly(currentAddress() ?? undefined);
 });

@@ -63,6 +63,15 @@ describe("a server given a database", () => {
     expect(res.status).toBe(404);
   });
 
+  it("reports its own state, which a browser cannot see otherwise", async () => {
+    const body = (await (await fetch(`${base}/api/debug`)).json()) as Record<string, unknown>;
+    expect(body.storage).toBe("sqlite");
+    expect(body.clients).toBe(0);
+    expect(body.version).toEqual(expect.any(String));
+    expect(body.updates).toEqual({ count: 0, stale: 0 });
+    expect(body.ops).toEqual({ total: 0, undone: 0 });
+  });
+
   it("accepts an edit and keeps it", async () => {
     const before = (await (await fetch(`${base}/api/project`)).json()) as {
       raw: string;

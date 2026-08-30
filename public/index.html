@@ -38,7 +38,11 @@
         background: var(--panel);
         border-bottom: 1px solid var(--border);
         flex: 0 0 auto;
+        /* A long status message must not reflow the toolbar onto two rows. */
+        flex-wrap: nowrap;
+        overflow: hidden;
       }
+      header > * { flex: 0 0 auto; }
 
       .brand {
         font-weight: 600;
@@ -82,7 +86,16 @@
 
       #goto { width: 90px; font-family: 'SF Mono', Menlo, Consolas, monospace; }
 
-      #status { color: var(--dim); font-size: 12px; min-width: 200px; }
+      #status {
+        color: var(--dim);
+        font-size: 12px;
+        /* Shrinks and truncates rather than pushing the buttons around. */
+        flex: 0 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
       #status.error { color: var(--illegal); }
 
       main { flex: 1; min-height: 0; display: flex; }
@@ -106,7 +119,8 @@
 
       #map { height: 100%; overflow: auto; background: var(--bg); }
       #content { height: 100%; position: relative; }
-      #disasm, #project { position: absolute; inset: 0; }
+      /* Each pane fills the content box; only its own contents scroll. */
+      #disasm, #project, #debug { position: absolute; inset: 0; }
 
       footer {
         flex: 0 0 auto;
@@ -232,6 +246,51 @@
       .kind-data { color: #b58ad0; }
       .kind-text { color: #d2a05a; }
       .kind-jumptable { color: #7fd3c1; }
+
+      /* --- Debug pane ------------------------------------------------- */
+      #debug {
+        overflow: auto;
+        padding: 16px 20px 28px;
+        font-size: 12px;
+        line-height: 1.6;
+      }
+      #debug h3 {
+        margin: 20px 0 6px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--dim);
+      }
+      #debug h3:first-child { margin-top: 0; }
+      #debug dl {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 1px 14px;
+        margin: 0;
+      }
+      #debug dt { color: var(--dim); white-space: nowrap; }
+      #debug dd { margin: 0; font-variant-numeric: tabular-nums; }
+      #debug .warn { color: #e0a35c; }
+      #debug .bad { color: #e07a7a; }
+      #debug .good { color: #7fd3a1; }
+
+      #debug ol {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        font-variant-numeric: tabular-nums;
+      }
+      #debug ol li {
+        display: grid;
+        grid-template-columns: 14px max-content 1fr;
+        gap: 10px;
+        padding: 1px 0;
+      }
+      #debug .marker { color: var(--accent); }
+      #debug .undone { color: var(--dim); text-decoration: line-through; }
+      #debug .when { color: var(--dim); }
+      #debug .empty { color: var(--dim); font-style: italic; }
       .kind-unknown { color: var(--dim); }
 
       /* Shortcuts dialog */
@@ -282,9 +341,12 @@
         <div class="tabs">
           <button class="tab active" data-tab="disasm">Disassembly</button>
           <button class="tab" data-tab="project">Project</button>
+          <button class="tab" data-tab="debug">Debug</button>
         </div>
         <button id="toggle-map" title="Show or hide the memory map">▤ Map</button>
         <button id="back">← Back</button>
+        <button id="undo" title="Undo">↶</button>
+        <button id="redo" title="Redo">↷</button>
         <input id="goto" placeholder="$8000" spellcheck="false" />
         <button id="reload">Reload</button>
         <button id="save">Save project</button>
@@ -297,6 +359,7 @@
           <div id="content" slot="end">
             <div id="disasm"></div>
             <div id="project" style="display: none"></div>
+            <div id="debug" style="display: none"></div>
           </div>
         </sl-split-panel>
       </main>
@@ -350,7 +413,8 @@
           <dt><kbd class="mod-key">Ctrl</kbd>+<kbd>Z</kbd></dt>
           <dd>Undo the last edit — renames, deletions, type changes</dd>
           <dt><kbd class="mod-key">Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></dt>
-          <dd>Redo</dd>
+          <dd>Redo — or the <kbd>↶</kbd> <kbd>↷</kbd> buttons, which name what
+            they would revert</dd>
           <dt>tags</dt>
           <dd>
             <span class="tok-labeltype type-function">[fn]</span> declared,

@@ -187,6 +187,15 @@ export function startServer(options: ServerOptions): RunningServer {
         return;
       }
 
+      if (path === "/api/debug" && req.method === "GET") {
+        return sendJson(res, 200, {
+          storage: database ? "sqlite" : "file",
+          path: projectPath,
+          clients: sync.clientCount,
+          ...store.debug(),
+        });
+      }
+
       if (path === "/api/history" && req.method === "GET") {
         return sendJson(res, 200, { entries: store.history() });
       }

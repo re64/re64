@@ -684,8 +684,14 @@ can land first over the existing fetch-and-rebuild flow.
 of operations paired with their inverses — separate from CodeMirror's
 `history()`, which covers typing in the project JSON editor and nothing else.
 
+There are buttons for it beside Back, whose titles name what they would revert —
+a bare arrow says nothing about whether pressing it undoes a rename or a
+deletion.
+
 It is **session-local**: held in memory, discarded on reload, and invisible to
-the `ops` table the CLI undoes from. So `re64 undo --any` cannot reach a browser
+the `ops` table the CLI undoes from. The Debug tab says so in as many words,
+because the two stacks looking alike and behaving differently is exactly the
+sort of thing to be told rather than to discover. So `re64 undo --any` cannot reach a browser
 edit, and a browser cannot reach the CLI's. Closing that means routing UI edits
 through the server as operations rather than as whole-document PUTs, which
 trades away the property `session.ts` is built around — that a rename shows
@@ -829,6 +835,26 @@ box-drawing characters along.
 One rendering gotcha: box-drawing glyphs fill their em box, not the taller line
 box, so unscaled verticals show a gap at every row boundary. The gutter span is
 stretched with `scaleY` to make segments meet.
+
+### The Debug tab
+
+Application state in one place, because the interesting parts are split across
+two machines and neither can see the other. The undo stack, the analysis
+timings and the fetched blobs are the browser's; the CRDT document, the crash
+log and the durable undo record are the server's, reached through `/api/debug`.
+
+It is laid out so **disagreement is what shows up**: the document version beside
+whether it matches this browser's, the base revision beside the stored one. A
+value on its own means little; a pair that has drifted apart is the bug.
+
+Two entries earn their place by naming things that are otherwise invisible:
+*unreplayable updates*, which is non-zero only when someone wrote around the
+document, and *shared with this browser: no*, which is the honest answer about
+the two undo stacks.
+
+The snapshot is a copy. A panel that could reach into the live arrays would be
+able to corrupt an undo stack by being looked at, and `session.debug()` is
+tested for that.
 
 ### Layers list, regions tree
 

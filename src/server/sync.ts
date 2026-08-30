@@ -160,6 +160,11 @@ export class SyncServer {
     this.idleTimer = undefined;
   }
 
+  /** How many participants are connected right now. */
+  get clientCount(): number {
+    return this.clients.size;
+  }
+
   /** Bring the file up to date now, without ending the session. */
   writeNow(): void {
     if (this.writeTimer) clearTimeout(this.writeTimer);

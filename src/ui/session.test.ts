@@ -129,6 +129,63 @@ describe("redo", () => {
   });
 });
 
+describe("the debug snapshot", () => {
+  it("reports an empty stack before anything is edited", async () => {
+    const session = await ProjectSession.open();
+    const d = session.debug();
+    expect(d.changes).toEqual([]);
+    expect(d.savedAt).toBeUndefined();
+    expect(d.unsavedEdits).toBe(0);
+  });
+
+  it("marks the entry undo would take next", async () => {
+    const session = await ProjectSession.open();
+    await session.setLabel(0x8100, "One", undefined);
+    await session.setLabel(0x81a2, "Two", undefined);
+
+    const marked = session.debug().changes.filter((c) => c.next);
+    expect(marked).toHaveLength(1);
+    expect(marked[0].description).toBe("set $81A2 to Two");
+  });
+
+  it("keeps an undone entry visible rather than dropping it", async () => {
+    // Redo needs it, and a debug view that hides it would misreport the depth.
+    const session = await ProjectSession.open();
+    await session.setLabel(0x8100, "One", undefined);
+    await session.undo();
+
+    const d = session.debug();
+    expect(d.changes).toHaveLength(1);
+    expect(d.changes[0].undone).toBe(true);
+    expect(d.changes.filter((c) => c.next)).toHaveLength(0);
+  });
+
+  it("notices unsaved work, and that it has been saved", async () => {
+    const session = await ProjectSession.open();
+    await session.setLabel(0x8100, "Renamed", undefined);
+    expect(session.debug().unsavedEdits).toBe(1);
+
+    await session.save();
+    expect(session.debug().unsavedEdits).toBe(0);
+    expect(session.debug().savedAt).toBeTypeOf("number");
+  });
+
+  it("cannot be used to corrupt the stack it describes", async () => {
+    const session = await ProjectSession.open();
+    await session.setLabel(0x8100, "Renamed", undefined);
+
+    session.debug().changes.length = 0;
+    expect(session.undoDescription()).toBe("set $8100 to Renamed");
+  });
+
+  it("reports the blobs it fetched and how big they are", async () => {
+    const session = await ProjectSession.open();
+    const blobs = session.debug().blobs;
+    expect(blobs.map((b) => b.path)).toEqual(["gridrunner.prg"]);
+    expect(blobs[0].bytes).toBe(4098);
+  });
+});
+
 describe("saving", () => {
   it("sends the text it holds, against the version it loaded", async () => {
     const session = await ProjectSession.open();

@@ -320,6 +320,58 @@ describe.each(BACKENDS)("$name", (b) => {
     });
   });
 
+  describe("what the debug view is told", () => {
+    it("says the stored text and the document agree when nothing is pending", () => {
+      const s = store();
+      s.document();
+      const d = s.debug();
+      expect(d.baseRev).toBe(d.storedRev);
+      expect(d.dirty).toBe(false);
+      expect(d.updates).toEqual({ count: 0, stale: 0 });
+    });
+
+    it("counts what is waiting to be flattened", () => {
+      const s = store();
+      s.addAuthor("alice");
+      s.runOps(
+        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Renamed" }],
+        "alice",
+        1
+      );
+
+      const d = s.debug();
+      expect(d.dirty).toBe(true);
+      expect(d.authors).toEqual(["alice"]);
+      expect(d.pendingOps).toBe(1);
+      expect(d.ops).toEqual({ total: 1, undone: 0 });
+    });
+
+    it("distinguishes an undone operation from a missing one", () => {
+      const s = store();
+      s.runOps(
+        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Renamed" }],
+        "alice",
+        1
+      );
+      s.undo("alice");
+
+      expect(s.debug().ops).toEqual({ total: 1, undone: 1 });
+    });
+
+    it("surfaces updates that can no longer be replayed", () => {
+      // Non-zero here is the signal that someone wrote around the document.
+      const s = store();
+      s.document();
+      applyOpToDoc(s.document(), {
+        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Pending",
+      });
+      expect(s.debug().updates.stale).toBe(0);
+
+      storage().writeText(PROJECT.replace('"Loop"', '"WrittenElsewhere"'));
+      expect(store().debug().updates.stale).toBeGreaterThan(0);
+    });
+  });
+
   describe("joining", () => {
     it("hands a newcomer the state it is missing", () => {
       const s = store();
