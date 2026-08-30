@@ -3,10 +3,32 @@
 Three, escalating, each adding one variable. They exist to find gaps in re64 by
 watching agents hit them, rather than by imagining what an agent would want.
 
-The rare thing here is an **oracle**. `assets/gridrunner.asm` is a complete human
-reverse engineering of the same binary — mwenge's `matrix`, released into the
-public domain — so there is a gold standard to compare against. Most agent
-evaluation has nothing of the kind.
+There is an **oracle**, with limits worth stating before anyone leans on it.
+`assets/gridrunner.asm` is a complete human reverse engineering of the same
+binary — mwenge's `matrix`, released into the public domain.
+
+**It is a linear sweep with names, not a reachability analysis.** Its author
+disassembled the span and named what they recognised. `PlayNewLevelSounds` and
+`SetVolumeAndPlaySounds` appear there as routines and are unreachable in any
+static walk of this binary — the only `JMP` to the first is inside the second,
+which nothing reaches either. Three consequences:
+
+- **Coverage is not comparable.** "The human named 300 addresses, the agent named
+  85" measures method, not skill. A sweep names everything it sees; a walk names
+  what it can reach.
+- **It can assert things that are not so.** Dead code is presented as routines.
+  `.BYTE $EA` between two routines is presented as data and is executed. An agent
+  copying faithfully reproduces both.
+- **It is silent about reachability**, which is what re64 computes — so the two
+  disagree by construction rather than by error.
+
+And the binary itself gets a vote. A 1983 game contains development leftovers,
+reaches code through computed jumps and `RTS` dispatch that no static walk
+follows, and may have bugs. A disagreement is a question, not a verdict.
+
+So use it for **expressiveness** — what the API cannot say that a person said —
+which is what experiment 1 was for and what it delivered. Do not use it to score
+fidelity, and do not treat "closer to the .asm" as the goal.
 
 | | Measures | Shared document? |
 |---|---|---|

@@ -65,13 +65,15 @@ describe("gridrunner disassembly", () => {
     // stopped resolving — except the last one, which is a genuine finding about
     // this project and not a defect in the loader.
     expect([...result.warnings].sort()).toEqual([
-      // Execution arrives two bytes before the end of laserFrameRateForLevel.
-      // Either that span is not all data, or the code leading there is being
-      // decoded wrongly. It has always been true and was never surfaced; the
-      // walk used to drop the address in silence.
-      "$8D16: execution reaches here and it is declared data, so decoding " +
-        "stops. Either that is not data, or the code leading here is being " +
-        "read wrongly",
+      // This analysis arrives two bytes before the end of
+      // laserFrameRateForLevel. Which of the three explanations applies is not
+      // known: the span may not be all data, the code leading there may be read
+      // wrongly, or a forty-year-old game may do something here that no static
+      // walk can follow. It has always been true and was never surfaced,
+      // because the walk dropped the address in silence.
+      "$8D16: this analysis arrives here and it is declared data, so decoding " +
+        "stops. It may not be data; the code leading here may be read wrongly; " +
+        "or the program may do something here that a static walk cannot follow",
       "$E518: undefined bytes",
       "$FD15: undefined bytes",
       "$FD50: undefined bytes",

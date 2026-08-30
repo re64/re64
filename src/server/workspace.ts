@@ -1262,8 +1262,10 @@ export class Workspace {
         // decoding, and asserting a mechanism this cannot check would be a
         // confident guess in the one message meant to be trusted.
         hint:
-          `Nothing reaches ${hex4(orphan)} any more. If that code is still ` +
-          `code, declare it: set_region start ${hex4(orphan)} kind "code".`,
+          `Nothing in this analysis reaches ${hex4(orphan)} any more. If it is ` +
+          `still code, say so: set_region start ${hex4(orphan)} kind "code", ` +
+          `or mark_function if something reaches it in a way a static walk ` +
+          `cannot see.`,
       },
     };
   }

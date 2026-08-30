@@ -1107,6 +1107,34 @@ The user id is one from `list_users`; the server does not verify it.
 
 ## Known Limitations & Future Features
 
+### What "reachable" means, and what the binary might be doing
+
+re64 computes **statically reachable**, which is strictly smaller than
+*executed*, and the gap between them is not a defect to be closed. A 6502
+program reaches code by means no walk can follow: a computed `JMP ($xx)`, an
+address pushed and `RTS`-dispatched, a table index from a variable,
+self-modifying code. A game from 1983 also contains dead routines left over
+from development, and may simply have bugs.
+
+So a disagreement between this analysis and a human's listing is not evidence
+that either is wrong. Three explanations are always live:
+
+- the annotation is wrong,
+- the decode leading there is wrong,
+- **the program does something the analysis cannot see, or is buggy.**
+
+Everything here that talks about reachability has to leave the third open.
+`find_references` already does — it states on every answer that it sees absolute
+addressing only. The `flowIntoData` warning and the `orphaned` hint say "this
+analysis arrives here", not "execution reaches here", and offer `mark_function`
+for the case where something reaches an address in a way no walk can show. An
+earlier draft of that warning offered exactly two explanations and was wrong for
+the reason this section exists.
+
+`find_undecoded` reports spans **nothing has explained** — not dead code. The
+distinction matters most on a fresh project, where almost everything is
+unexplained and none of it is dead.
+
 ### Flow into a non-code region stops, and says so
 
 A region says how to *read* bytes. Whether execution passes through it is a

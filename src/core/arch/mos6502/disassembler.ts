@@ -42,9 +42,10 @@ export function describeWarning(w: DisassemblyWarning): string {
       );
     case "flowIntoData":
       return (
-        `${hex(w.address)}: execution reaches here and it is declared ` +
-        `${w.kind}, so decoding stops. Either that is not ${w.kind}, or the ` +
-        `code leading here is being read wrongly`
+        `${hex(w.address)}: this analysis arrives here and it is declared ` +
+        `${w.kind}, so decoding stops. It may not be ${w.kind}; the code ` +
+        `leading here may be read wrongly; or the program may do something ` +
+        `here that a static walk cannot follow`
       );
   }
 }
@@ -237,10 +238,12 @@ export function disassemble(
     // follows a table — a correct-looking answer from a false premise, which is
     // the worst kind to produce silently.
     //
-    // The disagreement itself is the useful thing: either the region is
-    // mislabelled, or the decode that led here is wrong. Naming the address is
-    // what lets someone settle which. NOP filler between routines *is* code and
-    // should be declared code, which also renders it as NOP rather than bytes.
+    // The disagreement itself is the useful thing, and it has more than two
+    // explanations: the region may be mislabelled, the decode leading here may
+    // be wrong, or the program may genuinely do something a static walk cannot
+    // follow — a computed jump, self-modifying code, or a plain bug in a
+    // forty-year-old binary. Naming the address is what lets someone settle
+    // which. Claiming to know is not this warning's job.
     if (!shouldDisassemble(regions, address)) {
       const kind = regions?.getKindAt(address);
       if (kind) warnings.push({ type: "flowIntoData", address, kind });
