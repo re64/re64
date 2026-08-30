@@ -68,9 +68,7 @@ describe("orienting in a project never seen before", () => {
 
     expect(described.entryPoints).toContain("$8011");
     expect(described.layers.map((l) => l.name)).toContain("gridrunner");
-    // 1480, not 1449: control flow now continues past a non-code region, so
-    // the routine hidden behind laserFrameRateForLevel decodes.
-    expect(described.counts.instructions).toBe(1480);
+    expect(described.counts.instructions).toBe(1449);
     // The distinction that matters: chosen names mean something was understood.
     expect(described.counts.namedByHand).toBeGreaterThan(0);
     expect(described.counts.namedAutomatically).toBeGreaterThan(0);
@@ -1131,17 +1129,26 @@ describe("the last of trial 2's list", () => {
 });
 
 describe("an edit that cuts code off", () => {
-  it("stays quiet about the bytes it was asked to stop decoding", () => {
-    // Declaring the $EA filler between two routines as data — which is how a
-    // hand-written listing shows it — costs exactly those NOPs and nothing
-    // else, now that control flow continues past a non-code region. Counting
-    // them as orphans made every ordinary region report a loss.
+  it("reports the filler case, which is a mistake worth reporting", () => {
+    // The $EA between two routines is executed, so calling it data stops the
+    // walk there and takes the rest of the program with it. That is the
+    // correct behaviour for a wrong declaration — the NOPs are code — and the
+    // whole point is that it must not happen quietly.
     const blank = blankWorkspace();
     blank.setRegion(agent, 0x8000, 0x8002, "jumptable");
 
     const result = blank.setRegion(agent, 0x8361, 0x8370, "data", "filler");
 
-    expect(result.instructions.delta).toBe(-15);
+    expect(result.instructions.delta).toBeLessThan(-500);
+    expect(result.orphaned).toBeDefined();
+    expect(result.orphaned!.firstAt).toBe("$8370");
+  });
+
+  it("stays quiet about bytes nothing was reaching anyway", () => {
+    // A region over unreachable bytes costs nothing and says nothing.
+    const blank = blankWorkspace();
+    const result = blank.setRegion(agent, 0x8f00, 0x8f20, "data", "chargen");
+
     expect(result.orphaned).toBeUndefined();
   });
 

@@ -22,7 +22,8 @@ export type DisassemblyWarning =
   | { type: "undefined"; address: number }
   | { type: "truncated"; address: number; needed: number; available: number }
   | { type: "overlap"; address: number; existingAddress: number }
-  | { type: "oddJumptable"; address: number; bytes: number };
+  | { type: "oddJumptable"; address: number; bytes: number }
+  | { type: "flowIntoData"; address: number; kind: RegionKind };
 
 /** A warning as a line someone can read. */
 export function describeWarning(w: DisassemblyWarning): string {
@@ -38,6 +39,12 @@ export function describeWarning(w: DisassemblyWarning): string {
       return (
         `${hex(w.address)}: jumptable covers ${w.bytes} bytes, which is odd — ` +
         `the last byte is not part of any entry and is being ignored`
+      );
+    case "flowIntoData":
+      return (
+        `${hex(w.address)}: execution reaches here and it is declared ` +
+        `${w.kind}, so decoding stops. Either that is not ${w.kind}, or the ` +
+        `code leading here is being read wrongly`
       );
   }
 }
@@ -221,22 +228,22 @@ export function disassemble(
     }
     visited.add(address);
 
-    // Not instructions here — but execution does not stop.
+    // Flow arrived somewhere declared not to be code. Stop, and say so.
     //
-    // A region says how to *read* bytes. It says nothing about control flow,
-    // and conflating the two was never decided: `kind !== "code"` stopped
-    // decoding, and stopped the walk with it. So declaring the $EA filler
-    // between two routines as data — which is how a hand-written listing shows
-    // it, and which leaves a program that still runs — silently deleted
-    // everything downstream of it. Execution runs through those NOPs.
+    // Resuming after the region was tried and is wrong: it assumes execution
+    // passes through the bytes, which is true of NOP filler and false of the
+    // lookup table it would also apply to. On the reference project it decoded
+    // a routine that nothing reaches, purely because a routine is what usually
+    // follows a table — a correct-looking answer from a false premise, which is
+    // the worst kind to produce silently.
     //
-    // Resuming after the span needs no decoding inside it: whatever follows is
-    // where flow arrives. That also gets the inline-data-after-JSR idiom right,
-    // where a routine reads bytes past its own return address and resumes
-    // beyond them.
+    // The disagreement itself is the useful thing: either the region is
+    // mislabelled, or the decode that led here is wrong. Naming the address is
+    // what lets someone settle which. NOP filler between routines *is* code and
+    // should be declared code, which also renders it as NOP rather than bytes.
     if (!shouldDisassemble(regions, address)) {
-      const region = regions?.getRegionAt(address);
-      if (region && region.end > address) queue.push(region.end);
+      const kind = regions?.getKindAt(address);
+      if (kind) warnings.push({ type: "flowIntoData", address, kind });
       continue;
     }
 

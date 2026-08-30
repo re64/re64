@@ -35,17 +35,7 @@ const PROJECT = "assets/gridrunner.re64";
 // `(c) 1982 HES` — wrong, but visibly wrong, which is what tells a reader the
 // encoding needs saying. PETSCII and screen codes are now sayable; a custom
 // charset still is not.
-// Moved a third time: control flow now continues past a non-code region.
-//
-// A region says how to *read* bytes and nothing about control flow, but
-// `kind !== "code"` stopped decoding and stopped the walk with it. So the data
-// table `laserFrameRateForLevel` at $8CF6-$8D18 hid the routine immediately
-// after it — `PlayNewLevelSounds`, which this very project names and the human
-// reference documents, entered by falling through the table's end.
-//
-// 31 instructions appeared and none were lost, which is the shape a fix of this
-// kind should have. Checked address by address before re-pinning.
-const OUTPUT_SHA1 = "9169165ccb7177e6c02eda5723fd7b73b05bdbae";
+const OUTPUT_SHA1 = "2bac7155ff760f325fbf832738907d4c55ad3c66";
 
 describe("gridrunner disassembly", () => {
   const result = analyze(loadProjectFile(PROJECT), { annotations: false });
@@ -57,22 +47,31 @@ describe("gridrunner disassembly", () => {
 
   it("holds its shape", () => {
     expect(result.stats).toMatchObject({
-      instructions: 1480,
-      rows: 1872,
-      arrows: 208,
+      instructions: 1449,
+      rows: 1846,
+      arrows: 206,
       regions: 16,
       // 495, not the 597 this asserted before: the merged index counted every
       // user label twice, once through the memory map and once directly. The
       // rendered text never showed it because label rows dedupe by name, which
       // is why the hash above is unchanged.
-      labels: 502,
+      labels: 495,
     });
   });
 
-  it("warns only about KERNAL calls, which have no loaded bytes", () => {
-    // These are named by the platform symbol layer, which supplies no bytes on
-    // purpose. A warning naming anything else means a layer stopped resolving.
+  it("warns about KERNAL calls, and about one real disagreement", () => {
+    // The KERNAL entries are named by the platform symbol layer, which supplies
+    // no bytes on purpose. A warning naming anything *else* means a layer
+    // stopped resolving — except the last one, which is a genuine finding about
+    // this project and not a defect in the loader.
     expect([...result.warnings].sort()).toEqual([
+      // Execution arrives two bytes before the end of laserFrameRateForLevel.
+      // Either that span is not all data, or the code leading there is being
+      // decoded wrongly. It has always been true and was never surfaced; the
+      // walk used to drop the address in silence.
+      "$8D16: execution reaches here and it is declared data, so decoding " +
+        "stops. Either that is not data, or the code leading here is being " +
+        "read wrongly",
       "$E518: undefined bytes",
       "$FD15: undefined bytes",
       "$FD50: undefined bytes",

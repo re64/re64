@@ -1107,39 +1107,44 @@ The user id is one from `list_users`; the server does not verify it.
 
 ## Known Limitations & Future Features
 
-### A region says how to read bytes, not that execution stops
+### Flow into a non-code region stops, and says so
 
-These were one decision in the code and are two decisions in fact. The walk
-tested `kind !== "code"` and both stopped decoding *and* dropped the address —
-so declaring the `$EA` filler between two routines as data, which is exactly
-how a hand-written listing shows it and which leaves a program that still runs,
-silently deleted everything downstream. Execution runs through those NOPs.
+A region says how to *read* bytes. Whether execution passes through it is a
+different question, and the walk cannot answer it — so it does not try.
 
-Now a non-code region stops the bytes being decoded and control flow resumes at
-the region's end. That needs no decoding inside the span: whatever follows is
-where flow arrives. It also gets the inline-data-after-`JSR` idiom right, where
-a routine reads bytes past its own return address and resumes beyond them.
+Resuming after the region was implemented and reverted. It assumes execution
+runs through the bytes, which is true of `NOP` filler and false of the lookup
+table the same rule would apply to. On the reference project it decoded
+`PlayNewLevelSounds` — a routine nothing in the analysis reaches — purely
+because a routine is what usually follows a table. A correct-looking answer from
+a false premise is the worst kind to produce silently, and "usually right" is
+exactly how it would have stayed invisible.
 
-Filtering happened in two places — once when queueing a target and once in the
-loop — so a fall-through into data never reached the one that knew how to carry
-on. The loop decides now, and it is the only place that does.
+So the walk stops, and warns, naming the address. That disagreement is the
+useful output: either the span is not really data, or the decode that led there
+is wrong, and only a person or an agent can say which. On Gridrunner it reports
+`$8D16` — execution arriving two bytes before the end of `laserFrameRateForLevel`
+— which has always been true of this project and was never surfaced, because the
+walk dropped the address in silence.
 
-On the reference project this decoded 31 instructions that were previously
-invisible and lost none: `PlayNewLevelSounds` sits immediately after the data
-table `laserFrameRateForLevel`, is named by the project *and* the human
-reference, and was reachable only by falling through the table's end. That is
-the shape a fix of this kind should have, and it was checked address by address
-before the golden was re-pinned.
+**NOP filler between routines is code**, and should be declared `code`. A
+listing showing `.BYTE $EA` is making a rendering choice, not claiming that
+execution stops; declaring it data claims exactly that, and is wrong. Rendering
+it as `NOP NOP NOP` also says more.
+
+What is genuinely missing, and neither position supplies: a way to say **"this
+is code, render it as bytes"**. That is a display preference, and a region kind
+is the wrong place for it.
 
 **An edit that stops code decoding says so separately from `delta`.** A
 catastrophic loss used to arrive in the same field, shape and tone as a useful
 gain, and every tool description here teaches a reader that a positive delta is
-the reward for a good decision. `orphaned` names the first casualty *outside* the
-span written — bytes inside it are the point of the edit, not a loss — and
-suggests the `code` region that restores it. It makes no claim about *how* the
-address was reached: fall-through is the usual cause, but the same report
-follows from removing a jump's only decoding, and asserting a mechanism it
-cannot check would be a guess in the one message meant to be trusted.
+the reward for a good decision. `orphaned` names the first casualty *outside*
+the span written — bytes inside it are the point of the edit — and suggests the
+`code` region that restores it. It makes no claim about *how* the address was
+reached: fall-through is the usual cause, but the same report follows from
+removing a jump's only decoding, and asserting a mechanism it cannot check would
+be a guess in the one message meant to be trusted.
 
 ### One interpretation per address, and where that runs out
 
