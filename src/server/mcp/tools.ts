@@ -158,6 +158,15 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "list_warnings",
+    "What the disassembler could not make sense of. describe_project reports " +
+      "how many there are, which is enough to know something is wrong and no " +
+      "use for doing anything about it.",
+    { project },
+    ({ project: id }: { project?: string }) => context().workspace(id).warnings()
+  );
+
+  tool(
     "find_undecoded",
     "Spans of bytes nothing has explained: no instruction covers them and no " +
       "region says what they hold. This is the orientation question on a " +

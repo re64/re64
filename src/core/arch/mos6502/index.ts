@@ -18,5 +18,6 @@ export {
   DisassemblyOptions,
   RegionLookup,
   disassemble,
+  describeWarning,
   InstructionIndex,
 } from "./disassembler.js";

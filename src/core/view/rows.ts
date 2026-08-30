@@ -9,6 +9,7 @@
  */
 
 import { analyzeProgram } from "../analysis/program.js";
+import { describeWarning } from "../arch/mos6502/disassembler.js";
 import {
   LabelIndex,
   Label,
@@ -391,16 +392,7 @@ export function analyze(
     }
   }
 
-  const warnings = result.warnings.map((w) => {
-    switch (w.type) {
-      case "undefined":
-        return `$${hex4(w.address)}: undefined bytes`;
-      case "truncated":
-        return `$${hex4(w.address)}: truncated instruction (needed ${w.needed}, got ${w.available})`;
-      case "overlap":
-        return `$${hex4(w.address)}: overlaps instruction at $${hex4(w.existingAddress)}`;
-    }
-  });
+  const warnings = result.warnings.map(describeWarning);
 
   warnings.push(...walkWarnings);
 

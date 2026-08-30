@@ -21,6 +21,19 @@ export type DisassemblyWarning =
   | { type: "truncated"; address: number; needed: number; available: number }
   | { type: "overlap"; address: number; existingAddress: number };
 
+/** A warning as a line someone can read. */
+export function describeWarning(w: DisassemblyWarning): string {
+  const hex = (n: number) => `$${n.toString(16).toUpperCase().padStart(4, "0")}`;
+  switch (w.type) {
+    case "undefined":
+      return `${hex(w.address)}: undefined bytes`;
+    case "truncated":
+      return `${hex(w.address)}: truncated instruction (needed ${w.needed}, got ${w.available})`;
+    case "overlap":
+      return `${hex(w.address)}: overlaps instruction at ${hex(w.existingAddress)}`;
+  }
+}
+
 /**
  * Reference types discovered during disassembly:
  * - "call" - JSR target (subroutine entry)

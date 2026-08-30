@@ -152,7 +152,10 @@ describe("cross-references", () => {
 
     expect(refs.inbound!.length).toBeGreaterThan(0);
     // Without the text every entry costs another round trip to understand.
-    expect(refs.inbound![0].text).toContain("JSR");
+    // Asserted across all of them rather than the first, which only held
+    // while the order was arbitrary.
+    expect(refs.inbound!.every((r) => r.text)).toBe(true);
+    expect(refs.inbound!.some((r) => r.text!.includes("JSR"))).toBe(true);
   });
 
   it("admits what it cannot see", () => {
@@ -570,5 +573,34 @@ describe("naming what holds no bytes", () => {
     // And the next unowned name goes into it rather than making another.
     blank.setLabel(agent, 0x02, "currentXPosition");
     expect(blank.describe().layers.filter((l) => l.name === "hardware")).toHaveLength(1);
+  });
+});
+
+describe("what the disassembler could not make sense of", () => {
+  it("can be read, not only counted", () => {
+    const counted = workspace.describe().warnings;
+    const { total, warnings } = workspace.warnings();
+
+    expect(total).toBe(counted);
+    expect(warnings).toHaveLength(counted);
+    expect(warnings[0]).toMatch(/\$[0-9A-F]{4}/);
+  });
+});
+
+describe("who calls this", () => {
+  it("names the routine each call sits in", () => {
+    // "Who calls this" is a question about names. The answer used to be a bag
+    // of addresses in no order.
+    const { inbound } = workspace.references(0x8870, "in");
+
+    expect(inbound!.length).toBeGreaterThan(1);
+    expect(inbound!.some((r) => r.inRoutine !== undefined)).toBe(true);
+  });
+
+  it("puts them in address order", () => {
+    const { inbound } = workspace.references(0x8870, "in");
+    const addresses = inbound!.map((r) => parseInt(r.from.slice(1), 16));
+
+    expect(addresses).toEqual([...addresses].sort((a, b) => a - b));
   });
 });

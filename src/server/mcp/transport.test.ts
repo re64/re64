@@ -135,12 +135,15 @@ describe("working on a project", () => {
   it("shows callers with the line that calls them", async () => {
     const { value } = await callTool("find_references", { address: "$8870", direction: "in" });
     const { inbound, incomplete } = value as {
-      inbound: { from: string; text: string }[];
+      inbound: { from: string; text: string; inRoutine?: string }[];
       incomplete: string;
     };
 
     expect(inbound.length).toBeGreaterThan(0);
-    expect(inbound[0].text).toContain("JSR");
+    expect(inbound.some((r) => r.text.includes("JSR"))).toBe(true);
+    // Which routine the call sits in: "who calls this" is a question about
+    // names, and the answer used to be a bag of addresses.
+    expect(inbound.some((r) => r.inRoutine !== undefined)).toBe(true);
     // Stated on every answer, because a reader that trusts it would otherwise
     // conclude a routine has no callers when it has several.
     expect(incomplete).toMatch(/zero-page/i);

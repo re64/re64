@@ -130,6 +130,32 @@ description, not the behaviour.
   code decode, so declaring "this is code" forces a fabricated `sub_` name onto
   an address the reference leaves unnamed.
 
+## Status
+
+Fixed since this run, in commit order:
+
+| Finding | |
+|---|---|
+| `end` exclusivity silently doing nothing | `length` accepted, coverage reported, degenerate jumptable refused |
+| `writable: true` on labels that are not | now false for platform labels too |
+| unknown arguments accepted silently | tool schemas are strict |
+| `set_region kind:"code"` inert | seeds decoding, named or not |
+| no way to see what is left | `find_undecoded` |
+| comments only on labels and regions | first-class, `before` and `inline` |
+| nothing outside the loaded bytes can be named | symbols layer created on demand, plus `add_layer` |
+| zero-page label-relative rendering | fuzzy matching off below `$0100` |
+| warnings counted but not readable | `list_warnings` |
+| `find_references` unsorted, address-only | sorted, and names the enclosing routine |
+
+Two bugs found while fixing those, neither visible from the run: `diffProjects`
+did not diff layers at all, and a stale browser tab could crash the server by
+asking for a project it did not hold.
+
+Still open: bulk `set_labels`, named constants, `export_project`, text-region
+rendering, and the mid-instruction correctness bug — which needs the renderer to
+be able to draw two overlapping instruction streams, and is the only one of
+these that produces a wrong answer rather than a missing one.
+
 ## Triage
 
 Blocks experiment 2 (five agents from scratch, no answer sheet):

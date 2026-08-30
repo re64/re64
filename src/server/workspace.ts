@@ -39,7 +39,7 @@ import {
 } from "../core/index.js";
 import { projectFromDoc } from "../core/crdt/index.js";
 import { databaseFileBytes } from "../store/load.js";
-import { CommentPlacement } from "../core/index.js";
+import { CommentPlacement, describeWarning } from "../core/index.js";
 import { FileStorage, ProjectStore, SqliteStorage } from "../store/index.js";
 import { nodeFileBytes } from "../node-files.js";
 
@@ -280,7 +280,7 @@ export class Workspace {
     direction: "in" | "out" | "both" = "both"
   ): {
     address: string;
-    inbound?: { from: string; type: string; text?: string }[];
+    inbound?: { from: string; type: string; inRoutine?: string; text?: string }[];
     outbound?: { to: string; type: string; name?: string }[];
     incomplete: string;
   } {
@@ -288,15 +288,35 @@ export class Workspace {
     const { rows, lineForAddress } = this.rows();
     const lineAt = (a: number) => rows[lineForAddress[a]]?.text;
 
+    // The nearest named address at or before this one, which is as close to
+    // "the routine containing it" as anything gets without a call graph. Only
+    // labels that mark somewhere execution can start count: a data name above
+    // the call site would be a confident wrong answer.
+    const enclosing = (from: number): string | undefined => {
+      for (let at = from; at >= from - 0x400 && at >= 0; at--) {
+        const label = program.labels
+          .getLabelsAt(at)
+          .find((l) => l.type === "function" || l.type === "entry" || l.type === "code");
+        if (label) return label.name;
+      }
+      return undefined;
+    };
+
     return {
       address: hex4(address),
       ...(direction !== "out"
         ? {
-            inbound: program.xrefs.to(address).map((r: Reference) => ({
-              from: hex4(r.from),
-              type: r.type,
-              text: lineAt(r.from),
-            })),
+            inbound: [...program.xrefs.to(address)]
+              .sort((a: Reference, b: Reference) => a.from - b.from)
+              .map((r: Reference) => ({
+                from: hex4(r.from),
+                type: r.type,
+                // Which routine the call is *in*. "Who calls this" is a
+                // question about names, and the answer used to be a bag of
+                // addresses in no particular order.
+                inRoutine: enclosing(r.from),
+                text: lineAt(r.from),
+              })),
           }
         : {}),
       ...(direction !== "in"
@@ -380,6 +400,17 @@ export class Workspace {
       references: program.xrefs.count(label.address),
       writable: !invented && !builtIn,
     };
+  }
+
+  /**
+   * What the disassembler could not make sense of.
+   *
+   * `describe_project` reports how many there are, which is enough to know
+   * something is wrong and useless for doing anything about it.
+   */
+  warnings(): { total: number; warnings: string[] } {
+    const all = this.program().warnings.map(describeWarning);
+    return { total: all.length, warnings: all };
   }
 
   /**
