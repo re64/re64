@@ -229,130 +229,137 @@ primary and falls back to rank, so a delete racing a promote self-heals.
 Resolution is **explicit primary → source rank → id** — id, not name, so a rename
 does not silently move the primary.
 
-**Operations are the interface.** `src/core/ops/` holds a closed vocabulary, each
-op with a computable inverse, applied to project *text* through the line-editing
-serializer. They are the agent API, the history record, and the undo
-description. The CRDT beneath only decides how concurrent edits merge; nothing
-reads a binary update to learn what happened. The property the tests hold to is
-that an op followed by its inverse restores the exact original bytes.
+**Operations are the interface, not the mechanism.** `src/core/ops/` holds a
+closed vocabulary, each op with a computable inverse. They are the agent API,
+the durable history, and the undo description at both ends — agents send them,
+history displays them. What changed with the Yjs-first move is that they no
+longer *apply to text*: `applyOpsToDoc` puts them into the document, and the
+text is derived. `applyOp`/`invertOp` over text survive for the CLI and the
+line-editing serializer that keeps an export diff small.
 
-**Yjs sits behind one door.** `src/core/crdt/` is the only place that may import
-it, asserted by a test. Readable JSON stays canonical — now a column rather than
-a file; a document is built from it at the start of a session and flattened back
-at the end. That works only
-because construction is deterministic — fixed `clientID`, sorted insertion — so
-two clients loading the same file produce byte-identical documents and their
-edits have a common ancestor.
+**The CRDT stays behind an allowlist**, asserted by a test. The property is that
+the **domain never sees a CRDT type**: `yjs` only in `src/core/crdt`,
+`y-protocols`/`lib0` only there and in `src/server/sync.ts`, `y-websocket` only
+in `src/ui/doc-client.ts`. That last one is what keeps the transport
+replaceable — `main.ts` being on the deny-list is the assertion, not an
+oversight. Tests are exempt, because they stand in for a browser on purpose.
 
-**Flatten must go through operations**, never `formatProject`. A document knows
-the content everyone agreed on, not how the file was laid out: which labels a
-blank line grouped, what order regions were declared in. Regenerating the text
-turns a one-line edit into a whole-file diff. So a session is diffed against the
-stored text and the resulting ops applied line by line.
+**The export is regenerated, and that is a retreat taken knowingly.** The
+line-editing serializer exists so a one-label rename is a one-line diff, and a
+document cannot promise that — it knows the content everyone agreed on, not
+which labels a blank line grouped or what order regions were declared in. Hand
+authored layout in a `.re64` no longer survives a round trip. It is still
+diffable, because the projection has a defined order.
 
-**A session ends on a timeout**, not a goodbye. Tabs close without warning and
-agents simply stop; waiting for a clean exit would mean rarely flattening. It
-also lets a reload rejoin rather than splitting one piece of work in two.
+### Yjs-first: the document is the project
 
-**How edits reach the store.** Three moments, deliberately distinct:
+Read Yjs's own documentation before touching any of this. Its model is: **every
+participant holds a `Y.Doc`, persistence stores that document's update log, and
+readable formats are exports.** re64 spent a while doing the opposite — JSON
+canonical, the document rebuilt from it each session and flattened back — and
+almost every complication that arose descended from that inversion:
+`doc.clientID = 0` (assigning a field Yjs documents as readonly), deterministic
+construction, a base-revision guard, a three-way `absorb`, a file watcher,
+whole-document PUT with 409s, and the question "does merge happen on the client
+or the server?" — which in canonical Yjs does not arise, because everyone has a
+document and updates are commutative and idempotent.
 
-- **A debounced write, ~1.5s after edits stop.** The stored project tracks a
-  live session closely, so the CLI reads current content and any other process
-  stays in step. Without this it would sit stale for as long as anyone stayed
-  connected.
-- **A flatten, ~30s after the last participant leaves** (or on SIGINT/SIGTERM).
-  Writes anything outstanding and records one history entry.
-- **An HTTP PUT**, which writes immediately.
+The giveaway that this was always meant to be client-side: `doc.ts`'s own
+comment says determinism exists so "two clients loading the same JSON produce
+byte-identical documents, giving **their** edits a common ancestor". That is
+meaningless with one server-side document.
 
-All three write from the *whole document*, never one caller's own changes. The
-`.re64` export is a separate, on-demand step (`re64 export`) — it is what git
-tracks, so it moves when you decide it should, not on a timer.
+So: **the document is the truth.** A `.re64` is an *import source* or an *export
+target*, never synced to and never flattened into. `docFromProject` survives as
+the one-time conversion at import, kept as the first snapshot — the only place
+it is reached from, and why its determinism no longer has to hold across
+clients.
 
-History is accumulated as the session writes, not derived at the end — the file
-is already current by then, so an end-of-session diff would be empty and the
-entry would be lost.
-
-### Storage: SQLite, one database per project
-
-The canonical store is `<name>.re64db`, sitting beside the binaries it
-describes. `<name>.re64` is its **export**, written on demand by `re64 export`
-and read directly by `disasm`.
+### Storage: one database, many projects
 
 | Path | Holds | Committed? |
 |---|---|---|
-| `<name>.re64db` | the project, its binaries, history and undo log | no — gitignored |
-| `<name>.re64` | the export | yes — this is what a diff shows and what you hand someone |
-| `<name>.re64.history` | one JSON line per flattened session | exported alongside; the record git cannot give, since it names who did what *within* a session |
+| `<name>.re64db` | projects, users, sessions, updates, blobs | no — gitignored |
+| `<name>.re64` | the export | yes — what a diff shows and what you hand someone |
 
-The reason to be in a database is not size — a heavily annotated game is a
-couple of thousand tiny records. It is that **a JSON file has no transactions**
-and three writers share the project: the CLI, the server, and whoever has it
-open in an editor. Applying an operation and recording how to undo it were two
-writes that could come apart, leaving a project edited with no way back.
-Everything the filesystem needed to approximate safety — atomic rename, a
-directory watcher, comparing content to recognise one's own writes — exists
-because a file could not offer what `BEGIN IMMEDIATE` gives.
+Blobs are global and content-addressed, so two projects annotating the same game
+share one copy. Everything else is scoped by project id, and file names are
+unique per project rather than globally.
 
-**The project is one column of text, not normalized tables.** Nothing queries
-below project granularity: `/api/project` returns the whole string, analysis
-runs client-side over a whole `LoadedProject`, and `version()` hashes the whole
-document. Normalizing would buy query granularity nothing wants, at the cost of
-the property `serialize.ts` exists for — that a one-label rename is a one-line
-diff. Import and export move the text **verbatim**; `formatProject` regenerates
-layout from content and must never appear on either path.
+Storage is what a Yjs persistence provider is: append an update blob, read them
+back. Ordering and transactions are not needed for correctness — updates are
+commutative and idempotent — which is a *weaker* requirement than the text store
+this replaced.
 
-The trigger for normalizing later, so it is recognisable: the server needing to
-answer a question about *part* of a project — cross-project search, or serving
-one layer without the rest.
+`snapshots` is **not compaction**: the updates it covers stay exactly where they
+are. It exists so loading is not proportional to every edit ever made, which
+matters because the CLI runs in a fresh process to rename one label.
 
-`ProjectStorage` (`src/store/storage.ts`) is the interface, with two
-implementations that run the **identical** test suite: `SqliteStorage` and
-`FileStorage`. The filesystem one is not transitional — `disasm -p project.re64`
-must keep working, and `re64 import` reads layer paths from disk. SQLite is
-canonical for *edited* projects; a plain `.re64` stays a first-class read-only
-input.
+Compaction is deliberately not done. `gc: false` on every document, and it must
+match on every peer — two documents disagreeing about collection can reach
+different conclusions about the same history. The growth warnings in the Yjs
+literature are written for text editing, where every character ever typed is a
+struct; this document holds maps of scalars.
 
-**Binaries are content-addressed.** `files(name → hash)` and `blobs(hash →
-bytes)`. Dedup is the smaller reason; the larger is that nothing previously
-checked the bytes behind a layer were the ones its addresses were named against,
-so re-dumping a game silently pointed every label at nonsense.
+### The wire, and the browser
 
-Names stay project-local and **the byte source stays keyed by them**, so content
-addressing is invisible above `src/store`: the loader, the D64 handling,
-`FileLayer` and the browser client are untouched. That is load-bearing, not
-convenience — a layer's `path` also derives its id (`loader.ts`), its display
-name, and the name of its entry label (`file-layer.ts`), so rewriting paths into
-hashes would change the disassembly itself.
+`y-protocols/sync`, with the y-websocket envelope, so a stock client
+interoperates and so this is replaceable by Hocuspocus or y-sweet without
+touching the browser. The client opens with SyncStep1, the server answers
+SyncStep2 then its own SyncStep1, the client answers SyncStep2; the server only
+ever replies.
 
-Names are normalized identically on write and lookup (POSIX separators, no
-leading `./`), because `game.prg`, `./game.prg` and `sub/../game.prg` are one
-file on disk but would be three rows. A name reaching outside the project is
-refused rather than resolved: there is no outside once the bytes are in the
-database. Blobs are **append-only** — nothing collects one no name points at.
+The browser holds a `Y.Doc` too, via `WebsocketProvider` in `src/ui/doc-client.ts`
+— the only file that knows how synchronisation reaches the network. It starts
+**empty** and is filled by the server. Building a base locally from JSON both
+sides are assumed to share only works while those bytes are provably identical
+and fails silently when they are not, because both bases claim the same client
+id for different content.
 
-Because a name maps to bytes that cannot change under it, `/api/blob` is served
-`immutable` with the content hash as its `ETag`.
+Consequence worth knowing: the browser cannot know which binaries a project
+needs until the document arrives, so the first paint waits on a socket round
+trip rather than a fetch.
 
-Not done, and worth knowing: an exported `.re64` carries no hashes, so someone
-handed the file plus a binary cannot verify they match. Adding them to the text
-would break the verbatim round trip, so it needs to be opt-in.
+**One relay per project**, made on first use, rather than one relay made
+multi-tenant. A project has its own document, participants and idle timer. The
+room is the path segment a stock client already appends, so a project is chosen
+once, on upgrade, before the handshake — which is where an access check goes.
 
-Persistence serves three separate purposes, and they want different answers:
+### Sessions, not users
 
-| Purpose | Table | Shape | Lifetime |
-|---|---|---|---|
-| Crash safety | `session_updates` | append-only | dropped after flatten |
-| The project | `project` | last state | canonical |
-| History | `history` | linear, one row per session | durable |
-| Undo | `ops` | every op with its inverse | durable |
+**One connection, one document, one undo stack — not one person.** Two tabs are
+two sessions with two client ids, genuinely concurrent peers who can conflict
+with each other, and neither may undo the other's work. That falls out of
+scoping undo to the session id rather than to whoever is sitting there.
 
-**A CRDT update is only valid against the text it was built from.**
-`docFromProject` is deterministic *given the project text*, so `session_updates`
-records the `base_rev` each update was built against and recovery replays only
-matching ones. Without that guard, a crash log written before another writer
-edited the project merges cleanly and silently resurrects what that edit
-deleted. `rev` is a content hash rather than a counter, so two writers naming
-the same text agree on its name without coordinating.
+`sessions` records the Yjs client id alongside the user who claimed it, learned
+from the traffic rather than trusted from the claim. That is what makes an edit
+attributable later: a struct carries a client id and nothing else. Authentication
+is faked outright — picking a name is all it takes — and real accounts will
+change how a session is issued, not what one is.
+
+Presence is `y-protocols/awareness`, relayed but never persisted: who is looking
+at what is not part of the project.
+
+### Undo: two features that must not be merged
+
+- **In the browser**, `Y.UndoManager` scoped to the session. `captureTimeout: 0`,
+  because the 500ms default merges anything done in quick succession — right for
+  typing, wrong for two deliberate renames. Grouping is expressed by sharing a
+  transaction (`applyOpsToDoc`), not by happening to be close in time.
+- **In the CLI**, the `ops` table, which applies an inverse as a *new forward
+  edit*. `UndoManager` needs a live document and cannot exist in a process that
+  starts, edits and exits.
+
+Browser edits get no ops row, so `re64 undo` cannot reach them. Taken
+deliberately.
+
+Two details that were not obvious. A description must be attached as a change is
+made, since the stack holds structs that cannot say "renamed $8100"; and it
+cannot be read off the entry being retired, because `stack-item-added` fires
+**before** `stack-item-popped`, so it is stashed before the call. Connection
+status must be read from the provider rather than subscribed to, since the
+events fire before anything can listen.
 
 **A whole-document PUT conflicts rather than merges.** An agent may send JSON
 instead of operations, and it is routed through the shared document as a
@@ -422,252 +429,8 @@ evidence. Recorded here so it is not mistaken for a finding:
   cost one iteration; CSS class strings and stringly-typed props fail at
   runtime and cost a browser round-trip. Every error `tsc` could catch this
   session was caught immediately; every one that survived was string content
-  (`# CLAUDE.md
-
-This file provides guidance to Claude Code (claude.ai/claude-code) when working with code in this repository.
-
-## Project Overview
-
-re64 is a C64 disassembler. The long-term goal is a collaborative web-based tool with CRDT support for real-time collaboration. Currently it's a local CLI tool in active development.
-
-## Architecture
-
-### Directory Structure
-
-- `src/core/` - Platform-agnostic code shared between CLI and future web UI
-- `src/cli/` - Command-line interface using Commander
-- `assets/` - Example files and project configurations
-- Future: `src/server/` and `src/ui/` directories
-
-Keep core/ free of Node.js-specific APIs where possible to maintain web compatibility.
-
-### Conceptual Model
-
-The system has three layers of abstraction:
-
-**1. Memory Map & Layers** - The "physical" layer
-- `MemoryMap` contains stacked `Layer` objects (FileLayer, BytesLayer)
-- Layers provide actual bytes, stack and shadow each other (top wins)
-- This is the raw data being analyzed
-
-**2. Regions** - Semantic "what is this?"
-- Define what a range of memory *means* (code, data, text, jumptable, unknown)
-- Not backed by bytes - they overlay the memory map
-- Sources:
-  - Auto-generated from layers via `defaultRegionKind` (PRG→code, raw→data)
-  - User-defined in project file (finer granularity, overrides auto)
-- Guide the disassembler on how to interpret bytes
-
-**3. Labels** - Semantic "what is this called?"
-- Mark individual addresses with names
-- Sources:
-  - Layer-generated (PRG entry points)
-  - Region-generated (named region start addresses)
-  - User-defined in project file
-- Resolved in instruction operands (e.g., `JSR ROM_CHROUT` instead of `JSR $FFD2`)
-
-### Key Types
-
-```
-src/core/
-├── memory/
-│   ├── layer.ts         # Layer interface, BytesLayer
-│   ├── file-layer.ts    # FileLayer (PRG/raw files)
-│   ├── memory-map.ts    # MemoryMap (layer stack)
-│   ├── label.ts         # Label, LabelIndex, label factories
-│   └── region.ts        # Region, RegionKind, RegionIndex
-├── arch/
-│   └── mos6502/
-│       ├── opcodes.ts       # Complete 6502 opcode table (legal + illegal)
-│       ├── instruction.ts   # Instruction type, operand formatting
-│       ├── decoder.ts       # Single instruction decoder
-│       └── disassembler.ts  # Work-queue disassembler
-├── c64/
-│   └── d64.ts           # D64 disk image parser
-└── project/
-    └── project.ts       # Project file schema and parser
-```
-
-### Disassembler Design
-
-The 6502 disassembler uses a work-queue approach:
-1. Start with entry points in the queue
-2. Decode instruction at queue head
-3. Add control flow targets (branches, jumps, fall-through) to queue
-4. Skip addresses in non-code regions
-5. Continue until queue is empty
-
-This discovers all reachable code without disassembling data as instructions.
-
-## Commands
-
-- `npm run build` - Compile TypeScript
-- `npm test` - Run tests once
-- `npm run test:watch` - Run tests in watch mode
-- `npm run dev` - Watch mode compilation
-- `npm run typecheck` - Type check without emitting
-
-## Testing
-
-Tests live alongside source files with `.test.ts` suffix. Use vitest.
-
-## Guidelines
-
-- Minimal dependencies - only add packages when clearly beneficial
-- Write unit tests for core functionality
-- Keep abstractions simple until complexity is needed
-- TypeScript strict mode is enabled
-
-## Documentation
-
-- Use TSDoc (`/** */`) for public interfaces and classes
-- Document "why", not "what" - let types speak for themselves
-- Keep comments minimal; add them for non-obvious design decisions or C64-specific knowledge
-- Don't restate what the code or types already say
-
-## Project Files
-
-Project files (`.re64`) are JSON with this schema:
-
-```typescript
-interface Project {
-  name?: string;
-  description?: string;
-  layers: ProjectLayer[];      // Required: each layer owns its annotations
-  entryPoints?: (number | string)[];  // Disassembly entry points
-}
-
-interface ProjectLayer {
-  type: "prg" | "raw" | "bytes" | "symbols";
-  path?: string;        // For prg/raw
-  address?: number | string;  // For raw/bytes
-  bytes?: string;       // Hex string for bytes type
-  length?: number;      // Optional length for repeat/fill
-  noAutoEntry?: boolean;  // Suppress auto entry point for PRG
-  name?: string;        // Display name; defaults to file basename
-  labels?: ProjectLabel[];    // Labels owned by this layer
-  regions?: ProjectRegion[];  // Regions carved out of this layer
-}
-
-interface ProjectLabel {
-  address: number | string;  // "$8000" or 32768
-  name: string;
-  type?: "entry" | "function" | "code" | "address";  // Default: "address"
-  comment?: string;
-}
-
-interface ProjectRegion {
-  start: number | string;
-  end: number | string;   // Can use "+length" format: "+$100"
-  kind: "code" | "data" | "text" | "jumptable" | "unknown";
-  name?: string;
-  comment?: string;
-}
-```
-
-Addresses can be decimal (32768) or hex strings ("$8000", "0x8000").
-
-**Annotations belong to layers.** Labels and regions nest inside the layer that
-owns them, so reordering the layer stack moves them with the bytes they
-describe rather than leaving them pointing at whatever else lands at that
-address. Region and kind resolution asks the topmost layer supplying a byte —
-the same z-order rule as `readByte`.
-
-A `symbols` layer carries names for addresses with no loaded bytes (zero page,
-I/O registers, KERNAL entry points). It supplies no bytes, so it never shadows
-and occupies no address range. A built-in C64 platform layer of this kind sits
-at the bottom of every stack, supplying standard hardware and KERNAL names; a
-project's own labels outrank it, so `ROM_CHROUT` beats the built-in `CHROUT`.
-
-Label priority is explicit rather than insertion order:
-`user > region > layer > platform > auto`.
-
-## UI Design Decisions
-
-The eventual web UI is built around a single central widget: a disassembly view
-holding assembler lines, comments, cross-reference arrows, and inline editable
-elements (labels, comments). These decisions are recorded here because they
-constrain the core data model, not just the presentation layer.
-
-### Model-is-truth, not buffer-is-truth
-
-The displayed text is *derived* from the three-layer model (bytes → regions →
-labels). Users never type assembler; they edit specific fields — a label's name,
-a comment, a region's kind. Therefore:
-
-- The document is a list of rows keyed by **address**, not a text buffer.
-- CRDT sync operates on the project model (`labels`, `comments`, `regions`) —
-  the same structures already in the `.re64` schema — never on characters.
-- Two users renaming the same label is a clean conflict on one field, rather
-  than overlapping character edits in a generated string.
-
-Rejected alternative: holding generated text in an editor buffer and parsing
-edits back. That round-trips derived text through a parser and puts conflicts at
-the wrong granularity.
-
-### UI stack: web components, no framework
-
-Shoelace (`@shoelace-style/shoelace`) supplies application chrome — split
-panels, and later menus, trees, dialogs, toolbars. Components are imported
-individually so the bundle carries only what is used. Adoption is incremental:
-add a component when a hand-rolled one would otherwise be written.
-
-Rejected: **React with a data-dense component library** (Blueprint, Mantine).
-The deciding factor is that CodeMirror 6 is the hero widget and is *already*
-reactive — most of `src/ui/main.ts` is `StateField`/`StateEffect`/decoration
-code. A framework would insert a wrapper and a boundary at exactly the most
-complex point in the app, where CM6 manages its own DOM by design, while its
-declarative-render benefit lands on the simplest panels — `renderMap()` is a
-few dozen lines of plain DOM building.
-
-Standard DOM is also the cheaper thing to reason about from cold. `<sl-split-panel>`
-is an HTML tag: greppable, self-describing, documented outside this repo. A
-bespoke component tree has to be reconstructed mentally before anything can be
-changed, and this project is worked on in bursts across sessions.
-
-The CRDT counter-argument is real but weaker than it looks: the server is
-already the source of truth and the client already re-fetches and rebuilds, so
-that *is* the re-render model, only explicit.
-
-Nothing is foreclosed. `dockview-core` is also framework-agnostic, so if panels
-later need true IDE docking it drops in beside this rather than replacing it.
-Cost so far: +49KB, most of it the one-time Lit runtime.
-
-**Open question, deliberately parked (2026-08-22): move to React?**
-Not settled. The arguments, so they do not have to be reconstructed:
-
-*For React (with Yjs beneath it):*
-- A component library gives **nesting, layout composition, and a consistent
-  look across advanced controls** — virtualized trees, data grids, comboboxes,
-  context menus. Shoelace supplies widgets but is not a composition system,
-  and this is the strongest argument on the table.
-- Reconciliation beats the current `renderMap()`, which clears its container
-  and rebuilds the whole subtree. Irrelevant at three panels; not irrelevant
-  as panels multiply.
-- The port only gets more expensive: ~1000 lines of `src/ui/main.ts` today.
-- CM6 in React is a solved pattern — mount once into a ref, drive with
-  effects, never let React manage its internals. The earlier claim that CM6
-  argues *against* React was overstated: it argues against React owning CM6's
-  DOM, which nobody proposes.
-
-*Layering, which an earlier version of this file got wrong:*
-Redux and Yjs are not alternatives. Y.Doc would hold truth, sync, and
-per-user undo (`UndoManager` with `trackedOrigins`, so Ctrl-Z reverts your
-edits and not a collaborator's); a store is an immutable projection for
-rendering. With Yjs authoritative, `useSyncExternalStore` may remove the need
-for Redux entirely. The rule that matters: the projection stays one-way —
-Yjs accepts writes, the store only mirrors. Two stores both accepting writes
-is the trap; a read-only projection is not.
-
-*Separable and unanswered:* **Yjs vs JSON as the persisted format.** Readable
-JSON in git is a real advantage over panopticon's compressed-CBOR blob; Yjs's
-native persistence is a binary update log. Keeping JSON means rebuilding the
-Y.Doc on load and losing cross-session merge fidelity; keeping the Yjs log
-means losing readability and diffs. This changes the file format, so it is
-the expensive decision — and it is independent of the React question. React
-can land first over the existing fetch-and-rebuild flow.
-
- dropped from a template literal, blank lines stripped by a serializer).
+  (a versioned CSS class dropped from a template literal, blank lines
+  stripped by a serializer).
 - On that criterion Blueprint drops despite being the best *category* fit: its
   convention is versioned CSS classes (`bp3-`, `bp4-`, `bp5-`, `bp6-`), which
   is exactly the invisible failure mode. Fluent UI drops harder — v8 and v9 are
@@ -896,69 +659,25 @@ from `disk.d64:filename` shows the image and file name. Modelling disks as
 containers would be a real change to `FileLayer` and the schema, and nothing
 needs it yet.
 
-### Nobody owns the project
+### Rendering under a live collaborator
 
-The server is not the only writer. `re64 label set` opens the store in its own
-process — no daemon — and a user may have the export open in an editor. Left
-alone this loses data *silently*, and the shape of the loss is worth
-remembering: a write that diffs its own document against the stored text treats
-the document as the whole truth, so anything a second writer added since gets
-diffed straight back out.
+**Repaints are deferred entirely while an inline label editor is open.** Blunt
+and deliberate: a repaint replaces the document and rebuilds decorations, which
+would pull the field out from under someone mid-word. The disassembly view is
+not a collaborative text buffer and must not start behaving like one.
 
-Two things fix it, and both are needed:
+It also makes a latent bug unreachable — `LabelEditWidget.eq` compares by label
+*name*, so a remote rename of the address being edited would rebuild the widget
+even if editor state survived. Anyone removing the deferral has to fix that, and
+must anchor on the **label id**: several labels can share an address, so an
+address cannot identify one. Only the "naming a new address" case may key on an
+address, because no label exists there yet.
 
-- **Every write goes through the document.** `ProjectStore.runOps` is the only
-  mutating primitive; the CLI and the server both use it. Operations are routed
-  into the document and the document produces the text, so no write can be
-  invisible to whoever else holds one.
-- **A write folds in what changed underneath it first**, and does so
-  **three-way** — diffing from the text as it was last known, which describes
-  what *they* did. Comparing two documents has no common ancestor and cannot
-  tell "they added this" from "we deleted it". A watcher normally absorbs first,
-  but correctness must not depend on one running.
-
-**Only a database is watched.** `SqliteStorage` polls `PRAGMA data_version`,
-which changes only when a *different* connection commits. `FileStorage.watch`
-does nothing, deliberately: a project file has one writer, and a `.re64` is now
-the *exported* form, so watching one would be a timer in every server process
-looking for hand-edits to a generated file that the next `re64 export`
-overwrites. Two processes on one project is what the database is for, rather
-than something to approximate with `stat`.
-
-The filesystem was watched once, and the sequence is worth keeping because each
-step looked like the fix. `fs.watch` on a path follows the inode, and every
-writer replaces it by renaming a temporary file over the target — so the watch
-went deaf after the first write, including its own. Watching the *directory*
-fixed that and inherited the rest: one save reports several times, needing a
-debounce tuned by guess; the reported filename is null on some platforms; and
-the latency tracks machine load, which surfaced as a test failing about one full
-run in four while passing every time alone. Polling removed the flakiness and
-left the question of why any of it was there.
-
-Not watching is affordable because **correctness does not depend on it** — a
-write folds in whatever changed underneath it either way. Only latency differs:
-a database learns immediately, a file at the next write.
-
-**Fold in before applying, not after.** Removing the watcher exposed an ordering
-bug it had been hiding. `runOps` applied its operations to the document and
-reconciled afterwards, so a change someone else had made to the same label
-landed on top of the edit being made — reconciliation cannot tell that edit from
-anything else the document is missing. With a watcher running the poll usually
-absorbed first and hid it; between polls, on either store, it did not. Absorbing
-first also means an inverse is computed against the state its operation is
-actually applied to.
-
-**Undo is scoped to its author.** The record is shared, so an unscoped `re64
-undo` let someone at the CLI silently revert what a browser user had just done.
-`--any` asks for the old behaviour.
-
-External changes are recorded in the session history under the author `file`:
-the store cannot know who wrote it, but must not claim a session ended in a
-state it did not.
-
-Persistence driven by timers is wrapped so a failure reports rather than
-throwing. Losing one write is recoverable — the session is still in the document
-and the update log — while an unhandled throw in a timer takes the process down.
+Repaints otherwise coalesce on `requestAnimationFrame`. `analyze()` runs per
+update with no incremental path — about 10–20ms for Gridrunner. If it ever
+exceeds ~30ms the UI will stutter under a collaborator regardless of how the
+document is updated, and that is the number to measure before optimising
+anything else.
 
 ## Known Limitations & Future Features
 
