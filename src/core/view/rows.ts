@@ -180,10 +180,36 @@ export function analyze(
    * duplication is visible enough that whoever sees it removes one.
    */
   const emitComments = (addr: number) => {
+    // A region's own comment, where the region begins. It is a description of
+    // the span — the same thing a header comment is — and it was rendered only
+    // in the memory map, so `set_region comment:` looked like it had worked and
+    // then appeared nowhere a reader would look.
+    const region = map.getRegionAt(addr);
+    if (region?.comment && region.start === addr) {
+      for (const line of region.comment.split("\n")) {
+        push({ address: addr, kind: "comment", text: `${hex4(addr)}  ; ${line}`, tokens: [] });
+      }
+    }
+
     for (const comment of loaded.comments.at(addr, "before")) {
       for (const line of comment.text.split("\n")) {
         const text = `${hex4(addr)}  ; ${line}`;
         push({ address: addr, kind: "comment", text, tokens: [] });
+      }
+    }
+  };
+
+  /**
+   * Comments that belong below a row rather than beside it.
+   *
+   * The reference writes `;Returns` on its own line under a `JMP`, which is an
+   * observation about what happens *after* the jump. Inline would put it on the
+   * jump's row and say something slightly untrue about what it is about.
+   */
+  const emitAfter = (addr: number) => {
+    for (const comment of loaded.comments.at(addr, "after")) {
+      for (const line of comment.text.split("\n")) {
+        push({ address: addr, kind: "comment", text: `${hex4(addr)}  ; ${line}`, tokens: [] });
       }
     }
   };
@@ -328,6 +354,7 @@ export function analyze(
 
       text = withInline(addr, text);
       push({ address: addr, kind: "instruction", text, tokens, illegal: instr.illegal });
+      emitAfter(addr);
       // A second inline comment has no room on the row it belongs to, so it
       // goes underneath, indented to where the first one starts. Redundant by
       // construction and meant to look it.
@@ -408,6 +435,10 @@ export function analyze(
       // address inside a data run would be swallowed by the row and never
       // appear anywhere.
       if (bytes.length > 0 && (allLabels.hasLabelAt(addr) || loaded.comments.has(addr))) break;
+      // And at a region boundary. Rows chunk in eights, so two adjacent data
+      // regions used to share a row and the distinction between them — which
+      // is the whole reason someone declared two — became invisible.
+      if (bytes.length > 0 && map.getRegionAt(addr)?.id !== map.getRegionAt(lineStart)?.id) break;
 
       const byte = map.readByte(addr);
       if (byte === undefined) {

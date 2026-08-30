@@ -170,6 +170,7 @@ export class Workspace {
 
   describe(): {
     project: string;
+    description?: string;
     version: string;
     entryPoints: string[];
     layers: { level: number; name: string; start: string; end: string; labels: number }[];
@@ -194,6 +195,7 @@ export class Workspace {
 
     return {
       project: this.room.projectId,
+      ...(loaded.project.description ? { description: loaded.project.description } : {}),
       version: this.version(),
       entryPoints: program.entryPoints.map(hex4),
       layers: loaded.layers.map((layer, index) => ({
@@ -297,6 +299,22 @@ export class Workspace {
     // labels that mark somewhere execution can start count: a data name above
     // the call site would be a confident wrong answer.
     const enclosing = (from: number): string | undefined => {
+      // A declared extent first. Without one this answers with the nearest
+      // preceding label of any flow-bearing kind, which on a real routine is a
+      // local branch target — so "who calls this, from where" came back naming
+      // `b81BC` for two call sites both inside DrawGrid.
+      const containing = program.labels
+        .getAllLabels()
+        .filter(
+          (l) =>
+            (l.type === "function" || l.type === "entry") &&
+            l.extent !== undefined &&
+            from >= l.address &&
+            from < l.address + l.extent
+        )
+        .sort((a, b) => a.extent! - b.extent!)[0];
+      if (containing) return containing.name;
+
       for (let at = from; at >= from - 0x400 && at >= 0; at--) {
         const label = program.labels
           .getLabelsAt(at)
@@ -595,7 +613,13 @@ export class Workspace {
    */
   setLabels(
     caller: Caller,
-    labels: readonly { address: number; name: string; type?: LabelType; comment?: string }[]
+    labels: readonly {
+      address: number;
+      name: string;
+      type?: LabelType;
+      comment?: string;
+      extent?: number;
+    }[]
   ): EditResult {
     if (labels.length === 0) throw new Error("Give at least one label.");
 
@@ -618,8 +642,16 @@ export class Workspace {
 
         ops.push(
           madeLayer === layerId
-            ? { op: "label.set", id: newId("lbl"), layerId, address: entry.address, name: entry.name, type: entry.type }
-            : labelSetOp(loaded, entry.address, entry.name, entry.type)
+            ? {
+                op: "label.set",
+                id: newId("lbl"),
+                layerId,
+                address: entry.address,
+                name: entry.name,
+                type: entry.type,
+                extent: entry.extent,
+              }
+            : labelSetOp(loaded, entry.address, entry.name, entry.type, entry.extent)
         );
 
         if (entry.comment) {
@@ -868,6 +900,64 @@ export class Workspace {
     });
   }
 
+  /**
+   * Bind several sites at once.
+   *
+   * `set_constants` batches the declarations, which change no listing by
+   * design, while binding — the operation that actually changes what a reader
+   * sees — was one call per site. That is backwards for a program that loads
+   * the same value in dozens of places.
+   */
+  bindConstants(
+    caller: Caller,
+    bindings: readonly { address: number; name: string }[]
+  ): EditResult {
+    if (bindings.length === 0) throw new Error("Give at least one binding.");
+
+    return this.edit(caller, (loaded) =>
+      bindings.map((entry) => {
+        const constant = loaded.constants.byName(entry.name);
+        if (!constant) {
+          throw new Error(`No constant called ${entry.name}. Declare it first.`);
+        }
+
+        const instruction = this.program().instructions.get(entry.address);
+        if (!instruction || instruction.operand.type !== "immediate") {
+          throw new Error(
+            `${hex4(entry.address)} takes no immediate operand, so there is ` +
+              `no value to name.`
+          );
+        }
+        if (instruction.operand.value !== constant.value) {
+          throw new Error(
+            `${hex4(entry.address)} loads a different value from ${entry.name}.`
+          );
+        }
+
+        return {
+          op: "constant.bind",
+          id: newId("cst"),
+          layerId: owningLayerId(loaded, entry.address),
+          address: entry.address,
+          constantId: constant.id,
+        } as Op;
+      })
+    );
+  }
+
+  /**
+   * Say what the project is.
+   *
+   * The reference keeps its provenance and licence in an 18-line file header,
+   * and a project had nowhere to put that: `description` existed in the schema
+   * and could only arrive by importing a file that already carried one.
+   */
+  setDescription(caller: Caller, description: string): EditResult {
+    return this.edit(caller, () => [
+      { op: "meta.set", key: "description", value: description } as Op,
+    ]);
+  }
+
   unbindConstant(caller: Caller, address: number): EditResult {
     return this.edit(caller, (loaded) => {
       const layerId = owningLayerId(loaded, address);
@@ -1076,13 +1166,50 @@ export class Workspace {
   removeLabel(caller: Caller, address: number): EditResult {
     return this.edit(caller, (loaded) => {
       const op = labelDeleteOp(loaded, address);
-      if (!op) throw new Error(`This project has no label at ${hex4(address)}`);
-      return [op];
+      if (op) return [op];
+
+      // "No label here" contradicts a listing that plainly shows one. Say
+      // where the name actually comes from, since that is the fact the caller
+      // is missing — a layer's own entry point or the built-in C64 table
+      // belongs to nothing this project can edit.
+      const showing = loaded.map.getLabels().getLabelsAt(address);
+      if (showing.length > 0) {
+        const sources = [...new Set(showing.map((l) => l.source.kind))].join(", ");
+        throw new Error(
+          `${hex4(address)} is named ${showing.map((l) => l.name).join(", ")}, ` +
+            `but that comes from ${sources} rather than from this project, so ` +
+            `there is nothing here to remove. Use set_label to give it a name ` +
+            `of your own.`
+        );
+      }
+      throw new Error(`This project has no label at ${hex4(address)}`);
     });
   }
 
-  markFunction(caller: Caller, address: number, name?: string): EditResult {
-    return this.edit(caller, (loaded) => markFunctionOps(loaded, address, name));
+  /**
+   * Declare an address a subroutine, optionally saying how far it runs.
+   *
+   * The extent is *declared*, never inferred. Working out where a routine ends
+   * needs basic blocks, and a wrong extent is not visibly wrong — which is why
+   * this has stayed an explicit gap. Someone reading the code knows, and saying
+   * so is what makes `find_references` able to answer "from which routine"
+   * instead of naming the nearest branch target above the call.
+   */
+  markFunction(
+    caller: Caller,
+    address: number,
+    name?: string,
+    extent?: number
+  ): EditResult {
+    return this.edit(caller, (loaded) => {
+      const ops = markFunctionOps(loaded, address, name);
+      if (extent === undefined) return ops;
+
+      // The extent rides on the label the ops just wrote.
+      return ops.map((op) =>
+        op.op === "label.set" && op.address === address ? { ...op, extent } : op
+      );
+    });
   }
 
   unmarkFunction(caller: Caller, address: number): EditResult {

@@ -112,6 +112,13 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         childMap(layerById(doc, op.layerId), "comments").delete(op.id);
         break;
 
+      case "meta.set": {
+        const meta = doc.getMap<unknown>("meta");
+        if (op.value === undefined) meta.delete(op.key);
+        else meta.set(op.key, op.value);
+        break;
+      }
+
       case "label.bind": {
         const uses = childMap(layerById(doc, op.layerId), "labelUses");
         let entry = uses.get(op.id);

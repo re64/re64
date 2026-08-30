@@ -668,6 +668,9 @@ which has no rendering.
 
 `before` renders *above* the label, because the comment introduces the routine
 and the label is its name — which is how a hand-written disassembly reads.
+`after` renders below the row, for an observation about what happens next: the
+reference writes `;Returns` under a `JMP`, and inline would attach that to the
+jump itself and say something slightly untrue.
 
 **Every comment at an address is shown, and there is no index choosing one.**
 `primaryLabels` exists because operand rendering must substitute exactly one
@@ -681,9 +684,15 @@ where the redundancy is visible enough that whoever sees it removes one.
 Writing the same slot twice **revises** rather than stacking, since that is one
 person changing their mind rather than two comments.
 
-A **region's** `comment` is deliberately not this. It describes a span, is a
-property of the region object alongside its name, and is rendered in the memory
-map rather than in the disassembly. Different thing, different home.
+A **region's** `comment` is deliberately not this. It describes a span and is a
+property of the region object alongside its name — but it renders in the listing
+too, where the region begins, because a description that appeared only in the
+memory map made `set_region comment:` look like it had worked and then show up
+nowhere a reader was looking.
+
+Data rows break at a region boundary as well as at a label or a comment. They
+chunk in eights, so two adjacent regions shared a row and the distinction
+somebody drew between them was invisible.
 
 Comments belong to layers, like labels and regions, so reordering the stack
 moves them with the bytes they describe — and so a comment on zero page needs
@@ -890,9 +899,16 @@ So `src/core/analysis/program.ts` keeps what was being thrown away, and
 `InstructionIndex` into it would make every browser retain about 8MB it never
 reads.
 
-Two questions stay unanswered on purpose — a **function's extent**, and what a
-routine **calls outbound**. Both need basic blocks or a call graph. An explicit
-gap beats a tool that guesses, because a wrong extent is not visibly wrong.
+Two questions stay unanswered *by analysis* — a **function's extent**, and what
+a routine **calls outbound**. Both need basic blocks or a call graph, and a
+wrong extent is not visibly wrong, so neither is guessed.
+
+An extent can be **declared**, though, which is a different thing from inferring
+one: somebody reading the code knows where the routine ends. `mark_function`
+takes it, and it is what lets `find_references` say which routine a call came
+from. Without one that answer falls back to the nearest preceding flow label,
+which on a real routine is usually a local branch target — so "who calls this"
+came back naming `b81BC` for two call sites both inside `DrawGrid`.
 
 ### The server analyses now, and that is a reversal
 

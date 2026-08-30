@@ -823,3 +823,23 @@ export function unbindLabel(raw: string, layerIndex: number, id: string): string
   if (layer.labelUses.length === 0) delete layer.labelUses;
   return formatProject(project);
 }
+
+/**
+ * Set or clear a project-level field.
+ *
+ * Reserialises, like the other structural writers: there is no small diff to
+ * preserve on a top-level scalar, and the only caller applying operations to
+ * text reads the result to derive an inverse.
+ */
+export function setProjectMeta(
+  raw: string,
+  key: "name" | "description",
+  value: string | undefined
+): string {
+  const project = parseProject(raw);
+  if (project[key] === value) return raw;
+
+  if (value === undefined) delete project[key];
+  else project[key] = value;
+  return formatProject(project);
+}

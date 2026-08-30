@@ -73,6 +73,19 @@ export interface CommentDeleteOp {
   layerId: string;
 }
 
+/**
+ * Set a project-level field: its name, or what it is.
+ *
+ * The reference keeps its provenance and licence in an 18-line file header,
+ * and there was nowhere in a project for that to live — `description` existed
+ * in the schema and could only arrive by importing a file that already had one.
+ */
+export interface MetaSetOp {
+  op: "meta.set";
+  key: "name" | "description";
+  value?: string;
+}
+
 /** Say that the operand at an address means one particular label. */
 export interface LabelBindOp {
   op: "label.bind";
@@ -157,6 +170,7 @@ export type Op =
   | RegionDeleteOp
   | CommentSetOp
   | CommentDeleteOp
+  | MetaSetOp
   | LabelBindOp
   | LabelUnbindOp
   | ConstantSetOp
@@ -229,6 +243,8 @@ export function describeOp(op: Op): string {
     }
     case "comment.delete":
       return `delete comment ${op.id}`;
+    case "meta.set":
+      return op.value === undefined ? `clear the project ${op.key}` : `set the project ${op.key}`;
     case "label.bind":
       return `read ${hex(op.address)} as one particular label`;
     case "label.unbind":

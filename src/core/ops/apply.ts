@@ -31,6 +31,7 @@ import {
   insertLayer,
   removeLayer,
   setPrimaryLabel,
+  setProjectMeta,
   unbindConstant,
   unbindLabel,
   upsertComment,
@@ -144,6 +145,9 @@ export function applyOp(raw: string, op: Op): string {
 
     case "comment.delete":
       return deleteComment(raw, layerIndexOf(project, op.layerId), op.id);
+
+    case "meta.set":
+      return setProjectMeta(raw, op.key, op.value);
 
     case "label.bind":
       return bindLabel(raw, layerIndexOf(project, op.layerId), {
@@ -259,6 +263,9 @@ export function invertOp(raw: string, op: Op): Op {
         text: found.entry.text,
       };
     }
+
+    case "meta.set":
+      return { op: "meta.set", key: op.key, value: project[op.key] };
 
     case "label.bind": {
       const found = findLabelUse(project, op.id);

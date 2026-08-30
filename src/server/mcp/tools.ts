@@ -298,6 +298,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
             name: z.string().min(1),
             type: z.enum(["entry", "function", "code", "address"]).optional(),
             comment: z.string().optional(),
+            extent: z.number().int().min(1).max(0x10000).optional(),
           })
         )
         .min(1)
@@ -306,7 +307,13 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      labels: { address: number; name: string; type?: LabelType; comment?: string }[];
+      labels: {
+        address: number;
+        name: string;
+        type?: LabelType;
+        comment?: string;
+        extent?: number;
+      }[];
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
@@ -462,6 +469,45 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "bind_constants",
+    "Bind several sites in one call, as one action. set_constants batches the " +
+      "declarations, which change no listing by design; this batches the " +
+      "operation that actually changes what a reader sees.",
+    {
+      project,
+      bindings: z
+        .array(z.strictObject({ address, name: z.string().min(1) }))
+        .min(1)
+        .max(500),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      bindings: { address: number; name: string }[];
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.bindConstants(caller, args.bindings);
+    }
+  );
+
+  tool(
+    "set_project_description",
+    "Say what this project is: provenance, what the binary is, anything a " +
+      "reader should know before the first line. A hand-written listing keeps " +
+      "this in its file header.",
+    { project, description: z.string(), expectVersion: z.string().optional() },
+    (args: { project?: string; description: string; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.setDescription(caller, args.description);
+    }
+  );
+
+  tool(
     "list_constants",
     "Every declared constant, with its value.",
     { project },
@@ -539,14 +585,21 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       project,
       address,
       text: z.string().min(1),
-      placement: z.enum(["before", "inline"]).optional().describe("Default before"),
+      placement: z
+        .enum(["before", "inline", "after"])
+        .optional()
+        .describe(
+          "before (own rows above the label), inline (shares the instruction's " +
+            "row), or after (own rows below it, for an observation about what " +
+            "happens next). Default before."
+        ),
       expectVersion: z.string().optional(),
     },
     (args: {
       project?: string;
       address: number;
       text: string;
-      placement?: "before" | "inline";
+      placement?: "before" | "inline" | "after";
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
@@ -568,7 +621,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
           z.strictObject({
             address,
             text: z.string().min(1),
-            placement: z.enum(["before", "inline"]).optional(),
+            placement: z.enum(["before", "inline", "after"]).optional(),
           })
         )
         .min(1)
@@ -577,7 +630,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      comments: { address: number; text: string; placement?: "before" | "inline" }[];
+      comments: { address: number; text: string; placement?: "before" | "inline" | "after" }[];
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
@@ -618,13 +671,13 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     {
       project,
       address,
-      placement: z.enum(["before", "inline"]).optional(),
+      placement: z.enum(["before", "inline", "after"]).optional(),
       expectVersion: z.string().optional(),
     },
     (args: {
       project?: string;
       address: number;
-      placement?: "before" | "inline";
+      placement?: "before" | "inline" | "after";
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
@@ -643,13 +696,31 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       project,
       address,
       name: z.string().optional(),
+      extent: z
+        .number()
+        .int()
+        .min(1)
+        .max(0x10000)
+        .optional()
+        .describe(
+          "How many bytes the routine runs for, if you know. Never inferred — " +
+            "working out where a routine ends needs analysis re64 does not do, " +
+            "and a wrong extent is not visibly wrong. Saying so is what lets " +
+            "find_references answer which routine a call came from."
+        ),
       expectVersion: z.string().optional(),
     },
-    (args: { project?: string; address: number; name?: string; expectVersion?: string }) => {
+    (args: {
+      project?: string;
+      address: number;
+      name?: string;
+      extent?: number;
+      expectVersion?: string;
+    }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.markFunction(caller, args.address, args.name);
+      return space.markFunction(caller, args.address, args.name, args.extent);
     }
   );
 

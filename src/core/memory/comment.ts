@@ -7,20 +7,26 @@
  * listing with a name nobody wanted, and a comment could not exist anywhere a
  * label did not.
  *
- * A region's `comment` is deliberately *not* this. It describes a span, is a
- * property of the region object alongside its name, and is rendered in the
- * memory map rather than in the disassembly. Different thing, different home.
+ * A region's `comment` is deliberately *not* this. It describes a span and is a
+ * property of the region object alongside its name, so it is stored there and
+ * rendered where the span begins. Different thing, different home — but it does
+ * appear in the listing, because a description nobody can see is a parameter
+ * that looks like it worked.
  */
 
 /**
  * Where it goes relative to the row it is about.
  *
- * Placement is the only axis, and length follows from it: a `before` comment
- * owns its own rows and may run to several lines, an `inline` one shares a row
+ * Placement is the only axis, and length follows from it: `before` and `after`
+ * own their own rows and may run to several lines, an `inline` one shares a row
  * with an instruction and therefore cannot. Treating "long" and "short" as a
  * separate field would permit a long inline comment, which has no rendering.
+ *
+ * `after` exists because the reference writes `;Returns` on its own line below a
+ * `JMP`: an observation about what happens next, which inline would attach to
+ * the jump itself and say something slightly untrue about.
  */
-export type CommentPlacement = "before" | "inline";
+export type CommentPlacement = "before" | "inline" | "after";
 
 export interface Comment {
   /**

@@ -1209,3 +1209,79 @@ describe("adding a second name", () => {
     expect(blank.disassembly(0x8132, 1).lines[0].text).toContain("vicRegisterLoPtr");
   });
 });
+
+describe("the rest of trial 3's list", () => {
+  it("shows a region's own comment where the region begins", () => {
+    // It was stored, rendered only in the memory map, and so `comment:` on
+    // set_region looked like it had worked and appeared nowhere a reader looks.
+    workspace.setRegion(agent, 0x8f00, 0x8f20, "data", "chargen", "copied to $2000 at boot");
+    const rows = workspace.disassembly(0x8f00, 3).lines.map((l) => l.text).join("\n");
+
+    expect(rows).toContain("; copied to $2000 at boot");
+  });
+
+  it("breaks a data row at a region boundary", () => {
+    // Rows chunk in eights, so two adjacent regions shared a row and the
+    // distinction someone drew between them became invisible.
+    workspace.setRegion(agent, 0x8f00, 0x8f04, "data", "first");
+    workspace.setRegion(agent, 0x8f04, 0x8f10, "data", "second");
+
+    const rows = workspace.disassembly(0x8f00, 4).lines.filter((l) => l.kind === "data");
+    expect(rows[0].text).toContain("8F00");
+    expect(rows[1].text).toContain("8F04");
+  });
+
+  it("puts an after comment on its own row below", () => {
+    // The reference writes ";Returns" under a JMP: about what happens next,
+    // which inline would attach to the jump itself.
+    workspace.setComment(agent, 0x8018, "returns to the caller", "after");
+    const rows = workspace.disassembly(0x8018, 3).lines.map((l) => l.text);
+
+    const jump = rows.findIndex((r) => /BNE|JMP/.test(r));
+    const note = rows.findIndex((r) => r.includes("returns to the caller"));
+    expect(note).toBeGreaterThan(jump);
+  });
+
+  it("says where a name comes from instead of denying it exists", () => {
+    // "No label at $8000" contradicted a listing plainly showing one. The PRG
+    // layer names its own load address, and no project owns that.
+    const blank = blankWorkspace();
+    expect(() => blank.removeLabel(agent, 0x8000)).toThrow(/comes from .*rather than/);
+  });
+
+  it("takes an extent in a batch of labels", () => {
+    workspace.setLabels(agent, [
+      { address: 0x0400, name: "SCREEN_RAM", extent: 1000 },
+      { address: 0xd800, name: "COLOUR_RAM", extent: 1000 },
+    ]);
+
+    const rows = workspace.disassembly(0x8072, 2).lines.map((l) => l.text).join("\n");
+    expect(rows).toContain("SCREEN_RAM + ");
+  });
+
+  it("binds several constant sites at once", () => {
+    const sites = workspace.immediates(0x08).sites.slice(0, 2);
+    workspace.setConstant(agent, "ORANGE", 0x08);
+
+    const result = workspace.bindConstants(
+      agent,
+      sites.map((s) => ({ address: parseInt(s.address.slice(1), 16), name: "ORANGE" }))
+    );
+
+    expect(result.did).toHaveLength(2);
+  });
+
+  it("carries a project description", () => {
+    workspace.setDescription(agent, "Gridrunner, Jeff Minter 1983. Public domain.");
+    expect(workspace.describe().description).toContain("Jeff Minter");
+  });
+
+  it("names the routine a call sits in, once one has an extent", () => {
+    // Without an extent this answers with the nearest preceding flow label,
+    // which on a real routine is a local branch target.
+    workspace.markFunction(agent, 0x8850, "DrawSomething", 0x60);
+    const { inbound } = workspace.references(0x8870, "in");
+
+    expect(inbound!.some((r) => r.inRoutine === "DrawSomething")).toBe(true);
+  });
+});
