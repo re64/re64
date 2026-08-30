@@ -48,7 +48,7 @@ function sqlite(): typeof import("node:sqlite") {
   return cached;
 }
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS meta (
   value TEXT NOT NULL
 );
 
--- One row, always. The project text verbatim, never regenerated.
+-- The exported form, derived from the document. Kept so disasm and git have
+-- something to read without building one.
 CREATE TABLE IF NOT EXISTS project (
   id         INTEGER PRIMARY KEY CHECK (id = 1),
   doc        TEXT NOT NULL,
@@ -64,11 +65,18 @@ CREATE TABLE IF NOT EXISTS project (
   updated_at INTEGER NOT NULL
 );
 
--- CRDT updates awaiting a flatten. base_rev is not bookkeeping: an update only
--- means anything replayed onto the exact text its document was built from.
-CREATE TABLE IF NOT EXISTS session_updates (
-  seq      INTEGER PRIMARY KEY AUTOINCREMENT,
-  base_rev TEXT NOT NULL,
+-- The project, as the CRDT records it. This is the truth; everything else in
+-- this file is derived from it and can be rebuilt.
+CREATE TABLE IF NOT EXISTS updates (
+  seq     INTEGER PRIMARY KEY AUTOINCREMENT,
+  payload BLOB NOT NULL
+);
+
+-- A merged update covering everything up to seq_upto. NOT compaction: the rows
+-- it covers are still there. It exists so loading is not proportional to every
+-- edit ever made, which matters because the CLI runs in a fresh process.
+CREATE TABLE IF NOT EXISTS snapshots (
+  seq_upto INTEGER PRIMARY KEY,
   payload  BLOB NOT NULL
 );
 

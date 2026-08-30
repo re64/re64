@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileStorage, ProjectStorage, ProjectStore, SqliteStorage, pathsFor } from "./index.js";
 import { applyOpToDoc, encodeDoc, projectFromDoc } from "../core/crdt/index.js";
+import { diffProjects, parseProject } from "../core/index.js";
 
 const PROJECT = `{
   "name": "Test",
@@ -160,46 +161,116 @@ describe.each(BACKENDS)("$name", (b) => {
       expect(currentText()).toContain(`"name": "Survived"`);
     });
 
-    it("discards the log once the work is in the file", () => {
+    it("keeps the log after recording history, because the log is the project", () => {
+      // The inverse of what this asserted when the text was canonical. Then a
+      // flatten meant the log had served its purpose; now discarding it would
+      // discard the work itself.
       const s = store();
       applyOpToDoc(s.document(), {
         op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Done",
       });
       s.flatten(1000);
 
-      expect(storage().hasUpdates()).toBe(false);
+      expect(storage().hasUpdates()).toBe(true);
+      const names = (projectFromDoc(store().document()).layers[0].labels ?? []).map(
+        (l) => l.name
+      );
+      expect(names).toContain("Done");
     });
   });
 
-  describe("updates recorded against older text", () => {
-    it("are dropped rather than resurrecting what that text deleted", () => {
-      // The CLI and an editor both write the project directly. A crash log built
-      // against the text as it was before their edit would merge cleanly and put
-      // back the very label they removed, so it must not be replayed at all.
-      const s = store();
-      applyOpToDoc(s.document(), {
-        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Doomed",
-      });
-      expect(storage().hasUpdates()).toBe(true);
-
-      // Someone else rewrites the project without going through the document.
-      storage().writeText(PROJECT.replace('"Loop"', '"RewrittenElsewhere"'));
-
-      const fresh = store();
-      const names = (projectFromDoc(fresh.document()).layers[0].labels ?? []).map((l) => l.name);
-      expect(names).toContain("RewrittenElsewhere");
-      expect(names).not.toContain("Doomed");
-    });
-
-    it("still replay when the text is the one they were built from", () => {
+  describe("the document is the project", () => {
+    it("survives a write, which must not clear the log it came from", () => {
+      // The log used to be crash-safety for a canonical text, so a write meant
+      // it had served its purpose and could go. Now the log *is* the project
+      // and the text is the export, so clearing it here deletes everything.
       const s = store();
       applyOpToDoc(s.document(), {
         op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Kept",
       });
+      s.writeFile();
 
-      const fresh = store();
-      const names = (projectFromDoc(fresh.document()).layers[0].labels ?? []).map((l) => l.name);
+      expect(storage().hasUpdates()).toBe(true);
+      const names = (projectFromDoc(store().document()).layers[0].labels ?? []).map(
+        (l) => l.name
+      );
       expect(names).toContain("Kept");
+    });
+
+    it("comes back after the process dies mid-edit", () => {
+      const s = store();
+      applyOpToDoc(s.document(), {
+        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Survived",
+      });
+      // No write, no flatten, no clean exit — just gone.
+
+      const reopened = store();
+      const names = (projectFromDoc(reopened.document()).layers[0].labels ?? []).map(
+        (l) => l.name
+      );
+      expect(names).toContain("Survived");
+    });
+
+    it("reaches the same state however many times it is reopened", () => {
+      const s = store();
+      applyOpToDoc(s.document(), {
+        op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "One",
+        type: "function",
+      });
+      applyOpToDoc(s.document(), {
+        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Two",
+      });
+
+      const first = JSON.stringify(projectFromDoc(store().document()));
+      const second = JSON.stringify(projectFromDoc(store().document()));
+      expect(second).toBe(first);
+    });
+
+    it("converts a project that predates the document, once", () => {
+      // Text but no updates: written before the document was canonical.
+      const s = store();
+      expect(storage().readSnapshot()).toBeUndefined();
+      s.document();
+      expect(storage().readSnapshot()?.seqUpto).toBe(0);
+    });
+  });
+
+  describe("the export settles", () => {
+    it("agrees with the document, so a write does not provoke another", () => {
+      // If the exported text does not round-trip back to the same document,
+      // every write finds a difference and writes again. It would look like a
+      // phantom collaborator editing in a loop rather than like a bug here.
+      const s = store();
+      applyOpToDoc(s.document(), {
+        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Renamed",
+      });
+
+      s.writeFile();
+      expect(diffProjects(parseProject(currentText()), projectFromDoc(s.document()))).toEqual([]);
+    });
+
+    it("stops writing once there is nothing left to say", () => {
+      const s = store();
+      applyOpToDoc(s.document(), {
+        op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "Once",
+        type: "function",
+      });
+
+      expect(s.writeFile().length).toBeGreaterThan(0);
+      expect(s.writeFile()).toEqual([]);
+      expect(s.writeFile()).toEqual([]);
+    });
+
+    it("holds for regions and the primary index too, not just labels", () => {
+      const s = store();
+      applyOpToDoc(s.document(), {
+        op: "region.set", id: "rgn_x", layerId: "lay_a", start: 0x8008, end: 0x800c,
+        kind: "text", name: "blurb",
+      });
+      applyOpToDoc(s.document(), { op: "primary.set", address: 0x8000, labelId: "lbl_1" });
+
+      s.writeFile();
+      expect(diffProjects(parseProject(currentText()), projectFromDoc(s.document()))).toEqual([]);
     });
   });
 
@@ -321,13 +392,12 @@ describe.each(BACKENDS)("$name", (b) => {
   });
 
   describe("what the debug view is told", () => {
-    it("says the stored text and the document agree when nothing is pending", () => {
+    it("starts with nothing recorded", () => {
       const s = store();
       s.document();
       const d = s.debug();
-      expect(d.baseRev).toBe(d.storedRev);
       expect(d.dirty).toBe(false);
-      expect(d.updates).toEqual({ count: 0, stale: 0 });
+      expect(d.updates.count).toBe(0);
     });
 
     it("counts what is waiting to be flattened", () => {
@@ -358,17 +428,14 @@ describe.each(BACKENDS)("$name", (b) => {
       expect(s.debug().ops).toEqual({ total: 1, undone: 1 });
     });
 
-    it("surfaces updates that can no longer be replayed", () => {
-      // Non-zero here is the signal that someone wrote around the document.
+    it("says where the snapshot reaches, so a long log is visible", () => {
       const s = store();
       s.document();
       applyOpToDoc(s.document(), {
-        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Pending",
+        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Edited",
       });
-      expect(s.debug().updates.stale).toBe(0);
-
-      storage().writeText(PROJECT.replace('"Loop"', '"WrittenElsewhere"'));
-      expect(store().debug().updates.stale).toBeGreaterThan(0);
+      expect(s.debug().updates.count).toBeGreaterThan(0);
+      expect(s.debug().updates.snapshotAt).toBe(0);
     });
   });
 

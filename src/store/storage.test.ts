@@ -90,33 +90,51 @@ describe.each(BACKENDS)("$name", ({ open }) => {
       expect(store.hasUpdates()).toBe(false);
     });
 
-    it("keeps updates in order, each with the revision it was built against", () => {
-      store.appendUpdate(update(1), "aaaaaaaaaaaa");
-      store.appendUpdate(update(9), "bbbbbbbbbbbb");
+    it("gives back what was put in, whole", () => {
+      store.appendUpdate(update(1));
+      store.appendUpdate(update(9));
 
       const stored = store.readUpdates();
-      expect(stored.map((s) => s.baseRev)).toEqual(["aaaaaaaaaaaa", "bbbbbbbbbbbb"]);
+      expect(stored).toHaveLength(2);
       expect([...stored[0].update]).toEqual([1, 2, 3]);
       expect([...stored[1].update]).toEqual([9, 10, 11]);
     });
 
     it("does not run updates together", () => {
       // Yjs updates are not concatenative; two appended blobs cannot be applied
-      // as one. Each has to come back separately or a crash is unrecoverable.
-      store.appendUpdate(new Uint8Array([1]), "r");
-      store.appendUpdate(new Uint8Array([2]), "r");
+      // as one. Each has to come back separately or a replay is impossible.
+      store.appendUpdate(new Uint8Array([1]));
+      store.appendUpdate(new Uint8Array([2]));
       expect(store.readUpdates()).toHaveLength(2);
     });
 
-    it("forgets them on request", () => {
-      store.appendUpdate(update(1), "r");
-      store.clearUpdates();
-      expect(store.readUpdates()).toEqual([]);
-      expect(store.hasUpdates()).toBe(false);
+    it("can be read from a cursor, so a snapshot need not be replayed twice", () => {
+      store.appendUpdate(update(1));
+      store.appendUpdate(update(4));
+      store.appendUpdate(update(7));
+
+      const all = store.readUpdates();
+      const tail = store.readUpdates(all[0].seq);
+      expect(tail).toHaveLength(2);
+      expect([...tail[0].update]).toEqual([4, 5, 6]);
     });
 
-    it("tolerates being cleared when there is nothing to clear", () => {
-      expect(() => store.clearUpdates()).not.toThrow();
+    it("hands out increasing cursors", () => {
+      store.appendUpdate(update(1));
+      store.appendUpdate(update(2));
+      const [first, second] = store.readUpdates();
+      expect(second.seq).toBeGreaterThan(first.seq);
+    });
+  });
+
+  describe("snapshots", () => {
+    it("are optional", () => {
+      // A store may decline them. They are a shortcut for loading, never a
+      // requirement, because replaying the whole log reaches the same state.
+      expect(() => store.readSnapshot()).not.toThrow();
+      expect(() =>
+        store.writeSnapshot({ seqUpto: 1, update: new Uint8Array([1]) })
+      ).not.toThrow();
     });
   });
 
@@ -145,6 +163,53 @@ describe.each(BACKENDS)("$name", ({ open }) => {
   });
 });
 
+describe("SqliteStorage snapshots", () => {
+  let dir: string;
+  let store: SqliteStorage;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "re64-storage-"));
+    store = new SqliteStorage(join(dir, "t.re64db"));
+    store.initialize(PROJECT, 0);
+  });
+  afterEach(() => {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("has none until one is taken", () => {
+    expect(store.readSnapshot()).toBeUndefined();
+  });
+
+  it("keeps the updates it covers, because it is not compaction", () => {
+    store.appendUpdate(new Uint8Array([1]));
+    store.appendUpdate(new Uint8Array([2]));
+    const upto = store.readUpdates().at(-1)!.seq;
+
+    store.writeSnapshot({ seqUpto: upto, update: new Uint8Array([9, 9]) });
+
+    expect(store.readSnapshot()?.seqUpto).toBe(upto);
+    expect(store.readUpdates()).toHaveLength(2);
+  });
+
+  it("reports the newest when there are several", () => {
+    store.writeSnapshot({ seqUpto: 1, update: new Uint8Array([1]) });
+    store.writeSnapshot({ seqUpto: 5, update: new Uint8Array([5]) });
+    expect(store.readSnapshot()?.seqUpto).toBe(5);
+  });
+
+  it("reads the tail after a snapshot without replaying what it covers", () => {
+    store.appendUpdate(new Uint8Array([1]));
+    const covered = store.readUpdates().at(-1)!.seq;
+    store.writeSnapshot({ seqUpto: covered, update: new Uint8Array([9]) });
+    store.appendUpdate(new Uint8Array([2]));
+
+    const tail = store.readUpdates(covered);
+    expect(tail).toHaveLength(1);
+    expect([...tail[0].update]).toEqual([2]);
+  });
+});
+
 describe("FileStorage crash tolerance", () => {
   let dir: string;
 
@@ -158,7 +223,7 @@ describe("FileStorage crash tolerance", () => {
     writeFileSync(path, PROJECT, "utf-8");
     const store = new FileStorage(pathsFor(path));
 
-    store.appendUpdate(new Uint8Array([1, 2, 3]), "aaaaaaaaaaaa");
+    store.appendUpdate(new Uint8Array([1, 2, 3]));
     // A process killed mid-append leaves a header promising more than follows.
     appendFileSync(pathsFor(path).log, Buffer.from([0, 0, 0, 8, 99]));
 

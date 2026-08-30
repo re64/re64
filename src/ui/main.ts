@@ -892,12 +892,11 @@ interface ServerDebug {
   path: string;
   clients: number;
   version: string;
-  baseRev: string;
   storedRev: string;
   dirty: boolean;
   authors: string[];
   pendingOps: number;
-  updates: { count: number; stale: number };
+  updates: { count: number; snapshotAt: number };
   ops: { total: number; undone: number };
   history: number;
 }
@@ -1017,10 +1016,7 @@ async function renderDebug(): Promise<void> {
       ["document version", sv.version],
       // A version this browser does not share means someone else has edited.
       ["agrees with us", sv.version === d.version ? "yes" : "no", sv.version === d.version ? "good" : "warn"],
-      ["stored revision", sv.storedRev],
-      // The stored text lagging the document is normal mid-session: writes are
-      // debounced. It only matters if it never catches up.
-      ["document written out", sv.baseRev === sv.storedRev ? "yes" : "pending", sv.baseRev === sv.storedRev ? undefined : "warn"],
+      ["exported revision", sv.storedRev],
       ["unflattened session", sv.dirty ? "yes" : "no"],
       ["authors this session", sv.authors.length ? sv.authors.join(", ") : "—"],
       ["operations pending flatten", String(sv.pendingOps)],
@@ -1029,10 +1025,10 @@ async function renderDebug(): Promise<void> {
     html += "<h3>CRDT</h3>";
     html += definitions([
       ["held by", "the server; this browser has no document"],
-      ["crash-log updates", String(sv.updates.count)],
-      // Recorded against text that has since changed, so they are dropped
-      // rather than replayed. Non-zero means someone wrote around the document.
-      ["unreplayable", String(sv.updates.stale), sv.updates.stale ? "warn" : undefined],
+      ["recorded updates", String(sv.updates.count)],
+      // Nothing is deleted by a snapshot; it only says how much of the log a
+      // fresh reader can skip.
+      ["snapshot covers up to", sv.updates.snapshotAt ? String(sv.updates.snapshotAt) : "—"],
     ]);
 
     html += "<h3>Durable undo (server)</h3>";

@@ -27,30 +27,53 @@ export interface HistoryEntry {
 }
 
 /**
- * A CRDT update, with the revision of the text it was built against.
+ * A stored CRDT update.
  *
- * The pairing is not bookkeeping. `docFromProject` is deterministic *given the
- * project text*, so an update only means anything when replayed onto that same
- * text. Replaying it onto a text some other writer has since changed merges
- * without complaint and silently resurrects entries that text deleted.
+ * Order is not part of the contract: updates are commutative and idempotent, so
+ * a replay may deliver them in any order and may include duplicates. `seq` is
+ * only a cursor for reading the tail after a snapshot.
  */
 export interface StoredUpdate {
+  seq: number;
   update: Uint8Array;
-  baseRev: string;
+}
+
+/**
+ * A merged update covering everything up to `seqUpto`.
+ *
+ * **Not compaction** — nothing is deleted, and the updates it covers stay
+ * exactly where they were. It exists so that loading a project is not O(every
+ * edit ever made), which matters because `re64 label set` runs in a fresh
+ * process that would otherwise replay the entire history to rename one thing.
+ */
+export interface StoredSnapshot {
+  seqUpto: number;
+  update: Uint8Array;
 }
 
 export interface ProjectStorage {
   /** Whether the project still exists; it can be removed mid-session. */
   exists(): boolean;
+  /**
+   * The exported project text.
+   *
+   * A derived view, not the truth — kept so `disasm` and `git` have something
+   * to read without building a document.
+   */
   readText(): string;
   writeText(text: string): void;
   /** Identifies the current text. See {@link StoredUpdate}. */
   rev(): string;
 
-  appendUpdate(update: Uint8Array, baseRev: string): void;
-  readUpdates(): StoredUpdate[];
-  clearUpdates(): void;
+  /** Record an edit. This is the write that matters; everything else is derived. */
+  appendUpdate(update: Uint8Array): void;
+  /** Everything after `afterSeq`, or everything when it is omitted. */
+  readUpdates(afterSeq?: number): StoredUpdate[];
   hasUpdates(): boolean;
+
+  /** The newest snapshot, if one has been taken. */
+  readSnapshot(): StoredSnapshot | undefined;
+  writeSnapshot(snapshot: StoredSnapshot): void;
 
   appendHistory(entry: HistoryEntry): void;
   history(): HistoryEntry[];

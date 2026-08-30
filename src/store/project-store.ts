@@ -36,6 +36,7 @@ import {
   applyOpToDoc,
   applyUpdate,
   docFromProject,
+  docFromUpdates,
   encodeDoc,
   projectFromDoc,
 } from "../core/crdt/index.js";
@@ -62,8 +63,6 @@ export class ProjectStore {
    */
   private lastWritten: string | undefined;
   private unwatch: (() => void) | undefined;
-  /** The revision the document was built from; see `StoredUpdate`. */
-  private baseRev = "";
 
   constructor(private readonly storage: ProjectStorage) {}
 
@@ -76,29 +75,53 @@ export class ProjectStore {
   document(): CrdtDoc {
     if (this.doc) return this.doc;
 
-    const text = this.storage.readText();
-    this.baseRev = revOf(text);
-    this.lastWritten = text;
-    this.doc = docFromProject(parseProject(text));
+    this.doc = this.load();
+    this.lastWritten = this.storage.readText();
 
-    // Replay only what was built against this exact text. An update recorded
-    // against an older revision would merge without complaint and resurrect
-    // entries the current text deleted, so it is dropped instead.
-    const recovered = this.storage
-      .readUpdates()
-      .filter((stored) => stored.baseRev === this.baseRev);
-    for (const stored of recovered) applyUpdate(this.doc, stored.update, "recovery");
-    if (recovered.length > 0) this.dirty = true;
-
-    // Every subsequent change is appended, so nothing depends on a clean exit.
+    // Every change is appended as it happens. This is the write that matters —
+    // the exported text is derived from it, not the other way round — so a
+    // process that dies here has lost nothing.
     this.doc.on("update", (update: Uint8Array, origin: unknown) => {
-      if (origin === "recovery") return;
-      this.storage.appendUpdate(update, this.baseRev);
+      if (origin === "load") return;
+      this.storage.appendUpdate(update);
       this.dirty = true;
       for (const listener of this.listeners) listener(update, origin);
     });
 
     return this.doc;
+  }
+
+  /**
+   * Rebuild the document from what was stored.
+   *
+   * A snapshot, if there is one, plus every update recorded after it. The
+   * snapshot is only a shortcut: replaying the whole log reaches the same
+   * state, because updates are commutative and idempotent.
+   *
+   * A project written before the document was canonical has text but no
+   * updates. It is converted once, here, and the result kept as the first
+   * snapshot — which is the only place `docFromProject` is still reached from,
+   * and why its determinism no longer has to hold across clients.
+   */
+  private load(): CrdtDoc {
+    const snapshot = this.storage.readSnapshot();
+    const tail = this.storage.readUpdates(snapshot?.seqUpto ?? 0);
+
+    if (!snapshot && tail.length === 0) {
+      const converted = docFromProject(parseProject(this.storage.readText()));
+      this.storage.writeSnapshot({ seqUpto: 0, update: encodeDoc(converted) });
+      return converted;
+    }
+
+    // Updates past the snapshot are work that has not been recorded in the
+    // history yet — a session that ended without one, usually because the
+    // process died. Marking it lets the next flatten account for it.
+    if (tail.length > 0) this.dirty = true;
+
+    return docFromUpdates([
+      ...(snapshot ? [snapshot.update] : []),
+      ...tail.map((stored) => stored.update),
+    ]);
   }
 
   /**
@@ -134,12 +157,11 @@ export class ProjectStore {
    */
   debug(): {
     version: string;
-    baseRev: string;
     storedRev: string;
     dirty: boolean;
     authors: string[];
     pendingOps: number;
-    updates: { count: number; stale: number };
+    updates: { count: number; snapshotAt: number };
     ops: { total: number; undone: number };
     history: number;
   } {
@@ -147,17 +169,11 @@ export class ProjectStore {
     const ops = this.storage.readOps();
     return {
       version: this.version(),
-      baseRev: this.baseRev,
       storedRev: this.storage.rev(),
       dirty: this.dirty,
       authors: [...this.authors].sort(),
       pendingOps: this.sessionOps.length,
-      updates: {
-        count: updates.length,
-        // Recorded against text that has since changed, so they will not be
-        // replayed. A non-zero count here means someone wrote around the doc.
-        stale: updates.filter((u) => u.baseRev !== this.baseRev).length,
-      },
+      updates: { count: updates.length, snapshotAt: this.storage.readSnapshot()?.seqUpto ?? 0 },
       ops: { total: ops.length, undone: ops.filter((c) => c.undone).length },
       history: this.storage.history().length,
     };
@@ -223,13 +239,12 @@ export class ProjectStore {
       const updated = applyOps(text, ops);
       this.storage.writeText(updated);
       this.lastWritten = updated;
-      this.baseRev = revOf(updated);
       this.sessionOps.push(...ops);
     }
-    // The crash log's job is done: everything it held is now in the text, so a
-    // process dying here loses nothing. Without this it would grow for the
-    // lifetime of the project, since a CLI invocation never flattens.
-    this.storage.clearUpdates();
+    // Note what is *not* here: the update log is not cleared. It was, when the
+    // text was canonical and a write meant the log had served its purpose. Now
+    // the log is the project and the text is the export, so clearing it here
+    // would delete the project on every debounce tick.
     return ops;
   }
 
@@ -254,7 +269,6 @@ export class ProjectStore {
     const external = diffProjects(parseProject(this.lastWritten), parseProject(text));
     for (const op of external) applyOpToDoc(this.document(), op, "external");
     this.lastWritten = text;
-    this.baseRev = revOf(text);
     if (external.length > 0) {
       this.sessionOps.push(...external);
       this.authors.add("file");
@@ -395,7 +409,6 @@ export class ProjectStore {
 
   /** Crash-safety log has served its purpose once the file is written. */
   private discardLog(): void {
-    this.storage.clearUpdates();
     this.dirty = false;
     this.authors.clear();
     this.sessionOps = [];

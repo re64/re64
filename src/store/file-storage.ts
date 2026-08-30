@@ -7,13 +7,13 @@
  * against.
  */
 
-import { appendFileSync, existsSync, readFileSync, unlinkSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { writeFileAtomic } from "../fsutil.js";
 import { Change, decodeChanges, encodeChanges } from "../core/index.js";
 import {
   HistoryEntry,
   ProjectStorage,
-  REV_LENGTH,
+  StoredSnapshot,
   StoredUpdate,
   revOf,
 } from "./storage.js";
@@ -26,6 +26,8 @@ export interface SessionPaths {
   history: string;
   /** Operations with their inverses, for undo across invocations. */
   ops: string;
+  /** A merged update, so loading need not replay the whole log. */
+  snapshot: string;
 }
 
 export function pathsFor(projectPath: string): SessionPaths {
@@ -33,20 +35,19 @@ export function pathsFor(projectPath: string): SessionPaths {
     project: projectPath,
     ops: `${projectPath}.log`,
     log: `${projectPath}.session`,
+    snapshot: `${projectPath}.snapshot`,
     history: `${projectPath}.history`,
   };
 }
 
 /**
  * Updates are framed because they are not concatenative — appending two and
- * applying the result as one blob does not work. The revision each was built
- * against rides along in the frame, fixed-width so a reader needs no lookahead.
+ * applying the result as one blob does not work.
  */
-function frame(update: Uint8Array, baseRev: string): Buffer {
-  const framed = Buffer.allocUnsafe(4 + REV_LENGTH + update.length);
+function frame(update: Uint8Array): Buffer {
+  const framed = Buffer.allocUnsafe(4 + update.length);
   framed.writeUInt32BE(update.length, 0);
-  framed.write(baseRev.padEnd(REV_LENGTH, "0").slice(0, REV_LENGTH), 4, "ascii");
-  Buffer.from(update).copy(framed, 4 + REV_LENGTH);
+  Buffer.from(update).copy(framed, 4);
   return framed;
 }
 
@@ -54,13 +55,14 @@ function frame(update: Uint8Array, baseRev: string): Buffer {
 function unframe(buffer: Buffer): StoredUpdate[] {
   const updates: StoredUpdate[] = [];
   let offset = 0;
+  let seq = 0;
 
-  while (offset + 4 + REV_LENGTH <= buffer.length) {
+  while (offset + 4 <= buffer.length) {
     const length = buffer.readUInt32BE(offset);
-    const start = offset + 4 + REV_LENGTH;
+    const start = offset + 4;
     if (start + length > buffer.length) break;
     updates.push({
-      baseRev: buffer.toString("ascii", offset + 4, start),
+      seq: ++seq,
       update: new Uint8Array(buffer.subarray(start, start + length)),
     });
     offset = start + length;
@@ -88,21 +90,33 @@ export class FileStorage implements ProjectStorage {
     return revOf(this.readText());
   }
 
-  appendUpdate(update: Uint8Array, baseRev: string): void {
-    appendFileSync(this.paths.log, frame(update, baseRev));
+  appendUpdate(update: Uint8Array): void {
+    appendFileSync(this.paths.log, frame(update));
   }
 
-  readUpdates(): StoredUpdate[] {
+  readUpdates(afterSeq = 0): StoredUpdate[] {
     if (!existsSync(this.paths.log)) return [];
-    return unframe(readFileSync(this.paths.log));
-  }
-
-  clearUpdates(): void {
-    if (existsSync(this.paths.log)) unlinkSync(this.paths.log);
+    return unframe(readFileSync(this.paths.log)).filter((u) => u.seq > afterSeq);
   }
 
   hasUpdates(): boolean {
     return existsSync(this.paths.log);
+  }
+
+  readSnapshot(): StoredSnapshot | undefined {
+    if (!existsSync(this.paths.snapshot)) return undefined;
+    const buffer = readFileSync(this.paths.snapshot);
+    if (buffer.length < 4) return undefined;
+    return {
+      seqUpto: buffer.readUInt32BE(0),
+      update: new Uint8Array(buffer.subarray(4)),
+    };
+  }
+
+  writeSnapshot(snapshot: StoredSnapshot): void {
+    const header = Buffer.allocUnsafe(4);
+    header.writeUInt32BE(snapshot.seqUpto, 0);
+    writeFileSync(this.paths.snapshot, Buffer.concat([header, Buffer.from(snapshot.update)]));
   }
 
   /**

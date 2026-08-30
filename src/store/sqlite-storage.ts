@@ -12,7 +12,13 @@
 import { Change } from "../core/index.js";
 import { DatabaseSync, openDatabase } from "./db.js";
 import { hashBytes, normalizeBlobName } from "./blobs.js";
-import { HistoryEntry, ProjectStorage, StoredUpdate, revOf } from "./storage.js";
+import {
+  HistoryEntry,
+  ProjectStorage,
+  StoredSnapshot,
+  StoredUpdate,
+  revOf,
+} from "./storage.js";
 import { newId } from "../core/index.js";
 
 /** How often to notice another connection's commit. */
@@ -58,25 +64,32 @@ export class SqliteStorage implements ProjectStorage {
     return row?.rev ?? "";
   }
 
-  appendUpdate(update: Uint8Array, baseRev: string): void {
-    this.db
-      .prepare("INSERT INTO session_updates (base_rev, payload) VALUES (?, ?)")
-      .run(baseRev, update);
+  appendUpdate(update: Uint8Array): void {
+    this.db.prepare("INSERT INTO updates (payload) VALUES (?)").run(update);
   }
 
-  readUpdates(): StoredUpdate[] {
+  readUpdates(afterSeq = 0): StoredUpdate[] {
     const rows = this.db
-      .prepare("SELECT base_rev, payload FROM session_updates ORDER BY seq")
-      .all() as { base_rev: string; payload: Uint8Array }[];
-    return rows.map((r) => ({ baseRev: r.base_rev, update: new Uint8Array(r.payload) }));
-  }
-
-  clearUpdates(): void {
-    this.db.exec("DELETE FROM session_updates");
+      .prepare("SELECT seq, payload FROM updates WHERE seq > ? ORDER BY seq")
+      .all(afterSeq) as { seq: number; payload: Uint8Array }[];
+    return rows.map((r) => ({ seq: r.seq, update: new Uint8Array(r.payload) }));
   }
 
   hasUpdates(): boolean {
-    return this.db.prepare("SELECT 1 FROM session_updates LIMIT 1").get() !== undefined;
+    return this.db.prepare("SELECT 1 FROM updates LIMIT 1").get() !== undefined;
+  }
+
+  readSnapshot(): StoredSnapshot | undefined {
+    const row = this.db
+      .prepare("SELECT seq_upto, payload FROM snapshots ORDER BY seq_upto DESC LIMIT 1")
+      .get() as { seq_upto: number; payload: Uint8Array } | undefined;
+    return row ? { seqUpto: row.seq_upto, update: new Uint8Array(row.payload) } : undefined;
+  }
+
+  writeSnapshot(snapshot: StoredSnapshot): void {
+    this.db
+      .prepare("INSERT OR REPLACE INTO snapshots (seq_upto, payload) VALUES (?, ?)")
+      .run(snapshot.seqUpto, snapshot.update);
   }
 
   appendHistory(entry: HistoryEntry): void {
