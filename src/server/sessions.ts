@@ -40,6 +40,14 @@ export interface Lease {
   readonly userId: string;
   /** Their display name. */
   readonly label: string;
+  /**
+   * A Yjs client id, so the lease can appear in presence.
+   *
+   * Minted rather than derived: an agent has no document to take one from, and
+   * presence needs the same id across calls or a person watching sees a new
+   * arrival for every request.
+   */
+  readonly clientId: number;
   /** When it was last used, so idleness can end it. */
   lastSeen: number;
 }
@@ -54,6 +62,8 @@ export interface LeaseOptions {
    */
   idleMs?: number;
   now?: () => number;
+  /** Injected so tests are deterministic; the default is left to chance. */
+  newClientId?: () => number;
   /** Called when a lease is first issued, so it can be written down. */
   onIssued?: (lease: Lease) => void;
   /** Called when one lapses, so presence can drop it. */
@@ -61,6 +71,12 @@ export interface LeaseOptions {
 }
 
 const DEFAULT_IDLE_MS = 30 * 60 * 1000;
+
+/**
+ * Drawn from the space Yjs uses, and left to chance for the same reason it is:
+ * uniqueness among peers is what matters, and nothing here can coordinate.
+ */
+const randomClientId = (): number => Math.floor(Math.random() * 0xffffffff);
 
 export class SessionLeases {
   private readonly held = new Map<string, Lease>();
@@ -92,6 +108,7 @@ export class SessionLeases {
     const lease: Lease = {
       id: `ses_${this.nextId()}`,
       codename: this.freeCodename(),
+      clientId: (this.options.newClientId ?? randomClientId)(),
       userId: who.userId,
       label: who.label,
       lastSeen: this.now(),

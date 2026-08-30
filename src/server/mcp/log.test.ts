@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { RunningServer, startServer } from "../index.js";
 import { importProject } from "../../store/index.js";
 import { McpLogEntry, defaultMcpLogPath, replyOf } from "./log.js";
+import { ProjectSession } from "../../client/session.js";
 
 let dir: string;
 let server: RunningServer;
@@ -197,5 +198,51 @@ describe("reading a reply", () => {
     const cut = 'data: {"result":{"content":[{"type":"text","text":"{ \\"lines\\": [';
     expect(replyOf(cut, { truncated: true })).toEqual({ ok: true });
     expect(replyOf(cut, { truncated: false }).ok).toBe(false);
+  });
+});
+
+describe("being visible while working", () => {
+  it("shows an agent to a browser, under its codename", async () => {
+    // A person watching names change must not see nobody there. An agent holds
+    // no socket of its own, so the server announces presence on its behalf.
+    const watcher = await ProjectSession.open({
+      origin: `http://127.0.0.1:${server.port}`,
+      project: "gridrunner",
+      author: "marcus",
+    });
+    watcher.announce({ name: "marcus", colour: "#f00" });
+
+    await call("list_projects");
+    await new Promise((r) => setTimeout(r, 300));
+
+    const here = watcher.participants();
+    const agent = here.find((p) => p.name !== "marcus");
+    expect(agent?.name).toMatch(/^[a-z]+$/);
+    expect(here.filter((p) => p.name === "marcus")).toHaveLength(1);
+
+    watcher.close();
+  });
+
+  it("keeps one agent as one participant across calls", async () => {
+    const watcher = await ProjectSession.open({
+      origin: `http://127.0.0.1:${server.port}`,
+      project: "gridrunner",
+      author: "marcus",
+    });
+    watcher.announce({ name: "marcus", colour: "#f00" });
+
+    for (let i = 0; i < 3; i++) {
+      await rpc(
+        "tools/call",
+        { name: "list_projects", arguments: {} },
+        { "mcp-session-id": "steady" }
+      );
+    }
+    await new Promise((r) => setTimeout(r, 300));
+
+    // A new dot per request would make a working agent look like a crowd.
+    expect(watcher.participants().filter((p) => p.name !== "marcus")).toHaveLength(1);
+
+    watcher.close();
   });
 });

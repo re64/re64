@@ -89,6 +89,14 @@ export interface RunningServer {
 const FORBIDDEN = new Uint8Array(0);
 
 /**
+ * One colour for every agent, distinct from the palette people are given.
+ *
+ * A person watching wants to tell an agent from a colleague at a glance; which
+ * agent it is, is what the codename is for.
+ */
+const AGENT_COLOUR = "#7c8ea3";
+
+/**
  * Serve a layer binary from beside the project file.
  *
  * Only for a plain `.re64`, which names files it does not contain. A database
@@ -195,7 +203,44 @@ export function startServer(options: ServerOptions): RunningServer {
    * Agent sessions, held here rather than per project: one caller working
    * across two projects is one session, the same way one browser tab would be.
    */
-  const leases = new SessionLeases();
+  const leases = new SessionLeases({ onLapsed: (lease) => dropPresence(lease.id) });
+
+  /**
+   * Which agents are showing as here, and where.
+   *
+   * Presence expires much sooner than the lease behind it. The lease is
+   * identity and should survive a gap between turns; a dot is a claim that
+   * someone is working right now, and one still showing half an hour after the
+   * last call is worse than none at all.
+   */
+  const showing = new Map<string, { projectId: string; clientId: number; lastSeen: number }>();
+  const PRESENCE_MS = 90_000;
+
+  function showPresence(projectId: string, lease: { id: string; clientId: number; codename: string }): void {
+    const already = showing.get(lease.id);
+    if (already && already.projectId !== projectId) {
+      room(already.projectId).sync.setAgentPresence(lease.clientId, null);
+    }
+    showing.set(lease.id, { projectId, clientId: lease.clientId, lastSeen: Date.now() });
+    room(projectId).sync.setAgentPresence(lease.clientId, {
+      user: { name: lease.codename, colour: AGENT_COLOUR, agent: true },
+    });
+  }
+
+  function dropPresence(leaseId: string): void {
+    const shown = showing.get(leaseId);
+    if (!shown) return;
+    showing.delete(leaseId);
+    room(shown.projectId).sync.setAgentPresence(shown.clientId, null);
+  }
+
+  // Swept on a timer rather than on the next request, because the interesting
+  // case is precisely that no next request comes.
+  const presenceSweep = setInterval(() => {
+    const cutoff = Date.now() - PRESENCE_MS;
+    for (const [id, shown] of showing) if (shown.lastSeen < cutoff) dropPresence(id);
+  }, 30_000);
+  presenceSweep.unref?.();
 
   const mcpLog: McpLog = openMcpLog(
     options.mcpLog === undefined ? defaultMcpLogPath(projectPath) : options.mcpLog
@@ -246,6 +291,7 @@ export function startServer(options: ServerOptions): RunningServer {
           if (storage instanceof SqliteStorage) {
             storage.startSession(lease.id, lease.userId, Date.now(), lease.codename);
           }
+          showPresence(projectOf(url), lease);
           return {
             ...who,
             sessionId: lease.id,
@@ -438,6 +484,7 @@ export function startServer(options: ServerOptions): RunningServer {
       return (server.address() as { port: number } | null)?.port ?? port;
     },
     async close() {
+      clearInterval(presenceSweep);
       catalogue?.close();
       for (const { sync } of rooms.values()) {
         sync.flattenNow();

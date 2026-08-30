@@ -13,3 +13,4 @@ export {
   diffSince,
 } from "./doc.js";
 export { applyOpToDoc, applyOpsToDoc, undoManagerFor } from "./ops.js";
+export { newPresenceClientId, presenceUpdateFor } from "./presence.js";

@@ -24,7 +24,7 @@ import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";
-import { clientsInUpdate } from "../core/crdt/index.js";
+import { clientsInUpdate, presenceUpdateFor } from "../core/crdt/index.js";
 import { ProjectStore } from "../store/index.js";
 
 /**
@@ -249,6 +249,25 @@ export class SyncServer {
       null
     );
     if (this.clients.size === 0) this.scheduleIdleFlatten();
+  }
+
+  /**
+   * Show, or stop showing, a participant that holds no socket.
+   *
+   * Applied with an origin that is not a WebSocket, so the ownership map leaves
+   * it alone: a socket closing must not clear an agent's presence, and an agent
+   * lapsing must not clear a person's.
+   */
+  setAgentPresence(clientId: number, state: Record<string, unknown> | null): void {
+    if (state === null) {
+      awarenessProtocol.removeAwarenessStates(this.awareness, [clientId], "agent");
+      return;
+    }
+    awarenessProtocol.applyAwarenessUpdate(
+      this.awareness,
+      presenceUpdateFor(clientId, state),
+      "agent"
+    );
   }
 
   /** Which awareness entries a socket is responsible for. */
