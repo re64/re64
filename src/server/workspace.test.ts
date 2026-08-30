@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Caller, Workspace } from "./workspace.js";
@@ -35,9 +35,32 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const extra of extras) extra.close();
+  extras.length = 0;
   storage.close();
   rmSync(dir, { recursive: true, force: true });
 });
+
+const extras: SqliteStorage[] = [];
+
+/** A project holding the bytes and nothing else, as experiment 1 starts. */
+function blankWorkspace(): Workspace {
+  const path = join(dir, "blank.re64");
+  writeFileSync(
+    path,
+    JSON.stringify({ name: "blank", layers: [{ type: "prg", path: "gridrunner.prg" }] })
+  );
+  const { databasePath, projectId } = importProject(path);
+  const blankStorage = new SqliteStorage(databasePath, projectId);
+  extras.push(blankStorage);
+
+  return new Workspace({
+    store: new ProjectStore(blankStorage),
+    storage: blankStorage,
+    projectId,
+    projectPath: databasePath,
+  });
+}
 
 describe("orienting in a project never seen before", () => {
   it("says what is here and how far along it is", () => {
@@ -49,6 +72,20 @@ describe("orienting in a project never seen before", () => {
     // The distinction that matters: chosen names mean something was understood.
     expect(described.counts.namedByHand).toBeGreaterThan(0);
     expect(described.counts.namedAutomatically).toBeGreaterThan(0);
+    // The built-in C64 symbols are supplied, not decided by anyone.
+    expect(described.counts.namedByPlatform).toBeGreaterThan(100);
+  });
+
+  it("does not credit anyone for names re64 supplied itself", () => {
+    // A project holding only bytes reported 161 names chosen by hand, which is
+    // the built-in C64 table plus a PRG entry point. That is the number a
+    // reader uses to judge how far along a project is, so it has to be zero
+    // when nothing has been understood yet.
+    const blank = blankWorkspace();
+    const counts = blank.describe().counts;
+
+    expect(counts.namedByHand).toBe(0);
+    expect(counts.namedByPlatform).toBeGreaterThan(100);
   });
 });
 
@@ -249,5 +286,33 @@ describe("the cache", () => {
     for (let i = 0; i < 50; i++) workspace.disassembly(0x8011, 20);
     // Uncached this is ~50 × 12ms of disassembly plus rendering.
     expect(Date.now() - started).toBeLessThan(1000);
+  });
+});
+
+describe("a project written by hand", () => {
+  it("can be edited, not only read", () => {
+    // A file without ids loads and disassembles perfectly and then refused
+    // every write, because operations target objects by id. That is the shape
+    // a new project actually arrives in — nobody hand-writes an id — so the
+    // first thing anyone would try was the thing that did not work.
+    const blank = blankWorkspace();
+
+    const result = blank.setLabel(agent, 0x8011, "GameEntry", "function");
+    expect(result.did[0]).toContain("GameEntry");
+
+    const labels = blank.labels({ namePattern: "GameEntry" });
+    expect(labels.total).toBe(1);
+  });
+
+  it("opens up code that nothing reaches", () => {
+    // The workflow the first experiment is built around: a blank project
+    // decodes almost nothing until someone declares an entry point.
+    const blank = blankWorkspace();
+    const before = blank.describe().counts.instructions;
+
+    const marked = blank.markFunction(agent, 0x8011);
+
+    expect(marked.instructions.delta).toBeGreaterThan(100);
+    expect(blank.describe().counts.instructions).toBeGreaterThan(before);
   });
 });

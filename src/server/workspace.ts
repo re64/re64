@@ -165,12 +165,23 @@ export class Workspace {
     entryPoints: string[];
     layers: { level: number; name: string; start: string; end: string; labels: number }[];
     regions: { start: string; end: string; kind: string; name?: string }[];
-    counts: { instructions: number; namedByHand: number; namedAutomatically: number };
+    counts: {
+      instructions: number;
+      namedByHand: number;
+      namedAutomatically: number;
+      namedByPlatform: number;
+    };
     warnings: number;
   } {
     const program = this.program();
     const { loaded } = program;
     const auto = program.labels.filter({ source: "auto" });
+    // Supplied by re64 rather than decided by anyone: the built-in C64 symbol
+    // table, and the entry point a PRG layer labels from its load address.
+    const supplied = [
+      ...program.labels.filter({ source: "platform" }),
+      ...program.labels.filter({ source: "layer" }),
+    ];
 
     return {
       project: this.room.projectId,
@@ -193,8 +204,13 @@ export class Workspace {
         instructions: program.instructions.size,
         // The distinction that says how far along a project is: a name someone
         // chose means something was understood, an invented one means it was not.
-        namedByHand: program.labels.getAllLabels().length - auto.length,
+        //
+        // Platform and layer labels are neither. Counting them as chosen made a
+        // project with no annotations at all report 161 of them, which is the
+        // opposite of what this number exists to say.
+        namedByHand: program.labels.getAllLabels().length - auto.length - supplied.length,
         namedAutomatically: auto.length,
+        namedByPlatform: supplied.length,
       },
       warnings: program.warnings.length,
     };

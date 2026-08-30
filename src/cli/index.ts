@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { Command } from "commander";
 import {
   VERSION,
@@ -16,8 +17,10 @@ import {
   formatInstruction,
   InstructionIndex,
   ReferenceType,
+  formatProject,
   parseProject,
   parseProjectAddress,
+  withIds,
   Project,
   Row,
   analyze,
@@ -28,6 +31,7 @@ import {
 } from "../core/index.js";
 import { loadProjectFile, nodeFileBytes } from "../node-files.js";
 import { hexDump } from "./hex.js";
+import { formatSummary, readTranscript, summarise } from "../server/mcp/report.js";
 import { openProject } from "./edit.js";
 import {
   UndoOutcome,
@@ -362,7 +366,18 @@ program
   .argument("<file>", "Project file (.re64)")
   .action((file: string) => {
     const raw = readFileSync(file, "utf-8");
-    const migrated = migrateIds(raw, (prefix) => newId(prefix));
+    // Line-based, so a hand-authored layout survives — which is the point of
+    // doing it here rather than by reserialising.
+    let migrated = migrateIds(raw, (prefix) => newId(prefix));
+
+    // It edits the raw JSON line by line, so a file written on one line has
+    // nothing for it to work with and it reports success having done nothing.
+    // Falling back to reserialising loses the layout, but a file in that shape
+    // had none to lose.
+    const parsed = parseProject(migrated);
+    const complete = withIds(parsed);
+    if (complete !== parsed) migrated = formatProject(complete);
+
     if (migrated === raw) {
       console.log("Already migrated; nothing to write.");
       return;
@@ -495,6 +510,17 @@ program
   });
 
 // Action handlers run synchronously during parse, so a bad project file or an
+program
+  .command("transcript")
+  .description("Summarise an agent request transcript: what was missing, what was refused")
+  .argument("<file>", "A .mcp.jsonl written beside a project database")
+  .option("--json", "Emit the summary as JSON, for diffing two runs")
+  .action((file: string, options: { json?: boolean }) => {
+    const entries = readTranscript(readFileSync(resolve(file), "utf8"));
+    const summary = summarise(entries);
+    console.log(options.json ? JSON.stringify(summary, null, 2) : formatSummary(summary));
+  });
+
 // unreadable path surfaces here. Report it as a message: a stack trace is noise
 // when the fault is in the input rather than the code.
 try {

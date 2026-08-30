@@ -13,7 +13,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { writeFileAtomic } from "../fsutil.js";
 import { basename, dirname, resolve } from "node:path";
-import { blobPaths, parseProject } from "../core/index.js";
+import { blobPaths, formatProject, parseProject, withIds } from "../core/index.js";
 import { normalizeBlobName } from "./blobs.js";
 import { HistoryEntry } from "./storage.js";
 import { SqliteStorage } from "./sqlite-storage.js";
@@ -55,8 +55,21 @@ export function importProject(
   databasePath = databasePathFor(projectPath),
   projectId = basename(projectPath).replace(/\.re64$/, "")
 ): ImportResult {
-  const text = readFileSync(projectPath, "utf-8");
-  const project = parseProject(text); // Refuse a non-project before creating anything.
+  const raw = readFileSync(projectPath, "utf-8");
+  const parsed = parseProject(raw); // Refuse a non-project before creating anything.
+
+  // Mint ids the file does not carry, before anything is stored.
+  //
+  // Every operation targets an object by id, so a project written without them
+  // loads and disassembles perfectly and then refuses every write — and nobody
+  // hand-writes an id, so that is the shape a new project arrives in. Doing it
+  // at import means the document carries them from its first snapshot.
+  //
+  // Reserialised only when something was actually missing: an import must not
+  // rewrite a file that was already complete, and layout is not worth
+  // preserving here because the export is regenerated anyway.
+  const project = withIds(parsed);
+  const text = project === parsed ? raw : formatProject(project);
 
   // Read the binaries before the database exists, so a missing one fails the
   // import rather than leaving a database that cannot be disassembled.

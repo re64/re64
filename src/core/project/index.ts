@@ -21,4 +21,4 @@ export {
   normalizeProjectText,
 } from "./serialize.js";
 export { resolveOwningLayer } from "./ownership.js";
-export { IdPrefix, newId, derivedId, isId } from "./identity.js";
+export { IdPrefix, newId, derivedId, isId, withIds } from "./identity.js";

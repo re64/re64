@@ -11,6 +11,8 @@
  * person — must be able to mint them without coordinating.
  */
 
+import type { Project } from "./project.js";
+
 /** Prefix marks what an id refers to, so a stray id in a diff is readable. */
 export type IdPrefix = "lbl" | "rgn" | "lay" | "fil";
 
@@ -55,4 +57,36 @@ export function derivedId(prefix: IdPrefix, ...parts: (string | number)[]): stri
 /** True for ids this module could have produced. */
 export function isId(value: unknown): value is string {
   return typeof value === "string" && /^(lbl|rgn|lay)_[0-9a-z]+$/.test(value);
+}
+
+/**
+ * The same project with an id on everything that lacked one.
+ *
+ * Works on the parsed object rather than the text, so it does not care how the
+ * file was formatted. `migrateIds` edits the raw JSON line by line to keep a
+ * hand-authored layout intact, which is right for `re64 migrate` and silently
+ * does nothing to a file written on one line — the shape a generated project
+ * usually arrives in.
+ *
+ * Returns the original object untouched when nothing was missing, so a caller
+ * can tell whether reserialising is warranted.
+ */
+export function withIds(project: Project, mint: (prefix: IdPrefix) => string = newId): Project {
+  let minted = false;
+  const give = <T extends { id?: string }>(item: T, prefix: IdPrefix): T => {
+    if (item.id) return item;
+    minted = true;
+    return { ...item, id: mint(prefix) };
+  };
+
+  const layers = project.layers.map((layer) => {
+    const withId = give(layer, "lay");
+    return {
+      ...withId,
+      ...(layer.labels ? { labels: layer.labels.map((l) => give(l, "lbl")) } : {}),
+      ...(layer.regions ? { regions: layer.regions.map((r) => give(r, "rgn")) } : {}),
+    };
+  });
+
+  return minted ? { ...project, layers } : project;
 }
