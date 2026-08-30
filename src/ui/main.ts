@@ -1098,7 +1098,9 @@ async function renderDebug(): Promise<void> {
   }
 
   try {
-    const res = await fetch("/api/debug");
+    const res = await fetch(
+      "/api/debug" + (currentProject ? `?project=${encodeURIComponent(currentProject)}` : "")
+    );
     serverDebug = res.ok
       ? ((await res.json()) as ServerDebug)
       : { error: `server replied ${res.status}` };
@@ -1161,7 +1163,8 @@ async function renderDebug(): Promise<void> {
 
     html += "<h3>CRDT</h3>";
     html += definitions([
-      ["held by", "the server; this browser has no document"],
+      // Both hold one now, and they are the same document.
+      ["held by", "this browser and the server, in sync"],
       ["recorded updates", String(sv.updates.count)],
       // Nothing is deleted by a snapshot; it only says how much of the log a
       // fresh reader can skip.
