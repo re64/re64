@@ -207,16 +207,24 @@ describe("project schema", () => {
     expect(() => parseProject(JSON.stringify({ layers: [{ type: "symbols" }] }))).not.toThrow();
   });
 
-  it("requires a symbol layer to have no regions", () => {
-    const withRegions = JSON.stringify({
-      layers: [
-        {
-          type: "symbols",
-          labels: [{ address: "$02", name: "v" }],
-          regions: [{ start: "$02", end: "$03", kind: "data" }],
-        },
-      ],
-    });
-    expect(() => parseProject(withRegions)).toThrow(/cannot have regions/);
+  it("drops a region on a symbols layer rather than refusing to open", () => {
+    // It used to throw. One accepted write could then put a region there and
+    // the project became permanently unopenable — no interface could repair
+    // what one of them had written.
+    const parsed = parseProject(
+      JSON.stringify({
+        layers: [
+          {
+            type: "symbols",
+            labels: [{ address: "$02", name: "v" }],
+            regions: [{ start: "$02", end: "$03", kind: "data" }],
+          },
+        ],
+      })
+    );
+
+    expect(parsed.layers[0].regions).toBeUndefined();
+    expect(parsed.layers[0].labels).toHaveLength(1);
   });
+
 });

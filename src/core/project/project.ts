@@ -307,9 +307,13 @@ export function parseProject(json: string): Project {
       // one to be filled, and naming an address that no layer owns creates one
       // in the same action as the label going into it. It supplies no bytes and
       // no names, so it is inert rather than wrong.
-      if (layer.regions?.length) {
-        throw new Error("Layer type 'symbols' cannot have regions: it supplies no bytes");
-      }
+      // A symbols layer supplies no bytes, so a region on one says how to read
+      // something that is not there. Dropped rather than refused: this used to
+      // throw, and a single accepted write could put a region here and leave
+      // the project unopenable — unwritable through the agent API, the HTTP
+      // API and the CLI alike, with no way back. Refusing the *write* is the
+      // fix; refusing to load is how the damage became permanent.
+      if (layer.regions?.length) delete layer.regions;
     }
   }
 

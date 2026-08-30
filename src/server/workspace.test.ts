@@ -833,3 +833,32 @@ describe("declaring a jumptable", () => {
     expect(project.regions.some((r) => r.kind === "jumptable")).toBe(true);
   });
 });
+
+describe("a region where there are no bytes", () => {
+  it("is refused, rather than written somewhere that cannot hold it", () => {
+    // Ownership falls back to a symbols layer for an address nothing supplies,
+    // which is right for a label and wrong for a region. Sharing one resolver
+    // let a region land on a symbols layer, producing a document the loader
+    // refused — after which no interface could write to the project at all.
+    const blank = blankWorkspace();
+    blank.setLabel(agent, 0x02, "currentXPosition"); // creates the symbols layer
+
+    expect(() => blank.setRegion(agent, 0x0400, 0x07e8, "data", "SCREEN_RAM")).toThrow(
+      /No loaded bytes at \$0400/
+    );
+  });
+
+  it("leaves the project writable afterwards", () => {
+    const blank = blankWorkspace();
+    blank.setLabel(agent, 0x02, "currentXPosition");
+    try {
+      blank.setRegion(agent, 0x0400, 0x07e8, "data");
+    } catch {
+      // expected
+    }
+
+    // The point of the bug: everything after used to fail too.
+    expect(() => blank.setLabel(agent, 0x8011, "StillWorks")).not.toThrow();
+    expect(blank.labels({ namePattern: "StillWorks" }).total).toBe(1);
+  });
+});

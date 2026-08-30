@@ -169,6 +169,16 @@ export function labelDeleteOp(loaded: LoadedProject, address: number): Op | unde
   return existing ? { op: "label.delete", id: existing.id, layerId } : undefined;
 }
 
+/**
+ * A region needs bytes; a label does not.
+ *
+ * Ownership resolution falls back to a symbols layer for an address nothing
+ * supplies, which is right for a label — that is what symbols layers are for —
+ * and wrong for a region, which says how to *interpret* bytes that are not
+ * there. The two shared one resolver, so declaring a region over `$0400` on a
+ * project with a symbols layer attached it to that layer, wrote a document the
+ * loader refuses, and left the project unwritable through every interface.
+ */
 export function regionSetOp(
   loaded: LoadedProject,
   start: number,
@@ -177,6 +187,15 @@ export function regionSetOp(
   name?: string,
   comment?: string
 ): Op {
+  const owner = loaded.map.layerAt(start);
+  if (!owner || !owner.hasBytes) {
+    throw new Error(
+      `No loaded bytes at $${hex4(start)}, so there is nothing there to ` +
+        `interpret. A region says how to read bytes a layer supplies; to name ` +
+        `an address outside the loaded ranges, use a label instead.`
+    );
+  }
+
   const layerId = owningLayerId(loaded, start);
   const layer = loaded.project.layers.find((l) => l.id === layerId);
   const existing = layer?.regions?.find((r) => parseProjectAddress(r.start) === start);
