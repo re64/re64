@@ -43,7 +43,7 @@ export interface ArrowSpan {
  * through long stretches of straight-line code.
  */
 export function allocateArrowLanes(
-  references: Map<number, Reference[]>,
+  references: ReadonlyMap<number, readonly Reference[]>,
   targetLine: Record<number, number>,
   instructionLine: Record<number, number>
 ): { arrows: ArrowSpan[]; demoted: number } {

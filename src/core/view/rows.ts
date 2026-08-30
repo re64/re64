@@ -8,16 +8,13 @@
  * CLAUDE.md.
  */
 
+import { analyzeProgram } from "../analysis/program.js";
 import {
   LabelIndex,
   Label,
   LabelType,
-  createAutoLabel,
-  disassemble,
   formatOperand,
-  InstructionIndex,
   LoadedProject,
-  parseProjectAddress,
   RegionKind,
   derivedId,
 } from "../index.js";
@@ -122,47 +119,13 @@ export function analyze(
   } = typeof options === "number" ? { labelTolerance: options } : options;
 
 
-  const { project, map, prgEntries, userLabels } = loaded;
+  const { map } = loaded;
 
-  const labelEntryPoints = userLabels
-    .getAllLabels()
-    .filter((l) => l.type === "entry" || l.type === "function" || l.type === "code")
-    .map((l) => l.address);
-
-  const projectEntryPoints = project.entryPoints?.map(parseProjectAddress) ?? [];
-
-  let entryPoints: number[];
-  if (entryPointOverride?.length) {
-    entryPoints = entryPointOverride;
-  } else if (projectEntryPoints.length > 0) {
-    entryPoints = [...projectEntryPoints, ...labelEntryPoints];
-  } else if (prgEntries.length > 0) {
-    entryPoints = [...prgEntries, ...labelEntryPoints];
-  } else {
-    entryPoints = labelEntryPoints;
-  }
-
-  const result = disassemble(map, { entryPoints, regions: map });
-  const index = new InstructionIndex(result.instructions);
-
-  const allLabels = new LabelIndex();
-  allLabels.addLabels(map.getLabels().getAllLabels());
-  allLabels.addLabels(userLabels.getAllLabels());
-
-  // Auto-labels for otherwise-unnamed reference targets (lowest priority).
-  const autoLabels: Label[] = [];
-  for (const [targetAddr, refs] of result.references) {
-    if (allLabels.resolve(targetAddr, labelTolerance)) continue;
-    const addrStr = hex4(targetAddr);
-    if (refs.some((r) => r.type === "call")) {
-      autoLabels.push(createAutoLabel(derivedId("lbl", "auto", targetAddr), targetAddr, `sub_${addrStr}`, "function"));
-    } else if (refs.some((r) => r.type === "jump" || r.type === "branch")) {
-      autoLabels.push(createAutoLabel(derivedId("lbl", "auto", targetAddr), targetAddr, `loc_${addrStr}`, "code"));
-    } else {
-      autoLabels.push(createAutoLabel(derivedId("lbl", "auto", targetAddr), targetAddr, `dat_${addrStr}`, "address"));
-    }
-  }
-  allLabels.addLabels(autoLabels);
+  // What the program *is*, computed once and no longer thrown away — see
+  // core/analysis/program.ts. This function's job from here is rendering it.
+  const program = analyzeProgram(loaded, { labelTolerance, entryPoints: entryPointOverride });
+  const { instructions: index, labels: allLabels } = program;
+  const result = { references: program.xrefs.raw(), warnings: program.warnings };
 
   const resolveLabel = (addr: number) => {
     const resolved = allLabels.resolve(addr, labelTolerance);
@@ -404,7 +367,7 @@ export function analyze(
     arrows: renderArrowGutter(arrowSpans, rows.length),
     warnings,
     stats: {
-      instructions: result.instructions.size,
+      instructions: index.size,
       labels: allLabels.getAllLabels().length,
       regions: map.getAllRegions().length,
       rows: rows.length,

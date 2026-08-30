@@ -8,7 +8,8 @@
  * row builder.
  */
 
-import { Reference, ReferenceType } from "../arch/mos6502/disassembler.js";
+import { Instruction } from "../arch/mos6502/instruction.js";
+import { InstructionIndex, Reference, ReferenceType } from "../arch/mos6502/disassembler.js";
 
 /** Everything known about the references pointing at one address. */
 export interface XrefTarget {
@@ -55,5 +56,92 @@ export class XrefIndex {
 
   get size(): number {
     return this.refs.size;
+  }
+
+  /** The underlying map, for callers that need to walk every target. */
+  raw(): ReadonlyMap<number, readonly Reference[]> {
+    return this.refs;
+  }
+}
+
+/**
+ * What an address refers to, which the reference map cannot say.
+ *
+ * `disassemble` keys references by their *target*, so "who calls this" is a
+ * lookup and "what does this call" is not. This walks the decoded instructions
+ * once and builds the other direction.
+ *
+ * It reads the operand rather than the reference map, which means it sees
+ * zero-page targets — a `LDA $02` names a variable, and the reference map
+ * silently omits it because only absolute modes are recorded there.
+ */
+export class OutboundIndex {
+  private constructor(private readonly byAddress: Map<number, OutboundRef[]>) {}
+
+  static from(instructions: InstructionIndex): OutboundIndex {
+    const byAddress = new Map<number, OutboundRef[]>();
+
+    for (const instruction of instructions.all()) {
+      const target = targetOf(instruction);
+      if (target === undefined) continue;
+      byAddress.set(instruction.address, [{ to: target, type: kindOf(instruction) }]);
+    }
+
+    return new OutboundIndex(byAddress);
+  }
+
+  /** What the instruction at this address refers to. */
+  from(address: number): readonly OutboundRef[] {
+    return this.byAddress.get(address) ?? [];
+  }
+
+  /** Everything referred to from within a span, in address order. */
+  inRange(start: number, end: number): { address: number; refs: readonly OutboundRef[] }[] {
+    return [...this.byAddress.entries()]
+      .filter(([address]) => address >= start && address < end)
+      .sort((a, b) => a[0] - b[0])
+      .map(([address, refs]) => ({ address, refs }));
+  }
+
+  get size(): number {
+    return this.byAddress.size;
+  }
+}
+
+export interface OutboundRef {
+  to: number;
+  type: ReferenceType;
+}
+
+function kindOf(instruction: Instruction): ReferenceType {
+  switch (instruction.flow) {
+    case "call":
+      return "call";
+    case "jump":
+      return "jump";
+    case "branch":
+      return "branch";
+    default:
+      return "data";
+  }
+}
+
+/** The address an operand names, whatever the addressing mode. */
+function targetOf(instruction: Instruction): number | undefined {
+  const operand = instruction.operand;
+  switch (operand.type) {
+    case "absolute":
+    case "absoluteX":
+    case "absoluteY":
+    case "indirect":
+    case "zeroPage":
+    case "zeroPageX":
+    case "zeroPageY":
+      return operand.address;
+    case "relative":
+      // Branches carry a resolved target, not an address field.
+      return operand.target;
+    default:
+      return undefined;
   }
 }

@@ -242,6 +242,37 @@ export class LabelIndex {
     return this.byAddress.has(address);
   }
 
+  /**
+   * Labels matching every criterion given.
+   *
+   * Exists because "which addresses are still auto-named" is the question a
+   * reverse engineer actually asks, and answering it used to mean scanning
+   * every label and testing its source by hand.
+   */
+  filter(criteria: {
+    source?: LabelSource["kind"];
+    type?: LabelType;
+    /** Matched against the name, case-insensitively, as a substring. */
+    namePattern?: string;
+    /** Half-open, as everywhere else. */
+    range?: { start: number; end: number };
+  }): readonly Label[] {
+    const pattern = criteria.namePattern?.toLowerCase();
+
+    return this.getAllLabels().filter((label) => {
+      if (criteria.source !== undefined && label.source.kind !== criteria.source) return false;
+      if (criteria.type !== undefined && label.type !== criteria.type) return false;
+      if (pattern !== undefined && !label.name.toLowerCase().includes(pattern)) return false;
+      if (
+        criteria.range &&
+        (label.address < criteria.range.start || label.address >= criteria.range.end)
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }
+
   /** Get all labels, sorted by address */
   getAllLabels(): readonly Label[] {
     return [...this.all].sort((a, b) => a.address - b.address);
