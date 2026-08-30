@@ -20,7 +20,23 @@
  */
 
 import { createHash } from "node:crypto";
-import { HistoryEntry, ProjectStorage, revOf } from "./storage.js";
+import { HistoryEntry, ProjectStorage, StoredChange, revOf } from "./storage.js";
+
+/**
+ * What taking an action back actually did.
+ *
+ * More than a description, because it can be partial: an op whose target
+ * somebody else has since changed is left alone, and a caller that was told
+ * only "undone" would believe the whole action had gone.
+ */
+export interface UndoOutcome {
+  /** What was taken back, or null when nothing could be. */
+  undone: string | null;
+  /** How many operations were reverted. */
+  applied: number;
+  /** Operations left alone, and why. */
+  skipped: { description: string; reason: string }[];
+}
 import {
   Change,
   Op,
@@ -72,6 +88,8 @@ export class ProjectStore {
    * empty and the history entry would be lost.
    */
   private sessionOps: Op[] = [];
+  /** Counts actions, so two in the same millisecond get different ids. */
+  private changesets = 0;
   private dirty = false;
   /**
    * The text this store last wrote.
@@ -370,9 +388,14 @@ export class ProjectStore {
   runOps(
     ops: readonly Op[],
     author: string,
-    now: number
-  ): { applied: number; descriptions: string[] } {
-    if (ops.length === 0) return { applied: 0, descriptions: [] };
+    now: number,
+    session?: string
+  ): { applied: number; descriptions: string[]; changeset: string } {
+    // One call is one changeset, however many ops it takes. The boundary is
+    // this function; it simply went unrecorded, which is why undo used to take
+    // back part of a decision and report the whole thing.
+    const changeset = `chg_${now.toString(36)}${(this.changesets++).toString(36)}`;
+    if (ops.length === 0) return { applied: 0, descriptions: [], changeset };
 
     return this.storage.transaction(() => {
       // Learn what anyone else did *before* applying ours, not after. Applying
@@ -390,7 +413,7 @@ export class ProjectStore {
       let text = formatProject(projectFromDoc(this.document()));
       const changes: Change[] = [];
       for (const op of ops) {
-        changes.push({ op, inverse: invertOp(text, op), author, at: now });
+        changes.push({ op, inverse: invertOp(text, op), author, at: now, session, changeset });
         text = applyOp(text, op);
       }
 
@@ -404,48 +427,110 @@ export class ProjectStore {
       }
       this.storage.appendOps(changes);
 
-      return { applied: ops.length, descriptions: ops.map(describeOp) };
+      return { applied: ops.length, descriptions: ops.map(describeOp), changeset };
     });
   }
 
   /**
-   * Undo the most recent change, by default one of the caller's own.
+   * Undo the most recent action, by default one of the caller's own.
    *
-   * Scoped to the author because the record is shared: a person at the CLI
-   * pressing undo should not silently revert what someone in a browser just
-   * did. `author` omitted means anyone's.
+   * An *action*, not an operation: one tool call or one click is taken back
+   * whole, however many ops it produced. Before changesets were recorded this
+   * reverted a third of a decision and reported success, while the browser —
+   * whose ops share a Yjs transaction — took back the whole thing.
+   *
+   * Scoped to the session when one is known, and to the author otherwise. The
+   * session is the narrower and better rule, and the one the browser already
+   * follows: two agents under one identity are two peers and neither may
+   * revert the other. `re64 undo --any` passes neither and reaches anything.
    */
-  undo(author?: string): string | null {
+  undo(author?: string, session?: string): UndoOutcome {
     return this.step(
-      (c) => !c.undone && (author === undefined || c.author === author),
+      (c) => !c.undone,
       (c) => c.inverse,
-      true
+      true,
+      { author, session }
     );
   }
 
-  /** Redo the most recently undone change, by the same scoping rule. */
-  redo(author?: string): string | null {
+  /** Redo the most recently undone action, by the same scoping rule. */
+  redo(author?: string, session?: string): UndoOutcome {
     return this.step(
-      (c) => c.undone === true && (author === undefined || c.author === author),
+      (c) => c.undone === true,
       (c) => c.op,
-      false
+      false,
+      { author, session }
     );
   }
 
+  /**
+   * Walk one action back, or forward.
+   *
+   * Partial by design. A stored inverse says what the state was when the op was
+   * recorded, so applying one after somebody else has touched the same field
+   * silently reverts their work — the CRDT converges, and converges on the
+   * wrong thing. So each op is checked first: if replaying it forward would
+   * change nothing, its effect is still present and the inverse is safe. If it
+   * would, someone has been here since and it is left alone and reported.
+   *
+   * Reporting rather than refusing, because taking back three of four renames
+   * and saying which one was kept is more useful than declining the lot.
+   */
   private step(
-    wanted: (change: Change) => boolean,
-    direction: (change: Change) => Op,
-    undone: boolean
-  ): string | null {
+    wanted: (change: StoredChange) => boolean,
+    direction: (change: StoredChange) => Op,
+    undone: boolean,
+    scope: { author?: string; session?: string }
+  ): UndoOutcome {
+    const inScope = (c: StoredChange): boolean => {
+      if (scope.session !== undefined) return c.session === scope.session;
+      if (scope.author !== undefined) return c.author === scope.author;
+      return true;
+    };
+
     return this.storage.transaction(() => {
       const log = this.storage.readOps();
-      for (let i = log.length - 1; i >= 0; i--) {
-        if (!wanted(log[i])) continue;
-        this.applyThroughDocument([direction(log[i])], log[i].author ?? "unknown");
-        this.storage.markUndone(log[i].seq, undone);
-        return describeOp(log[i].op);
+      const newest = [...log].reverse().find((c) => wanted(c) && inScope(c));
+      if (!newest) return { undone: null, applied: 0, skipped: [] };
+
+      // A row written before changesets existed is its own action.
+      const group = newest.changeset
+        ? log.filter((c) => c.changeset === newest.changeset && wanted(c) && inScope(c))
+        : [newest];
+
+      let text = formatProject(projectFromDoc(this.document()));
+      const skipped: UndoOutcome["skipped"] = [];
+      const applying: StoredChange[] = [];
+
+      for (const change of [...group].reverse()) {
+        // The op whose effect must still be present for the stored inverse to
+        // mean anything: what was applied last time round. Undoing checks the
+        // original op, redoing checks the inverse that undid it.
+        const settled = undone ? change.op : change.inverse;
+        if (applyOp(text, settled) !== text) {
+          skipped.push({
+            description: describeOp(change.op),
+            reason: "changed by someone else since",
+          });
+          continue;
+        }
+        applying.push(change);
+        text = applyOp(text, direction(change));
       }
-      return null;
+
+      if (applying.length > 0) {
+        this.applyThroughDocument(
+          applying.map(direction),
+          newest.author ?? "unknown"
+        );
+        for (const change of applying) this.storage.markUndone(change.seq, undone);
+      }
+
+      return {
+        undone: applying.length > 0 ? describeOp(newest.op) : null,
+        applied: applying.length,
+        skipped,
+      };
     });
   }
 

@@ -227,6 +227,18 @@ describe("editing as an agent", () => {
     expect(changes[0].did).toContain("Second");
   });
 
+  it("reports an action as one entry that several changes share", async () => {
+    await callTool("mark_function", { address: "$801B" });
+    const { value } = await callTool("changes_since", { cursor: 0 });
+    const { changes } = value as { changes: { action?: string; as?: string }[] };
+
+    // However many ops it took, it was one decision, and the feed says so.
+    const actions = new Set(changes.map((c) => c.action));
+    expect(actions.size).toBe(1);
+    // And it says who, by a name a person can read.
+    expect(changes[0].as).toMatch(/^[a-z]+$/);
+  });
+
   it("takes an edit back", async () => {
     await callTool("set_label", { address: "$8870", name: "Regretted" });
     const { value } = await callTool("undo");

@@ -38,10 +38,23 @@ import { databaseFileBytes } from "../store/load.js";
 import { FileStorage, ProjectStore, SqliteStorage } from "../store/index.js";
 import { nodeFileBytes } from "../node-files.js";
 
-/** Who is asking. Resolved once per connection, never per call. */
+/**
+ * Who is asking, and under which lease.
+ *
+ * Resolved once per request, never taken as a tool argument. The session is
+ * what scopes undo, so that two agents claiming one identity are two peers
+ * rather than one — the same rule two browser tabs already follow.
+ */
 export interface Caller {
   userId: string;
   label: string;
+  sessionId?: string;
+  codename?: string;
+  /**
+   * Set when no session handle was presented, so the lease had to be keyed by
+   * identity alone and everyone under it shares one undo scope.
+   */
+  sharedSession?: boolean;
 }
 
 export interface Room {
@@ -352,13 +365,30 @@ export class Workspace {
    * The cursor is stable: entries are appended and never renumbered, so a
    * position held across an undo still means what it meant.
    */
-  changesSince(cursor = 0, limit = 100): {
+  changesSince(
+    cursor = 0,
+    limit = 100
+  ): {
     cursor: number;
-    changes: { seq: number; did: string; by?: string; at?: number; undone?: boolean }[];
+    changes: {
+      seq: number;
+      did: string;
+      by?: string;
+      as?: string;
+      action?: string;
+      at?: number;
+      undone?: boolean;
+    }[];
     truncated: boolean;
   } {
     const found = this.room.storage.readOps(cursor);
     const page = found.slice(0, limit);
+    // Whose session it was, so a feed can say "basalt" rather than a bare id.
+    const names = new Map(
+      (this.room.storage instanceof SqliteStorage ? this.room.storage.sessions() : [])
+        .filter((s) => s.codename)
+        .map((s) => [s.id, s.codename as string])
+    );
 
     return {
       // Where to resume: the last entry actually returned, not the last that
@@ -369,6 +399,12 @@ export class Workspace {
         seq: change.seq,
         did: describeOp(change.op),
         by: change.author,
+        // Entries sharing an `action` were one decision. Rows written before
+        // changesets existed carry none, and each stands alone.
+        ...(change.session && names.has(change.session)
+          ? { as: names.get(change.session) }
+          : {}),
+        ...(change.changeset ? { action: change.changeset } : {}),
         at: change.at,
         ...(change.undone ? { undone: true } : {}),
       })),
@@ -431,7 +467,8 @@ export class Workspace {
   }
 
   undo(caller: Caller): { undone: string | null; version: string } {
-    return { undone: this.room.store.undo(caller.userId), version: this.version() };
+    const outcome = this.room.store.undo(caller.userId, caller.sessionId);
+    return { ...outcome, version: this.version() };
   }
 
   /**
@@ -445,7 +482,12 @@ export class Workspace {
     const before = this.program().instructions.size;
     const ops = build(this.program().loaded);
 
-    const { descriptions } = this.room.store.runOps(ops, caller.userId, Date.now());
+    const { descriptions } = this.room.store.runOps(
+      ops,
+      caller.userId,
+      Date.now(),
+      caller.sessionId
+    );
     const after = this.program().instructions.size;
 
     return {

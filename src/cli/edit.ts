@@ -28,6 +28,7 @@ import {
   FileStorage,
   ProjectStore,
   SqliteStorage,
+  UndoOutcome,
   loadProjectFromDatabase,
   pathsFor,
 } from "../store/index.js";
@@ -94,12 +95,12 @@ export class ProjectEditor {
     return descriptions;
   }
 
-  undo(author?: string): string | null {
+  undo(author?: string): UndoOutcome {
     this.parsed = undefined;
     return this.store.undo(author);
   }
 
-  redo(author?: string): string | null {
+  redo(author?: string): UndoOutcome {
     this.parsed = undefined;
     return this.store.redo(author);
   }

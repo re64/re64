@@ -310,8 +310,10 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
 
   tool(
     "undo",
-    "Take back your own most recent change. Reaches anything recorded here, " +
-      "on the command line, or in a browser — every edit is written down.",
+    "Take back your own most recent action — the whole of it, however many " +
+      "changes it made. Reaches anything recorded here, on the command line, " +
+      "or in a browser. Any part of it that somebody else has changed since is " +
+      "left alone and reported rather than reverted over the top of them.",
     { project },
     ({ project: id }: { project?: string }) => {
       const { workspace, caller } = context();

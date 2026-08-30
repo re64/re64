@@ -29,7 +29,12 @@ import {
 import { loadProjectFile, nodeFileBytes } from "../node-files.js";
 import { hexDump } from "./hex.js";
 import { openProject } from "./edit.js";
-import { exportProject, importProject, loadProjectFromDatabase } from "../store/index.js";
+import {
+  UndoOutcome,
+  exportProject,
+  importProject,
+  loadProjectFromDatabase,
+} from "../store/index.js";
 
 function parseAddress(value: string): number {
   const num = value.startsWith("0x") || value.startsWith("$")
@@ -84,6 +89,26 @@ function parseHexBytes(hex: string): Uint8Array {
  * `loadProjectFile`'s job, and the difference is intentional.
  */
 const loadFile = makeFileLoader(nodeFileBytes());
+
+/**
+ * Say what an undo actually did.
+ *
+ * An action can come back only partly: an op whose target somebody else has
+ * changed since is left alone, because applying its stored inverse would
+ * silently revert their work. Printing only "Undid" would claim otherwise.
+ */
+function reportUndo(verb: string, outcome: UndoOutcome): void {
+  if (!outcome.undone) {
+    console.log(`Nothing to ${verb === "Undid" ? "undo" : "redo"}.`);
+    return;
+  }
+
+  const partly = outcome.skipped.length > 0 ? ` (${outcome.applied} of ${outcome.applied + outcome.skipped.length})` : "";
+  console.log(`${verb}: ${outcome.undone}${partly}`);
+  for (const left of outcome.skipped) {
+    console.log(`  left alone: ${left.description} — ${left.reason}`);
+  }
+}
 
 const program = new Command();
 
@@ -283,8 +308,7 @@ program
   .option("-a, --author <name>", "Whose edit to undo", "cli")
   .option("--any", "Undo whoever edited last, not only your own")
   .action((projectPath: string, options) => {
-    const undone = openProject(projectPath).undo(options.any ? undefined : options.author);
-    console.log(undone ? `Undid: ${undone}` : "Nothing to undo.");
+    reportUndo("Undid", openProject(projectPath).undo(options.any ? undefined : options.author));
   });
 
 program
@@ -294,8 +318,7 @@ program
   .option("-a, --author <name>", "Whose edit to redo", "cli")
   .option("--any", "Redo whoever edited last, not only your own")
   .action((projectPath: string, options) => {
-    const redone = openProject(projectPath).redo(options.any ? undefined : options.author);
-    console.log(redone ? `Redid: ${redone}` : "Nothing to redo.");
+    reportUndo("Redid", openProject(projectPath).redo(options.any ? undefined : options.author));
   });
 
 program

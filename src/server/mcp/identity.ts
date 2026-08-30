@@ -11,20 +11,10 @@
 import type { IncomingMessage } from "node:http";
 import { FileStorage, SqliteStorage } from "../../store/index.js";
 
-export interface Caller {
-  userId: string;
-  label: string;
-  /** The lease this call is working under; what the ops log records. */
-  sessionId?: string;
-  /** Its readable handle, for a transcript and for presence. */
-  codename?: string;
-  /**
-   * True when no session handle was presented and the lease had to be keyed by
-   * identity alone, so every caller claiming this user shares one session and
-   * one undo scope. Surfaced rather than silently tolerated.
-   */
-  sharedSession?: boolean;
-}
+// One definition, in the module whose methods take one. Two structurally
+// compatible copies drifted apart the moment sessions were added to one.
+export type { Caller } from "../workspace.js";
+import type { Caller } from "../workspace.js";
 
 /**
  * There is no authentication yet: the connection says who it is and is

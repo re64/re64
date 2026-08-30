@@ -102,6 +102,11 @@ CREATE TABLE IF NOT EXISTS ops (
   op         TEXT NOT NULL,
   inverse    TEXT NOT NULL,
   author     TEXT,
+  -- The session that made it, so undo is scoped the way the browser scopes it.
+  session    TEXT,
+  -- Which action it belonged to. One call or one click is one changeset,
+  -- however many ops it took; a record of intent, never a promise of atomicity.
+  changeset  TEXT,
   at         INTEGER,
   undone     INTEGER NOT NULL DEFAULT 0
 );
@@ -164,6 +169,8 @@ CREATE TABLE IF NOT EXISTS files (
 function addMissingColumns(db: DatabaseSync): void {
   const wanted: [table: string, column: string, type: string][] = [
     ["sessions", "codename", "TEXT"],
+    ["ops", "session", "TEXT"],
+    ["ops", "changeset", "TEXT"],
   ];
 
   for (const [table, column, type] of wanted) {

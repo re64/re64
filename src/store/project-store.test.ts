@@ -392,7 +392,7 @@ describe.each(BACKENDS)("$name", (b) => {
         2
       );
 
-      expect(s.undo("alice")).toBe("set $8000 to ByAlice (function)");
+      expect(s.undo("alice").undone).toBe("set $8000 to ByAlice (function)");
       expect(currentText()).toContain("ByBob");
       expect(currentText()).not.toContain("ByAlice");
     });
@@ -404,7 +404,7 @@ describe.each(BACKENDS)("$name", (b) => {
         "bob",
         1
       );
-      expect(s.undo()).toBe("set $8004 to ByBob");
+      expect(s.undo().undone).toBe("set $8004 to ByBob");
     });
 
     it("has nothing to undo when the author did nothing", () => {
@@ -414,7 +414,79 @@ describe.each(BACKENDS)("$name", (b) => {
         "bob",
         1
       );
-      expect(s.undo("carol")).toBeNull();
+      expect(s.undo("carol").undone).toBeNull();
+    });
+
+    it("takes back a whole action, not one operation of it", () => {
+      // Two ops, one call, one decision. Before changesets were recorded this
+      // reverted the last op and reported the action, so a caller was told
+      // something had been taken back that mostly had not.
+      const s = store();
+      s.runOps(
+        [
+          { op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "First" },
+          { op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Second" },
+        ],
+        "cli",
+        1
+      );
+
+      const outcome = s.undo("cli");
+      expect(outcome.applied).toBe(2);
+      expect(outcome.skipped).toEqual([]);
+      expect(currentText()).not.toContain("First");
+      expect(currentText()).not.toContain("Second");
+    });
+
+    it("scopes to the session, so one identity is not one undo stack", () => {
+      // Two agents claiming the same user are two peers, exactly as two
+      // browser tabs are, and neither may take back the other's work.
+      const s = store();
+      s.runOps(
+        [{ op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "ByOne" }],
+        "usr_agent",
+        1,
+        "ses_one"
+      );
+      s.runOps(
+        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "ByTwo" }],
+        "usr_agent",
+        2,
+        "ses_two"
+      );
+
+      expect(s.undo("usr_agent", "ses_one").undone).toBe("set $8000 to ByOne");
+      expect(currentText()).toContain("ByTwo");
+      expect(currentText()).not.toContain("ByOne");
+    });
+
+    it("leaves alone what somebody else has changed since, and says so", () => {
+      // A stored inverse says what the state was when it was recorded. Applying
+      // one after someone else has touched the same field reverts their work,
+      // and the CRDT converges on it perfectly happily.
+      const s = store();
+      s.runOps(
+        [
+          { op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "Mine" },
+          { op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "AlsoMine" },
+        ],
+        "alice",
+        1
+      );
+      s.runOps(
+        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "BobWasHere" }],
+        "bob",
+        2
+      );
+
+      const outcome = s.undo("alice");
+      expect(outcome.applied).toBe(1);
+      expect(outcome.skipped).toEqual([
+        { description: "set $8004 to AlsoMine", reason: "changed by someone else since" },
+      ]);
+      // Alice's own untouched edit came back; Bob's survived.
+      expect(currentText()).not.toContain("Mine\"");
+      expect(currentText()).toContain("BobWasHere");
     });
 
     it("redoes what it undid, and stops there", () => {
@@ -425,9 +497,9 @@ describe.each(BACKENDS)("$name", (b) => {
         1
       );
       s.undo("cli");
-      expect(s.redo("cli")).toBe("set $8004 to Renamed");
+      expect(s.redo("cli").undone).toBe("set $8004 to Renamed");
       expect(currentText()).toContain("Renamed");
-      expect(s.redo("cli")).toBeNull();
+      expect(s.redo("cli").undone).toBeNull();
     });
   });
 

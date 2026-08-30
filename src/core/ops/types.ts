@@ -80,6 +80,26 @@ export interface Change {
   inverse: Op;
   /** Who did it: a user id, an agent name, or "cli". */
   author?: string;
+  /**
+   * The session that did it, when one is known.
+   *
+   * Scoping undo to this rather than to the author is what stops two agents
+   * under one identity taking back each other's work, and it is the same rule
+   * the browser already follows.
+   */
+  session?: string;
+  /**
+   * Which action this op was part of.
+   *
+   * One tool call or one click is one changeset, however many ops it produces.
+   * The boundary already existed as a transaction and simply went unrecorded,
+   * which is why undo took back a third of a decision.
+   *
+   * It is a record of *intent*. It cannot promise the ops landed together —
+   * a CRDT converges per field and has no idea they were one thought — and
+   * every use of it has to survive some of them having been superseded.
+   */
+  changeset?: string;
   /** Milliseconds since the epoch, supplied by the caller. */
   at?: number;
   /**
