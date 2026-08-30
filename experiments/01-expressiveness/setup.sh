@@ -19,6 +19,15 @@ if [ ! -f "$repo/dist/cli/index.js" ]; then
   (cd "$repo" && npm run build >/dev/null)
 fi
 
+# Refuse to run against a port something else already holds. Starting a second
+# server there binds nothing, and every call then goes to whatever was already
+# listening — which looks exactly like a fresh project that mysteriously
+# remembers the last run.
+if lsof -ti "tcp:$port" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "Port $port is already in use. Stop that server first, or set RE64_PORT." >&2
+  exit 1
+fi
+
 rm -rf "$run"
 mkdir -p "$run"
 cp "$repo/assets/gridrunner.prg" "$run/"
