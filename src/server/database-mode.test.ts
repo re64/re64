@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer, RunningServer } from "./index.js";
 import { importProject } from "../store/index.js";
+import { emptyDoc } from "../core/crdt/index.js";
+import { WebsocketProvider } from "y-websocket";
 
 /**
  * Serving a project that carries its own binaries.
@@ -70,6 +72,31 @@ describe("a server given a database", () => {
     expect(body.version).toEqual(expect.any(String));
     expect(body.updates).toMatchObject({ count: expect.any(Number) });
     expect(body.ops).toEqual({ total: 0, undone: 0 });
+  });
+
+  it("offers the users a session can claim to be", async () => {
+    const body = (await (await fetch(`${base}/api/users`)).json()) as {
+      users: { id: string; name: string }[];
+    };
+    expect(body.users.map((u) => u.name)).toContain("you");
+  });
+
+  it("records a session, and who it says it is", async () => {
+    const before = (await (await fetch(`${base}/api/debug`)).json()) as { sessions: number };
+    expect(before.sessions).toBe(0);
+
+    const doc = emptyDoc();
+    const provider = new WebsocketProvider(base.replace("http", "ws") + "/sync", "p", doc, {
+      params: { author: "usr_you", session: "sess-under-test" },
+      disableBc: true,
+    });
+    await new Promise<void>((resolve) => provider.once("sync", () => resolve()));
+
+    const after = (await (await fetch(`${base}/api/debug`)).json()) as { sessions: number };
+    expect(after.sessions).toBe(1);
+
+    provider.disconnect();
+    provider.destroy();
   });
 
   it("accepts an edit and keeps it", async () => {

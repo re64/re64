@@ -36,6 +36,7 @@ export interface SessionDebug {
   blobs: { path: string; bytes: number }[];
   /** How long the last rebuild took: projection, map, and layer construction. */
   lastBuildMs: number;
+  participants: number;
   undo: { canUndo: boolean; canRedo: boolean; next: string | undefined };
 }
 
@@ -76,6 +77,18 @@ export class ProjectSession {
 
   onChange(listener: () => void): void {
     this.client.onChange(listener);
+  }
+
+  onPresence(listener: () => void): void {
+    this.client.onPresence(listener);
+  }
+
+  announce(user: { name: string; colour: string }): void {
+    this.client.announce(user);
+  }
+
+  participants(): { clientId: number; name: string; colour: string; isMe: boolean }[] {
+    return this.client.participants();
   }
 
   private async fetchMissingBlobs(project: Project): Promise<void> {
@@ -188,6 +201,7 @@ export class ProjectSession {
       status: this.client.status,
       blobs: [...this.blobs].map(([path, data]) => ({ path, bytes: data.length })),
       lastBuildMs: this.lastBuildMs,
+      participants: this.client.participants().length,
       undo: {
         canUndo: this.client.canUndo,
         canRedo: this.client.canRedo,

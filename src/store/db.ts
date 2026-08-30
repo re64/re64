@@ -48,7 +48,7 @@ function sqlite(): typeof import("node:sqlite") {
   return cached;
 }
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -100,6 +100,30 @@ CREATE TABLE IF NOT EXISTS ops (
 
 -- Binaries, by content. Deduplicated, and a hash is what lets a project say
 -- which bytes its addresses were named against.
+-- Who can be selected in the interface. No authentication yet: choosing a name
+-- is all it takes, and real accounts will replace how a session is issued
+-- rather than what a session is.
+CREATE TABLE IF NOT EXISTS users (
+  id     TEXT PRIMARY KEY,
+  name   TEXT NOT NULL,
+  colour TEXT NOT NULL
+);
+
+-- One connection, one document, one undo stack. NOT one person: two tabs are
+-- two sessions and two client ids, genuinely concurrent peers who can conflict
+-- with each other.
+--
+-- client_id is the Yjs client id, learned from the traffic rather than trusted
+-- from the claim. Recording it is what makes an edit attributable later: a
+-- struct carries a client id, and this maps it to a person.
+CREATE TABLE IF NOT EXISTS sessions (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT,
+  client_id     INTEGER,
+  started_at    INTEGER NOT NULL,
+  last_seen_at  INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS blobs (
   hash TEXT PRIMARY KEY,
   size INTEGER NOT NULL,

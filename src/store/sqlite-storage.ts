@@ -142,6 +142,50 @@ export class SqliteStorage implements ProjectStorage {
     }
   }
 
+  /** Everyone who can be picked in the interface. */
+  users(): { id: string; name: string; colour: string }[] {
+    return this.db.prepare("SELECT id, name, colour FROM users ORDER BY name").all() as {
+      id: string;
+      name: string;
+      colour: string;
+    }[];
+  }
+
+  addUser(user: { id: string; name: string; colour: string }): void {
+    this.db
+      .prepare("INSERT OR REPLACE INTO users (id, name, colour) VALUES (?, ?, ?)")
+      .run(user.id, user.name, user.colour);
+  }
+
+  /**
+   * Note that a session exists, and who claims to be behind it.
+   *
+   * Idempotent: a reconnect keeps the same row and only moves `last_seen_at`.
+   */
+  startSession(id: string, userId: string | undefined, now: number): void {
+    this.db
+      .prepare(
+        "INSERT INTO sessions (id, user_id, started_at, last_seen_at) VALUES (?, ?, ?, ?) " +
+          "ON CONFLICT(id) DO UPDATE SET last_seen_at = excluded.last_seen_at"
+      )
+      .run(id, userId ?? null, now, now);
+  }
+
+  /** Bind the Yjs client id, once the traffic reveals it. */
+  noteSessionClient(id: string, clientId: number, now: number): void {
+    this.db
+      .prepare("UPDATE sessions SET client_id = ?, last_seen_at = ? WHERE id = ?")
+      .run(clientId, now, id);
+  }
+
+  sessions(): { id: string; userId: string | null; clientId: number | null }[] {
+    return (
+      this.db
+        .prepare("SELECT id, user_id, client_id FROM sessions ORDER BY started_at")
+        .all() as { id: string; user_id: string | null; client_id: number | null }[]
+    ).map((r) => ({ id: r.id, userId: r.user_id, clientId: r.client_id }));
+  }
+
   /**
    * Store bytes under the name the project uses for them.
    *

@@ -86,6 +86,25 @@
 
       #goto { width: 90px; font-family: 'SF Mono', Menlo, Consolas, monospace; }
 
+      /* Who is here, and who you are. */
+      #here { display: flex; gap: 4px; align-items: center; }
+      #here .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        border: 1px solid var(--panel);
+      }
+      #here .dot.me { box-shadow: 0 0 0 1.5px var(--fg); }
+      #who {
+        background: var(--bg);
+        color: var(--fg);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 3px 6px;
+        font: inherit;
+        font-size: 12px;
+      }
+
       #status {
         color: var(--dim);
         font-size: 12px;
@@ -351,6 +370,8 @@
         <button id="reload">Reload</button>
         <button id="save">Save project</button>
         <span class="spacer"></span>
+        <span id="here" title="Who else is in this project"></span>
+        <select id="who" title="Who you are editing as"></select>
         <span id="status"></span>
       </header>
       <main>

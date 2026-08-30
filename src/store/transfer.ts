@@ -23,6 +23,19 @@ export function databasePathFor(projectPath: string): string {
   return `${projectPath}db`;
 }
 
+/**
+ * Something for the picker to show before there is any way to add people.
+ *
+ * Not a security boundary — there is no authentication yet, and picking a name
+ * is all it takes. They exist so an edit can be attributed to *someone*, which
+ * is what makes the history worth keeping.
+ */
+const STARTER_USERS = [
+  { id: "usr_you", name: "you", colour: "#7fb2f0" },
+  { id: "usr_agent", name: "agent", colour: "#c8a2f0" },
+  { id: "usr_guest", name: "guest", colour: "#7fd3a1" },
+];
+
 export interface ImportResult {
   databasePath: string;
   historyEntries: number;
@@ -54,6 +67,7 @@ export function importProject(
   const storage = new SqliteStorage(databasePath);
   storage.initialize(text, Date.now());
   for (const file of wanted) storage.putBlob(file.name, file.bytes);
+  for (const user of STARTER_USERS) storage.addUser(user);
 
   const historyPath = `${projectPath}.history`;
   let historyEntries = 0;

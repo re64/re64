@@ -834,11 +834,88 @@ const projectView = new EditorView({
 /** The project as this browser holds it; edits apply here first. */
 let session: ProjectSession | null = null;
 
+interface User {
+  id: string;
+  name: string;
+  colour: string;
+}
+
+let users: User[] = [];
+let me: User | undefined;
+
+/**
+ * Who you are editing as.
+ *
+ * The URL wins so a second window can be opened as someone else for testing;
+ * otherwise the last choice, otherwise the first name the server offers. There
+ * is no authentication — picking a name is all it takes, and this only decides
+ * what the history records and what other people see.
+ */
+function preferredUserId(): string | undefined {
+  const fromUrl = new URLSearchParams(location.search).get("user");
+  if (fromUrl) return fromUrl;
+  try {
+    return localStorage.getItem("re64.user") ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function loadUsers(): Promise<void> {
+  try {
+    const res = await fetch("/api/users");
+    users = res.ok ? ((await res.json()) as { users: User[] }).users : [];
+  } catch {
+    users = [];
+  }
+
+  const wanted = preferredUserId();
+  me = users.find((u) => u.id === wanted || u.name === wanted) ?? users[0];
+
+  const picker = $("#who") as HTMLSelectElement;
+  picker.innerHTML = "";
+  for (const user of users) {
+    const option = document.createElement("option");
+    option.value = user.id;
+    option.textContent = user.name;
+    option.selected = user.id === me?.id;
+    picker.appendChild(option);
+  }
+  picker.style.display = users.length ? "" : "none";
+}
+
+$("#who").addEventListener("change", (event) => {
+  const id = (event.target as HTMLSelectElement).value;
+  store("re64.user", id);
+  // A reload rather than a live swap: identity is fixed when the session
+  // connects, and two identities on one document would be one peer pretending
+  // to be two.
+  const url = new URL(location.href);
+  url.searchParams.set("user", id);
+  location.assign(url.toString());
+});
+
+/** Who else is in this project, as coloured dots. */
+function renderPresence(): void {
+  const here = $("#here");
+  here.innerHTML = "";
+  if (!session) return;
+
+  for (const person of session.participants()) {
+    const dot = document.createElement("span");
+    dot.className = person.isMe ? "dot me" : "dot";
+    dot.style.background = person.colour;
+    dot.title = person.isMe ? `${person.name} (you)` : person.name;
+    here.appendChild(dot);
+  }
+}
+
 /** Fetch the project and its bytes, then analyse in the browser. */
 async function loadDisassembly(restoreAddress?: number): Promise<void> {
   try {
     session?.close();
-    session = await ProjectSession.open();
+    await loadUsers();
+    session = await ProjectSession.open({ author: me?.id });
   } catch (err) {
     setStatus(err instanceof Error ? err.message : "Could not load the project", true);
     return;
@@ -846,6 +923,9 @@ async function loadDisassembly(restoreAddress?: number): Promise<void> {
 
   // Every change arrives through the same door from here, whoever caused it.
   session.onChange(() => scheduleRepaint());
+  session.onPresence(() => renderPresence());
+  if (me) session.announce({ name: me.name, colour: me.colour });
+  renderPresence();
   render(restoreAddress);
 }
 
@@ -1000,6 +1080,8 @@ async function renderDebug(): Promise<void> {
     // independent undo stacks, and they can conflict with each other.
     ["session", d.sessionId],
     ["connection", d.status, d.status === "connected" ? "good" : "warn"],
+    ["editing as", me ? `${me.name} (${me.id})` : "nobody — no users defined"],
+    ["participants", String(d.participants)],
     ["can undo", d.undo.canUndo ? (d.undo.next ?? "yes") : "no"],
     ["can redo", d.undo.canRedo ? "yes" : "no"],
     ...d.blobs.map(

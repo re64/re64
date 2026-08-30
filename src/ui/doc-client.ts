@@ -64,6 +64,37 @@ export class DocClient {
     });
   }
 
+  /**
+   * Say who is here.
+   *
+   * Presence, not authorship — it is client-controlled and not persisted, so
+   * the history takes its author from the session record on the server
+   * instead. This only decides what other people see in the participant list.
+   */
+  announce(user: { name: string; colour: string }): void {
+    this.provider.awareness.setLocalStateField("user", user);
+  }
+
+  /** Everyone currently connected, this session included. */
+  participants(): { clientId: number; name: string; colour: string; isMe: boolean }[] {
+    const here: { clientId: number; name: string; colour: string; isMe: boolean }[] = [];
+    for (const [clientId, state] of this.provider.awareness.getStates()) {
+      const user = (state as { user?: { name?: string; colour?: string } }).user;
+      if (!user?.name) continue;
+      here.push({
+        clientId,
+        name: user.name,
+        colour: user.colour ?? "#888",
+        isMe: clientId === this.doc.clientID,
+      });
+    }
+    return here.sort((a, b) => a.clientId - b.clientId);
+  }
+
+  onPresence(listener: () => void): void {
+    this.provider.awareness.on("change", listener);
+  }
+
   /** Whether the socket is up right now, not whether it once came up. */
   get status(): ConnectionStatus {
     if (this.provider.wsconnected) return "connected";

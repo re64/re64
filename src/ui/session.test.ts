@@ -165,6 +165,42 @@ describe("two sessions, as two tabs would be", () => {
   });
 });
 
+describe("presence", () => {
+  it("shows nobody until someone says who they are", async () => {
+    const session = await open();
+    expect(session.participants()).toEqual([]);
+    session.close();
+  });
+
+  it("shows the other participants, and marks which one is you", async () => {
+    const a = await open();
+    const b = await open();
+    a.announce({ name: "alice", colour: "#f00" });
+    b.announce({ name: "bob", colour: "#0f0" });
+    await settle();
+
+    const seenByA = a.participants();
+    expect(seenByA.map((p) => p.name).sort()).toEqual(["alice", "bob"]);
+    expect(seenByA.filter((p) => p.isMe).map((p) => p.name)).toEqual(["alice"]);
+    a.close();
+    b.close();
+  });
+
+  it("forgets someone who leaves", async () => {
+    const a = await open();
+    const b = await open();
+    a.announce({ name: "alice", colour: "#f00" });
+    b.announce({ name: "bob", colour: "#0f0" });
+    await settle();
+    expect(a.participants()).toHaveLength(2);
+
+    b.close();
+    await settle();
+    expect(a.participants().map((p) => p.name)).toEqual(["alice"]);
+    a.close();
+  });
+});
+
 describe("the exported view", () => {
   it("shows what would be written out", async () => {
     const session = await open();

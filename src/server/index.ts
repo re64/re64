@@ -104,6 +104,7 @@ export function startServer(options: ServerOptions): RunningServer {
     // The file should track a live session closely enough that git, the CLI,
     // and an editor open on it all see the work as it happens.
     writeMs: 1_500,
+    onSession: (sessionId, userId) => database?.startSession(sessionId, userId, Date.now()),
     onFlatten: (summary) =>
       console.log(`flattened ${summary.length} change${summary.length === 1 ? "" : "s"}`),
   });
@@ -187,6 +188,10 @@ export function startServer(options: ServerOptions): RunningServer {
         return;
       }
 
+      if (path === "/api/users" && req.method === "GET") {
+        return sendJson(res, 200, { users: database?.users() ?? [] });
+      }
+
       if (path === "/api/export" && req.method === "POST") {
         // Writing the project out is a deliberate act now, not a save. The
         // document was already everyone's the moment the edit landed.
@@ -199,6 +204,7 @@ export function startServer(options: ServerOptions): RunningServer {
           storage: database ? "sqlite" : "file",
           path: projectPath,
           clients: sync.clientCount,
+          sessions: database?.sessions().length ?? 0,
           ...store.debug(),
         });
       }

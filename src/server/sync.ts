@@ -58,6 +58,8 @@ export interface SyncOptions {
    */
   writeMs: number;
   onFlatten?: (summary: string[]) => void;
+  /** A participant has connected, claiming to be someone. */
+  onSession?: (sessionId: string, userId: string) => void;
 }
 
 export class SyncServer {
@@ -125,8 +127,13 @@ export class SyncServer {
   }
 
   private join(socket: WebSocket, request: IncomingMessage): void {
-    const author =
-      new URL(request.url ?? "/", "http://localhost").searchParams.get("author") ?? "anonymous";
+    const params = new URL(request.url ?? "/", "http://localhost").searchParams;
+    const author = params.get("author") ?? "anonymous";
+    const sessionId = params.get("session") ?? undefined;
+
+    // Fake authentication: the connection says who it is and is believed. Real
+    // accounts will change how a session is issued, not what one is.
+    if (sessionId) this.options.onSession?.(sessionId, author);
 
     socket.binaryType = "arraybuffer";
     this.clients.add(socket);
