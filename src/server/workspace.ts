@@ -29,11 +29,13 @@ import {
   commentSetOp,
   ensureOwningLayer,
   labelSetOp,
+  owningLayerId,
   ownsAddress,
   newId,
   makeFileLoader,
   markFunctionOps,
   parseProject,
+  parseProjectAddress,
   regionDeleteOp,
   regionSetOp,
   unmarkFunctionOps,
@@ -635,6 +637,178 @@ export class Workspace {
 
       return ops;
     });
+  }
+
+  /**
+   * The work as a listing, the way the reference is written.
+   *
+   * Text rather than rows: it is what a reader compares against a hand-written
+   * disassembly, and it costs roughly a fifth of the tokens the same span
+   * costs as JSON — so it is also the cheaper way to read a lot at once.
+   *
+   * The equate block is derived, not stored: the constants actually meant
+   * somewhere in the span, so it stays in step with the bindings by
+   * construction. A declared constant nobody used does not appear, which is
+   * why this is a listing and the `.re64` is the export that round-trips.
+   */
+  listing(start?: number, lines = 200): {
+    start: string;
+    text: string;
+    truncated: boolean;
+    nextStart?: string;
+  } {
+    const { rows } = this.rows();
+    const from = start === undefined ? 0 : rows.findIndex((r) => r.address >= start);
+    const begin = from < 0 ? rows.length : from;
+    const page = rows.slice(begin, begin + lines);
+
+    const covered = new Set(page.map((r) => r.address));
+    const used = this.program().loaded.constants.used((a) => covered.has(a));
+    const equates = used.map(
+      (c) => `${c.name.padEnd(28)}= $${c.value.toString(16).toUpperCase().padStart(2, "0")}`
+    );
+
+    const body = page.map((r) => r.text);
+    const text = [...equates, ...(equates.length ? [""] : []), ...body].join("\n");
+    const after = rows[begin + lines];
+
+    return {
+      start: hex4(page[0]?.address ?? start ?? 0),
+      text,
+      truncated: after !== undefined,
+      ...(after ? { nextStart: hex4(after.address) } : {}),
+    };
+  }
+
+  /**
+   * Declare that a name exists for a value.
+   *
+   * Declaring is not using. Nothing renders differently until a site is bound,
+   * because the same value means different things in different places — the
+   * reference disassembly names $01 both LEFT_ZAPPER and WHITE — and guessing
+   * which was meant is exactly what this design refuses to do.
+   */
+  setConstant(caller: Caller, name: string, value: number): EditResult {
+    if (value < 0 || value > 0xff) {
+      throw new Error(`A constant names a byte, so its value must be $00-$FF; got ${value}.`);
+    }
+    return this.edit(caller, (loaded) => {
+      const existing = loaded.constants.byName(name);
+      return [{ op: "constant.set", id: existing?.id ?? newId("cst"), name, value }];
+    });
+  }
+
+  removeConstant(caller: Caller, name: string): EditResult {
+    return this.edit(caller, (loaded) => {
+      const existing = loaded.constants.byName(name);
+      if (!existing) throw new Error(`No constant called ${name}.`);
+      // Sites bound to it are left alone: a use pointing at nothing renders the
+      // literal, so deleting needs no sweep and a delete racing a bind heals.
+      return [{ op: "constant.delete", id: existing.id }];
+    });
+  }
+
+  /** Say that the immediate at this address means a constant. */
+  bindConstant(caller: Caller, address: number, name: string): EditResult {
+    return this.edit(caller, (loaded) => {
+      const constant = loaded.constants.byName(name);
+      if (!constant) {
+        throw new Error(`No constant called ${name}. Declare it first with set_constant.`);
+      }
+
+      const instruction = this.program().instructions.get(address);
+      if (!instruction) {
+        throw new Error(`No instruction at ${hex4(address)}; nothing there to read as a constant.`);
+      }
+      if (instruction.operand.type !== "immediate") {
+        throw new Error(
+          `${hex4(address)} takes no immediate operand, so there is no value to name.`
+        );
+      }
+      if (instruction.operand.value !== constant.value) {
+        throw new Error(
+          `${hex4(address)} loads $${instruction.operand.value
+            .toString(16)
+            .toUpperCase()
+            .padStart(2, "0")}, but ${name} is $${constant.value
+            .toString(16)
+            .toUpperCase()
+            .padStart(2, "0")}.`
+        );
+      }
+
+      const { layerId, create } = ensureOwningLayer(loaded, address, this.room.projectId);
+      return [
+        ...(create ? [create] : []),
+        { op: "constant.bind", id: newId("cst"), layerId, address, constantId: constant.id },
+      ];
+    });
+  }
+
+  unbindConstant(caller: Caller, address: number): EditResult {
+    return this.edit(caller, (loaded) => {
+      const layerId = owningLayerId(loaded, address);
+      const layer = loaded.project.layers.find((l) => l.id === layerId);
+      const use = layer?.constantUses?.find(
+        (u) => parseProjectAddress(u.address) === address
+      );
+      if (!use?.id) throw new Error(`No constant is bound at ${hex4(address)}.`);
+      return [{ op: "constant.unbind", id: use.id, layerId }];
+    });
+  }
+
+  constants(): {
+    total: number;
+    constants: { name: string; value: string; uses: number }[];
+  } {
+    const program = this.program();
+    const used = new Set(program.loaded.constants.used().map((c) => c.id));
+
+    return {
+      total: program.loaded.constants.all().length,
+      constants: program.loaded.constants.all().map((c) => ({
+        name: c.name,
+        value: `$${c.value.toString(16).toUpperCase().padStart(2, "0")}`,
+        uses: used.has(c.id) ? 1 : 0,
+      })),
+    };
+  }
+
+  /**
+   * Every instruction loading an immediate, optionally of one value.
+   *
+   * The other half of naming a constant: having decided that $01 here means
+   * LEFT_ZAPPER, the next question is where else $01 is loaded — and whether
+   * those sites mean the same thing, which only a reader can say.
+   */
+  immediates(
+    value?: number,
+    limit = 100
+  ): {
+    total: number;
+    sites: { address: string; value: string; boundTo?: string; text?: string }[];
+  } {
+    const program = this.program();
+    const { rows, lineForAddress } = this.rows();
+
+    const found = program.instructions
+      .all()
+      .filter(
+        (i) => i.operand.type === "immediate" && (value === undefined || i.operand.value === value)
+      );
+
+    return {
+      total: found.length,
+      sites: found.slice(0, limit).map((i) => {
+        const immediate = i.operand as { value: number };
+        return {
+          address: hex4(i.address),
+          value: `$${immediate.value.toString(16).toUpperCase().padStart(2, "0")}`,
+          boundTo: program.loaded.constants.nameAt(i.address),
+          text: rows[lineForAddress[i.address]]?.text,
+        };
+      }),
+    };
   }
 
   /**

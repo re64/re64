@@ -1,4 +1,10 @@
 import { Comment, CommentPlacement, createComment } from "../memory/comment.js";
+import {
+  Constant,
+  ConstantUse,
+  createConstant,
+  createConstantUse,
+} from "../memory/constant.js";
 import { Label, LabelType, createUserLabel } from "../memory/label.js";
 import { Region, RegionKind, createUserRegion } from "../memory/region.js";
 import { derivedId } from "./identity.js";
@@ -36,6 +42,22 @@ export interface ProjectLayer {
   regions?: ProjectRegion[];
   /** Comments about addresses this layer owns */
   comments?: ProjectComment[];
+  /** Operands in this layer that mean a named constant */
+  constantUses?: ProjectConstantUse[];
+}
+
+/**
+ * An operand that means a constant, rather than the number it literally is.
+ *
+ * Owned by the layer holding the instruction. The declaration it points at is
+ * project-level, because a name for a value describes no bytes and so has
+ * nothing to move with when the stack is reordered.
+ */
+export interface ProjectConstantUse {
+  id?: string;
+  address: number | string;
+  /** The declared constant's id. Dangling means "render the literal". */
+  constant: string;
 }
 
 /**
@@ -111,6 +133,21 @@ export interface Project {
    * deleting a promoted label needs no cleanup.
    */
   primaryLabels?: Record<string, string>;
+  /**
+   * Names for values, project-wide.
+   *
+   * A value has no address and no single meaning — the reference disassembly
+   * names $01 both LEFT_ZAPPER and WHITE — so these are declarations only.
+   * Which one an operand means is recorded per site, in the owning layer.
+   */
+  constants?: ProjectConstant[];
+}
+
+export interface ProjectConstant {
+  id?: string;
+  name: string;
+  /** 8-bit value, as a number or "$1F". */
+  value: number | string;
 }
 
 /**
@@ -194,6 +231,22 @@ export function projectCommentsToComments(
   }
 
   return comments;
+}
+
+/** Convert a layer's constant uses to ConstantUse objects. */
+export function projectConstantUses(layer: ProjectLayer, layerId: string): ConstantUse[] {
+  return (layer.constantUses ?? []).map((u) => {
+    const address = parseProjectAddress(u.address);
+    return createConstantUse(u.id ?? derivedId("cst", layerId, address, "use"), address, u.constant);
+  });
+}
+
+/** Convert project constants to Constant objects. */
+export function projectConstants(constants: readonly ProjectConstant[] = []): Constant[] {
+  return constants.map((c) => {
+    const value = parseProjectAddress(c.value);
+    return createConstant(c.id ?? derivedId("cst", c.name, value), c.name, value);
+  });
 }
 
 /** Convert project regions to Region objects */

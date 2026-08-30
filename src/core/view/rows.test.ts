@@ -4,6 +4,7 @@ import { MemoryMap } from "../memory/memory-map.js";
 import { FileLayer } from "../memory/file-layer.js";
 import { LabelIndex, createUserLabel } from "../memory/label.js";
 import { CommentIndex } from "../memory/comment.js";
+import { ConstantIndex } from "../memory/constant.js";
 import { createUserRegion, RegionKind } from "../memory/region.js";
 import { LoadedProject } from "../project/loader.js";
 
@@ -48,6 +49,7 @@ function project(
     prgEntries: [ORG],
     userLabels,
     comments: new CommentIndex(),
+    constants: new ConstantIndex(),
     layers: [layer],
   };
 }

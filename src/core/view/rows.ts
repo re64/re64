@@ -260,7 +260,14 @@ export function analyze(
 
       const prefix = `${hex4(addr)}  ${bytesColumn([...instr.bytes]).padEnd(8)}  `;
       const marker = instr.illegal ? "*" : " ";
-      const operandStr = formatOperand(instr.operand, resolveLabel);
+      // An immediate the reader has said means something. Nothing is inferred
+      // from the value: the same number carries different names at different
+      // sites, so only an explicit binding puts a name here.
+      const constant =
+        instr.operand.type === "immediate" ? loaded.constants.nameAt(addr) : undefined;
+      const operandStr = constant
+        ? `#${constant}`
+        : formatOperand(instr.operand, resolveLabel);
       const mnemonicStart = prefix.length + marker.length;
 
       let text = `${prefix}${marker}${instr.mnemonic}`;

@@ -309,6 +309,102 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "export_listing",
+    "The disassembly as a listing, the way a hand-written one reads: any " +
+      "constants used in the span as an equate block, then the rows. Plain " +
+      "text rather than JSON, so it is both what you compare against a " +
+      "reference and the cheapest way to read a lot at once.",
+    {
+      project,
+      start: address.optional().describe("From the beginning if omitted"),
+      lines: z.number().int().min(1).max(2000).optional().describe("Default 200"),
+    },
+    (args: { project?: string; start?: number; lines?: number }) =>
+      context().workspace(args.project).listing(args.start, args.lines ?? 200)
+  );
+
+  tool(
+    "set_constant",
+    "Declare a name for a byte value: GRID = $00, ORANGE = $08. Declaring " +
+      "changes no listing — a value has no single meaning, and the reference " +
+      "disassembly names $01 both LEFT_ZAPPER and WHITE. Use bind_constant to " +
+      "say that a particular operand means this one.",
+    {
+      project,
+      name: z.string().min(1),
+      value: address.describe("A byte, $00-$FF"),
+      expectVersion: z.string().optional(),
+    },
+    (args: { project?: string; name: string; value: number; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.setConstant(caller, args.name, args.value);
+    }
+  );
+
+  tool(
+    "remove_constant",
+    "Forget a declared constant. Operands bound to it go back to showing the " +
+      "literal; nothing needs unbinding first.",
+    { project, name: z.string().min(1), expectVersion: z.string().optional() },
+    (args: { project?: string; name: string; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.removeConstant(caller, args.name);
+    }
+  );
+
+  tool(
+    "list_constants",
+    "Every declared constant, with its value.",
+    { project },
+    ({ project: id }: { project?: string }) => context().workspace(id).constants()
+  );
+
+  tool(
+    "bind_constant",
+    "Say that the immediate operand at an address means a named constant, so " +
+      "it renders as #ORANGE rather than #$08. Refused if the instruction " +
+      "takes no immediate or loads a different value.",
+    { project, address, name: z.string().min(1), expectVersion: z.string().optional() },
+    (args: { project?: string; address: number; name: string; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.bindConstant(caller, args.address, args.name);
+    }
+  );
+
+  tool(
+    "unbind_constant",
+    "Read the operand at an address as its literal value again.",
+    { project, address, expectVersion: z.string().optional() },
+    (args: { project?: string; address: number; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.unbindConstant(caller, args.address);
+    }
+  );
+
+  tool(
+    "find_immediates",
+    "Every instruction loading an immediate value, optionally just one value, " +
+      "with whatever constant is already bound there. The question after " +
+      "naming one site: where else is this value loaded, and does it mean the " +
+      "same thing there? Only a reader can answer the second part.",
+    {
+      project,
+      value: address.optional().describe("Only sites loading this byte"),
+      limit: z.number().int().min(1).max(500).optional().describe("Default 100"),
+    },
+    (args: { project?: string; value?: number; limit?: number }) =>
+      context().workspace(args.project).immediates(args.value, args.limit ?? 100)
+  );
+
+  tool(
     "add_layer",
     "Add a symbols layer: names for addresses that hold no loaded bytes — zero " +
       "page variables, I/O registers, KERNAL entry points. Usually unnecessary, " +

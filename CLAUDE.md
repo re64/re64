@@ -529,6 +529,55 @@ KERNAL entry points — render as plain grey names rather than links. They are
 named but have no bytes, and on 6502 they are common enough that making them
 clickable means constantly landing on an error.
 
+### Constants: a value has no single meaning
+
+A label names an address and an address means one thing. A constant names a
+**value**, and a value does not. The reference disassembly settles this by
+itself:
+
+```
+LEFT_ZAPPER   = $01        WHITE = $01
+BOTTOM_ZAPPER = $02        RED   = $02
+```
+
+The same number carries two names in the same program, so there is no
+value-to-name map to be had and **nothing infers one**. `LDA #$01` stays `#$01`
+until someone says which of the two they meant. That is the same stance taken
+everywhere else here: an explicit gap beats a confident wrong answer.
+
+So it is two objects, which is what an assembler's equate and its source text
+already are:
+
+- **A declaration** — `{id, name, value}` — at **project** level, beside
+  `primaryLabels`. It describes no bytes, so there is no layer for it to move
+  with when the stack is reordered.
+- **A use** — `{id, address, constantId}` — in the **layer** holding that
+  instruction, because it is about those bytes.
+
+Keyed by address with no operand slot, because the 6502 has exactly one
+immediate addressing mode out of thirteen and no instruction takes two
+immediates — so the "which operand" index that would make this a mess does not
+exist on this architecture. Keying by address also leaves `.BYTE EXPLOSION1`
+reachable later without changing the shape.
+
+**A dangling use renders the literal.** Delete a declaration and every site
+bound to it falls back to `#$08` rather than breaking. Same rule as a dangling
+`primaryLabels` entry: deletion needs no sweep, and a delete racing a bind heals
+itself.
+
+**The equate block is derived, never stored.** `ConstantIndex.used(within?)`
+returns the constants actually meant inside a span, so a listing's block stays in
+step with the bindings by construction — and exporting one layer can emit just
+what that layer means. The consequence, worth saying out loud: a declared but
+unbound constant does not appear in a listing. Nothing is lost, because the
+`.re64` holds declarations explicitly and is the export that round-trips; the
+listing is a listing.
+
+Naming a value is a judgement, so both consumers get the same shape of help
+rather than an answer: `find_immediates(value)` returns every site loading it
+with whatever is already bound there, which is the query behind a dropdown for a
+person and a batch for an agent.
+
 ### Naming what has no bytes
 
 `set_label` on zero page used to be refused with "add a layer of type symbols"

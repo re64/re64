@@ -111,6 +111,40 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         childMap(layerById(doc, op.layerId), "comments").delete(op.id);
         break;
 
+      case "constant.set": {
+        const constants = doc.getMap<Y.Map<unknown>>("constants");
+        let entry = constants.get(op.id);
+        if (!entry) {
+          entry = new Y.Map<unknown>();
+          constants.set(op.id, entry);
+        }
+        assign(entry, {
+          id: op.id,
+          name: op.name,
+          value: `$${op.value.toString(16).toUpperCase().padStart(2, "0")}`,
+        });
+        break;
+      }
+
+      case "constant.delete":
+        doc.getMap<Y.Map<unknown>>("constants").delete(op.id);
+        break;
+
+      case "constant.bind": {
+        const uses = childMap(layerById(doc, op.layerId), "constantUses");
+        let entry = uses.get(op.id);
+        if (!entry) {
+          entry = new Y.Map<unknown>();
+          uses.set(op.id, entry);
+        }
+        assign(entry, { id: op.id, address: hex4(op.address), constant: op.constantId });
+        break;
+      }
+
+      case "constant.unbind":
+        childMap(layerById(doc, op.layerId), "constantUses").delete(op.id);
+        break;
+
       case "layer.add": {
         const layers = doc.getArray<Y.Map<unknown>>("layers");
         // Already there: two participants naming an unowned address at the

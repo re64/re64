@@ -12,7 +12,14 @@
  * returned, so a botched splice throws instead of producing a corrupt file.
  */
 
-import { Project, ProjectComment, ProjectLabel, ProjectLayer } from "./project.js";
+import {
+  Project,
+  ProjectComment,
+  ProjectConstant,
+  ProjectConstantUse,
+  ProjectLabel,
+  ProjectLayer,
+} from "./project.js";
 import { parseProject, parseProjectAddress } from "./project.js";
 
 /** Serialize one object compactly on a single line: `{ "a": 1, "b": 2 }`. */
@@ -36,7 +43,7 @@ export function formatProject(project: Project): string {
   // Layer scalars expanded, its labels and regions one per line.
   const layers = project.layers
     .map((layer) => {
-      const { labels, regions, comments, ...scalars } = layer;
+      const { labels, regions, comments, constantUses, ...scalars } = layer;
       const parts = Object.entries(scalars)
         .filter(([, v]) => v !== undefined)
         .map(([k, v]) => `      ${JSON.stringify(k)}: ${JSON.stringify(v)}`);
@@ -59,6 +66,12 @@ export function formatProject(project: Project): string {
           .join(",\n");
         parts.push(`      "comments": [\n${body}\n      ]`);
       }
+      if (constantUses?.length) {
+        const body = constantUses
+          .map((u) => `        ${compactObject(u as unknown as Record<string, unknown>)}`)
+          .join(",\n");
+        parts.push(`      "constantUses": [\n${body}\n      ]`);
+      }
 
       return `    {\n${parts.join(",\n")}\n    }`;
     })
@@ -67,6 +80,13 @@ export function formatProject(project: Project): string {
 
   if (project.entryPoints?.length) {
     body.push(`  "entryPoints": [${project.entryPoints.map((e) => JSON.stringify(e)).join(", ")}]`);
+  }
+
+  if (project.constants?.length) {
+    const entries = project.constants
+      .map((c) => `    ${compactObject(c as unknown as Record<string, unknown>)}`)
+      .join(",\n");
+    body.push(`  "constants": [\n${entries}\n  ]`);
   }
 
   const primary = Object.entries(project.primaryLabels ?? {});
@@ -678,5 +698,68 @@ export function insertLayer(raw: string, layer: ProjectLayer, index?: number): s
 export function removeLayer(raw: string, id: string): string {
   const project = parseProject(raw);
   project.layers = project.layers.filter((l) => l.id !== id);
+  return formatProject(project);
+}
+
+/**
+ * Declare a constant, forget one, bind a site, and unbind it.
+ *
+ * Reserialising, like the comment and layer writers: these are the same kind of
+ * structural change with no small diff to preserve, and the only caller that
+ * applies operations to text reads the result to derive an inverse.
+ *
+ * Every one is idempotent. Undo replays an operation forward to check that its
+ * effect is still present, so a writer that appended a duplicate instead of
+ * doing nothing would make its own operation impossible to take back.
+ */
+export function upsertConstant(raw: string, constant: ProjectConstant): string {
+  const project = parseProject(raw);
+  const constants = (project.constants ??= []);
+  const at = constants.findIndex((c) => c.id === constant.id);
+  if (at >= 0) {
+    if (constants[at].name === constant.name && constants[at].value === constant.value) return raw;
+    constants[at] = constant;
+  } else {
+    constants.push(constant);
+  }
+  return formatProject(project);
+}
+
+export function deleteConstant(raw: string, id: string): string {
+  const project = parseProject(raw);
+  if (!project.constants?.some((c) => c.id === id)) return raw;
+
+  project.constants = project.constants.filter((c) => c.id !== id);
+  if (project.constants.length === 0) delete project.constants;
+  return formatProject(project);
+}
+
+export function bindConstant(
+  raw: string,
+  layerIndex: number,
+  use: ProjectConstantUse
+): string {
+  const project = parseProject(raw);
+  const layer = project.layers[layerIndex];
+  if (!layer) throw new Error(`No layer at index ${layerIndex} to own a constant use`);
+
+  const uses = (layer.constantUses ??= []);
+  const at = uses.findIndex((u) => u.id === use.id);
+  if (at >= 0) {
+    if (uses[at].constant === use.constant && uses[at].address === use.address) return raw;
+    uses[at] = use;
+  } else {
+    uses.push(use);
+  }
+  return formatProject(project);
+}
+
+export function unbindConstant(raw: string, layerIndex: number, id: string): string {
+  const project = parseProject(raw);
+  const layer = project.layers[layerIndex];
+  if (!layer?.constantUses?.some((u) => u.id === id)) return raw;
+
+  layer.constantUses = layer.constantUses.filter((u) => u.id !== id);
+  if (layer.constantUses.length === 0) delete layer.constantUses;
   return formatProject(project);
 }

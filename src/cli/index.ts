@@ -18,6 +18,7 @@ import {
   InstructionIndex,
   ReferenceType,
   CommentIndex,
+  ConstantIndex,
   formatProject,
   parseProject,
   parseProjectAddress,
@@ -404,6 +405,7 @@ program
     let userLabels = new LabelIndex();
     // Layers declared on the command line carry no annotations of their own.
     let comments = new CommentIndex();
+    let constants = new ConstantIndex();
     // Layers declared on the command line have no project file behind them.
     let project: Project = { layers: [] };
 
@@ -415,6 +417,7 @@ program
       prgEntries = loaded.prgEntries;
       userLabels = loaded.userLabels;
       comments = loaded.comments;
+      constants = loaded.constants;
       project = loaded.project;
 
     } else {
@@ -478,7 +481,7 @@ program
     // range, two renderers. Annotations are off because nothing in a terminal
     // is clickable, so type tags and xref stubs would only be noise.
     const analysis = analyze(
-      { project, map, prgEntries, userLabels, comments, layers: [] },
+      { project, map, prgEntries, userLabels, comments, constants, layers: [] },
       {
         labelTolerance: parseInt(options.labelTolerance, 10) || 1,
         annotations: false,

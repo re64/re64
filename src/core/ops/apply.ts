@@ -14,19 +14,24 @@
 import {
   Project,
   ProjectComment,
+  ProjectConstantUse,
   ProjectLabel,
   ProjectRegion,
   parseProject,
   parseProjectAddress,
 } from "../project/project.js";
 import {
+  bindConstant,
   deleteComment,
+  deleteConstant,
   deleteLabel,
   deleteRegion,
   insertLayer,
   removeLayer,
   setPrimaryLabel,
+  unbindConstant,
   upsertComment,
+  upsertConstant,
   upsertLabel,
   upsertRegion,
 } from "../project/serialize.js";
@@ -60,6 +65,17 @@ function findRegion(project: Project, id: string): Found<ProjectRegion> | undefi
   return undefined;
 }
 
+function findConstantUse(
+  project: Project,
+  id: string
+): Found<ProjectConstantUse> | undefined {
+  for (const [layerIndex, layer] of project.layers.entries()) {
+    const entry = layer.constantUses?.find((u) => u.id === id);
+    if (entry) return { layerIndex, entry };
+  }
+  return undefined;
+}
+
 function findComment(project: Project, id: string): Found<ProjectComment> | undefined {
   for (const [layerIndex, layer] of project.layers.entries()) {
     const entry = layer.comments?.find((c) => c.id === id);
@@ -69,6 +85,8 @@ function findComment(project: Project, id: string): Found<ProjectComment> | unde
 }
 
 const addressHex = (n: number) => "$" + n.toString(16).toUpperCase().padStart(4, "0");
+/** A constant's value is one byte, so it reads as two digits rather than four. */
+const addressHex8 = (n: number) => "$" + n.toString(16).toUpperCase().padStart(2, "0");
 
 /** Apply one operation, returning the updated project text. */
 export function applyOp(raw: string, op: Op): string {
@@ -113,6 +131,22 @@ export function applyOp(raw: string, op: Op): string {
 
     case "comment.delete":
       return deleteComment(raw, layerIndexOf(project, op.layerId), op.id);
+
+    case "constant.set":
+      return upsertConstant(raw, { id: op.id, name: op.name, value: addressHex8(op.value) });
+
+    case "constant.delete":
+      return deleteConstant(raw, op.id);
+
+    case "constant.bind":
+      return bindConstant(raw, layerIndexOf(project, op.layerId), {
+        id: op.id,
+        address: addressHex(op.address),
+        constant: op.constantId,
+      });
+
+    case "constant.unbind":
+      return unbindConstant(raw, layerIndexOf(project, op.layerId), op.id);
 
     case "layer.add":
       return insertLayer(
@@ -199,6 +233,52 @@ export function invertOp(raw: string, op: Op): Op {
         address: parseProjectAddress(found.entry.address),
         placement: found.entry.placement ?? "before",
         text: found.entry.text,
+      };
+    }
+
+    case "constant.set": {
+      const found = project.constants?.find((c) => c.id === op.id);
+      if (!found) return { op: "constant.delete", id: op.id };
+      return {
+        op: "constant.set",
+        id: op.id,
+        name: found.name,
+        value: parseProjectAddress(found.value),
+      };
+    }
+
+    case "constant.delete": {
+      const found = project.constants?.find((c) => c.id === op.id);
+      if (!found) return op;
+      return {
+        op: "constant.set",
+        id: op.id,
+        name: found.name,
+        value: parseProjectAddress(found.value),
+      };
+    }
+
+    case "constant.bind": {
+      const found = findConstantUse(project, op.id);
+      if (!found) return { op: "constant.unbind", id: op.id, layerId: op.layerId };
+      return {
+        op: "constant.bind",
+        id: op.id,
+        layerId: project.layers[found.layerIndex].id!,
+        address: parseProjectAddress(found.entry.address),
+        constantId: found.entry.constant,
+      };
+    }
+
+    case "constant.unbind": {
+      const found = findConstantUse(project, op.id);
+      if (!found) return op;
+      return {
+        op: "constant.bind",
+        id: op.id,
+        layerId: project.layers[found.layerIndex].id!,
+        address: parseProjectAddress(found.entry.address),
+        constantId: found.entry.constant,
       };
     }
 

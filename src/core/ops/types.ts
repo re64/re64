@@ -68,6 +68,34 @@ export interface CommentDeleteOp {
   layerId: string;
 }
 
+/** Declare that a name exists for a value, creating it if the id is new. */
+export interface ConstantSetOp {
+  op: "constant.set";
+  id: string;
+  name: string;
+  value: number;
+}
+
+export interface ConstantDeleteOp {
+  op: "constant.delete";
+  id: string;
+}
+
+/** Say that the operand at an address means a constant. */
+export interface ConstantBindOp {
+  op: "constant.bind";
+  id: string;
+  layerId: string;
+  address: number;
+  constantId: string;
+}
+
+export interface ConstantUnbindOp {
+  op: "constant.unbind";
+  id: string;
+  layerId: string;
+}
+
 /**
  * Add a layer, at a position in the declaration order.
  *
@@ -109,6 +137,10 @@ export type Op =
   | RegionDeleteOp
   | CommentSetOp
   | CommentDeleteOp
+  | ConstantSetOp
+  | ConstantDeleteOp
+  | ConstantBindOp
+  | ConstantUnbindOp
   | LayerAddOp
   | LayerRemoveOp
   | PrimarySetOp
@@ -175,6 +207,14 @@ export function describeOp(op: Op): string {
     }
     case "comment.delete":
       return `delete comment ${op.id}`;
+    case "constant.set":
+      return `define ${op.name} as $${op.value.toString(16).toUpperCase().padStart(2, "0")}`;
+    case "constant.delete":
+      return `delete constant ${op.id}`;
+    case "constant.bind":
+      return `read ${hex(op.address)} as a constant`;
+    case "constant.unbind":
+      return `read ${op.id} as a literal again`;
     case "layer.add":
       return `add ${op.layerType} layer ${op.name}`;
     case "layer.remove":

@@ -22,3 +22,10 @@ export {
   CommentIndex,
   createComment,
 } from "./comment.js";
+export {
+  Constant,
+  ConstantUse,
+  ConstantIndex,
+  createConstant,
+  createConstantUse,
+} from "./constant.js";

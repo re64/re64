@@ -26,6 +26,8 @@ import * as Y from "yjs";
 import {
   Project,
   ProjectComment,
+  ProjectConstant,
+  ProjectConstantUse,
   ProjectLabel,
   ProjectLayer,
   ProjectRegion,
@@ -68,6 +70,7 @@ const DOC_OPTIONS = { gc: false } as const;
 const ROOT_LAYERS = "layers";
 const ROOT_META = "meta";
 const ROOT_PRIMARY = "primaryLabels";
+const ROOT_CONSTANTS = "constants";
 
 /** Scalars a project carries outside its layers. */
 const META_KEYS = ["name", "description", "entryPoints"] as const;
@@ -93,7 +96,7 @@ export function docFromProject(project: Project): Y.Doc {
   doc.transact(() => {
     const layers = doc.getArray<Y.Map<unknown>>(ROOT_LAYERS);
     for (const layer of project.layers) {
-      const { labels, regions, comments, ...scalars } = layer;
+      const { labels, regions, comments, constantUses, ...scalars } = layer;
       const entry = mapFrom(scalars as Record<string, unknown>);
 
       // Keyed by id rather than held in an array: two people editing different
@@ -116,6 +119,12 @@ export function docFromProject(project: Project): Y.Doc {
       }
       entry.set("comments", commentMap);
 
+      const useMap = new Y.Map<Y.Map<unknown>>();
+      for (const use of [...(constantUses ?? [])].sort(byId)) {
+        useMap.set(use.id!, mapFrom(use as unknown as Record<string, unknown>));
+      }
+      entry.set("constantUses", useMap);
+
       layers.push([entry]);
     }
 
@@ -127,6 +136,14 @@ export function docFromProject(project: Project): Y.Doc {
     const primary = doc.getMap<string>(ROOT_PRIMARY);
     for (const address of Object.keys(project.primaryLabels ?? {}).sort()) {
       primary.set(address, project.primaryLabels![address]);
+    }
+
+    // Keyed by id, like labels: two people declaring different constants touch
+    // different keys. Project level because a name for a value describes no
+    // bytes, so there is no layer for it to belong to.
+    const constants = doc.getMap<Y.Map<unknown>>(ROOT_CONSTANTS);
+    for (const constant of [...(project.constants ?? [])].sort(byId)) {
+      constants.set(constant.id!, mapFrom(constant as unknown as Record<string, unknown>));
     }
   }, "load");
 
@@ -143,6 +160,7 @@ export function projectFromDoc(doc: Y.Doc): Project {
   const layers = doc.getArray<Y.Map<unknown>>(ROOT_LAYERS);
   const meta = doc.getMap<unknown>(ROOT_META);
   const primary = doc.getMap<string>(ROOT_PRIMARY);
+  const constants = doc.getMap<Y.Map<unknown>>(ROOT_CONSTANTS);
 
   const project: Project = {
     layers: layers.toArray().map((entry) => {
@@ -150,10 +168,12 @@ export function projectFromDoc(doc: Y.Doc): Project {
       delete scalars.labels;
       delete scalars.regions;
       delete scalars.comments;
+      delete scalars.constantUses;
 
       const labels = entry.get("labels") as Y.Map<Y.Map<unknown>> | undefined;
       const regions = entry.get("regions") as Y.Map<Y.Map<unknown>> | undefined;
       const comments = entry.get("comments") as Y.Map<Y.Map<unknown>> | undefined;
+      const uses = entry.get("constantUses") as Y.Map<Y.Map<unknown>> | undefined;
 
       const layer = inOrder<ProjectLayer>(scalars, LAYER_FIELDS);
       const labelList = labels
@@ -177,7 +197,14 @@ export function projectFromDoc(doc: Y.Doc): Project {
 
       if (labelList.length) layer.labels = labelList;
       if (regionList.length) layer.regions = regionList;
+      const useList = uses
+        ? sortedValues<ProjectConstantUse>(uses, "address").map((u) =>
+            inOrder<ProjectConstantUse>(u as unknown as Record<string, unknown>, USE_FIELDS)
+          )
+        : [];
+
       if (commentList.length) layer.comments = commentList;
+      if (useList.length) layer.constantUses = useList;
       return layer;
     }),
   };
@@ -189,6 +216,11 @@ export function projectFromDoc(doc: Y.Doc): Project {
 
   const primaryJson = primary.toJSON() as Record<string, string>;
   if (Object.keys(primaryJson).length) project.primaryLabels = primaryJson;
+
+  const constantList = sortedValues<ProjectConstant>(constants, "value").map((c) =>
+    inOrder<ProjectConstant>(c as unknown as Record<string, unknown>, CONSTANT_FIELDS)
+  );
+  if (constantList.length) project.constants = constantList;
 
   return project;
 }
@@ -206,6 +238,8 @@ export function projectFromDoc(doc: Y.Doc): Project {
 const LABEL_FIELDS = ["id", "address", "name", "type"] as const;
 const REGION_FIELDS = ["id", "start", "end", "kind", "name", "comment"] as const;
 const COMMENT_FIELDS = ["id", "address", "placement", "text"] as const;
+const USE_FIELDS = ["id", "address", "constant"] as const;
+const CONSTANT_FIELDS = ["id", "name", "value"] as const;
 const LAYER_FIELDS = [
   "id",
   "type",

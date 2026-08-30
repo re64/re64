@@ -14,6 +14,8 @@
 import {
   Project,
   ProjectComment,
+  ProjectConstant,
+  ProjectConstantUse,
   ProjectLabel,
   ProjectRegion,
   parseProjectAddress,
@@ -59,6 +61,23 @@ const sameLabel = (a: ProjectLabel, b: ProjectLabel) =>
   parseProjectAddress(a.address) === parseProjectAddress(b.address) &&
   a.name === b.name &&
   (a.type ?? "address") === (b.type ?? "address");
+
+function usesById(project: Project): Map<string, Owned<ProjectConstantUse>> {
+  const out = new Map<string, Owned<ProjectConstantUse>>();
+  for (const layer of project.layers) {
+    for (const entry of layer.constantUses ?? []) {
+      if (entry.id) out.set(entry.id, { layerId: layer.id!, entry });
+    }
+  }
+  return out;
+}
+
+const sameUse = (a: ProjectConstantUse, b: ProjectConstantUse) =>
+  parseProjectAddress(a.address) === parseProjectAddress(b.address) &&
+  a.constant === b.constant;
+
+const sameConstant = (a: ProjectConstant, b: ProjectConstant) =>
+  a.name === b.name && parseProjectAddress(a.value) === parseProjectAddress(b.value);
 
 const sameComment = (a: ProjectComment, b: ProjectComment) =>
   parseProjectAddress(a.address) === parseProjectAddress(b.address) &&
@@ -109,6 +128,10 @@ export function diffProjects(from: Project, to: Project): Op[] {
   const afterRegions = regionsById(to);
   const beforeComments = commentsById(from);
   const afterComments = commentsById(to);
+  const beforeUses = usesById(from);
+  const afterUses = usesById(to);
+  const beforeConstants = new Map((from.constants ?? []).filter((c) => c.id).map((c) => [c.id!, c]));
+  const afterConstants = new Map((to.constants ?? []).filter((c) => c.id).map((c) => [c.id!, c]));
 
   for (const [id, owned] of beforeLabels) {
     if (!afterLabels.has(id)) ops.push({ op: "label.delete", id, layerId: owned.layerId });
@@ -118,6 +141,14 @@ export function diffProjects(from: Project, to: Project): Op[] {
   }
   for (const [id, owned] of beforeComments) {
     if (!afterComments.has(id)) ops.push({ op: "comment.delete", id, layerId: owned.layerId });
+  }
+  for (const [id, owned] of beforeUses) {
+    if (!afterUses.has(id)) ops.push({ op: "constant.unbind", id, layerId: owned.layerId });
+  }
+  // Declarations go after the sites that meant them, so nothing is left
+  // pointing at a constant that has already gone.
+  for (const id of beforeConstants.keys()) {
+    if (!afterConstants.has(id)) ops.push({ op: "constant.delete", id });
   }
 
   for (const [id, owned] of afterLabels) {
@@ -130,6 +161,29 @@ export function diffProjects(from: Project, to: Project): Op[] {
       address: parseProjectAddress(owned.entry.address),
       name: owned.entry.name,
       type: owned.entry.type,
+    });
+  }
+
+  for (const [id, constant] of afterConstants) {
+    const before = beforeConstants.get(id);
+    if (before && sameConstant(before, constant)) continue;
+    ops.push({
+      op: "constant.set",
+      id,
+      name: constant.name,
+      value: parseProjectAddress(constant.value),
+    });
+  }
+
+  for (const [id, owned] of afterUses) {
+    const before = beforeUses.get(id);
+    if (before && before.layerId === owned.layerId && sameUse(before.entry, owned.entry)) continue;
+    ops.push({
+      op: "constant.bind",
+      id,
+      layerId: owned.layerId,
+      address: parseProjectAddress(owned.entry.address),
+      constantId: owned.entry.constant,
     });
   }
 

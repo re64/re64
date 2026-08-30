@@ -673,3 +673,125 @@ describe("naming many addresses at once", () => {
     expect(() => workspace.setLabels(agent, [])).toThrow(/at least one/);
   });
 });
+
+describe("naming a value", () => {
+  it("changes nothing until a site says it means that", () => {
+    // The whole design: a value has no single meaning. Declaring ORANGE = $08
+    // must not turn every #$08 in the program orange.
+    const before = workspace.disassembly(0x8011, 300).lines.map((l) => l.text).join("\n");
+    workspace.setConstant(agent, "ORANGE", 0x08);
+
+    expect(workspace.disassembly(0x8011, 300).lines.map((l) => l.text).join("\n")).toBe(before);
+    expect(workspace.constants().constants.map((c) => c.name)).toContain("ORANGE");
+  });
+
+  it("renders where a site is bound, and nowhere else", () => {
+    const site = workspace.immediates(0x08).sites[0];
+    const address = parseInt(site.address.slice(1), 16);
+
+    workspace.setConstant(agent, "ORANGE", 0x08);
+    workspace.bindConstant(agent, address, "ORANGE");
+
+    const row = workspace.disassembly(address, 1).lines[0].text;
+    expect(row).toContain("#ORANGE");
+
+    // Another site loading the same value is untouched.
+    const other = workspace.immediates(0x08).sites.find((s) => s.address !== site.address);
+    expect(other?.boundTo).toBeUndefined();
+  });
+
+  it("refuses a binding the instruction cannot mean", () => {
+    workspace.setConstant(agent, "ORANGE", 0x08);
+    const wrongValue = workspace.immediates().sites.find((s) => s.value !== "$08")!;
+    const at = parseInt(wrongValue.address.slice(1), 16);
+
+    expect(() => workspace.bindConstant(agent, at, "ORANGE")).toThrow(/but ORANGE is/);
+    // And an address with no immediate at all.
+    expect(() => workspace.bindConstant(agent, 0x8015, "ORANGE")).toThrow(
+      /no immediate|nothing there/i
+    );
+  });
+
+  it("refuses a value that is not a byte", () => {
+    expect(() => workspace.setConstant(agent, "TOO_BIG", 0x100)).toThrow(/\$00-\$FF/);
+  });
+
+  it("renders the literal again when the constant is deleted", () => {
+    // A use pointing at nothing falls back rather than breaking, so deleting a
+    // declaration needs no sweep over the sites that meant it.
+    const site = workspace.immediates(0x08).sites[0];
+    const address = parseInt(site.address.slice(1), 16);
+
+    workspace.setConstant(agent, "ORANGE", 0x08);
+    workspace.bindConstant(agent, address, "ORANGE");
+    workspace.removeConstant(agent, "ORANGE");
+
+    expect(workspace.disassembly(address, 1).lines[0].text).toContain("#$08");
+  });
+
+  it("takes a binding back", () => {
+    const site = workspace.immediates(0x08).sites[0];
+    const address = parseInt(site.address.slice(1), 16);
+
+    workspace.setConstant(agent, "ORANGE", 0x08);
+    workspace.bindConstant(agent, address, "ORANGE");
+    workspace.unbindConstant(agent, address);
+
+    expect(workspace.disassembly(address, 1).lines[0].text).toContain("#$08");
+    // The declaration survives; only the use went.
+    expect(workspace.constants().constants.map((c) => c.name)).toContain("ORANGE");
+  });
+
+  it("lets two names share one value", () => {
+    // LEFT_ZAPPER = $01 and WHITE = $01 in the reference. Both must be
+    // declarable, and each site picks which it meant.
+    workspace.setConstant(agent, "LEFT_ZAPPER", 0x01);
+    workspace.setConstant(agent, "WHITE", 0x01);
+
+    const names = workspace.constants().constants.map((c) => c.name);
+    expect(names).toContain("LEFT_ZAPPER");
+    expect(names).toContain("WHITE");
+  });
+
+  it("finds where else a value is loaded", () => {
+    const { total, sites } = workspace.immediates(0x08);
+
+    expect(total).toBeGreaterThan(1);
+    expect(sites.every((s) => s.value === "$08")).toBe(true);
+    expect(sites[0].text).toMatch(/#\$08/);
+  });
+});
+
+describe("the work as a listing", () => {
+  it("reads like a hand-written disassembly", () => {
+    const { text } = workspace.listing(0x8015, 4);
+
+    expect(text).toContain("MaybeContinueCheckingScreen:");
+    expect(text.split("\n").length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("emits only the constants the span actually means", () => {
+    const site = workspace.immediates(0x16).sites[0];
+    const address = parseInt(site.address.slice(1), 16);
+    workspace.setConstant(agent, "EXPLOSION1", 0x16);
+    workspace.setConstant(agent, "NEVER_USED", 0x99);
+    workspace.bindConstant(agent, address, "EXPLOSION1");
+
+    const { text } = workspace.listing(address, 4);
+
+    expect(text).toContain("EXPLOSION1                  = $16");
+    // Derived from the bindings, so a declaration nobody used stays out.
+    expect(text).not.toContain("NEVER_USED");
+    expect(text).toContain("#EXPLOSION1");
+  });
+
+  it("has no equate block when the span means no constants", () => {
+    expect(workspace.listing(0x8015, 3).text.startsWith("8015")).toBe(true);
+  });
+
+  it("says where to continue", () => {
+    const page = workspace.listing(0x8015, 5);
+    expect(page.truncated).toBe(true);
+    expect(page.nextStart).toMatch(/^\$[0-9A-F]{4}$/);
+  });
+});

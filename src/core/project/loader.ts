@@ -15,12 +15,15 @@ import { SymbolLayer } from "../memory/symbol-layer.js";
 import { MemoryMap } from "../memory/memory-map.js";
 import { LabelIndex } from "../memory/label.js";
 import { CommentIndex } from "../memory/comment.js";
+import { ConstantIndex } from "../memory/constant.js";
 import { createC64PlatformLayer } from "../c64/symbols.js";
 import {
   Project,
   ProjectLayer,
   parseProjectAddress,
   projectCommentsToComments,
+  projectConstantUses,
+  projectConstants,
   projectLabelsToLabels,
   projectRegionsToRegions,
 } from "./project.js";
@@ -49,6 +52,8 @@ export interface LoadedProject {
    * address", and the answer does not depend on which layer holds it.
    */
   comments: CommentIndex;
+  /** Names for values, and which operands mean them. */
+  constants: ConstantIndex;
   /**
    * Built layers in *declaration* order, so index i corresponds to
    * project.layers[i]. The map itself stores them in z-order (reversed, with
@@ -86,6 +91,8 @@ export function buildMemoryMap(
   const prgEntries: number[] = [];
   const userLabels = new LabelIndex();
   const comments = new CommentIndex();
+  const constants = new ConstantIndex();
+  constants.declareAll(projectConstants(project.constants));
   const layers: Layer[] = [];
 
   if (options.platform !== false) {
@@ -130,6 +137,7 @@ export function buildMemoryMap(
     }
     userLabels.addLabels(labels);
     comments.addAll(projectCommentsToComments(decl, layerId));
+    constants.bindAll(projectConstantUses(decl, layerId));
 
     layers.push(layer);
     map.addLayer(layer);
@@ -139,5 +147,5 @@ export function buildMemoryMap(
     map.primaryLabels.set(parseProjectAddress(address), labelId);
   }
 
-  return { project, map, prgEntries, userLabels, comments, layers };
+  return { project, map, prgEntries, userLabels, comments, constants, layers };
 }
