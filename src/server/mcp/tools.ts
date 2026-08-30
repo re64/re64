@@ -158,6 +158,28 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "find_undecoded",
+    "Spans of bytes nothing has explained: no instruction covers them and no " +
+      "region says what they hold. This is the orientation question on a " +
+      "project nobody has worked on yet — find_unnamed ranks what has already " +
+      "been reached, which on a fresh project is almost nothing. Biggest span " +
+      "first. Declaring a span data or text is an answer and removes it from " +
+      "this list; so does making it decode.",
+    {
+      project,
+      limit: z.number().int().min(1).max(200).optional().describe("Default 20"),
+      minimumBytes: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe("Ignore holes smaller than this. Default 1."),
+    },
+    (args: { project?: string; limit?: number; minimumBytes?: number }) =>
+      context().workspace(args.project).undecoded(args.limit ?? 20, args.minimumBytes ?? 1)
+  );
+
+  tool(
     "list_labels",
     "Labels, narrowed by where they came from, their type, their name, or an " +
       "address range.",

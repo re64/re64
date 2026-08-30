@@ -377,3 +377,55 @@ describe("what a reader is told it may edit", () => {
     expect(own.writable).toBe(true);
   });
 });
+
+describe("what is left to look at", () => {
+  it("finds the holes on a project nobody has worked on", () => {
+    // The question that had no answer. `unnamed()` ranks what has been
+    // reached, which on a blank project is almost nothing precisely because
+    // almost nothing is reachable.
+    const blank = blankWorkspace();
+    const { spans, unexplainedBytes } = blank.undecoded();
+
+    // A 4KB layer with five instructions decoded is almost entirely unknown,
+    // and it is one unbroken run.
+    expect(unexplainedBytes).toBeGreaterThan(4000);
+    expect(spans).toHaveLength(1);
+    expect(spans[0].inLayer).toBe("gridrunner");
+  });
+
+  it("puts the biggest hole first", () => {
+    // A 400-byte hole is worth looking at before a stray three.
+    const { spans } = workspace.undecoded(200);
+    const sizes = spans.map((s) => s.bytes);
+
+    expect(spans.length).toBeGreaterThan(1);
+    expect(sizes).toEqual([...sizes].sort((a, b) => b - a));
+  });
+
+  it("shrinks as the work is done", () => {
+    const blank = blankWorkspace();
+    const before = blank.undecoded().unexplainedBytes;
+
+    blank.markFunction(agent, 0x8011);
+
+    expect(blank.undecoded().unexplainedBytes).toBeLessThan(before / 2);
+  });
+
+  it("counts a span someone has explained as explained", () => {
+    // Saying "this is data" is understanding, not a gap. If it stayed on the
+    // list the list would never shrink and would stop meaning anything.
+    const blank = blankWorkspace();
+    const before = blank.undecoded().unexplainedBytes;
+
+    blank.setRegion(agent, 0x8f00, 0x9000, "data", "chargen");
+
+    expect(blank.undecoded().unexplainedBytes).toBe(before - 0x100);
+  });
+
+  it("ignores holes too small to be worth reporting", () => {
+    const all = workspace.undecoded(200, 1).total;
+    const big = workspace.undecoded(200, 16).total;
+
+    expect(big).toBeLessThan(all);
+  });
+});

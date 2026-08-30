@@ -378,6 +378,73 @@ export class Workspace {
   }
 
   /**
+   * Spans of bytes nothing has explained.
+   *
+   * The orientation question on a project nobody has worked on yet, and the one
+   * thing that had no answer: `unnamed()` ranks what has been *reached* and is
+   * still called `sub_`, which on a blank project is almost nothing, because
+   * almost nothing is reachable. "What is left" is a different question and it
+   * is the one that comes first.
+   *
+   * A span counts as unexplained when no instruction covers it and no region
+   * says what it holds. Declaring a span data or text is an answer — "this is
+   * not code" is understanding, not a gap — so those drop out, which is what
+   * makes the list shrink as work is done rather than staying the same size.
+   *
+   * Biggest first: a 400-byte hole is worth looking at before a stray three.
+   */
+  undecoded(limit = 20, minimumBytes = 1): {
+    total: number;
+    unexplainedBytes: number;
+    spans: { start: string; end: string; bytes: number; inLayer: string }[];
+  } {
+    const program = this.program();
+    const { loaded } = program;
+
+    // Only where bytes actually exist. A symbols layer supplies none and has no
+    // range, and the space between layers is not a hole in anything.
+    const covered = new Set<number>();
+    for (const instruction of program.instructions.all()) {
+      for (let i = 0; i < instruction.bytes.length; i++) covered.add(instruction.address + i);
+    }
+
+    const spans: { start: string; end: string; bytes: number; inLayer: string }[] = [];
+    let unexplainedBytes = 0;
+
+    for (const layer of loaded.map.getLayers().filter((l) => l.hasBytes)) {
+      let run: number | undefined;
+
+      const close = (at: number): void => {
+        if (run === undefined) return;
+        const bytes = at - run;
+        unexplainedBytes += bytes;
+        if (bytes >= minimumBytes) {
+          spans.push({
+            start: hex4(run),
+            end: hex4(at - 1),
+            bytes,
+            inLayer: layer.name,
+          });
+        }
+        run = undefined;
+      };
+
+      for (let address = layer.start; address < layer.end; address++) {
+        const kind = loaded.map.getKindAt(address);
+        // Explained: something decoded here, or someone said what it holds.
+        const explained =
+          covered.has(address) || kind === "data" || kind === "text" || kind === "jumptable";
+        if (explained) close(address);
+        else if (run === undefined) run = address;
+      }
+      close(layer.end);
+    }
+
+    spans.sort((a, b) => b.bytes - a.bytes);
+    return { total: spans.length, unexplainedBytes, spans: spans.slice(0, limit) };
+  }
+
+  /**
    * What has happened since a reader last looked.
    *
    * The substitute for the socket an agent cannot hold. Without it the only way

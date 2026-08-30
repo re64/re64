@@ -464,7 +464,16 @@ export function startServer(options: ServerOptions): RunningServer {
     // place a project is chosen for a socket, and it happens before the
     // handshake, which is where an access check would go.
     const requested = pathname.slice("/sync/".length);
-    room(requested || defaultProject()).sync.handleUpgrade(request, socket, head);
+    try {
+      room(requested || defaultProject()).sync.handleUpgrade(request, socket, head);
+    } catch {
+      // A socket asking for a project this database does not hold used to throw
+      // out of the upgrade handler and take the process down — so a browser tab
+      // left open on a previous project killed the next server started on that
+      // port, before anybody connected on purpose. One client's bad request
+      // closes one socket.
+      socket.destroy();
+    }
   });
 
   const ready = new Promise<void>((resolve) => {

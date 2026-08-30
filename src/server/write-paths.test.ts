@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebsocketProvider } from "y-websocket";
 import { startServer, RunningServer } from "./index.js";
-import { FileStorage, pathsFor } from "../store/index.js";
+import { FileStorage, importProject, pathsFor } from "../store/index.js";
 import {
   CrdtDoc,
   applyOpToDoc,
@@ -238,5 +238,39 @@ describe("three clients over sockets", () => {
     }
 
     await Promise.all([a.close(), b.close(), c.close()]);
+  });
+});
+
+describe("a socket asking for something that is not here", () => {
+  it("closes that socket instead of the server", async () => {
+    // A browser tab left open on a previous project reconnects to the next
+    // server started on that port. The unknown room threw out of the upgrade
+    // handler, which is not inside any request, so it took the process down
+    // before anyone connected on purpose.
+    const dir = mkdtempSync(join(tmpdir(), "re64-unknown-room-"));
+    copyFileSync("assets/gridrunner.re64", join(dir, "gridrunner.re64"));
+    copyFileSync("assets/gridrunner.prg", join(dir, "gridrunner.prg"));
+    const { databasePath } = importProject(join(dir, "gridrunner.re64"));
+
+    const server = startServer({
+      projectPath: databasePath,
+      port: 0,
+      host: "127.0.0.1",
+      quiet: true,
+    });
+    await server.ready;
+
+    const socket = new WebSocket(`ws://127.0.0.1:${server.port}/sync/no-such-project`);
+    await new Promise((resolve) => {
+      socket.addEventListener("close", resolve);
+      socket.addEventListener("error", resolve);
+    });
+
+    // Still serving.
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/projects`);
+    expect(res.ok).toBe(true);
+
+    await server.close();
+    rmSync(dir, { recursive: true, force: true });
   });
 });
