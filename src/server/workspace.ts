@@ -665,13 +665,26 @@ export class Workspace {
         .find((l) => l.name === name);
       if (already) throw new Error(`${hex4(address)} is already called ${name}.`);
 
+      // Pin whatever is showing now as the primary, unless something already
+      // is. Two user labels at one address tie on rank, so the winner would
+      // otherwise be decided by id order — which is random. Adding a second
+      // name silently renamed every reference to the address, and did so
+      // unpredictably enough that testing it once told you nothing.
+      const showing = loaded.map.getLabels().resolve(address)?.label;
+      const alreadyChosen = loaded.map.primaryLabels.has(address);
+      const pin: Op[] =
+        showing && !alreadyChosen
+          ? [{ op: "primary.set", address, labelId: showing.id }]
+          : [];
+
       const { layerId, create } = ensureOwningLayer(loaded, address, this.room.projectId);
       return create
         ? [
             create,
+            ...pin,
             { op: "label.set", id: newId("lbl"), layerId, address, name, type, extent } as Op,
           ]
-        : [labelAddOp(loaded, address, name, type, extent)];
+        : [...pin, labelAddOp(loaded, address, name, type, extent)];
     });
   }
 
@@ -1130,9 +1143,11 @@ export class Workspace {
       );
     }
 
-    const result = this.edit(caller, (loaded) => [
-      regionSetOp(loaded, start, end, kind, name, comment, encoding),
-    ]);
+    const result = this.edit(
+      caller,
+      (loaded) => [regionSetOp(loaded, start, end, kind, name, comment, encoding)],
+      { start, end }
+    );
     return {
       ...result,
       covers: `${hex4(start)}-${hex4(end - 1)} (${end - start} bytes)`,
@@ -1159,8 +1174,13 @@ export class Workspace {
    * reachable only through a jump table gets decoded at all, so the count is
    * how a caller tells a productive guess from a wasted one.
    */
-  private edit(caller: Caller, build: (loaded: LoadedProject) => Op[]): EditResult {
+  private edit(
+    caller: Caller,
+    build: (loaded: LoadedProject) => Op[],
+    affecting?: { start: number; end: number }
+  ): EditResult {
     const before = this.program().instructions.size;
+    const decodedBefore = new Set(this.program().instructions.all().map((i) => i.address));
     const warnedBefore = new Set(this.program().warnings.map(describeWarning));
     const ops = build(this.program().loaded);
 
@@ -1190,6 +1210,52 @@ export class Workspace {
       did: descriptions,
       instructions: { before, after, delta: after - before },
       ...(introduced.length ? { warnings: introduced } : {}),
+      ...this.describeLoss(decodedBefore, affecting),
+    };
+  }
+
+  /**
+   * What an edit stopped decoding, when it stopped decoding anything.
+   *
+   * `delta` reports this already, and that is the problem: a catastrophic
+   * -950 arrives in the same field, the same shape and the same tone as a
+   * useful +8, and every description here teaches a reader that a positive
+   * delta is the reward for a good decision. Declaring the `$EA` filler
+   * between two routines as data — which is exactly what the reference
+   * listing shows — broke fall-through into the main game loop and deleted two
+   * thirds of the program while returning ok.
+   *
+   * So a loss says so separately, and names the first address that lost the
+   * only thing reaching it, which is the address a `code` region has to be put
+   * back on.
+   */
+  private describeLoss(
+    decodedBefore: ReadonlySet<number>,
+    affecting?: { start: number; end: number }
+  ): { orphaned?: { instructions: number; firstAt: string; hint: string } } {
+    const now = this.program().instructions;
+    const lost = [...decodedBefore].filter((a) => !now.has(a)).sort((a, b) => a - b);
+    if (lost.length === 0) return {};
+
+    // The fall-through point, not the lowest casualty. Marking a span data
+    // stops the walk at its end, so the instruction *after* it is the one that
+    // lost its only predecessor; everything else that stopped decoding did so
+    // because it was reached from there. Reporting the lowest address instead
+    // names a victim rather than the wound.
+    const orphan =
+      (affecting && lost.find((a) => a >= affecting.end)) ??
+      lost.find((a) => !affecting || a < affecting.start) ??
+      lost[0];
+
+    return {
+      orphaned: {
+        instructions: lost.length,
+        firstAt: hex4(orphan),
+        hint:
+          `Nothing reaches ${hex4(orphan)} any more — execution used to fall ` +
+          `through into it. If that code is still code, declare it: ` +
+          `set_region start ${hex4(orphan)} kind "code".`,
+      },
     };
   }
 
@@ -1233,6 +1299,13 @@ export interface EditResult {
   version: string;
   did: string[];
   instructions: { before: number; after: number; delta: number };
+  /**
+   * Instructions this edit stopped decoding, when it stopped any.
+   *
+   * Absent almost always. Present when a decision cut something off — which
+   * `delta` also says, in a field a reader is taught to read as good news.
+   */
+  orphaned?: { instructions: number; firstAt: string; hint: string };
   /**
    * Warnings this edit introduced, when it introduced any.
    *

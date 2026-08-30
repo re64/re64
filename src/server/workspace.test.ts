@@ -1127,3 +1127,75 @@ describe("the last of trial 2's list", () => {
     ).toThrow(/\$8015.*inline/s);
   });
 });
+
+describe("an edit that cuts code off", () => {
+  it("says so, instead of hiding it in the delta", () => {
+    // Declaring the $EA filler between two routines as data — exactly what the
+    // reference listing shows — breaks fall-through into the main game loop and
+    // deletes two thirds of the program. It returned ok, and reported the loss
+    // in the same field, shape and tone as a useful gain.
+    const blank = blankWorkspace();
+    blank.setRegion(agent, 0x8000, 0x8002, "jumptable");
+
+    const result = blank.setRegion(agent, 0x8361, 0x8370, "data", "filler");
+
+    expect(result.instructions.delta).toBeLessThan(-500);
+    expect(result.orphaned).toBeDefined();
+    expect(result.orphaned!.instructions).toBeGreaterThan(500);
+  });
+
+  it("names the address that lost its predecessor, not the lowest casualty", () => {
+    // Everything else stopped decoding because it was reached from there.
+    // Reporting the lowest address names a victim rather than the wound.
+    const blank = blankWorkspace();
+    blank.setRegion(agent, 0x8000, 0x8002, "jumptable");
+
+    const result = blank.setRegion(agent, 0x8361, 0x8370, "data");
+    expect(result.orphaned!.firstAt).toBe("$8370");
+    expect(result.orphaned!.hint).toContain("$8370");
+  });
+
+  it("suggests a repair that works", () => {
+    const blank = blankWorkspace();
+    blank.setRegion(agent, 0x8000, 0x8002, "jumptable");
+    blank.setRegion(agent, 0x8361, 0x8370, "data");
+
+    const repaired = blank.setRegion(agent, 0x8370, 0x8373, "code");
+    expect(repaired.instructions.delta).toBeGreaterThan(500);
+    expect(repaired.orphaned).toBeUndefined();
+  });
+
+  it("stays quiet when an edit costs nothing", () => {
+    const blank = blankWorkspace();
+    const result = blank.setRegion(agent, 0x8011, 0x8015, "code");
+    expect(result.orphaned).toBeUndefined();
+  });
+});
+
+describe("adding a second name", () => {
+  it("does not change what anyone sees", () => {
+    // Two user labels at one address tie on rank, so without an explicit
+    // primary the winner is decided by id order — which is random. Adding a
+    // second name silently renamed every reference to the address, and
+    // unpredictably enough that testing it once told you nothing.
+    const blank = blankWorkspace();
+    blank.setRegion(agent, 0x8011, 0x8015, "code");
+    blank.setLabel(agent, 0x02, "currentXPosition");
+
+    const before = blank.disassembly(0x8132, 1).lines[0].text;
+    blank.addLabel(agent, 0x02, "vicRegisterLoPtr");
+
+    expect(blank.disassembly(0x8132, 1).lines[0].text).toBe(before);
+  });
+
+  it("leaves an explicit choice alone", () => {
+    const blank = blankWorkspace();
+    blank.setRegion(agent, 0x8011, 0x8015, "code");
+    blank.setLabel(agent, 0x02, "currentXPosition");
+    blank.addLabel(agent, 0x02, "vicRegisterLoPtr");
+    blank.setPrimaryLabel(agent, 0x02, "vicRegisterLoPtr");
+
+    blank.addLabel(agent, 0x02, "aThirdName");
+    expect(blank.disassembly(0x8132, 1).lines[0].text).toContain("vicRegisterLoPtr");
+  });
+});
