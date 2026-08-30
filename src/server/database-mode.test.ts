@@ -3,8 +3,8 @@ import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer, RunningServer } from "./index.js";
-import { importProject } from "../store/index.js";
-import { emptyDoc } from "../core/crdt/index.js";
+import { SqliteStorage, importProject } from "../store/index.js";
+import { applyOpsToDoc, emptyDoc } from "../core/crdt/index.js";
 import { WebsocketProvider } from "y-websocket";
 
 /**
@@ -19,6 +19,7 @@ let dir: string;
 let server: RunningServer;
 let base: string;
 let project: string;
+let databaseUnderTest: string;
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "re64-dbmode-"));
@@ -35,6 +36,7 @@ beforeEach(async () => {
   await server.ready;
   base = `http://127.0.0.1:${server.port}`;
   project = projectId;
+  databaseUnderTest = databasePath;
 });
 
 afterEach(async () => {
@@ -96,6 +98,49 @@ describe("a server given a database", () => {
 
     const after = (await (await fetch(`${base}/api/debug?project=${project}`)).json()) as { sessions: number };
     expect(after.sessions).toBe(1);
+
+    provider.disconnect();
+    provider.destroy();
+  });
+
+  it("learns which client id a session edits under, so edits are attributable", async () => {
+    // A Yjs struct carries a client id and nothing else. Without this binding
+    // the history can say what changed but never who changed it.
+    const doc = emptyDoc();
+    const provider = new WebsocketProvider(base.replace("http", "ws") + "/sync", project, doc, {
+      params: { author: "usr_you", session: "sess-attribution" },
+      disableBc: true,
+    });
+    await new Promise<void>((resolve) => provider.once("sync", () => resolve()));
+
+    const layer = (await (await fetch(`${base}/api/project?project=${project}`)).json()) as {
+      raw: string;
+    };
+    const prg = JSON.parse(layer.raw).layers.find(
+      (l: { type: string }) => l.type === "prg"
+    ) as { id: string; labels: { id: string; address: string }[] };
+
+    applyOpsToDoc(
+      doc,
+      [
+        {
+          op: "label.set",
+          id: prg.labels[0].id,
+          layerId: prg.id,
+          address: 0x8100,
+          name: "AttributedToMe",
+        },
+      ],
+      "local"
+    );
+    await new Promise((r) => setTimeout(r, 400));
+
+    const storage = new SqliteStorage(databaseUnderTest, project);
+    expect(storage.authorOf(doc.clientID)).toEqual({
+      sessionId: "sess-attribution",
+      userId: "usr_you",
+    });
+    storage.close();
 
     provider.disconnect();
     provider.destroy();

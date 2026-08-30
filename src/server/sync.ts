@@ -24,6 +24,7 @@ import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";
+import { clientsInUpdate } from "../core/crdt/index.js";
 import { ProjectStore } from "../store/index.js";
 
 /**
@@ -60,6 +61,8 @@ export interface SyncOptions {
   onFlatten?: (summary: string[]) => void;
   /** A participant has connected, claiming to be someone. */
   onSession?: (sessionId: string, userId: string) => void;
+  /** A session turned out to be editing under this Yjs client id. */
+  onClient?: (sessionId: string, clientId: number) => void;
 }
 
 export class SyncServer {
@@ -70,6 +73,10 @@ export class SyncServer {
   private readonly awareness: awarenessProtocol.Awareness;
   /** Which socket is responsible for each awareness entry, so a close clears it. */
   private readonly awarenessOwners = new Map<number, WebSocket>();
+  /** Which session each socket belongs to, for attributing its edits. */
+  private readonly sessionOf = new Map<WebSocket, string>();
+  /** Client ids already bound to a session; binding is idempotent but noisy. */
+  private readonly knownClients = new Set<number>();
 
   /** The project this relay is for. */
   get store(): ProjectStore {
@@ -89,6 +96,22 @@ export class SyncServer {
     // on from a state the server has already moved past.
     options.store.onUpdate((update, origin) => {
       const from = origin instanceof WebSocket ? origin : undefined;
+
+      // Bind the Yjs client id to the session that sent it, the first time it
+      // is seen. This is what makes an edit attributable later: a struct
+      // carries a client id and nothing else, so without this the history can
+      // say what changed but never who changed it.
+      if (from) {
+        const session = this.sessionOf.get(from);
+        if (session) {
+          for (const client of clientsInUpdate(update)) {
+            if (this.knownClients.has(client)) continue;
+            this.knownClients.add(client);
+            options.onClient?.(session, client);
+          }
+        }
+      }
+
       const message = encoding.createEncoder();
       encoding.writeVarUint(message, MESSAGE_SYNC);
       syncProtocol.writeUpdate(message, update);
@@ -138,7 +161,10 @@ export class SyncServer {
 
     // Fake authentication: the connection says who it is and is believed. Real
     // accounts will change how a session is issued, not what one is.
-    if (sessionId) this.options.onSession?.(sessionId, author);
+    if (sessionId) {
+      this.options.onSession?.(sessionId, author);
+      this.sessionOf.set(socket, sessionId);
+    }
 
     socket.binaryType = "arraybuffer";
     this.clients.add(socket);
@@ -204,6 +230,7 @@ export class SyncServer {
 
   private leave(socket: WebSocket): void {
     this.clients.delete(socket);
+    this.sessionOf.delete(socket);
     // Presence outlives the socket by 30s otherwise, so a closed tab lingers in
     // the participant list.
     awarenessProtocol.removeAwarenessStates(

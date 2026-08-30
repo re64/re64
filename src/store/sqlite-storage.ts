@@ -213,6 +213,19 @@ export class SqliteStorage implements ProjectStorage {
       .run(clientId, now, id);
   }
 
+  /**
+   * Who was editing under a Yjs client id.
+   *
+   * The whole point of recording client ids: a struct in the document carries
+   * one, so this turns "who wrote this label" from unanswerable into a lookup.
+   */
+  authorOf(clientId: number): { sessionId: string; userId: string | null } | undefined {
+    const row = this.db
+      .prepare("SELECT id, user_id FROM sessions WHERE client_id = ? ORDER BY started_at DESC")
+      .get(clientId) as { id: string; user_id: string | null } | undefined;
+    return row ? { sessionId: row.id, userId: row.user_id } : undefined;
+  }
+
   sessions(): { id: string; userId: string | null; clientId: number | null }[] {
     return (
       this.db

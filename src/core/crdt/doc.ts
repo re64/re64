@@ -270,6 +270,19 @@ export function squashUpdates(updates: readonly Uint8Array[]): Uint8Array {
   return Y.mergeUpdates([...updates]);
 }
 
+/**
+ * Who made the changes in an update.
+ *
+ * Every struct carries the client id of whoever created it, so this is the
+ * whole basis of attribution: a client id maps to a session, and a session to a
+ * person. Nothing else in an update says who did anything.
+ *
+ * Usually one id, but an update relayed from elsewhere can carry several.
+ */
+export function clientsInUpdate(update: Uint8Array): number[] {
+  return [...Y.decodeStateVector(Y.encodeStateVectorFromUpdate(update)).keys()];
+}
+
 /** What this document has, so a peer can send only what it lacks. */
 export function stateVector(doc: Y.Doc): Uint8Array {
   return Y.encodeStateVector(doc);

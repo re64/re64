@@ -7,6 +7,7 @@ export {
   projectFromDoc,
   encodeDoc,
   applyUpdate,
+  clientsInUpdate,
   squashUpdates,
   stateVector,
   diffSince,

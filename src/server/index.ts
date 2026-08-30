@@ -133,6 +133,10 @@ export function startServer(options: ServerOptions): RunningServer {
         storage instanceof SqliteStorage
           ? storage.startSession(sessionId, userId, Date.now())
           : undefined,
+      onClient: (sessionId, clientId) =>
+        storage instanceof SqliteStorage
+          ? storage.noteSessionClient(sessionId, clientId, Date.now())
+          : undefined,
       onFlatten: (summary) =>
         console.log(`${projectId}: recorded ${summary.length} change${summary.length === 1 ? "" : "s"}`),
     });
