@@ -839,8 +839,10 @@ So grouped undo is **partial and reported**: skip any op whose target moved
 since, and say so — *"undid 2 of 3; $8870 was changed by marcus since, left
 alone."* Better than clobbering, better than refusing.
 
-Grouping lives in the ops log for now, since that is already unified across all
-four consumers and the transaction boundary exists but goes unrecorded. If the
+Grouping lives in the ops log, which is already unified across all four
+consumers; the transaction boundary existed and simply went unrecorded. `ops`
+now carries `session` and `changeset`, and `changes_since` returns `action` and
+the acting codename so a feed groups by decision rather than by operation. If the
 history ever has to travel with the project — export, a second server, an
 offline browser — it moves into the document as an **append-only** intent log,
 which is the one shape that merges without conflict precisely because nothing
@@ -878,15 +880,19 @@ therefore the only decoder for who a historical client id was, and **must not be
 pruned like a session store** — expiring the lease is not the same as forgetting
 what it wrote.
 
-**Open question, needs measuring before this is built.** MCP already separates
-identity from instance: `Mcp-Session-Id` is issued at `initialize` and returned
-on later requests, so N client instances get N sessions from one credential —
-no account per agent, exactly the "one user, many tabs" model. But whether N
-spawned agents are N MCP clients or one shared client is a property of the
-*host*, not the protocol, and it decides the design: with one shared client they
-share a session id and the handle has to come from the agent instead. Measure it
-— log `initialize` calls, point several agents at the server, count session ids.
-Do not guess.
+**Built.** `SessionLeases` in `src/server/sessions.ts`, claimed per MCP request.
+The handle comes from `Mcp-Session-Id` when the host issues one — the protocol's
+own answer to "which instance", so one credential yields many sessions and no
+account per agent is needed — or from `X-Re64-Session` when a caller says so
+itself.
+
+**Still open, and now free to measure.** Whether N spawned agents are N MCP
+clients or one shared client is a property of the *host*, not the protocol. With
+one shared client they share a session id, fall back to being keyed by identity,
+and collapse into one undo scope. That fallback is marked `sharedSession` rather
+than tolerated silently, and the transcript records `clientInfo` and any session
+id on every request — so counting distinct ids across the first experiment
+answers it without setting anything up. Do not guess it in the meantime.
 
 Note this also means "should agents have sessions" and "should MCP be stateful"
 are less independent than the stateless decision above assumed.
