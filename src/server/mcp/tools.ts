@@ -1,0 +1,293 @@
+/**
+ * The tool vocabulary.
+ *
+ * Schemas and shaping only — every question is answered by `Workspace`, which
+ * is tested without a protocol in the way. If something here needs logic, the
+ * logic is in the wrong file.
+ *
+ * Two rules the shapes follow, both from what an agent needs rather than what a
+ * browser does. Every answer is bounded, because a full 64K disassembly is tens
+ * of thousands of tokens. And every line carries structure as well as its
+ * rendered text: the text is what a person reads, the fields are what a caller
+ * acts on.
+ */
+
+import { z } from "zod";
+import type { McpContext } from "./transport.js";
+
+/** Accepts `$8100`, `0x8100` or plain decimal, and says so in the schema. */
+const address = z
+  .string()
+  .describe("An address, as $8100, 0x8100, or decimal")
+  .transform((value, ctx) => {
+    const text = value.trim();
+    const parsed = text.startsWith("$")
+      ? parseInt(text.slice(1), 16)
+      : text.startsWith("0x")
+        ? parseInt(text.slice(2), 16)
+        : parseInt(text, 10);
+
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 0xffff) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Not an address: ${value}` });
+      return z.NEVER;
+    }
+    return parsed;
+  });
+
+const project = z.string().optional().describe("Which project; the only one if omitted");
+
+interface Server {
+  registerTool(
+    name: string,
+    config: { title?: string; description: string; inputSchema?: Record<string, unknown> },
+    handler: (args: never) => Promise<{ content: { type: "text"; text: string }[] }>
+  ): unknown;
+}
+
+const json = (value: unknown) => ({
+  content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }],
+});
+
+export function registerTools(rawServer: unknown, context: () => McpContext): void {
+  const server = rawServer as Server;
+  const tool = (
+    name: string,
+    description: string,
+    inputSchema: Record<string, unknown>,
+    handler: (args: never) => unknown
+  ) =>
+    server.registerTool(name, { description, inputSchema }, async (args: never) =>
+      json(await handler(args))
+    );
+
+  // --- orienting ------------------------------------------------------
+
+  tool(
+    "list_projects",
+    "Every project on this server, and the users an edit can be made as. " +
+      "Start here when you do not know what exists.",
+    {},
+    () => {
+      const { workspace } = context();
+      return workspace().catalogue();
+    }
+  );
+
+  tool(
+    "describe_project",
+    "What a project contains: its layers, its declared regions, where " +
+      "disassembly starts, and how much of it has been named by a person " +
+      "rather than by the disassembler. The last of those is the best single " +
+      "measure of how far along the work is.",
+    { project },
+    ({ project: id }: { project?: string }) => context().workspace(id).describe()
+  );
+
+  // --- reading --------------------------------------------------------
+
+  tool(
+    "read_disassembly",
+    "Disassembly from an address. Each line carries both the rendered text " +
+      "and the fields behind it, so you can read it and act on it without " +
+      "parsing. Bounded; follow nextStart to continue.",
+    {
+      project,
+      start: address,
+      lines: z.number().int().min(1).max(400).optional().describe("Default 80"),
+    },
+    ({ project: id, start, lines }: { project?: string; start: number; lines?: number }) =>
+      context().workspace(id).disassembly(start, lines ?? 80)
+  );
+
+  tool(
+    "find_references",
+    "What refers to an address, and what it refers to. Inbound entries carry " +
+      "the calling line, so you need not read each one separately.",
+    {
+      project,
+      address,
+      direction: z.enum(["in", "out", "both"]).optional().describe("Default both"),
+    },
+    ({
+      project: id,
+      address: at,
+      direction,
+    }: {
+      project?: string;
+      address: number;
+      direction?: "in" | "out" | "both";
+    }) => context().workspace(id).references(at, direction ?? "both")
+  );
+
+  tool(
+    "find_unnamed",
+    "Addresses the disassembler had to invent a name for, most-referenced " +
+      "first. This is the work queue: an auto-named address is one that has " +
+      "been found and not yet understood. Their names cannot be edited by id — " +
+      "name the address instead.",
+    {
+      project,
+      kind: z
+        .enum(["calls", "jumps", "data", "any"])
+        .optional()
+        .describe("calls = sub_, jumps = loc_, data = dat_. Default any"),
+      limit: z.number().int().min(1).max(200).optional().describe("Default 50"),
+    },
+    ({
+      project: id,
+      kind,
+      limit,
+    }: {
+      project?: string;
+      kind?: "calls" | "jumps" | "data" | "any";
+      limit?: number;
+    }) => context().workspace(id).unnamed(kind ?? "any", limit ?? 50)
+  );
+
+  tool(
+    "list_labels",
+    "Labels, narrowed by where they came from, their type, their name, or an " +
+      "address range.",
+    {
+      project,
+      source: z
+        .enum(["user", "layer", "region", "platform", "auto"])
+        .optional()
+        .describe("user = someone chose it; auto = the disassembler invented it"),
+      type: z.enum(["entry", "function", "code", "address"]).optional(),
+      namePattern: z.string().optional().describe("Case-insensitive substring"),
+      limit: z.number().int().min(1).max(500).optional().describe("Default 200"),
+    },
+    ({ project: id, limit, ...criteria }: { project?: string; limit?: number }) =>
+      context().workspace(id).labels(criteria, limit ?? 200)
+  );
+
+  tool(
+    "changes_since",
+    "What has happened to a project since a position you were given. Use it " +
+      "to catch up rather than re-reading everything: someone may be editing " +
+      "alongside you. Pass 0 the first time, then the cursor you get back.",
+    {
+      project,
+      cursor: z.number().int().min(0).optional().describe("Default 0, from the beginning"),
+      limit: z.number().int().min(1).max(500).optional().describe("Default 100"),
+    },
+    ({
+      project: id,
+      cursor,
+      limit,
+    }: {
+      project?: string;
+      cursor?: number;
+      limit?: number;
+    }) => context().workspace(id).changesSince(cursor ?? 0, limit ?? 100)
+  );
+
+  // --- editing --------------------------------------------------------
+  //
+  // Every write reports how the instruction count moved. Naming something a
+  // function is how code reachable only through a jump table gets decoded at
+  // all, so that number is how you tell a good guess from a wasted one.
+
+  tool(
+    "set_label",
+    "Name an address, or rename what is already there.",
+    {
+      project,
+      address,
+      name: z.string().min(1),
+      type: z.enum(["entry", "function", "code", "address"]).optional(),
+      comment: z.string().optional(),
+      expectVersion: z
+        .string()
+        .optional()
+        .describe("Refuse if the project has changed since you read it"),
+    },
+    (args: {
+      project?: string;
+      address: number;
+      name: string;
+      type?: "entry" | "function" | "code" | "address";
+      comment?: string;
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.setLabel(caller, args.address, args.name, args.type, args.comment);
+    }
+  );
+
+  tool(
+    "remove_label",
+    "Remove the label at an address. Only labels this project declares; a " +
+      "built-in name is not one of them.",
+    { project, address, expectVersion: z.string().optional() },
+    (args: { project?: string; address: number; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.removeLabel(caller, args.address);
+    }
+  );
+
+  tool(
+    "mark_function",
+    "Declare an address a subroutine, creating a label if there is none. " +
+      "This makes it an entry point, so it is how code nothing references " +
+      "gets decoded. An invented name is rewritten so its prefix matches.",
+    {
+      project,
+      address,
+      name: z.string().optional(),
+      expectVersion: z.string().optional(),
+    },
+    (args: { project?: string; address: number; name?: string; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.markFunction(caller, args.address, args.name);
+    }
+  );
+
+  tool(
+    "set_region",
+    "Say what a span of memory holds. Marking data stops it being disassembled " +
+      "as garbage, and marking a jumptable decodes the code it points at, " +
+      "which no control-flow walk can reach on its own.",
+    {
+      project,
+      start: address,
+      end: address,
+      kind: z.enum(["code", "data", "text", "jumptable", "unknown"]),
+      name: z.string().optional(),
+      comment: z.string().optional(),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      start: number;
+      end: number;
+      kind: "code" | "data" | "text" | "jumptable" | "unknown";
+      name?: string;
+      comment?: string;
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.setRegion(caller, args.start, args.end, args.kind, args.name, args.comment);
+    }
+  );
+
+  tool(
+    "undo",
+    "Take back your own most recent change. Reaches anything recorded here, " +
+      "on the command line, or in a browser — every edit is written down.",
+    { project },
+    ({ project: id }: { project?: string }) => {
+      const { workspace, caller } = context();
+      return workspace(id).undo(caller);
+    }
+  );
+}

@@ -129,6 +129,23 @@ export class Workspace {
 
   // --- reads ----------------------------------------------------------
 
+  /** What this server holds, for a caller that knows nothing yet. */
+  catalogue(): {
+    projects: { id: string; name: string }[];
+    users: { id: string; name: string }[];
+    storage: "sqlite" | "file";
+  } {
+    const { storage } = this.room;
+    const sqlite = storage instanceof SqliteStorage;
+    return {
+      projects: sqlite
+        ? storage.projects()
+        : [{ id: this.room.projectId, name: this.room.projectPath }],
+      users: sqlite ? storage.users().map(({ id, name }) => ({ id, name })) : [],
+      storage: sqlite ? "sqlite" : "file",
+    };
+  }
+
   describe(): {
     project: string;
     version: string;

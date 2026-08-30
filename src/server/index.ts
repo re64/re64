@@ -23,6 +23,10 @@ import {
 } from "../store/index.js";
 import { diffProjects, parseProject } from "../core/index.js";
 import { SyncServer } from "./sync.js";
+import { Workspace } from "./workspace.js";
+import { McpEndpoint, createMcpEndpoint } from "./mcp/transport.js";
+import { Caller, resolveCaller } from "./mcp/identity.js";
+import { registerTools } from "./mcp/tools.js";
 import { applyOpToDoc, projectFromDoc } from "../core/crdt/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -168,12 +172,55 @@ export function startServer(options: ServerOptions): RunningServer {
     return catalog()?.projects()[0]?.id ?? DEFAULT_PROJECT;
   }
 
+  /**
+   * The agent-facing endpoint, brought up on first use.
+   *
+   * Its SDK is the heaviest dependency here by a wide margin, and a server
+   * nobody points an agent at should not pay to load it.
+   */
+  let endpoint: Promise<McpEndpoint | undefined> | undefined;
+  let callerFor: () => Caller = () => ({ userId: "agent", label: "agent" });
+
+  const mcp = () =>
+    (endpoint ??= createMcpEndpoint({
+      registerTools,
+      context: () => ({
+        workspace: (projectId) => workspaceFor(projectId ?? defaultProject()),
+        caller: callerFor(),
+      }),
+    }));
+
+  /** One Workspace per project, holding its analysis cache between calls. */
+  const workspaces = new Map<string, Workspace>();
+  function workspaceFor(projectId: string): Workspace {
+    const existing = workspaces.get(projectId);
+    if (existing) return existing;
+
+    const { sync, storage } = room(projectId);
+    const made = new Workspace({ store: sync.store, storage, projectId, projectPath });
+    workspaces.set(projectId, made);
+    return made;
+  }
+
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     const path = url.pathname;
 
     try {
       // --- API ---------------------------------------------------------
+      if (path === "/mcp") {
+        const endpoint = await mcp();
+        if (!endpoint) {
+          return sendJson(res, 501, {
+            error: "The MCP endpoint is unavailable; its SDK could not be loaded",
+          });
+        }
+        callerFor = () => resolveCaller(req, url, room(projectOf(url)).storage);
+        // The transport wants the parsed body; a GET or DELETE carries none.
+        const raw = req.method === "POST" ? await readBody(req) : "";
+        return endpoint.handle(req, res, raw ? JSON.parse(raw) : undefined);
+      }
+
       if (path === "/api/projects" && req.method === "GET") {
         const listed = catalog()?.projects() ?? [];
         return sendJson(res, 200, {
