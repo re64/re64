@@ -149,10 +149,23 @@ export function startServer(options: ServerOptions): RunningServer {
   /** Which project a request is about; the only one, unless it says otherwise. */
   const projectOf = (url: URL) => url.searchParams.get("project") ?? defaultProject();
 
+  /**
+   * One connection for questions about the database itself, rather than about a
+   * project inside it.
+   *
+   * Opened once. Every open runs the schema DDL, and this is reached from any
+   * request that omits `?project=` — a handful of times for a browser, hundreds
+   * for an agent.
+   */
+  let catalogue: SqliteStorage | undefined;
+  function catalog(): SqliteStorage | undefined {
+    if (!isDatabase) return undefined;
+    catalogue ??= new SqliteStorage(projectPath);
+    return catalogue;
+  }
+
   function defaultProject(): string {
-    if (!isDatabase) return DEFAULT_PROJECT;
-    const first = new SqliteStorage(projectPath).projects()[0];
-    return first?.id ?? DEFAULT_PROJECT;
+    return catalog()?.projects()[0]?.id ?? DEFAULT_PROJECT;
   }
 
   const server = createServer(async (req, res) => {
@@ -162,7 +175,7 @@ export function startServer(options: ServerOptions): RunningServer {
     try {
       // --- API ---------------------------------------------------------
       if (path === "/api/projects" && req.method === "GET") {
-        const listed = isDatabase ? new SqliteStorage(projectPath).projects() : [];
+        const listed = catalog()?.projects() ?? [];
         return sendJson(res, 200, {
           projects: listed.length ? listed : [{ id: defaultProject(), name: projectPath }],
         });
@@ -341,6 +354,7 @@ export function startServer(options: ServerOptions): RunningServer {
       return (server.address() as { port: number } | null)?.port ?? port;
     },
     async close() {
+      catalogue?.close();
       for (const { sync } of rooms.values()) {
         sync.flattenNow();
         sync.close();

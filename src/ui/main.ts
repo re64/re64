@@ -894,7 +894,11 @@ function preferredUserId(): string | undefined {
 
 async function loadUsers(): Promise<void> {
   try {
-    const res = await fetch("/api/users");
+    // Scoped like every other call: an unscoped one materialises a room for
+    // whichever project sorts first, document and file watcher included.
+    const res = await fetch(
+      "/api/users" + (currentProject ? `?project=${encodeURIComponent(currentProject)}` : "")
+    );
     users = res.ok ? ((await res.json()) as { users: User[] }).users : [];
   } catch {
     users = [];
@@ -1063,7 +1067,10 @@ function showExportedProject(): void {
 async function exportProjectFile(): Promise<void> {
   if (!session) return;
   try {
-    const res = await fetch("/api/export", { method: "POST" });
+    const res = await fetch(
+      "/api/export" + (currentProject ? `?project=${encodeURIComponent(currentProject)}` : ""),
+      { method: "POST" }
+    );
     if (!res.ok) {
       throw new Error(((await res.json()) as { error?: string }).error ?? "export failed");
     }

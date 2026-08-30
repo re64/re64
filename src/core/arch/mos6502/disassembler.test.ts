@@ -195,3 +195,46 @@ describe("InstructionIndex", () => {
     expect(range[1].address).toBe(0x1002);
   });
 });
+
+describe("scaling", () => {
+  /**
+   * Guards a change that is invisible in correctness and enormous in cost.
+   *
+   * Overlap detection used to scan every instruction decoded so far for every
+   * address queued, which is quadratic: fine at a thousand instructions, four
+   * seconds at forty thousand. Analysis now runs on the server, where that
+   * would block the event loop and stall every connected browser.
+   */
+  it("stays linear over a large program", () => {
+    // NOP-sleds decode one byte at a time, so this is 0x8000 instructions.
+    const size = 0x8000;
+    const bytes = new Uint8Array(size).fill(0xea);
+    const reader = {
+      readByte: (a: number) => (a >= 0x8000 && a < 0x8000 + size ? bytes[a - 0x8000] : undefined),
+    };
+
+    const started = performance.now();
+    const result = disassemble(reader, { entryPoints: [0x8000] });
+    const elapsed = performance.now() - started;
+
+    expect(result.instructions.size).toBe(size);
+    // The quadratic version took seconds at this size; the bound is generous so
+    // this fails on a regression rather than on a slow machine.
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  it("still reports an instruction landing inside another", () => {
+    // JMP $8001 — into the middle of its own three-byte encoding.
+    const bytes = new Uint8Array([0x4c, 0x01, 0x80]);
+    const reader = {
+      readByte: (a: number) => (a >= 0x8000 && a < 0x8003 ? bytes[a - 0x8000] : undefined),
+    };
+
+    const result = disassemble(reader, { entryPoints: [0x8000] });
+    expect(result.warnings).toContainEqual({
+      type: "overlap",
+      address: 0x8001,
+      existingAddress: 0x8000,
+    });
+  });
+});

@@ -235,6 +235,46 @@ describe.each(BACKENDS)("$name", (b) => {
     });
   });
 
+  describe("what undo will restore", () => {
+    it("records the value the document holds, not the one the export lags at", () => {
+      // The export trails the document by up to the write debounce. An inverse
+      // computed against it names a value that may already be stale — so a
+      // human renames a label, an agent touches it moments later, and undo
+      // restores something neither of them ever chose.
+      const s = store();
+      applyOpToDoc(s.document(), {
+        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "ByAHuman",
+      });
+      // Deliberately no writeFile(): this is the window the debounce leaves open.
+      expect(currentText()).not.toContain("ByAHuman");
+
+      s.runOps(
+        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "ByAnAgent" }],
+        "agent",
+        1
+      );
+
+      const recorded = storage().readOps().at(-1)!;
+      expect(recorded.inverse).toMatchObject({ op: "label.set", name: "ByAHuman" });
+    });
+
+    it("restores that value when undone", () => {
+      const s = store();
+      applyOpToDoc(s.document(), {
+        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "ByAHuman",
+      });
+      s.runOps(
+        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "ByAnAgent" }],
+        "agent",
+        1
+      );
+
+      s.undo("agent");
+      const names = (projectFromDoc(s.document()).layers[0].labels ?? []).map((l) => l.name);
+      expect(names).toContain("ByAHuman");
+    });
+  });
+
   describe("the export settles", () => {
     it("agrees with the document, so a write does not provoke another", () => {
       // If the exported text does not round-trip back to the same document,

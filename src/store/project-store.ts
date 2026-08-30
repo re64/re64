@@ -28,6 +28,7 @@ import {
   applyOps,
   diffProjects,
   describeOp,
+  formatProject,
   invertOp,
   parseProject,
 } from "../core/index.js";
@@ -304,7 +305,12 @@ export class ProjectStore {
       // the state the operation is actually applied to.
       this.absorb(this.storage.readText());
 
-      let text = this.storage.readText();
+      // Against the *document*, not the export. The export trails by up to the
+      // write debounce, so an inverse computed from it can name a value that is
+      // already stale — and undo would then restore something nobody chose.
+      // The layout does not matter here: an inverse is an operation, and this
+      // text is only ever read to derive one.
+      let text = formatProject(projectFromDoc(this.document()));
       const changes: Change[] = [];
       for (const op of ops) {
         changes.push({ op, inverse: invertOp(text, op), author, at: now });

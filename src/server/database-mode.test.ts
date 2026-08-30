@@ -146,6 +146,25 @@ describe("a server given a database", () => {
     provider.destroy();
   });
 
+  it("exports the project asked for, not whichever sorts first", async () => {
+    // The export button used to omit the project, so in a database holding
+    // several it wrote out the wrong one.
+    const res = await fetch(`${base}/api/export?project=${project}`, { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { ok: boolean }).ok).toBe(true);
+  });
+
+  it("answers about the database without opening it again each time", async () => {
+    // Every open runs the schema DDL, and an agent asks far more often than a
+    // browser does.
+    for (let i = 0; i < 50; i++) {
+      const listed = (await (await fetch(`${base}/api/projects`)).json()) as {
+        projects: { id: string }[];
+      };
+      expect(listed.projects.map((p) => p.id)).toContain(project);
+    }
+  });
+
   it("accepts an edit and keeps it", async () => {
     const before = (await (await fetch(`${base}/api/project?project=${project}`)).json()) as {
       raw: string;

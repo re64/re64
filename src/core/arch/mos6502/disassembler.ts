@@ -158,6 +158,7 @@ export function disassemble(
   options: DisassemblyOptions
 ): DisassemblyResult {
   const instructions = new Map<number, Instruction>();
+  const occupied = new Occupancy();
   const warnings: DisassemblyWarning[] = [];
   const references = new Map<number, Reference[]>();
   const regions = options.regions;
@@ -186,7 +187,7 @@ export function disassemble(
     }
 
     // Check for overlap with existing instruction
-    const overlap = findOverlap(instructions, address);
+    const overlap = occupied.covering(address);
     if (overlap !== undefined) {
       warnings.push({
         type: "overlap",
@@ -215,6 +216,7 @@ export function disassemble(
 
     const instr = result.instruction;
     instructions.set(address, instr);
+    occupied.claim(address, instr.bytes.length);
 
     // Extract and record references from this instruction
     const instrRefs = extractReferences(instr);
@@ -238,18 +240,30 @@ export function disassemble(
  * Check if decoding at `address` would overlap with an existing instruction.
  * Returns the address of the overlapping instruction, or undefined if no overlap.
  */
-function findOverlap(
-  instructions: Map<number, Instruction>,
-  address: number
-): number | undefined {
-  // Check if any existing instruction spans this address
-  for (const [existingAddr, instr] of instructions) {
-    const end = existingAddr + instr.bytes.length;
-    if (address > existingAddr && address < end) {
-      return existingAddr;
-    }
+/**
+ * Which decoded instruction, if any, already covers an address.
+ *
+ * A byte map rather than a scan of everything decoded so far. The scan was
+ * quadratic — every queued address against every instruction already found —
+ * which is invisible on a few thousand instructions and four seconds on forty
+ * thousand. That matters now that analysis runs on the server, where it would
+ * block the event loop and stall every connected browser.
+ *
+ * Holds the address of the instruction owning each byte, offset by one so that
+ * zero means unclaimed; the 6502 address space is small enough to afford it.
+ */
+class Occupancy {
+  private readonly owner = new Uint32Array(0x10000);
+
+  claim(address: number, length: number): void {
+    for (let i = 0; i < length; i++) this.owner[(address + i) & 0xffff] = address + 1;
   }
-  return undefined;
+
+  /** The instruction covering this address, or undefined when it starts one. */
+  covering(address: number): number | undefined {
+    const owner = this.owner[address & 0xffff];
+    return owner !== 0 && owner - 1 !== address ? owner - 1 : undefined;
+  }
 }
 
 /** Create an index for fast instruction lookup by address */
