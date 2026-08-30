@@ -15,6 +15,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Caller } from "./identity.js";
 import type { Workspace } from "../workspace.js";
+import { McpLog, McpLogEntry, replyOf } from "./log.js";
 
 export interface McpContext {
   workspace: (projectId?: string) => Workspace;
@@ -38,6 +39,7 @@ type ToolRegistrar = (server: unknown, context: () => McpContext) => void;
 export async function createMcpEndpoint(options: {
   context: () => McpContext;
   registerTools: ToolRegistrar;
+  log?: McpLog;
   name?: string;
   version?: string;
 }): Promise<McpEndpoint | undefined> {
@@ -82,6 +84,33 @@ export async function createMcpEndpoint(options: {
         void server.close();
       });
 
+      const log = options.log;
+      const watching = log ? watchReply(response) : undefined;
+      const started = Date.now();
+
+      if (log && watching) {
+        // On `finish`, not after `handleRequest`: the transport answers as an
+        // event stream and resolves once the stream is set up, so reading the
+        // reply at that point sees nothing written yet. `close` is the backstop
+        // for a client that hangs up mid-reply, which is itself worth recording.
+        let recorded = false;
+        const write = (): void => {
+          if (recorded) return;
+          recorded = true;
+          log.record({
+            ...describeRequest(body),
+            at: new Date(started).toISOString(),
+            ms: Date.now() - started,
+            caller: safeCaller(options.context),
+            session: header(request, "mcp-session-id"),
+            bytes: watching.bytes(),
+            ...replyOf(watching.text(), { truncated: watching.truncated() }),
+          });
+        };
+        response.on("finish", write);
+        response.on("close", write);
+      }
+
       await server.connect(transport);
       await transport.handleRequest(request, response, body);
     },
@@ -104,4 +133,90 @@ interface Transport {
     body?: unknown
   ): Promise<void>;
   close(): Promise<void>;
+}
+
+/** The caller, if resolving one does not itself fail. */
+function safeCaller(context: () => McpContext): string | undefined {
+  try {
+    return context().caller.userId;
+  } catch {
+    return undefined;
+  }
+}
+
+function header(request: IncomingMessage, name: string): string | undefined {
+  const value = request.headers[name];
+  return Array.isArray(value) ? value[0] : value;
+}
+
+/**
+ * What was asked for, from the request body.
+ *
+ * Reads the JSON-RPC envelope directly rather than hooking tool dispatch, so a
+ * call naming a tool that does not exist is recorded as the attempt it was.
+ */
+function describeRequest(body: unknown): Partial<McpLogEntry> {
+  const message = body as {
+    method?: string;
+    params?: {
+      name?: string;
+      arguments?: unknown;
+      protocolVersion?: string;
+      clientInfo?: { name?: string; version?: string };
+    };
+  };
+  if (!message?.method) return {};
+
+  return {
+    method: message.method,
+    tool: message.params?.name,
+    args: message.params?.arguments,
+    client: message.params?.clientInfo,
+    protocol: message.params?.protocolVersion,
+  };
+}
+
+/**
+ * Watch what is written back without holding on to it.
+ *
+ * A disassembly read is large and there is no reason to keep a copy of one, so
+ * the size is counted in full and only the head is retained — enough for the
+ * JSON-RPC envelope and an error message, which is all the transcript wants.
+ */
+function watchReply(response: ServerResponse): {
+  bytes(): number;
+  text(): string;
+  truncated(): boolean;
+} {
+  const KEEP = 8_192;
+  let seen = 0;
+  let head = "";
+
+  const observe = (chunk: unknown): void => {
+    // The SDK writes a plain Uint8Array, which is not a Buffer — a guard
+    // checking only for Buffer silently discards every chunk and leaves a
+    // transcript that records the request and nothing about the answer.
+    let text: string;
+    if (typeof chunk === "string") text = chunk;
+    else if (ArrayBuffer.isView(chunk)) text = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength).toString("utf8");
+    else return;
+
+    seen += Buffer.byteLength(text);
+    if (head.length < KEEP) head += text.slice(0, KEEP - head.length);
+  };
+
+  const write = response.write.bind(response);
+  const end = response.end.bind(response);
+
+  response.write = ((chunk: unknown, ...rest: unknown[]) => {
+    observe(chunk);
+    return (write as (...a: unknown[]) => boolean)(chunk, ...rest);
+  }) as typeof response.write;
+
+  response.end = ((chunk: unknown, ...rest: unknown[]) => {
+    observe(chunk);
+    return (end as (...a: unknown[]) => ServerResponse)(chunk, ...rest);
+  }) as typeof response.end;
+
+  return { bytes: () => seen, text: () => head, truncated: () => seen > head.length };
 }

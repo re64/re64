@@ -27,6 +27,7 @@ import { Workspace } from "./workspace.js";
 import { McpEndpoint, createMcpEndpoint } from "./mcp/transport.js";
 import { Caller, resolveCaller } from "./mcp/identity.js";
 import { registerTools } from "./mcp/tools.js";
+import { McpLog, defaultMcpLogPath, openMcpLog } from "./mcp/log.js";
 import { applyOpToDoc, projectFromDoc } from "../core/crdt/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -63,6 +64,14 @@ export interface ServerOptions {
   host: string;
   /** Suppress the startup banner; tests bind ephemeral ports in bulk. */
   quiet?: boolean;
+  /**
+   * Where to transcribe agent requests, or false for nowhere.
+   *
+   * Defaults to a file beside the database. On by default because its purpose
+   * is to be there already when something interesting happens — a transcript
+   * switched on after the run that raised the question has missed it.
+   */
+  mcpLog?: string | false;
 }
 
 /** A running server, so callers (and tests) can shut one down cleanly. */
@@ -181,9 +190,14 @@ export function startServer(options: ServerOptions): RunningServer {
   let endpoint: Promise<McpEndpoint | undefined> | undefined;
   let callerFor: () => Caller = () => ({ userId: "agent", label: "agent" });
 
+  const mcpLog: McpLog = openMcpLog(
+    options.mcpLog === undefined ? defaultMcpLogPath(projectPath) : options.mcpLog
+  );
+
   const mcp = () =>
     (endpoint ??= createMcpEndpoint({
       registerTools,
+      log: mcpLog,
       context: () => ({
         workspace: (projectId) => workspaceFor(projectId ?? defaultProject()),
         caller: callerFor(),
@@ -420,14 +434,22 @@ if (isMain) {
   const args = process.argv.slice(2);
   const projectArg = args.find((a) => !a.startsWith("-"));
   const portIndex = args.indexOf("--port");
+  const logIndex = args.indexOf("--mcp-log");
   if (!projectArg) {
-    console.error("usage: re64-server <project.re64> [--port N]");
+    console.error(
+      "usage: re64-server <project.re64> [--port N] [--mcp-log PATH | --no-mcp-log]"
+    );
     process.exit(1);
   }
   const running = startServer({
     projectPath: resolve(projectArg),
     port: portIndex >= 0 ? Number(args[portIndex + 1]) : 5164,
     host: "127.0.0.1",
+    mcpLog: args.includes("--no-mcp-log")
+      ? false
+      : logIndex >= 0
+        ? resolve(args[logIndex + 1])
+        : undefined,
   });
 
   // Registered here rather than inside `startServer`, which the tests call

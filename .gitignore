@@ -12,3 +12,6 @@ public/app.js.map
 *.re64db
 *.re64db-wal
 *.re64db-shm
+
+# Agent request transcripts: experiment output, regenerated per run
+*.mcp.jsonl
