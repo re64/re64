@@ -66,6 +66,11 @@ export function ensureOwningLayer(
   };
 }
 
+/** Whether any layer already owns this address, without throwing to find out. */
+export function ownsAddress(loaded: LoadedProject, address: number): boolean {
+  return resolveOwningLayer(loaded, address) !== undefined;
+}
+
 /** The layer an annotation at this address belongs to. */
 export function owningLayerId(loaded: LoadedProject, address: number): string {
   const index = resolveOwningLayer(loaded, address);

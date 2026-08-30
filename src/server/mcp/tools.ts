@@ -13,6 +13,7 @@
  */
 
 import { z } from "zod";
+import type { LabelType } from "../../core/index.js";
 import type { McpContext } from "./transport.js";
 
 /** Accepts `$8100`, `0x8100` or plain decimal, and says so in the schema. */
@@ -259,6 +260,38 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.setLabel(caller, args.address, args.name, args.type, args.comment);
+    }
+  );
+
+  tool(
+    "set_labels",
+    "Name several addresses in one call, as one action. Undo takes the whole " +
+      "batch back. Use this rather than a call per label: a real disassembly " +
+      "has hundreds, and one round trip each is almost all protocol.",
+    {
+      project,
+      labels: z
+        .array(
+          z.strictObject({
+            address,
+            name: z.string().min(1),
+            type: z.enum(["entry", "function", "code", "address"]).optional(),
+            comment: z.string().optional(),
+          })
+        )
+        .min(1)
+        .max(500),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      labels: { address: number; name: string; type?: LabelType; comment?: string }[];
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.setLabels(caller, args.labels);
     }
   );
 

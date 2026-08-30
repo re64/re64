@@ -622,3 +622,54 @@ describe("an edit that breaks the decode", () => {
     expect(result.warnings).toBeUndefined();
   });
 });
+
+describe("naming many addresses at once", () => {
+  it("takes a batch and reports it as one action", () => {
+    const result = workspace.setLabels(agent, [
+      { address: 0x8450, name: "BatchedOne", type: "function" },
+      { address: 0x8870, name: "BatchedTwo", type: "function" },
+      { address: 0x8230, name: "BatchedThree" },
+    ]);
+
+    expect(result.did).toHaveLength(3);
+    // Distinctive names on purpose: namePattern matches case-insensitively and
+    // the built-in C64 table is full of ordinary words.
+    expect(workspace.labels({ namePattern: "Batched" }).total).toBe(3);
+  });
+
+  it("undoes the whole batch, not the last of it", () => {
+    workspace.setLabels(agent, [
+      { address: 0x8450, name: "BatchedOne" },
+      { address: 0x8870, name: "BatchedTwo" },
+    ]);
+    workspace.undo(agent);
+
+    expect(workspace.labels({ namePattern: "Batched" }).total).toBe(0);
+  });
+
+  it("makes one symbols layer for a batch of unowned addresses, not one each", () => {
+    const blank = blankWorkspace();
+    blank.setLabels(agent, [
+      { address: 0x02, name: "currentXPosition" },
+      { address: 0x03, name: "currentYPosition" },
+      { address: 0x04, name: "currentCharacter" },
+    ]);
+
+    const symbols = blank.describe().layers.filter((l) => l.name.includes("symbols"));
+    expect(symbols).toHaveLength(1);
+    expect(blank.labels({ source: "user" }).total).toBe(3);
+  });
+
+  it("carries comments through the batch", () => {
+    workspace.setLabels(agent, [
+      { address: 0x8450, name: "Named", comment: "and explained" },
+    ]);
+
+    const rows = workspace.disassembly(0x8450, 3).lines.map((l) => l.text).join("\n");
+    expect(rows).toContain("; and explained");
+  });
+
+  it("refuses an empty batch rather than reporting success", () => {
+    expect(() => workspace.setLabels(agent, [])).toThrow(/at least one/);
+  });
+});

@@ -29,6 +29,7 @@ import {
   commentSetOp,
   ensureOwningLayer,
   labelSetOp,
+  ownsAddress,
   newId,
   makeFileLoader,
   markFunctionOps,
@@ -572,6 +573,67 @@ export class Workspace {
             ]
           : []),
       ];
+    });
+  }
+
+  /**
+   * Name several addresses as one action.
+   *
+   * The reference disassembly has hundreds of labels, and one call each is
+   * hundreds of round trips returning an instruction delta nobody asked for.
+   * One action means one changeset, so undo takes the batch back whole.
+   *
+   * At most one symbols layer is created however many unowned addresses are in
+   * the batch: the per-address helper is asked once, and later addresses reuse
+   * what the first one made — otherwise naming forty zero-page variables would
+   * build forty layers.
+   */
+  setLabels(
+    caller: Caller,
+    labels: readonly { address: number; name: string; type?: LabelType; comment?: string }[]
+  ): EditResult {
+    if (labels.length === 0) throw new Error("Give at least one label.");
+
+    return this.edit(caller, (loaded) => {
+      const ops: Op[] = [];
+      let madeLayer: string | undefined;
+
+      for (const entry of labels) {
+        let layerId: string;
+        if (madeLayer !== undefined && !ownsAddress(loaded, entry.address)) {
+          layerId = madeLayer;
+        } else {
+          const owning = ensureOwningLayer(loaded, entry.address, this.room.projectId);
+          layerId = owning.layerId;
+          if (owning.create) {
+            ops.push(owning.create);
+            madeLayer = owning.layerId;
+          }
+        }
+
+        ops.push(
+          madeLayer === layerId
+            ? { op: "label.set", id: newId("lbl"), layerId, address: entry.address, name: entry.name, type: entry.type }
+            : labelSetOp(loaded, entry.address, entry.name, entry.type)
+        );
+
+        if (entry.comment) {
+          ops.push(
+            madeLayer === layerId
+              ? ({
+                  op: "comment.set",
+                  id: newId("cmt"),
+                  layerId,
+                  address: entry.address,
+                  placement: "before",
+                  text: entry.comment,
+                } as Op)
+              : commentSetOp(loaded, entry.address, "before", entry.comment)
+          );
+        }
+      }
+
+      return ops;
     });
   }
 
