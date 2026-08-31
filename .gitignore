@@ -20,3 +20,6 @@ public/app.js.map
 experiments/*/run/
 # ...but keep the transcripts a finding was drawn from
 !experiments/*/runs/
+
+# Third-party test material is fetched, not built
+3party/**/*.bin
