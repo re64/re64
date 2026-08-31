@@ -761,6 +761,9 @@ export class Workspace {
       itself: show(found.own),
       including_what_it_calls: show(found.total),
       calls: found.calls.map(name),
+      // Derived from the stack delta, which knows exactly: a block is
+      // straight-line, so how far the stack moved needs no guessing.
+      returns: found.returns.length > 0 ? found.returns.map((r) => r.why) : undefined,
       incomplete:
         found.incomplete.length > 0
           ? found.incomplete

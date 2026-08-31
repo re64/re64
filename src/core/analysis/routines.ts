@@ -57,6 +57,15 @@ export interface RoutineEffects {
   /** Subroutines it calls, directly. */
   calls: number[];
   /**
+   * Every way it leaves that is not an ordinary return.
+   *
+   * Derived from `stackDelta`, which already knows: the count is exact because
+   * a block is straight-line, so "how much did the stack move" needs no guessing.
+   */
+  returns: ReturnBehaviour[];
+  /** True when it returns past its caller, so a caller does not get control back. */
+  skipsFrames: boolean;
+  /**
    * Why the answer may be short, in the caller's terms.
    *
    * Never empty of meaning: an instruction with no semantics makes both sets
@@ -72,6 +81,122 @@ export interface Effects {
   flags: number[];
   readsComputedMemory: boolean;
   writesComputedMemory: boolean;
+}
+
+export interface ReturnBehaviour {
+  at: number;
+  /** How many extra call frames it pops. 0 means it leaves without returning normally. */
+  skipsFrames: number;
+  why: string;
+}
+
+/**
+ * How a routine leaves, worked out from the stack.
+ *
+ * The delta already determines this and nothing needs to be guessed — but it
+ * has to be accumulated **from the routine's entry**, not read off the block
+ * that returns. An interrupt handler saves its registers in one block and
+ * restores them in another, so the returning block alone is three bytes short
+ * and looks broken; the routine is balanced. Judging blocks in isolation
+ * reports every handler in every program as anomalous.
+ *
+ * The convention: at the entry, depth is 0 and the caller's return address is
+ * already on the stack. A routine that returns normally is back at 0 by the
+ * time its `RTS` runs. Sitting at -2 means an extra address has been popped and
+ * it returns one frame further up — which is what `$87FE` in Gridrunner does.
+ *
+ * `RTS` pops two bytes, `RTI` three, and that difference is the whole reason
+ * this cannot be compared against one number.
+ */
+function describeReturns(entry: number, body: readonly BasicBlock[]): ReturnBehaviour[] {
+  const byStart = new Map(body.map((b) => [b.start, b]));
+  const depth = new Map<number, number | undefined>([[entry, 0]]);
+  const found: ReturnBehaviour[] = [];
+  const queue = [entry];
+  const conflicted = new Set<number>();
+
+  while (queue.length > 0) {
+    const at = queue.pop() as number;
+    const block = byStart.get(at);
+    if (!block) continue;
+
+    const here = depth.get(at);
+    // A `JSR` pushes a return address that the callee's `RTS` pops again, so
+    // across a call the net effect on *this* routine's stack is nothing. The
+    // block's own delta counts the push, because a block cannot see what
+    // happens after it — leaving it in makes every routine look two bytes
+    // deeper per call it makes, which is how this first reported 48 findings
+    // across 50 routines: 30 bytes deeper meant fifteen calls, not a bug.
+    //
+    // It assumes the callee returns normally. Where one does not, that is
+    // reported against the callee and against everyone who calls it.
+    const pushedByCall = block.exit === "call" ? 2 : 0;
+    // `TXS` sets the pointer rather than moving it, so the chain is not deeper
+    // or shallower — it is gone, along with whatever was going to return.
+    const after = here === undefined || block.stackDelta === undefined
+      ? undefined
+      : here + block.stackDelta - pushedByCall;
+
+    for (const next of block.successors) {
+      if (!depth.has(next)) {
+        depth.set(next, after);
+        queue.push(next);
+      } else if (depth.get(next) !== after && !conflicted.has(next)) {
+        // Two ways in leaving the stack at different depths. Worth saying: it
+        // means the return address is not always in the same place.
+        conflicted.add(next);
+        found.push({
+          at: next,
+          skipsFrames: 0,
+          why:
+            `${hex(next)} is reached with the stack at two different depths, so ` +
+            `where this routine returns to depends on the path taken`,
+        });
+      }
+    }
+
+    if (block.stackDelta === undefined) {
+      found.push({
+        at: block.start,
+        skipsFrames: 0,
+        why:
+          `${hex(block.start)} sets the stack pointer outright, abandoning whatever ` +
+          `call chain it was in — so nothing that called it gets control back`,
+      });
+      continue;
+    }
+    if (block.exit !== "ret" || here === undefined) continue;
+
+    const last = block.instructions[block.instructions.length - 1];
+    const pops = last?.mnemonic === "RTI" ? 3 : 2;
+    // What the stack looked like just before the return instruction ran.
+    const before = here + block.stackDelta + pops;
+    if (before === 0) continue;
+
+    const frames = -before / 2;
+    found.push(
+      Number.isInteger(frames) && frames > 0
+        ? {
+            at: block.start,
+            skipsFrames: frames,
+            why:
+              `${hex(block.start)} reaches its ${last?.mnemonic ?? "return"} with ` +
+              `${frames * 2} bytes already popped, so it returns to its caller's ` +
+              `${frames === 1 ? "caller" : `caller ${frames} deep`} — whatever called ` +
+              `it does not get control back`,
+          }
+        : {
+            at: block.start,
+            skipsFrames: 0,
+            why:
+              `${hex(block.start)} reaches its ${last?.mnemonic ?? "return"} with the ` +
+              `stack ${before > 0 ? before + " bytes deeper" : -before + " bytes shallower"} ` +
+              `than it started, so the address it returns to is not the one pushed for it`,
+          }
+    );
+  }
+
+  return found;
 }
 
 const empty = (): Effects => ({
@@ -177,6 +302,8 @@ export function analyzeRoutines(
     const body = bodyOf(entry, byStart);
     const own = empty();
     const incomplete: string[] = [];
+    const returns: ReturnBehaviour[] = [];
+    let skipsFrames = false;
     const calls = new Set<number>();
 
     for (const block of body) {
@@ -190,19 +317,11 @@ export function analyzeRoutines(
             `these sets are short by an unknown amount`
         );
       }
-      // A routine that leaves the stack somewhere unexpected is not returning
-      // where its caller thinks. $87FE in Gridrunner pops its own return
-      // address and returns to its caller's caller.
-      if (block.exit === "ret" && block.stackDelta !== undefined && block.stackDelta !== -2) {
-        incomplete.push(
-          `${hex(block.start)} returns having moved the stack by ${block.stackDelta} ` +
-            `rather than -2, so it does not return where its caller expects`
-        );
-      }
-      if (block.stackDelta === undefined) {
-        incomplete.push(`${hex(block.start)} sets the stack pointer outright, so its depth is unknown`);
-      }
     }
+
+    const returnBehaviour = describeReturns(entry, body);
+    returns.push(...returnBehaviour);
+    skipsFrames = returnBehaviour.some((r) => r.skipsFrames > 0);
 
     routines.set(entry, {
       entry,
@@ -211,6 +330,8 @@ export function analyzeRoutines(
       own,
       total: add(empty(), own),
       calls: [...calls].sort((a, b) => a - b),
+      returns,
+      skipsFrames,
       incomplete: [...new Set(incomplete)],
     });
   }
@@ -237,10 +358,18 @@ export function analyzeRoutines(
     if (!changed) break;
   }
 
-  // A call to something that never decoded is a hole in the interprocedural
-  // answer, and only visible once every routine is known.
   for (const routine of routines.values()) {
     for (const target of routine.calls) {
+      // A callee that returns past its caller means the code after the `JSR`
+      // is not reached through that call — which the caller cannot see for
+      // itself and which the block graph assumes otherwise.
+      const callee = routines.get(target);
+      if (callee?.skipsFrames) {
+        routine.incomplete.push(
+          `${hex(target)} returns past whoever called it, so the code after that ` +
+            `JSR is not reached through it`
+        );
+      }
       if (!routines.has(target)) {
         routine.incomplete.push(
           `it calls ${hex(target)}, which did not decode, so what that touches is unknown`

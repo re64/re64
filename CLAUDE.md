@@ -1150,11 +1150,36 @@ essentially every routine. Neither is a data effect, which is the question being
 asked — where control went is the exit and the call list, and what happened to
 the stack is `stackDelta`, which says more than "touched" ever could.
 
-What it says it cannot see: an instruction with no modelled semantics leaves both
-sets short by an unknown amount; a routine whose `stackDelta` at a `ret` is not
-`-2` does not return where its caller expects — `$87FE` is `PLA PLA RTS`, which
-returns to its caller's caller and has no absolute callers at all; and
-reachability is static, so a computed jump leads somewhere no walk follows.
+**How a routine leaves is derived, not flagged as uncertain**, and the stack
+delta already determines it — but only when **accumulated from the entry**.
+Three things had to be right, and each was wrong first:
+
+- **The expected depth depends on the return instruction.** `RTS` pops two bytes,
+  `RTI` three. Comparing everything against `-2` reports every interrupt handler
+  in every program as broken.
+- **A block cannot be judged alone.** A handler saves its registers in one block
+  and restores them in another, so the returning block is three bytes short and
+  looks wrong while the routine is balanced.
+- **A call is net zero.** `JSR` pushes a return address that the callee's `RTS`
+  pops again. Counting the push makes every routine look two bytes deeper per
+  call it makes — which is how this first produced *48 findings across 50
+  routines*, one of them "30 bytes deeper" for a routine that simply made
+  fifteen calls. The implausible volume was the tell.
+
+With all three right it reports **five** things about Gridrunner, and they are
+all real: two routines that reset the stack pointer outright and abandon their
+call chain, and three that return to their *caller's caller*. `$87FE` is the
+`PLA PLA RTS` this file already knew about; the other two were invisible before,
+because the pops and the return sit in **different blocks** — `$8A2F` discards
+the address and `$8A41` returns, eight blocks apart.
+
+A caller is told too: a callee that returns past whoever called it means the code
+after that `JSR` is not reached through it, which the caller cannot see for
+itself and which the block graph assumes otherwise.
+
+What it still cannot see: an instruction with no modelled semantics leaves both
+sets short by an unknown amount, and reachability is static, so a computed jump
+leads somewhere no walk follows.
 
 ### The server analyses now, and that is a reversal
 

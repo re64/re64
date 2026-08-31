@@ -71,3 +71,58 @@ describe("what a routine touches", () => {
     expect(routineEntries(blocks, [ORG])).toContain(0x1004);
   });
 });
+
+describe("how a routine leaves", () => {
+  it("says nothing about an ordinary return", () => {
+    const { routines: r } = routines([0xa9, 0x01, 0x60]); // LDA #$01 / RTS
+    expect(r.get(ORG)!.returns).toEqual([]);
+  });
+
+  it("does not flag a balanced interrupt handler", () => {
+    // PHA TXA PHA / ... / PLA TAX PLA RTI — saves and restores, then returns.
+    // The *returning block* alone is three bytes short and looks broken, which
+    // is why the depth has to be accumulated from the entry rather than read
+    // off that block: judging blocks in isolation reports every handler in
+    // every program as anomalous.
+    const { routines: r } = routines([0x48, 0x8a, 0x48, 0x68, 0xaa, 0x68, 0x40]);
+    expect(r.get(ORG)!.returns).toEqual([]);
+  });
+
+  it("counts RTI as popping three bytes, not two", () => {
+    // An interrupt pushes the status byte as well as the address, so a bare RTI
+    // is balanced and must not be flagged. If this treated RTI like RTS it
+    // would come out one byte short and complain — which is exactly what it did
+    // for every handler before the expected depth was made to depend on the
+    // return instruction.
+    const { routines: r } = routines([0x40]);
+    expect(r.get(ORG)!.returns).toEqual([]);
+  });
+
+  it("works out that popping an extra address returns past the caller", () => {
+    // PLA PLA RTS — Gridrunner does this at $87FE. The stack delta already
+    // determined it; it used to be reported as an open question.
+    const { routines: r } = routines([0x68, 0x68, 0x60]);
+    const found = r.get(ORG)!;
+    expect(found.skipsFrames).toBe(true);
+    expect(found.returns[0]).toMatchObject({ skipsFrames: 1 });
+    expect(found.returns[0].why).toContain("caller's caller");
+  });
+
+  it("counts two extra frames as two", () => {
+    const { routines: r } = routines([0x68, 0x68, 0x68, 0x68, 0x60]);
+    expect(r.get(ORG)!.returns[0]).toMatchObject({ skipsFrames: 2 });
+  });
+
+  it("treats setting the stack pointer as abandoning the chain, not as unknown", () => {
+    // LDX #$F6 / TXS / RTS. Gridrunner resets the stack this way when it
+    // restarts. "Depth unknown" is true and useless next to what it means.
+    const { routines: r } = routines([0xa2, 0xf6, 0x9a, 0x60]);
+    expect(r.get(ORG)!.returns[0].why).toContain("abandoning");
+  });
+
+  it("warns a caller that it will not get control back", () => {
+    // $1000: JSR $1004 / RTS      $1004: PLA PLA RTS
+    const { routines: r } = routines([0x20, 0x04, 0x10, 0x60, 0x68, 0x68, 0x60]);
+    expect(r.get(ORG)!.incomplete.join(" ")).toMatch(/returns past whoever called it/);
+  });
+});
