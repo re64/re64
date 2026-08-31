@@ -17,9 +17,18 @@
  * instead, because inventing an address would be worse than admitting to one.
  */
 
-import { BasicBlock } from "../analysis/blocks.js";
+import { Instruction } from "../arch/mos6502/instruction.js";
 import { lift } from "./lift.js";
-import { FLAGS, PcodeOp, Varnode, formatVarnode, reads, sameVarnode, writes } from "./pcode.js";
+import {
+  FLAGS,
+  PcodeOp,
+  REG,
+  Varnode,
+  formatVarnode,
+  reads,
+  sameVarnode,
+  writes,
+} from "./pcode.js";
 
 export interface BlockEffects {
   /** Slots read before this block wrote them: what it depends on. */
@@ -70,11 +79,11 @@ function accumulate(sequences: readonly (readonly PcodeOp[])[]): {
   return { inputs, outputs };
 }
 
-export function blockEffects(block: BasicBlock): BlockEffects {
-  const sequences = block.instructions.map(lift);
+export function blockEffects(instructions: readonly Instruction[]): BlockEffects {
+  const sequences = instructions.map(lift);
   const { inputs, outputs } = accumulate(sequences);
 
-  const unmodelled = block.instructions
+  const unmodelled = instructions
     .filter((instr, i) => sequences[i].some((op) => op.op === "CALLOTHER"))
     .map((instr) => ({ address: instr.address, mnemonic: instr.mnemonic }));
 
@@ -101,4 +110,50 @@ export function describeEffects(effects: BlockEffects): { reads: string[]; write
   if (effects.readsComputedMemory) reads.push("memory at a computed address");
   if (effects.writesComputedMemory) writes.push("memory at a computed address");
   return { reads, writes };
+}
+
+/**
+ * Net bytes a straight-line run leaves on the stack, or undefined when that
+ * cannot be known.
+ *
+ * Derived from the lifted operations rather than from a table of which nine
+ * opcodes touch the stack. That table was a stopgap and this is what replaces
+ * it: `JSR` counts two because it emits two pushes, not because somebody wrote
+ * `2` beside its name, so the count cannot drift away from the semantics.
+ *
+ * Exact only because a block is straight-line — there is no branch inside one
+ * for the total to depend on.
+ *
+ * Undefined the moment the stack pointer is written by anything other than a
+ * step of a known size. `TXS` is the case that matters: it *sets* the pointer,
+ * so the delta is whatever the program decided, and reporting zero would be a
+ * guess dressed as an answer.
+ *
+ * It exists because `RTS` on this machine does not reliably return to its
+ * caller. Pushing an address and returning is a standard computed jump, and
+ * popping the return address to read inline data is a standard way to pass
+ * arguments — a block ending in `ret` with a non-zero delta is doing one of
+ * those, and a call graph assuming the ordinary return edge is wrong about it.
+ */
+export function stackDelta(instructions: readonly Instruction[]): number | undefined {
+  let delta = 0;
+
+  for (const instruction of instructions) {
+    for (const op of lift(instruction)) {
+      if (!op.output || op.output.space !== "register" || op.output.offset !== REG.SP) continue;
+
+      // Pushes and pulls are `SP = SP ± n`. Anything else writing SP — `TXS`
+      // above all — cannot be reduced to a number.
+      if (op.op !== "INT_ADD" && op.op !== "INT_SUB") return undefined;
+      const [target, amount] = op.inputs;
+      if (target?.space !== "register" || target.offset !== REG.SP) return undefined;
+      if (amount?.space !== "const") return undefined;
+
+      // The stack grows downward, so a push is a subtraction and counts as a
+      // byte gained.
+      delta += op.op === "INT_SUB" ? amount.offset : -amount.offset;
+    }
+  }
+
+  return delta;
 }

@@ -488,7 +488,7 @@ export class Workspace {
     const block = blockAt(program.blocks, address);
     if (!block) throw new Error(`No decoded block covers ${hex4(address)}`);
 
-    const effects = blockEffects(block);
+    const effects = blockEffects(block.instructions);
     const described = describeEffects(effects);
 
     return {

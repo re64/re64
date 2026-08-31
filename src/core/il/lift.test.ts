@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { decode } from "../arch/mos6502/decoder.js";
 import { Instruction } from "../arch/mos6502/instruction.js";
 import { BasicBlock } from "../analysis/blocks.js";
-import { blockEffects, describeEffects } from "./effects.js";
+import { blockEffects, describeEffects, stackDelta } from "./effects.js";
 import { BlockInputs, runBlock } from "./run.js";
 import { formatVarnode } from "./pcode.js";
 import { lift } from "./lift.js";
@@ -42,7 +42,7 @@ describe("loads and flags", () => {
 
   it("names the cell a static address reads, so it is an input of the block", () => {
     // LDA $10 / STA $11
-    const effects = blockEffects(blockOf([0xa5, 0x10, 0x85, 0x11]));
+    const effects = blockEffects(blockOf([0xa5, 0x10, 0x85, 0x11]).instructions);
     expect(effects.inputs.map(formatVarnode)).toEqual(["$(0x10)"]);
     expect(effects.outputs.map(formatVarnode)).toContain("$(0x11)");
     expect(effects.readsComputedMemory).toBe(false);
@@ -50,7 +50,7 @@ describe("loads and flags", () => {
 
   it("admits to an address it cannot name", () => {
     // LDA $10,X — the address depends on X, so no static answer exists.
-    const effects = blockEffects(blockOf([0xb5, 0x10]));
+    const effects = blockEffects(blockOf([0xb5, 0x10]).instructions);
     expect(effects.readsComputedMemory).toBe(true);
     expect(describeEffects(effects).reads).toContain("memory at a computed address");
     expect(effects.inputs.map(formatVarnode)).toContain("X");
@@ -206,7 +206,7 @@ describe("saying what the answer rests on", () => {
   });
 
   it("reports an unmodelled instruction in the static effects too", () => {
-    const effects = blockEffects(blockOf([0xa9, 0x05, 0x02]));
+    const effects = blockEffects(blockOf([0xa9, 0x05, 0x02]).instructions);
     expect(effects.unmodelled).toEqual([{ address: 0x8002, mnemonic: "JAM" }]);
   });
 });
@@ -214,7 +214,7 @@ describe("saying what the answer rests on", () => {
 describe("what a whole block touches", () => {
   it("counts a register read before it was written, and not after", () => {
     // LDA $10 / CLC / ADC #$01 / STA $10 — reads $10 and C, writes $10, A and flags.
-    const effects = blockEffects(blockOf([0xa5, 0x10, 0x18, 0x69, 0x01, 0x85, 0x10]));
+    const effects = blockEffects(blockOf([0xa5, 0x10, 0x18, 0x69, 0x01, 0x85, 0x10]).instructions);
     // A is written before it is read, so it is not an input.
     expect(effects.inputs.map(formatVarnode)).toEqual(["$(0x10)"]);
     expect(effects.outputs.map(formatVarnode)).toContain("A");
@@ -224,8 +224,31 @@ describe("what a whole block touches", () => {
   it("keeps a temporary out of both sides", () => {
     const ops = lift(blockOf([0xb5, 0x10]).instructions[0]);
     expect(ops.some((op) => op.output?.space === "unique")).toBe(true);
-    expect(blockEffects(blockOf([0xb5, 0x10])).outputs.every((v) => v.space !== "unique")).toBe(
+    expect(blockEffects(blockOf([0xb5, 0x10]).instructions).outputs.every((v) => v.space !== "unique")).toBe(
       true
     );
+  });
+});
+
+describe("what a block does to the stack", () => {
+  it("counts a call as two bytes, because it emits two pushes", () => {
+    expect(stackDelta(blockOf([0x20, 0x00, 0x90]).instructions)).toBe(2); // JSR
+    expect(stackDelta(blockOf([0x60]).instructions)).toBe(-2); // RTS
+    expect(stackDelta(blockOf([0x40]).instructions)).toBe(-3); // RTI
+  });
+
+  it("nets a push against a pull", () => {
+    // PHA / PHP / PLA
+    expect(stackDelta(blockOf([0x48, 0x08, 0x68]).instructions)).toBe(1);
+  });
+
+  it("gives up rather than guessing after TXS", () => {
+    // TXS sets the pointer outright. Nothing here can say to what, and zero
+    // would be a guess dressed as an answer.
+    expect(stackDelta(blockOf([0x48, 0x9a]).instructions)).toBeUndefined();
+  });
+
+  it("is zero for a run that does not touch the stack", () => {
+    expect(stackDelta(blockOf([0xa9, 0x01, 0x85, 0x10]).instructions)).toBe(0);
   });
 });

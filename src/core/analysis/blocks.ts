@@ -39,6 +39,7 @@ function jumpTargets(instr: Instruction): number[] {
   return getTargets(instr).filter((t) => t !== next);
 }
 import { InstructionIndex } from "../arch/mos6502/disassembler.js";
+import { stackDelta } from "../il/effects.js";
 
 export interface BasicBlock {
   /** First address. Blocks are identified by where they start. */
@@ -80,9 +81,10 @@ export interface BasicBlock {
    * Net bytes this block leaves on the stack, or undefined when that cannot be
    * known.
    *
-   * Computable exactly *because* a block is straight-line — there is no branch
-   * inside one for the count to depend on, which is a dividend of splitting
-   * strictly rather than loosely.
+   * Derived from the lifted operations rather than from a table naming the nine
+   * opcodes that touch the stack: `JSR` counts two because it emits two pushes,
+   * so the count cannot drift away from the semantics. Exact *because* a block
+   * is straight-line — there is no branch inside one for it to depend on.
    *
    * It exists because an `RTS` on this machine does not reliably return to its
    * caller. Pushing an address and returning is a standard computed jump, and
@@ -95,29 +97,6 @@ export interface BasicBlock {
    * then whatever the program decided, and saying zero would be a guess.
    */
   readonly stackDelta?: number;
-}
-
-/** What one instruction does to the stack pointer, in bytes. */
-function stackEffect(mnemonic: string): number | undefined {
-  switch (mnemonic) {
-    case "PHA":
-    case "PHP":
-      return 1;
-    case "PLA":
-    case "PLP":
-      return -1;
-    case "JSR":
-      return 2;
-    case "RTS":
-      return -2;
-    case "RTI":
-      return -3;
-    case "TXS":
-      // Sets the pointer rather than moving it. Nothing here can say to what.
-      return undefined;
-    default:
-      return 0;
-  }
 }
 
 /**
@@ -228,15 +207,7 @@ export function buildBlocks(
     // routine has callers, and the block knows none of them. See `stackDelta`
     // for why even that edge cannot simply be assumed on this machine.
 
-    let stackDelta: number | undefined = 0;
-    for (const instr of body) {
-      const effect = stackEffect(instr.mnemonic);
-      if (effect === undefined) {
-        stackDelta = undefined;
-        break;
-      }
-      stackDelta += effect;
-    }
+    const delta = stackDelta(body);
 
     blocks.push({
       start,
@@ -245,7 +216,7 @@ export function buildBlocks(
       successors: successors.filter((s) => instructions.has(s)),
       calls,
       exit,
-      ...(stackDelta === undefined ? {} : { stackDelta }),
+      ...(delta === undefined ? {} : { stackDelta: delta }),
       ...(options.alternate ? { alternate: true } : {}),
     });
   }

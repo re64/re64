@@ -1381,13 +1381,14 @@ control flow: `mask = INT_SUB(#0, D)` is `$00` or `$FF`, and
 `CBRANCH` — which matters because the effect sets must stay identical either
 way, and because `execute` has no way to skip operations.
 
-`stackDelta` on a basic block is a **stopgap** and should be retired when the IL
-lands. It hand-models nine opcodes to answer one question; a real semantic model
-answers it as a special case of dataflow, along with every other question of the
-kind. It earns its place meanwhile — it found the routine at `$87FE` that
-discards its own return address — but it is not the beginning of an IL, and
-growing it one opcode at a time is how a project ends up with a semantic model
-nobody planned.
+`stackDelta` **is derived now**, and the hand table of nine opcodes is gone.
+`JSR` counts two because it emits two pushes, not because somebody wrote `2`
+beside its name, so the count cannot drift away from the semantics. `TXS` still
+yields undefined — it *sets* the pointer rather than stepping it, and reporting
+zero would be a guess dressed as an answer.
+
+It reproduces what the table found and then some: `$87FE`, which discards its
+own return address, and `$83E2` alongside it.
 
 ### Overlap: every reading is kept, and shown
 
