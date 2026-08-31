@@ -83,10 +83,6 @@
       button:hover:not(:disabled) { border-color: var(--accent-dim); }
       button:disabled { opacity: 0.4; cursor: default; }
       button.active { color: var(--accent); border-color: var(--accent-dim); }
-      /* Nothing is wide enough to wrap, so the toggle has nothing to do. Still
-         clickable — dimmed rather than disabled, because "no effect right now"
-         is a different statement from "not available". */
-      button.idle { opacity: 0.45; }
 
       #goto { width: 90px; font-family: 'SF Mono', Menlo, Consolas, monospace; }
 
@@ -369,7 +365,6 @@
           <button class="tab" data-tab="debug">Debug</button>
         </div>
         <button id="toggle-map" title="Show or hide the memory map">▤ Map</button>
-        <button id="toggle-wrap">⏎ Wrap</button>
         <button id="back">← Back</button>
         <button id="undo" title="Undo">↶</button>
         <button id="redo" title="Redo">↷</button>
@@ -457,12 +452,6 @@
 
         <h3>View</h3>
         <dl>
-          <dt><kbd>w</kbd></dt>
-          <dd>
-            Wrap long rows instead of letting them run off the edge — mainly for
-            comments, which have no columns to protect. Off by default, and
-            remembered.
-          </dd>
           <dt><kbd>▤ Map</kbd></dt>
           <dd>
             Show or hide the memory map. Dragging the divider to the edge does

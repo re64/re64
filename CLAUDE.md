@@ -540,55 +540,44 @@ Two things that cost a browser round trip to find:
   .cm-gutterElement` would have thrown away its font and padding without a
   warning. Merge, never append.
 
-**Comments are wrapped in the row model, at a fixed column**, and that is what
-keeps the arrow gutter correct. A wrapped line becomes *another comment row at
-the same address*, identical in every way to one the author broke with a
-newline — so there is no continuation row to style, no special case in the
-gutter, and no way for the two to drift apart. The gutter is rendered per row,
-so a comment occupying three rows gets three cells and its verticals connect.
+**Comments are wrapped in the row model, at a fixed column of 100.** A wrapped
+line becomes *another comment row at the same address*, identical in every way to
+one the author broke with a newline — so there is no continuation row to style,
+no special case anywhere, and no way for the two to drift apart.
 
-Soft wrapping cannot do this: a soft-wrapped line is still one document line and
-gets one gutter cell, so the connector breaks across it. That is the whole
-reason the wrap lives in the model rather than in the view.
+Three things fall out of putting it in the model rather than the view, and the
+first is why it has to be there:
 
-**Fixed at 100 columns, not derived from the viewport, and that is the point.**
-Wrapping to the window would make the row model depend on the window: every
-resize would rebuild the document, on top of whatever selection or inline editor
-was open. A column is a property of a listing, the way it is in a hand-written
-disassembly, so nothing recomputes when a pane moves — and the CLI gets the same
-listing for free. `AnalyzeOptions.commentWidth` is the seam for making it
-configurable; nothing sets it yet.
+- **The CLI needs it.** A terminal cannot soft-wrap a listing into something
+  readable; it needs real rows. Anything living in CodeMirror could never have
+  served the consumer that most wants a wrapped comment.
+- **The arrow gutter comes out right for free.** It is rendered per row, so a
+  comment occupying three rows gets three cells and its verticals connect. A
+  soft-wrapped line is still one document line and gets one cell, which is
+  exactly where the connector broke.
+- **Nothing depends on the viewport.** Wrapping to the window would make the row
+  model depend on the window, so every resize would rebuild the document on top
+  of whatever selection or inline editor was open. A column is a property of a
+  listing, the way it is in a hand-written disassembly.
 
-Two things it deliberately does not touch. An **inline** comment shares its row
-with an instruction and cannot be broken, so those rows may still exceed the
-column — the only ones that do. And a **word longer than the width** is left
-long rather than split, since it is usually an identifier or an address and
-breaking it makes it unselectable to save a column.
+`AnalyzeOptions.commentWidth` is the seam for configuring it; nothing sets it
+yet.
 
-The soft toggle stays, for the residual case of a window narrower than the
-column — **and it says when that is not the case.** Once comments wrap in the
-model, a wide pane has nothing left for soft wrap to do, so the button became
-genuinely inert and therefore looked broken. It dims when no row is wider than
-the pane, which turns "does nothing" into "has nothing to do", and stays
-clickable, because those are different statements.
+**There was briefly a soft-wrap toggle as well, and removing it is the lesson.**
+It was added first, before the model wrap, and once comments wrapped at a column
+it had nothing left to do on any normal pane — so it needed a compartment, a CSS
+hanging indent, a dimmed-when-idle affordance and a `requestAnimationFrame`
+measurement purely to stop looking broken. Machinery accreting around a feature
+to make it *appear* to work is the signal that the feature is in the wrong layer.
+One mechanism, in the model, serving all four consumers.
 
-Two things that made this harder than it should have been, both worth keeping:
+Two exemptions it deliberately keeps. An **inline** comment shares its row with
+an instruction and cannot be broken, so those rows may still exceed the column —
+they are the only ones that do, in the browser and in the CLI alike. And a
+**word longer than the width** is left long rather than split, since it is
+usually an identifier or an address and breaking it makes it unselectable.
 
-- **Match CodeMirror's own `.cm-line` padding when adding a hanging indent.** It
-  is `6px`; using anything else shifts the entire listing sideways on toggle,
-  which on rows that do not wrap is the *only* thing the button appears to do.
-- **Measure on the next frame, never inside the handler that changed the
-  layout.** A pane's new width is not readable from the `sl-reposition` handler
-  that resized it, so the button settles one event behind. Coalesced on
-  `requestAnimationFrame`, like repaints.
-
-And the trap this project already knew about, met again: **a hidden tab gets no
-animation frames.** Driving the page from a background tab makes an
-rAF-scheduled update look like dead code — three separate diagnostics here
-"proved" the affordance never ran, and every one of them was measuring a tab
-Chrome had stopped painting.
-
-Two gotchas worth remembering:
+Two gotchas worth remembering:Two gotchas worth remembering:
 
 - A read-only view (`EditorView.editable.of(false)`) is **not focusable**. Without
   `contentAttributes: {tabindex: "0"}`, clicking a line leaves the keymap with no

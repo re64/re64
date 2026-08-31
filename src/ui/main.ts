@@ -10,7 +10,6 @@
  */
 
 import {
-  Compartment,
   EditorState,
   StateEffect,
   StateField,
@@ -722,7 +721,6 @@ const navKeymap = keymap.of([
   { key: "Backspace", run: () => (goBack(), true) },
   { key: "n", run: () => (nameCurrentLine(), true) },
   { key: "f", run: () => (toggleFunctionOnCurrentLine(), true) },
-  { key: "w", run: () => (toggleWrap(), true) },
   { key: "Escape", run: () => (endLabelEdit(), true) },
   { key: "Mod-z", run: () => (void undoEdit(), true) },
   { key: "Mod-Shift-z", run: () => (void redoEdit(), true) },
@@ -746,21 +744,10 @@ const navKeymap = keymap.of([
   },
 ]);
 
-/**
- * Line wrapping, reconfigurable rather than fixed.
- *
- * A compartment because it is a toggle: `lineWrapping` cannot be added or
- * removed from a running editor any other way, and rebuilding the state would
- * throw away the scroll position and the selection at the moment somebody is
- * reading.
- */
-const wrapping = new Compartment();
-
 const disasmView = new EditorView({
   state: EditorState.create({
     doc: "Loading…",
     extensions: [
-      wrapping.of([]),
       arrowGutter,
       highlightActiveLine(),
       decorationField,
@@ -786,28 +773,11 @@ const disasmView = new EditorView({
           fontFamily: "'SF Mono', Menlo, Consolas, monospace",
           paddingLeft: "6px",
           whiteSpace: "pre",
-          // A wrapped row is taller than one line and so is its gutter cell.
-          // The arrow belongs beside the row's *first* visual line, where the
-          // instruction it points at is; centring it in a tall cell slides it
-          // away from what it refers to.
-          display: "block",
         },
         ".cm-arrow-gutter .arrow-glyphs": {
           display: "inline-block",
           transform: "scaleY(1.45)",
           transformOrigin: "center",
-        },
-        // Continuation lines clear the address column, so a wrapped comment
-        // reads as one paragraph rather than restarting under the hex. Negative
-        // text-indent with matching padding is the hanging indent; it applies
-        // only while wrapping is on, since without it every row would shift.
-        // The 6px matches CodeMirror's own `.cm-line` padding, so the *first*
-        // line of every row lands exactly where it did with wrapping off.
-        // Getting it wrong shifts the whole listing sideways on toggle, which
-        // is all the button appears to do on rows that do not wrap.
-        "&.wrap .cm-line": {
-          textIndent: "-8ch",
-          paddingLeft: "calc(6px + 8ch)",
         },
         ".label-edit": {
           font: "inherit",
@@ -1074,7 +1044,6 @@ function render(restoreAddress?: number): void {
 
   if (restoreAddress !== undefined) goToAddress(restoreAddress, false);
 
-  scheduleWrapAffordance();
   timings.renderMs = performance.now() - startedRender;
   refreshEditButtons();
   if (currentTab === "debug") void renderDebug();
@@ -1471,97 +1440,11 @@ function store(key: string, value: string): void {
   }
 }
 
-/**
- * Wrap long rows, or let them run off the edge.
- *
- * Off by default: a disassembly is columnar, and wrapping puts an instruction's
- * operand under its own address, which costs more than it saves on the rows that
- * fit. Comments are the case it is for — a paragraph about a routine has no
- * column structure to protect and is unreadable at three screens wide.
- */
-let wrapEnabled = false;
-
-function setWrapped(on: boolean): void {
-  wrapEnabled = on;
-  disasmView.dispatch({
-    effects: wrapping.reconfigure(
-      on
-        ? [
-            EditorView.lineWrapping,
-            // Through the editor's own attributes, not `dom.classList`: CodeMirror
-            // rewrites `className` wholesale when it updates — adding `cm-focused`
-            // is enough — so a class set from outside survives until the first
-            // click and then silently disappears, taking the hanging indent with
-            // it.
-            EditorView.editorAttributes.of({ class: "wrap" }),
-          ]
-        : []
-    ),
-  });
-  $("#toggle-wrap").classList.toggle("active", on);
-  store("re64.wrap", on ? "1" : "0");
-  scheduleWrapAffordance();
-}
-
-const toggleWrap = () => setWrapped(!wrapEnabled);
-
-/**
- * Say when wrapping would change nothing.
- *
- * Comments already wrap at a fixed column in the row model, so on a wide pane
- * nothing is too wide and the toggle is genuinely inert — which looks exactly
- * like a broken button. Dimming it turns "does nothing" into "has nothing to
- * do", and it stays clickable, because those are different statements.
- *
- * Measured from row lengths and the editor's own character width rather than
- * from `scrollWidth`, which reports no overflow while wrapping is *on* and so
- * cannot answer the question the button is about.
- */
-function updateWrapAffordance(): void {
-  const rows = analysis?.rows;
-  const width = disasmView.scrollDOM.clientWidth;
-  if (!rows || !width) return;
-
-  const widest = rows.reduce((n, row) => Math.max(n, row.text.length), 0);
-  const fits = widest * disasmView.defaultCharacterWidth <= width;
-
-  const button = $("#toggle-wrap");
-  button.classList.toggle("idle", fits);
-  button.title = fits
-    ? "Nothing here is wider than the pane — comments already wrap at 100 columns (w)"
-    : "Wrap rows too wide for the pane instead of letting them run off the edge (w)";
-}
-
-/**
- * Measure on the next frame, not now.
- *
- * The pane's new width is not readable from inside the handler that changed it —
- * the browser has not laid out yet, so `clientWidth` is still the old one and
- * the button settles one event behind. Coalesced on a frame, like repaints, so
- * a drag measures once at the end rather than on every step.
- */
-let wrapAffordanceQueued = false;
-function scheduleWrapAffordance(): void {
-  if (wrapAffordanceQueued) return;
-  wrapAffordanceQueued = true;
-  requestAnimationFrame(() => {
-    wrapAffordanceQueued = false;
-    updateWrapAffordance();
-  });
-}
-
-// View-only: it measures, it never rebuilds the document, so a resize costs a
-// couple of comparisons rather than an analysis.
-window.addEventListener("resize", scheduleWrapAffordance);
-
-$("#toggle-wrap").addEventListener("click", toggleWrap);
-
 function setMapVisible(visible: boolean): void {
   split.classList.toggle("collapsed", !visible);
   split.position = visible ? lastMapWidth : 0;
   $("#toggle-map").classList.toggle("active", visible);
   store("re64.map", visible ? "1" : "0");
-  scheduleWrapAffordance();
 }
 
 $("#toggle-map").addEventListener("click", () => {
@@ -1579,8 +1462,6 @@ split.addEventListener("sl-reposition", () => {
     store("re64.map", "1");
     store("re64.mapWidth", String(lastMapWidth));
   }
-  // The pane changed width without the window doing so.
-  scheduleWrapAffordance();
 });
 
 $("#back").addEventListener("click", goBack);
@@ -1606,15 +1487,12 @@ updateBackButton();
 showTab("disasm");
 
 let mapVisible = true;
-let startWrapped = false;
 try {
   mapVisible = localStorage.getItem("re64.map") !== "0";
   const width = Number(localStorage.getItem("re64.mapWidth"));
   if (width > 0 && width < 100) lastMapWidth = width;
-  startWrapped = localStorage.getItem("re64.wrap") === "1";
 } catch {
-  // Defaults: map shown at the standard width, rows unwrapped.
+  // Defaults: shown, at the standard width.
 }
 setMapVisible(mapVisible);
-setWrapped(startWrapped);
 void loadDisassembly();
