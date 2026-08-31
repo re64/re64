@@ -1140,9 +1140,41 @@ from five routines. For a *may* answer that is fine: effects are a union over
 what is reachable, and over-approximating is the sound direction. No dominators,
 no arbitrating who owns a shared tail.
 
-**A tail jump belongs to the routine**, so the walk follows jumps and does not
-stop at another entry: control goes there and never comes back. That could have
-swallowed the program and does not — median routine 5 blocks, largest 93 of 450.
+**A tail jump ends the routine**, and this was wrong first — badly, and in a way
+worth keeping written down. The walk originally followed jumps through on the
+grounds that control really does go there and never comes back, checked against
+"does any routine swallow the program" (no: median 5 blocks, largest 93 of 450).
+
+That was the wrong check. The same structure was then used to answer *which*
+routine an address is in, which needs exactly one answer, and there it failed:
+seven routines claimed `$8393`, one routine absorbed 26% of the program, and on
+a project nobody had annotated yet **every SID write in the game reported as
+being in `ColdStart`**. Two readers in the second run of experiment 2 reported it
+independently and one diagnosed it exactly — the game's top level is a `JMP`
+chain, not JSR/RTS, so a flow-derived extent merges it.
+
+The boundary is the instruction: a `JMP` transfers and never returns, while a
+6502 branch reaches ±127 bytes and is structurally local — the same fact the
+arrow gutter relies on. Bounding there took the largest routine from 26% of the
+program to 5% and left four ambiguous addresses instead of 764. The symmetric
+half is that a jump *target* becomes a routine of its own, or a `JMP` chain
+would be a program in which no address is in any routine.
+
+Nothing is lost: the target is recorded as `continuesInto` and its effects fold
+into `total`, exactly as a callee's do. What changes is that the extent stops.
+
+**Membership is asked of blocks, never of spans.** A span is a merged contiguous
+range, and two routines whose blocks interleave have overlapping spans while
+sharing no block — which turned an exact question into 272 false ambiguities.
+`spans` shows a reader where the code is; `blockStarts` decides what belongs to
+whom.
+
+The visible cost, worth stating: attribution now names `loc_XXXX` where it used
+to say `MaterializeShip`, because the call site is in a smaller jump-bounded unit
+inside it. That is precise rather than recognisable, and it is a *different*
+thing from the original complaint — those `loc_` names are jump targets, real
+units nobody has named, where the old wrong answer named branch targets, which
+are not units at all.
 
 **May, never must.** A union is always answerable; an intersection over paths
 often is not, and a "must" that is quietly sometimes a "may" is worse than not

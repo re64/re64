@@ -1,0 +1,5 @@
+{
+  "name": "reader-1",
+  "description": "Gridrunner, unannotated: one independent reading",
+  "layers": [{ "type": "prg", "path": "gridrunner.prg" }]
+}

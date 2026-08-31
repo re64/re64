@@ -49,15 +49,32 @@ describe("what a routine touches", () => {
     expect(caller.calls).toEqual([0x1004]);
   });
 
-  it("follows a tail jump, so the routine can be in two places", () => {
-    // $8000: JMP $8010   $8010: LDA #$01 / STA $30 / RTS
+  it("stops at a tail jump and records where it went", () => {
+    // $1000: JMP $1010   $1010: LDA #$01 / STA $30 / RTS
+    //
+    // The routine ends at the JMP. Following through was the first attempt and
+    // it made attribution useless: on a program whose top level is a JMP chain
+    // one routine absorbed a quarter of the code, and every SID write in the
+    // game reported as being in the same place.
     const bytes = [0x4c, 0x10, 0x10, ...new Array(13).fill(0xea), 0xa9, 0x01, 0x85, 0x30, 0x60];
     const { routines: r } = routines(bytes);
     const found = r.get(ORG)!;
-    expect(names(found.own.writes)).toContain("$(0x30)");
-    // Two spans: the jump, and the code it lands in. A single declared extent
-    // could not have described this.
-    expect(found.spans.length).toBeGreaterThan(1);
+
+    expect(found.continuesInto).toEqual([0x1010]);
+    // Its own code does not include the target...
+    expect(names(found.own.writes)).not.toContain("$(0x30)");
+    // ...but what it *does* still accounts for it, exactly as a call would.
+    expect(names(found.total.writes)).toContain("$(0x30)");
+  });
+
+  it("makes the target of a jump a routine of its own", () => {
+    // The symmetric half: if a jump leaves the routine it was in, the code it
+    // lands on has to belong to something, or a JMP chain is a program in which
+    // no address is in any routine.
+    const bytes = [0x4c, 0x10, 0x10, ...new Array(13).fill(0xea), 0xa9, 0x01, 0x85, 0x30, 0x60];
+    const { routines: r } = routines(bytes);
+    expect(r.has(0x1010)).toBe(true);
+    expect(names(r.get(0x1010)!.own.writes)).toContain("$(0x30)");
   });
 
   it("says when an instruction has no semantics, rather than answering short", () => {

@@ -25,6 +25,7 @@ import {
   analyze,
   analyzeProgram,
   analyzeRoutines,
+  routineAt,
   Effects,
   RoutineEffects,
   blockAt,
@@ -232,6 +233,20 @@ export class Workspace {
     );
     this.cachedRoutines = { key, routines };
     return routines;
+  }
+
+  /**
+   * The routine an address is in, named, or undefined when nothing owns it.
+   *
+   * Asked of blocks rather than of merged spans, which is the difference
+   * between an exact answer and a plausible one.
+   */
+  private routineNameAt(address: number): string | undefined {
+    const program = this.program();
+    const owning = routineAt(this.routines(), program.blocks, address);
+    if (!owning) return undefined;
+    const label = program.labels.resolve(owning.entry);
+    return label && label.offset === 0 ? label.label.name : hex4(owning.entry);
   }
 
   /** The analysed program, rebuilt only when something it depends on moved. */
@@ -453,15 +468,8 @@ export class Workspace {
       // `loc_XXXX`. Deriving it needs nobody to have declared anything, and
       // handles the 20 of 50 routines here whose code is not one contiguous
       // span and which no declared extent could have described.
-      const owning = [...this.routines().values()]
-        .filter((r) => r.spans.some((s) => from >= s.start && from < s.end))
-        // Innermost first: a shared tail belongs to several, and the smallest
-        // claim is the most specific thing that can be said.
-        .sort((a, b) => a.blocks - b.blocks)[0];
-      if (owning) {
-        const label = program.labels.resolve(owning.entry);
-        return label && label.offset === 0 ? label.label.name : hex4(owning.entry);
-      }
+      const named = this.routineNameAt(from);
+      if (named) return named;
 
       for (let at = from; at >= from - 0x400 && at >= 0; at--) {
         const label = program.labels
@@ -726,22 +734,15 @@ export class Workspace {
       );
     });
 
-    const routineAt = (address: number) => {
-      const owning = [...this.routines().values()]
-        .filter((r) => r.spans.some((s) => address >= s.start && address < s.end))
-        .sort((a, b) => a.blocks - b.blocks)[0];
-      if (!owning) return undefined;
-      const label = program.labels.resolve(owning.entry);
-      return label && label.offset === 0 ? label.label.name : hex4(owning.entry);
-    };
-
     return {
       total: matches.length,
       truncated: matches.length > limit,
       sites: matches.slice(0, limit).map((instruction) => ({
         address: hex4(instruction.address),
         text: contentRowAt(rows, lineForAddress, instruction.address)?.text ?? "",
-        ...(routineAt(instruction.address) ? { inRoutine: routineAt(instruction.address)! } : {}),
+        ...(this.routineNameAt(instruction.address)
+          ? { inRoutine: this.routineNameAt(instruction.address)! }
+          : {}),
       })),
     };
   }
@@ -763,11 +764,7 @@ export class Workspace {
       return label && label.offset === 0 ? `${hex4(at)} (${label.label.name})` : hex4(at);
     };
 
-    const owning =
-      routines.get(address) ??
-      [...routines.values()].find((r) =>
-        r.spans.some((s) => address >= s.start && address < s.end)
-      );
+    const owning = routines.get(address) ?? routineAt(routines, program.blocks, address);
     if (!owning) {
       throw new Error(
         `${hex4(address)} is not in a routine this can see — nothing calls it and ` +
@@ -793,9 +790,7 @@ export class Workspace {
         .to(owning.entry)
         .filter((r) => r.type === "call")
         .map((r) => {
-          const from = [...routines.values()]
-            .filter((x) => x.spans.some((s) => r.from >= s.start && r.from < s.end))
-            .sort((a, b) => a.blocks - b.blocks)[0];
+          const from = routineAt(routines, program.blocks, r.from);
           return { from: hex4(r.from), inRoutine: from ? name(from.entry) : undefined };
         }),
       calls: below(owning.entry, depth, new Set([owning.entry])),
@@ -919,13 +914,9 @@ export class Workspace {
     const program = this.program();
     const routines = this.routines();
 
-    const found =
-      routines.get(address) ??
-      // The address of any block in a routine is a fair way to ask about it —
-      // a reader has a line, not necessarily an entry point.
-      [...routines.values()].find((r) =>
-        r.spans.some((span) => address >= span.start && address < span.end)
-      );
+    // The address of any block in a routine is a fair way to ask about it — a
+    // reader has a line, not necessarily an entry point.
+    const found = routines.get(address) ?? routineAt(routines, program.blocks, address);
 
     if (!found) {
       throw new Error(

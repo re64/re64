@@ -41,6 +41,16 @@ export interface RoutineEffects {
   /** Blocks reachable from the entry without following a call. */
   blocks: number;
   /**
+   * Where each of those blocks starts.
+   *
+   * Membership is asked of *this*, never of `spans`. A span is a merged
+   * contiguous range, and two routines whose blocks interleave in memory have
+   * overlapping spans while sharing no block at all — which turned an exact
+   * question into 272 false ambiguities. `spans` is for showing a reader where
+   * the code is; this is for deciding what belongs to whom.
+   */
+  blockStarts: number[];
+  /**
    * The address ranges its code occupies, in order.
    *
    * More than one whenever the routine tail-jumps away — which is why a single
@@ -56,6 +66,14 @@ export interface RoutineEffects {
   total: Effects;
   /** Subroutines it calls, directly. */
   calls: number[];
+  /**
+   * Routines it jumps into and never returns from.
+   *
+   * A tail call. Their effects count towards `total` exactly as a callee's do,
+   * but their code is theirs — which is what keeps an address in at most one
+   * routine, and attribution therefore answerable.
+   */
+  continuesInto: number[];
   /**
    * Every way it leaves that is not an ordinary return.
    *
@@ -239,30 +257,104 @@ function add(into: Effects, from: Effects | BlockEffects): Effects {
   return into;
 }
 
-/** Where a routine can start: anything called, plus anything declared to be one. */
+/**
+ * Where a routine can start: anything called, anything declared to be one, and
+ * anything jumped to.
+ *
+ * The last is the symmetric half of bounding a routine at a `JMP`. If a jump
+ * leaves the routine it was in, the code it lands on has to belong to
+ * *something* — otherwise a top-level `JMP` chain is a program in which no
+ * address is in any routine, which is a different useless answer from the one
+ * this replaced.
+ *
+ * It means a program's structure is read as it is written rather than as
+ * subroutine theory would prefer: on this machine a chain of `JMP`s is an
+ * ordinary top level, and each link really is a separate piece of code that
+ * runs to completion and hands on.
+ */
 export function routineEntries(
   blocks: readonly BasicBlock[],
   declared: readonly number[] = []
 ): number[] {
   const real = blocks.filter((b) => !b.alternate);
   const starts = new Set(real.map((b) => b.start));
+
   const called = real.flatMap((b) => b.calls);
-  return [...new Set([...called, ...declared])].filter((a) => starts.has(a)).sort((a, b) => a - b);
+  const jumpedTo = real.filter((b) => b.exit === "jump").flatMap((b) => b.successors);
+
+  return [...new Set([...called, ...declared, ...jumpedTo])]
+    .filter((a) => starts.has(a))
+    .sort((a, b) => a - b);
 }
 
-/** Blocks reachable from an entry without following a call. */
-function bodyOf(entry: number, byStart: Map<number, BasicBlock>): BasicBlock[] {
+/**
+ * Blocks reachable from an entry, without following a call and without walking
+ * into another routine.
+ *
+ * **Stopping at another entry is the whole of the correction here.** Following
+ * tail jumps through was defensible for a *may* effects answer — over-approximate
+ * and the union is still sound — and it was measured against "does any routine
+ * swallow the program", which it did not.
+ *
+ * That was the wrong question. The same structure was then used to say *which*
+ * routine an address is in, which needs exactly one answer, and there it fails
+ * badly: on a program whose top level is a `JMP` chain rather than JSR/RTS, one
+ * routine absorbed a quarter of the code and every SID write in the program was
+ * reported as "in ColdStart". Seven different routines claimed `$8393`.
+ *
+ * Bounded here, and the transfer is not lost: a tail jump into another routine
+ * is recorded as `continuesInto` and its effects are folded into `total`,
+ * exactly as a call's are. What changes is that the *extent* stops, so an
+ * address belongs to at most one routine and attribution can be precise.
+ */
+function bodyOf(
+  entry: number,
+  byStart: Map<number, BasicBlock>,
+  entries: ReadonlySet<number>
+): { body: BasicBlock[]; continuesInto: number[] } {
   const seen = new Set<number>();
+  const leaves = new Set<number>();
   const queue = [entry];
+
   while (queue.length > 0) {
     const at = queue.pop() as number;
     if (seen.has(at)) continue;
     seen.add(at);
+
+    const block = byStart.get(at);
+    if (!block) continue;
+
     // Successors only. A call's successor is where it *returns to*, which is in
     // this routine; who it called is the interprocedural question, kept apart.
-    for (const next of byStart.get(at)?.successors ?? []) queue.push(next);
+    for (const next of block.successors) {
+      // A `JMP` leaves. A branch does not.
+      //
+      // This is the line that decides whether "which routine is this in" has an
+      // answer. Bounding only at known entries is not enough: on a project
+      // nobody has annotated yet almost nothing *is* a known entry, so a
+      // top-level `JMP` chain merges into one routine that absorbs a quarter of
+      // the program — every SID write in the game reported as "in ColdStart".
+      //
+      // The instruction says it plainly: a `JMP` transfers and never comes back,
+      // while a 6502 branch reaches ±127 bytes and is structurally local, which
+      // is the same fact the arrow gutter already relies on. Splitting at jumps
+      // errs towards small, precisely attributed units; the alternative errs
+      // towards one blob, and only one of those two is useful.
+      //
+      // Nothing is lost: the target is recorded as `continuesInto` and its
+      // effects fold into `total`, exactly as a callee's do.
+      if (next !== entry && (block.exit === "jump" || entries.has(next))) {
+        leaves.add(next);
+        continue;
+      }
+      queue.push(next);
+    }
   }
-  return [...seen].map((s) => byStart.get(s)).filter((b): b is BasicBlock => b !== undefined);
+
+  return {
+    body: [...seen].map((s) => byStart.get(s)).filter((b): b is BasicBlock => b !== undefined),
+    continuesInto: [...leaves].sort((a, b) => a - b),
+  };
 }
 
 /** Contiguous runs of the blocks a routine occupies, in address order. */
@@ -298,8 +390,10 @@ export function analyzeRoutines(
 
   const routines = new Map<number, RoutineEffects>();
 
+  const entrySet = new Set(entries);
+
   for (const entry of entries) {
-    const body = bodyOf(entry, byStart);
+    const { body, continuesInto } = bodyOf(entry, byStart, entrySet);
     const own = empty();
     const incomplete: string[] = [];
     const returns: ReturnBehaviour[] = [];
@@ -326,10 +420,12 @@ export function analyzeRoutines(
     routines.set(entry, {
       entry,
       blocks: body.length,
+      blockStarts: body.map((b) => b.start).sort((a, b) => a - b),
       spans: spansOf(body),
       own,
       total: add(empty(), own),
       calls: [...calls].sort((a, b) => a - b),
+      continuesInto,
       returns,
       skipsFrames,
       incomplete: [...new Set(incomplete)],
@@ -342,7 +438,7 @@ export function analyzeRoutines(
     for (const routine of routines.values()) {
       const before = routine.total.reads.length + routine.total.writes.length;
       const flags = [routine.total.readsComputedMemory, routine.total.writesComputedMemory];
-      for (const target of routine.calls) {
+      for (const target of [...routine.calls, ...routine.continuesInto]) {
         const callee = routines.get(target);
         if (callee) add(routine.total, callee.total);
       }
@@ -382,3 +478,26 @@ export function analyzeRoutines(
 }
 
 const hex = (n: number) => `$${n.toString(16).toUpperCase().padStart(4, "0")}`;
+
+/**
+ * Which routine an address is in, or undefined when nothing owns it.
+ *
+ * By block, not by span — see `blockStarts`. Where more than one routine still
+ * claims a block, the smallest wins: the most specific claim is the most useful
+ * thing that can be said, and it is stable rather than depending on iteration
+ * order.
+ */
+export function routineAt(
+  routines: ReadonlyMap<number, RoutineEffects>,
+  blocks: readonly BasicBlock[],
+  address: number
+): RoutineEffects | undefined {
+  const block = blocks
+    .filter((b) => !b.alternate && address >= b.start && address < b.end)
+    .sort((a, b) => a.end - a.start - (b.end - b.start))[0];
+  if (!block) return undefined;
+
+  return [...routines.values()]
+    .filter((r) => r.blockStarts.includes(block.start))
+    .sort((a, b) => a.blocks - b.blocks)[0];
+}

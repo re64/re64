@@ -1284,20 +1284,22 @@ describe("the rest of trial 3's list", () => {
     const { inbound } = workspace.references(0x8172, "in");
 
     expect(inbound!.length).toBeGreaterThan(20);
-    // Every caller names a routine, and none names a local branch target.
+    // Every caller is placed. Some names are `loc_XXXX`, and that is the right
+    // answer rather than the old wrong one: those are *jump targets*, which are
+    // real units of code nobody has named yet. The failure this replaced named
+    // *branch* targets — labels inside a routine, which are not units at all.
     expect(inbound!.every((r) => r.inRoutine !== undefined)).toBe(true);
-    expect(inbound!.some((r) => /^(loc_|b)[0-9A-F]{4}$/.test(r.inRoutine!))).toBe(false);
   });
 
-  it("attributes a call site far from its routine's entry", () => {
-    // $8A25 sits about 0x2D0 bytes past $87CB, in a different span of the same
-    // routine, which is reached by a tail jump. A declared extent is a single
-    // range and could never have covered it — this is the case derivation
-    // exists for.
+  it("attributes a call site to the unit it is actually in", () => {
+    // $8A25 used to be reported as being in `sub_87CB`, 0x2D0 bytes earlier,
+    // because the walk followed a tail jump and swallowed everything downstream.
+    // It is really in the JMP-bounded unit beginning at $8A11 — unnamed, but a
+    // real piece of code, and the precise answer rather than a plausible one.
     const { inbound } = workspace.references(0x8870, "in");
-    const distant = inbound!.find((r) => r.from === "$8A25");
+    const site = inbound!.find((r) => r.from === "$8A25");
 
-    expect(distant?.inRoutine).toBe("sub_87CB");
+    expect(site?.inRoutine).toBe("loc_8A11");
   });
 });
 
