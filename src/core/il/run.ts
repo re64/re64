@@ -168,7 +168,11 @@ export function runBlock(block: BasicBlock, inputs: BlockInputs = {}): BlockRun 
 
   const before = {} as Record<RegisterName, number>;
   for (const name of REGISTER_NAMES) {
-    const value = inputs.registers?.[name] ?? 0;
+    // A real program sets the stack pointer to $FF at boot and leaves it near
+    // there. Starting it at zero made the first push write $0100 and every pull
+    // read $0101, so a block ending in RTS reported reading the bottom of the
+    // stack page as though that were a finding.
+    const value = inputs.registers?.[name] ?? (name === "SP" ? 0xff : 0);
     machine.set({ space: "register", offset: OFFSETS[name], size: 1 }, value);
     before[name] = machine.register(OFFSETS[name]);
   }
@@ -231,8 +235,29 @@ export function runBlock(block: BasicBlock, inputs: BlockInputs = {}): BlockRun 
     if (registers[name] !== before[name]) changed.push(name);
   }
 
+  // The stack page is not ordinary memory, and reporting it as such buries the
+  // reads that matter. A block that returns pulls an address somebody is
+  // expected to have pushed; saying "$0101 read as zero" is true and useless
+  // next to saying the return address was never there.
+  const onStack = (address: number) => address >= 0x0100 && address <= 0x01ff;
   const listOf = (source: ValueSource) =>
-    [...reads].filter(([, r]) => r.source === source).map(([a]) => a);
+    [...reads].filter(([a, r]) => r.source === source && !onStack(a)).map(([a]) => a);
+
+  const stackUnderflow =
+    exit.kind === "return" &&
+    [...reads].some(([a, r]) => onStack(a) && r.source !== "given");
+
+  if (stackUnderflow) {
+    warnings.push(
+      "This block returns, and nothing had pushed a return address — so the " +
+        "address it returned to is whatever the empty stack held, not a real " +
+        "destination. Supply the stack bytes, or read the exit as \"it returns\"."
+    );
+    // Reported as a bare return rather than as a destination. A meaningless
+    // address gets a label resolved against it and comes back looking like an
+    // answer — `to: $0001 (R6510)` is the shape that caused this.
+    exit = { kind: "return" };
+  }
 
   const unknown = listOf("unknown");
   if (unknown.length) {

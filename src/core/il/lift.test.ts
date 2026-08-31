@@ -252,3 +252,28 @@ describe("what a block does to the stack", () => {
     expect(stackDelta(blockOf([0xa9, 0x01, 0x85, 0x10]).instructions)).toBe(0);
   });
 });
+
+describe("a block that returns", () => {
+  it("says the stack was empty rather than naming a destination", () => {
+    // Reported as `to: $0001 (R6510)` before: a meaningless address with a
+    // label resolved against it, which is the shape that reads as an answer.
+    const result = run([0x60]); // RTS
+    expect(result.exit).toEqual({ kind: "return" });
+    expect(result.warnings.join(" ")).toContain("nothing had pushed a return address");
+  });
+
+  it("returns where it was told to, when the stack holds one", () => {
+    const result = run([0x60], {
+      registers: { SP: 0xfd },
+      memory: { 0x01fe: 0x41, 0x01ff: 0x90 },
+    });
+    expect(result.exit).toEqual({ kind: "return", to: 0x9042 });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("keeps stack traffic out of the warning about unsupplied memory", () => {
+    // "$0101 read as zero" is true and buries the reads that matter.
+    const result = run([0x48, 0x68], { registers: { SP: 0xff } }); // PHA / PLA
+    expect(result.warnings.join(" ")).not.toContain("$01");
+  });
+});
