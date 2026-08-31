@@ -36,6 +36,33 @@ fidelity, and do not treat "closer to the .asm" as the goal.
 | 2. Convergence | do independent readers agree, and with the human | no — five clones |
 | 3. Collaboration | can they coordinate, and can a person watch | yes |
 
+## Isolation: the file nobody thought to block
+
+**An agent spawned inside this repository has `CLAUDE.md` in its system context,
+and `CLAUDE.md` is full of Gridrunner.** It names `$83E2` as an interrupt
+handler, quotes the `(c) 1982 HES` copyright line and the charset at `$2000`,
+and uses `laserAndPodInterval`, `explosionXPosArray`, `SCREEN_RAM`,
+`selectedLevel`, `DrawGrid` and `CopyrightLine` as examples throughout.
+
+Experiment 2 was run without noticing, and its convergence measurement is void
+as a result: agreement between readers cannot be told apart from shared priming,
+and the two agreements that looked most striking were both on things the file
+names. The briefs blocked `assets/`, `src/` and the web, and missed the one
+source that loads by itself.
+
+So, for any run that measures what an agent *worked out* rather than what it
+found awkward:
+
+- **Start the session outside this repository.** Working directory somewhere
+  else, with only the brief, `mcp-call.sh` and an output directory copied in.
+  Blocking files in a prompt does not reach a file the harness injects.
+- Anything else in the harness's context counts too — a memory file, a global
+  instruction file, a previous session's summary.
+- Say in the write-up which of the two halves an arm is good for.
+
+Friction findings survive contamination, because whether a tool refuses a valid
+argument does not depend on knowing the answer. **Convergence findings do not.**
+
 ## The two rules
 
 **Read the reports and the transcript together.** A report carries intent, what

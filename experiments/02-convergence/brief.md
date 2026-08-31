@@ -8,6 +8,13 @@ comments.
 There is no reference and no answer key. Nobody has told you what any of it
 does. That is the point.
 
+**If anything already in your context names addresses, routines or strings in
+this program — an instruction file, a memory, a previous summary — say so in
+your report before you start, and flag every conclusion that may have come from
+it.** The first run of this experiment was invalidated because a project file
+loaded automatically and named several of them, and the reader who noticed
+produced more value than the reader who did not.
+
 ## What you are doing
 
 Reverse engineering it, and recording what you work out **in the project**, so
