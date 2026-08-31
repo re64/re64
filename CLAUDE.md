@@ -1209,6 +1209,45 @@ the reason this section exists.
 distinction matters most on a fresh project, where almost everything is
 unexplained and none of it is dead.
 
+### Instruction semantics: what exists, and why we write our own
+
+Wanted eventually: an IL with real 6502 semantics, SSA over basic blocks, and
+symbolic execution — the shape panopticon has. Searched first, because writing a
+lifter is not something to start by accident.
+
+**Nothing exists to port.** No RREIL implementation for JavaScript or
+TypeScript. No binary-lifting IL for JS at all: the 6502 packages on npm are
+emulators and assemblers, which execute rather than describe. P-Code/SLEIGH is
+the IL with traction and every binding is native — `pypcode` (Python, drives
+angr), `sleighcraft` and `rsleigh` (Rust), `lifting-bits/sleigh` (C++).
+
+**A native binding is ruled out by the architecture, not by taste.** re64's
+analysis runs in the browser, deliberately, so that a rename does not round-trip
+to the server. Nothing behind node-gyp can go there, and a WASM build of SLEIGH
+is a very large dependency for a project with almost none. Writing the IL in
+TypeScript is therefore the only shape that fits, and is not reinvention: there
+is no wheel of this shape.
+
+**Two references, with different standing.**
+
+- Ghidra's `Ghidra/Processors/6502/data/languages/6502.slaspec` is complete,
+  maintained, and **Apache 2.0** — compatible with this project, so it can be
+  read and lifted from freely.
+- panopticon's `mos6502/src/semantic.rs` is **GPL-3 and mixed authorship**. The
+  target was written by this project's author in December 2015 (decoding,
+  illegal opcodes, loader, semantics) and converted to RREIL by Kai Michaelis in
+  2016, with three other contributors since. So the design is one thing and the
+  current text is another: usable as a reference whose reasoning is already
+  understood, not as source to copy into an MIT project.
+
+`stackDelta` on a basic block is a **stopgap** and should be retired when the IL
+lands. It hand-models nine opcodes to answer one question; a real semantic model
+answers it as a special case of dataflow, along with every other question of the
+kind. It earns its place meanwhile — it found the routine at `$87FE` that
+discards its own return address — but it is not the beginning of an IL, and
+growing it one opcode at a time is how a project ends up with a semantic model
+nobody planned.
+
 ### Overlap needs the decoder, not just blocks
 
 Blocks are the right model for a byte read two ways — two runs whose ranges
