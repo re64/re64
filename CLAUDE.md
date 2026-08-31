@@ -1429,9 +1429,29 @@ down because the lopsided table above otherwise looks like neglect:
 So "when and whether it appears in the web UI" is a genuinely separable
 question for most features, and deferring it is a schedule, not an oversight.
 
-The one thing this does *not* excuse is the missing `layer.set` above: that is in
-the vocabulary itself, not in a surface, and no amount of exposing things
-elsewhere reaches it.
+`layer.set` is missing for the same kind of reason, and it is worth stating so it
+does not read as forgotten: **every experiment so far has handed agents a project
+that already existed.** Analysing one needs no layer editing at all. It becomes
+relevant the moment they are given a pile of disks and asked to *build* the
+project — which is the intended shape of a later run.
+
+That scenario needs a cluster rather than a single op, and the last item is the
+one that decides whether it is possible at all:
+
+- `layer.set`, so a stack can be renamed and **reordered** — the property this
+  file cites as the reason annotations belong to layers, and which nothing can
+  currently exercise.
+- `add_layer` that can make **file** layers. It creates `symbols` layers only,
+  so an agent cannot add a PRG, let alone one out of a disk image.
+- The D64 reader reachable from a tool. `src/core/c64/d64.ts` exists and only
+  the CLI can get at it, so nothing can ask what is on a disk.
+- **The overlay question, which is the real wall.** A game like Bard's Tale
+  loads a level over memory that held code a moment ago, and both readings are
+  correct at different times. Layers do not express that: shadowing is static
+  z-order decided at analysis time, so stacking two layers over one range hides
+  one rather than representing both. See "One interpretation per address" below
+  — building a project from disks runs into it immediately, and it needs a
+  decision about what a row means before it can be built rather than after.
 
 Nor is human-side evidence actually missing, which an earlier version of this
 note got wrong. It arrives directly from whoever is building this — line
