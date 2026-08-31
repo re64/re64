@@ -222,7 +222,36 @@ export function regionSetOp(
 
   const layerId = owningLayerId(loaded, start);
   const layer = loaded.project.layers.find((l) => l.id === layerId);
-  const existing = layer?.regions?.find((r) => parseProjectAddress(r.start) === start);
+  const regions = layer?.regions ?? [];
+  const startsHere = regions.filter((r) => parseProjectAddress(r.start) === start);
+
+  // Which region — if any — this declaration is a *revision of*, rather than a
+  // new statement alongside it. Three cases, strongest signal first:
+  //
+  // 1. The same span exactly. One statement being corrected: reuse its id, so
+  //    saying it twice does not stack up two regions.
+  // 2. Exactly one region starts here and the new span is not strictly inside
+  //    it. That is an extend or a move of the obvious candidate.
+  // 3. Anything else — strictly inside, or ambiguous because several regions
+  //    already start here — is a new region, which *nests*.
+  //
+  // Nesting matters because the model has always allowed it: regions may
+  // overlap and `getRegionAt` resolves innermost-first, so the inner one
+  // renders inside its span and the outer one either side, with nothing left
+  // unexplained. Reusing an id whenever the starts matched made this a silent
+  // *replacement* — declaring 32 bytes of a 512-byte `characterSetData` region
+  // a bitmap shrank it to 32 bytes and left the other 480 explained by nothing.
+  //
+  // Case 1 has to be checked before case 2, and that is not a detail: without
+  // it, re-declaring the same span inside a larger region nests again on every
+  // call, and two identical spans then race to be the innermost.
+  const exact = startsHere.find((r) => parseProjectAddress(r.end) === end);
+  const extending =
+    startsHere.length === 1 && end >= parseProjectAddress(startsHere[0].end)
+      ? startsHere[0]
+      : undefined;
+  const existing = exact ?? extending;
+
   return {
     op: "region.set",
     id: existing?.id ?? newId("rgn"),

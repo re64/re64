@@ -1444,14 +1444,62 @@ describe("declaring a picture", () => {
     expect(workspace.undecoded(50).unexplainedBytes).toBe(before);
   });
 
-  it("shrinks the region it starts on, rather than nesting inside it", () => {
-    // Worth pinning because it surprised me. `regionSetOp` matches an existing
-    // region by *start address* and reuses its id, so this edits the 512-byte
-    // `data` region at $8E00 down to 32 bytes — and the other 480 stop being
-    // explained by anything. That is existing behaviour for every kind, not
-    // something bitmaps introduced, but it is silent and a caller should know.
+  it("nests inside the region it starts on rather than replacing it", () => {
+    // $8E00-$9000 is a 512-byte `data` region. Declaring 32 bytes of it a
+    // bitmap used to reuse that region's id and shrink it, leaving the other
+    // 480 bytes explained by nothing. Both statements are true at once, and the
+    // model has always allowed them to be: regions may overlap and resolve
+    // innermost-first.
     const before = workspace.undecoded(50).unexplainedBytes;
+    const result = workspace.setRegion(
+      agent, 0x8e00, 0x8e20, "bitmap", "CharSet", undefined, undefined, "char:4"
+    );
+
+    expect(workspace.undecoded(50).unexplainedBytes).toBe(before);
+    expect(result.nestedInside).toContain("characterSetData");
+    expect(result.nestedInside).toContain("remove_region");
+  });
+
+  it("draws the inner picture and leaves the outer region either side", () => {
     workspace.setRegion(agent, 0x8e00, 0x8e20, "bitmap", "CharSet", undefined, undefined, "char:4");
-    expect(workspace.undecoded(50).unexplainedBytes).toBe(before + (0x9000 - 0x8e20));
+    const listing = workspace.listing(0x8e00, 14).text;
+    expect(listing).toMatch(/@{2,}/);
+    // The bytes past the nested span are still data, from the region that was
+    // there before and is still there.
+    expect(listing).toContain("8E20");
+  });
+
+  it("does not stack up when the same span is declared twice inside a bigger one", () => {
+    // The case that broke this while it was being written. $8004-$8011 is
+    // already `initData`, so the first declaration nests — and the second one
+    // must recognise its *own* region rather than nesting inside `initData`
+    // again. Otherwise two identical spans race to be innermost and the listing
+    // shows whichever won.
+    const before = workspace.describe().regions.length;
+    workspace.setRegion(agent, 0x8004, 0x800c, "text", "header", undefined, "screen");
+    workspace.setRegion(agent, 0x8004, 0x800c, "text", "header", undefined, "ascii");
+
+    expect(workspace.describe().regions.length).toBe(before + 1);
+    // And the second declaration is the one in force, rather than whichever of
+    // two identical spans happened to win. `C3 C2 CD` reads as box-drawing in
+    // screen codes and as unprintable in ASCII, so the glyphs say which.
+    const listing = workspace.listing(0x8004, 3).text;
+    expect(listing).toContain('.TEXT "...80');
+    expect(listing).not.toContain("·│·");
+  });
+
+  it("still revises a region declared over the same span", () => {
+    // The unambiguous case: same start, same end. That is one statement being
+    // corrected, not a second one being made, so it must not stack up.
+    const before = workspace.describe().regions.length;
+    workspace.setRegion(agent, 0x8e00, 0x9000, "data", "RenamedOnce");
+    workspace.setRegion(agent, 0x8e00, 0x9000, "data", "RenamedTwice");
+    expect(workspace.describe().regions.length).toBe(before);
+  });
+
+  it("still extends a region declared wider than the one there", () => {
+    const before = workspace.describe().regions.length;
+    workspace.setRegion(agent, 0x8e00, 0x9000, "data", "Wider");
+    expect(workspace.describe().regions.length).toBe(before);
   });
 });

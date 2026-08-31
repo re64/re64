@@ -1754,11 +1754,38 @@ the CLI kind string, the explained-kinds list in `undecoded`, `shouldDisassemble
 found by hand. The runtime whitelist is the nastiest: miss it and every write
 throws `Unknown region kind`, so a missing case looks like a broken tool.
 
-One behaviour worth knowing, which predates all this: `regionSetOp` matches an
-existing region by **start address** and reuses its id, so declaring a small
-region at the same start as a large one *shrinks* it rather than nesting inside
-it. Declaring 32 bytes of `characterSetData` a bitmap left the other 480 bytes
-explained by nothing, silently.
+### Declaring a region inside another nests; it does not replace it
+
+`regionSetOp` used to match an existing region by **start address** alone and
+reuse its id, so declaring 32 bytes of a 512-byte `characterSetData` region a
+bitmap *shrank* it to 32 bytes and left the other 480 explained by nothing,
+silently.
+
+Nesting is the right answer, and splitting the outer region is not: splitting
+mutates a region the author never asked to change and invents a second one to
+hold the remainder, where nesting leaves *"$8E00–$9000 is the character set
+data"* true and adds a more specific statement inside it. Both are true at once,
+which is what overlap is for. The model already supported it — regions may
+overlap and `getRegionAt` resolves innermost-first — so the inner one renders
+inside its span, the outer one either side, and nothing becomes unexplained.
+
+Three cases, strongest signal first:
+
+| declaration | meaning |
+|---|---|
+| the same span exactly | one statement corrected — reuse the id |
+| the only region starting here, and not strictly inside it | an extend or a move |
+| strictly inside, or ambiguous because several regions start here | a new region, nested |
+
+**Checking the exact span first is not a detail.** Without it, re-declaring the
+same span inside a larger region nests again on every call, and two identical
+spans then race to be the innermost — which showed up as a test that passed
+eight times in a row and then failed twice.
+
+To genuinely shrink a region, remove it first. The edit result says so:
+`nestedInside` names the enclosing region and how to replace it instead, because
+"I declared 32 bytes and a 512-byte region is still there" should not have to be
+discovered by reading the map afterwards.
 
 ### Text Region Rendering
 

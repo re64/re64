@@ -1602,6 +1602,11 @@ export class Workspace {
       );
     }
 
+    // Worked out before the edit, because afterwards the enclosing region is no
+    // longer the one that was there first.
+    const enclosing = this.program().loaded.map.getRegionAt(start);
+    const nests = enclosing !== undefined && enclosing.start <= start && end < enclosing.end;
+
     const result = this.edit(
       caller,
       (loaded) => [regionSetOp(loaded, start, end, kind, name, comment, encoding, view)],
@@ -1610,6 +1615,17 @@ export class Workspace {
     return {
       ...result,
       covers: `${hex4(start)}-${hex4(end - 1)} (${end - start} bytes)`,
+      // Said out loud, because "I declared 32 bytes and something else changed"
+      // is exactly the kind of thing a caller should not have to discover.
+      ...(nests
+        ? {
+            nestedInside:
+              `${enclosing.name ?? enclosing.kind} ` +
+              `(${hex4(enclosing.start)}-${hex4(enclosing.end - 1)}), which is unchanged and ` +
+              `still explains the bytes either side. To shrink it instead, ` +
+              `remove_region ${hex4(enclosing.start)} first.`,
+          }
+        : {}),
     };
   }
 
@@ -1776,6 +1792,15 @@ export interface EditResult {
    * `delta` also says, in a field a reader is taught to read as good news.
    */
   orphaned?: { instructions: number; firstAt: string; hint: string };
+  /**
+   * Set when this region was declared *inside* one that already covered the
+   * span, rather than replacing it.
+   *
+   * Both statements stand and nothing becomes unexplained, but "I declared 32
+   * bytes and a 512-byte region is still there" is not something a caller
+   * should have to discover by reading the map afterwards.
+   */
+  nestedInside?: string;
   /**
    * Warnings this edit introduced, when it introduced any.
    *
