@@ -5,8 +5,8 @@ import { createUserRegion } from "../index.js";
 describe("buildRegionTree", () => {
   it("nests a region inside the one containing it", () => {
     const tree = buildRegionTree([
-      createUserRegion("rgn_8000", 0x8000, 0x9000, "data", "outer"),
-      createUserRegion("rgn_8100", 0x8100, 0x8200, "text", "inner"),
+      createUserRegion({ id: "rgn_8000", start: 0x8000, end: 0x9000, kind: "data", name: "outer" }),
+      createUserRegion({ id: "rgn_8100", start: 0x8100, end: 0x8200, kind: "text", name: "inner" }),
     ]);
 
     expect(tree).toHaveLength(1);
@@ -16,9 +16,9 @@ describe("buildRegionTree", () => {
 
   it("nests several levels deep", () => {
     const tree = buildRegionTree([
-      createUserRegion("rgn_8000", 0x8000, 0x9000, "data", "a"),
-      createUserRegion("rgn_8100", 0x8100, 0x8800, "data", "b"),
-      createUserRegion("rgn_8200", 0x8200, 0x8300, "text", "c"),
+      createUserRegion({ id: "rgn_8000", start: 0x8000, end: 0x9000, kind: "data", name: "a" }),
+      createUserRegion({ id: "rgn_8100", start: 0x8100, end: 0x8800, kind: "data", name: "b" }),
+      createUserRegion({ id: "rgn_8200", start: 0x8200, end: 0x8300, kind: "text", name: "c" }),
     ]);
 
     expect(tree[0].name).toBe("a");
@@ -30,9 +30,9 @@ describe("buildRegionTree", () => {
     // The case that ruled out a flat per-address type array: these must not
     // merge into one run, because the user drew the boundary deliberately.
     const tree = buildRegionTree([
-      createUserRegion("rgn_8cb5", 0x8cb5, 0x8cd5, "data", "noOfDroidSquads"),
-      createUserRegion("rgn_8cd5", 0x8cd5, 0x8cf6, "data", "sizeOfDroidSquads"),
-      createUserRegion("rgn_8cf6", 0x8cf6, 0x8d18, "data", "laserFrameRate"),
+      createUserRegion({ id: "rgn_8cb5", start: 0x8cb5, end: 0x8cd5, kind: "data", name: "noOfDroidSquads" }),
+      createUserRegion({ id: "rgn_8cd5", start: 0x8cd5, end: 0x8cf6, kind: "data", name: "sizeOfDroidSquads" }),
+      createUserRegion({ id: "rgn_8cf6", start: 0x8cf6, end: 0x8d18, kind: "data", name: "laserFrameRate" }),
     ]);
 
     expect(tree.map((n) => n.name)).toEqual([
@@ -45,8 +45,8 @@ describe("buildRegionTree", () => {
 
   it("sorts siblings by address regardless of declaration order", () => {
     const tree = buildRegionTree([
-      createUserRegion("rgn_8800", 0x8800, 0x8900, "data", "later"),
-      createUserRegion("rgn_8000", 0x8000, 0x8100, "data", "earlier"),
+      createUserRegion({ id: "rgn_8800", start: 0x8800, end: 0x8900, kind: "data", name: "later" }),
+      createUserRegion({ id: "rgn_8000", start: 0x8000, end: 0x8100, kind: "data", name: "earlier" }),
     ]);
 
     expect(tree.map((n) => n.name)).toEqual(["earlier", "later"]);
@@ -55,8 +55,8 @@ describe("buildRegionTree", () => {
   it("leaves merely-overlapping regions as siblings", () => {
     // Neither contains the other, so neither can honestly be the parent.
     const tree = buildRegionTree([
-      createUserRegion("rgn_8000", 0x8000, 0x8200, "data", "left"),
-      createUserRegion("rgn_8100", 0x8100, 0x8300, "text", "right"),
+      createUserRegion({ id: "rgn_8000", start: 0x8000, end: 0x8200, kind: "data", name: "left" }),
+      createUserRegion({ id: "rgn_8100", start: 0x8100, end: 0x8300, kind: "text", name: "right" }),
     ]);
 
     expect(tree).toHaveLength(2);
@@ -65,7 +65,7 @@ describe("buildRegionTree", () => {
 
   it("carries the comment through for display", () => {
     const tree = buildRegionTree([
-      createUserRegion("rgn_8000", 0x8000, 0x8100, "data", "table", "sprite frames"),
+      createUserRegion({ id: "rgn_8000", start: 0x8000, end: 0x8100, kind: "data", name: "table", comment: "sprite frames" }),
     ]);
 
     expect(tree[0].comment).toBe("sprite frames");

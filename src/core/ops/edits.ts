@@ -208,7 +208,8 @@ export function regionSetOp(
   kind: RegionKind,
   name?: string,
   comment?: string,
-  encoding?: TextEncoding
+  encoding?: TextEncoding,
+  view?: string
 ): Op {
   const owner = loaded.map.layerAt(start);
   if (!owner || !owner.hasBytes) {
@@ -232,6 +233,7 @@ export function regionSetOp(
     name,
     comment,
     encoding,
+    view,
   };
 }
 

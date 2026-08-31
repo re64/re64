@@ -8,6 +8,7 @@ export type RegionKind =
   | "data"       // Raw bytes (display as hex)
   | "text"       // ASCII/PETSCII text
   | "jumptable"  // Array of addresses (each is an entry point)
+  | "bitmap"     // Graphics: a character set, sprites, a screen
   | "unknown";   // Not yet analyzed
 
 /**
@@ -44,19 +45,30 @@ export interface Region {
    * that way produces confident nonsense.
    */
   readonly encoding?: TextEncoding;
+  /**
+   * How to draw a `bitmap` region: `char:8`, `bits:3`, `sprite`.
+   *
+   * One string rather than a format, a stride and a column count, because each
+   * of those would need threading through the schema, the serializer, the CRDT
+   * assignment, the op, the diff, the inverse and four signatures. It also
+   * leaves room for `snippet:<id>` without doing that again.
+   */
+  readonly view?: string;
 }
 
 /** Create a user-defined region */
-export function createUserRegion(
-  id: string,
-  start: number,
-  end: number,
-  kind: RegionKind,
-  name?: string,
-  comment?: string,
-  encoding?: TextEncoding
-): Region {
-  return { id, start, end, kind, name, comment, encoding };
+export function createUserRegion(region: {
+  id: string;
+  start: number;
+  end: number;
+  kind: RegionKind;
+  name?: string;
+  comment?: string;
+  encoding?: TextEncoding;
+  view?: string;
+}): Region {
+  const { id, start, end, kind, name, comment, encoding, view } = region;
+  return { id, start, end, kind, name, comment, encoding, view };
 }
 
 /**

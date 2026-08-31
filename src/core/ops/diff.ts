@@ -105,7 +105,8 @@ const sameRegion = (a: ProjectRegion, b: ProjectRegion) =>
   a.kind === b.kind &&
   a.name === b.name &&
   a.comment === b.comment &&
-  (a.encoding ?? "ascii") === (b.encoding ?? "ascii");
+  (a.encoding ?? "ascii") === (b.encoding ?? "ascii") &&
+  a.view === b.view;
 
 /**
  * Operations that take `from` to `to`.
@@ -251,6 +252,7 @@ export function diffProjects(from: Project, to: Project): Op[] {
       name: owned.entry.name,
       comment: owned.entry.comment,
       encoding: owned.entry.encoding,
+      view: owned.entry.view,
     });
   }
 

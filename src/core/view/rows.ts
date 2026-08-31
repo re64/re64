@@ -22,6 +22,12 @@ import {
   derivedId,
 } from "../index.js";
 import { ArrowSpan, allocateArrowLanes, renderArrowGutter } from "./arrows.js";
+import {
+  bitmapToText,
+  bytesPerCell,
+  decodeBitmap,
+  parseBitmapView,
+} from "./bitmap-view.js";
 
 /** A clickable span within a row's text, as character offsets into `text`. */
 export interface RowToken {
@@ -56,7 +62,9 @@ export type RowKind =
   | "word"
   | "comment"
   /** A second reading of bytes already shown above. */
-  | "overlap";
+  | "overlap"
+  /** One scanline of a picture, drawn with shading characters. */
+  | "bitmap";
 
 /** One rendered line of the disassembly view. */
 export interface Row {
@@ -549,6 +557,35 @@ export function analyze(
       continue;
     }
 
+    // A picture, drawn where the bytes are.
+    //
+    // Text art rather than an inline canvas, and that is the whole point: one
+    // rendering serves the browser, the CLI and an agent reading rows, so
+    // nothing has to be built twice and the listing a person exports looks like
+    // the listing they were reading. Colour and zoom belong in the explorer
+    // panel, where you are choosing a format rather than reading code.
+    if (strategy === "bitmap") {
+      const region = map.getRegionAt(addr);
+      const options = parseBitmapView(region?.view) ?? { format: "char" as const, columns: 1 };
+      const cellBytes = bytesPerCell(options);
+      const perRow = cellBytes * (options.columns ?? 1);
+
+      emitLabels(addr);
+      emitComments(addr);
+
+      const available = Math.min(perRow, rangeEnd - addr);
+      const picture = decodeBitmap(map.readBytes(addr, available), options);
+      const art = bitmapToText(picture).split("\n");
+
+      // Every line carries the address, exactly as a multi-line comment does —
+      // a wrapped line and a hand-broken one are the same thing here too.
+      for (const line of art) {
+        push({ address: addr, kind: "bitmap", text: `${hex4(addr)}  ${line}`, tokens: [] });
+      }
+      addr += Math.max(1, available);
+      continue;
+    }
+
     // Data and text regions: accumulate up to 8 bytes per row, breaking at
     // labels, region boundaries, and decoded instructions.
     const isText = strategy === "text";
@@ -657,7 +694,7 @@ export function analyze(
  * the inner accumulator cannot disagree about who handles what — which is
  * exactly how an unhandled kind used to leave the address un-advanced.
  */
-type RowStrategy = "word" | "text" | "bytes";
+type RowStrategy = "word" | "text" | "bytes" | "bitmap";
 
 function rowStrategy(kind: RegionKind): RowStrategy {
   switch (kind) {
@@ -665,6 +702,8 @@ function rowStrategy(kind: RegionKind): RowStrategy {
       return "word";
     case "text":
       return "text";
+    case "bitmap":
+      return "bitmap";
     case "data":
     case "code":
     case "unknown":

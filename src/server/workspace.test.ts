@@ -1411,3 +1411,47 @@ describe("quoting the line that refers to something", () => {
     expect(caller?.text).not.toContain("and here is why");
   });
 });
+
+describe("declaring a picture", () => {
+  it("draws it in the listing", () => {
+    workspace.setRegion(agent, 0x8e00, 0x8e20, "bitmap", "CharSet", undefined, undefined, "char:4");
+    const listing = workspace.listing(0x8e00, 10).text;
+    expect(listing).toContain("CharSet:");
+    // Shading characters, not a hex column.
+    expect(listing).toMatch(/@{2,}/);
+  });
+
+  it("insists on knowing how to read the bytes", () => {
+    // A bitmap without a view cannot be drawn at all, so accepting one would
+    // record a region nothing can render and report success.
+    expect(() => workspace.setRegion(agent, 0x8e00, 0x8e20, "bitmap")).toThrow(
+      /needs a view/
+    );
+  });
+
+  it("names the views it understands rather than failing vaguely", () => {
+    expect(() =>
+      workspace.setRegion(agent, 0x8e00, 0x8e20, "bitmap", "X", undefined, undefined, "pixels")
+    ).toThrow(/char:<columns>/);
+  });
+
+  it("counts as explained, so it is not an undecoded hole", () => {
+    // $8E00-$9000 is already declared `data`. Re-declaring the same span as a
+    // bitmap must leave the accounting alone: a picture is an explanation of
+    // those bytes just as much as "data" was.
+    const before = workspace.undecoded(50).unexplainedBytes;
+    workspace.setRegion(agent, 0x8e00, 0x9000, "bitmap", "CharSet", undefined, undefined, "char:8");
+    expect(workspace.undecoded(50).unexplainedBytes).toBe(before);
+  });
+
+  it("shrinks the region it starts on, rather than nesting inside it", () => {
+    // Worth pinning because it surprised me. `regionSetOp` matches an existing
+    // region by *start address* and reuses its id, so this edits the 512-byte
+    // `data` region at $8E00 down to 32 bytes — and the other 480 stop being
+    // explained by anything. That is existing behaviour for every kind, not
+    // something bitmaps introduced, but it is silent and a caller should know.
+    const before = workspace.undecoded(50).unexplainedBytes;
+    workspace.setRegion(agent, 0x8e00, 0x8e20, "bitmap", "CharSet", undefined, undefined, "char:4");
+    expect(workspace.undecoded(50).unexplainedBytes).toBe(before + (0x9000 - 0x8e20));
+  });
+});

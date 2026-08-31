@@ -1697,6 +1697,57 @@ mid-instruction address reports success, the name resolves correctly in operands
 row for it. That is a real gap and a small one, and it is the whole of what is
 left here.
 
+### Bytes as pictures
+
+A C64 program's data is mostly images, and a hex column is the worst possible
+way to look at one. Every reader in experiment 2 ended up scraping hex out of a
+listing and writing their own bitmap printer, which is the clearest available
+statement that this belongs in the tool.
+
+**A decoder returns pixels, not pictures.** `src/core/view/bitmap-view.ts` is
+DOM-free like `map-view.ts`: it hands back palette indices, and each consumer
+draws them its own way. That is what lets one decoder serve the browser, the CLI
+and an agent — and it is the contract a user-supplied decoder will have to
+satisfy, so it was worth settling while the only implementations are ours.
+
+**A bitmap region renders as text art, in the row model.** Not an inline canvas:
+the same rows go to the browser, to `re64 disasm` and to `export_listing`, so
+nothing is built twice and the listing somebody exports looks like the listing
+they were reading. Colour and zoom belong in an explorer panel, where you are
+choosing a format rather than reading code. Every art line repeats the address,
+exactly as a multi-line comment does — a wrapped line and a hand-broken one are
+the same thing here too.
+
+**`view` is one string, not three fields.** `char:8`, `bits:3`, `sprite`. A
+format, a stride and a column count would each have to be threaded through the
+schema, the line serializer, the CRDT assignment, the op type, the diff, the
+inverse and four call signatures — that is twelve sites per field. One string
+diffs readably and leaves room for `snippet:<id>` without doing it again.
+
+`bits` with a stride is the format that matters: sliding the byte width until an
+image snaps into focus is how anyone has ever found graphics in a dump. The
+others are the hardware's own layouts, worth having because guessing a sprite's
+stride is tedious when only one is legal.
+
+Default colours are black and white rather than the machine's own light-blue on
+blue. Authenticity would be unreadable both as terminal shading and as a
+thumbnail, and the real colours live in colour RAM somewhere else entirely, so
+any choice here is a viewing default rather than a claim about the program.
+
+**Adding a `RegionKind` has exactly one compile-time guard and nine silent
+sites.** `rowStrategy`'s `never` default is the guard. The rest — the runtime
+`REGION_KINDS` whitelist, the MCP `z.enum` *and* its hand-duplicated arg union,
+the CLI kind string, the explained-kinds list in `undecoded`, `shouldDisassemble`,
+`generateLabels`, the analysis filter, and a colour in `index.html` — must be
+found by hand. The runtime whitelist is the nastiest: miss it and every write
+throws `Unknown region kind`, so a missing case looks like a broken tool.
+
+One behaviour worth knowing, which predates all this: `regionSetOp` matches an
+existing region by **start address** and reuses its id, so declaring a small
+region at the same start as a large one *shrinks* it rather than nesting inside
+it. Declaring 32 bytes of `characterSetData` a bitmap left the other 480 bytes
+explained by nothing, silently.
+
 ### Text Region Rendering
 
 A text region declares its **encoding**: `petscii`, `screen`, or `ascii`. Neither

@@ -142,6 +142,8 @@ export interface ProjectRegion {
   name?: string;
   /** Optional comment */
   comment?: string;
+  /** How to draw a `bitmap` region: `char:8`, `bits:3`, `sprite`. */
+  view?: string;
 }
 
 /** Project file structure */
@@ -194,6 +196,7 @@ const REGION_KINDS: readonly RegionKind[] = [
   "data",
   "text",
   "jumptable",
+  "bitmap",
   "unknown",
 ];
 const LABEL_TYPES: readonly LabelType[] = ["entry", "function", "code", "address"];
@@ -307,7 +310,16 @@ export function projectRegionsToRegions(
     }
 
     const id = pr.id ?? derivedId("rgn", layerId, start, pr.kind);
-    return createUserRegion(id, start, end, pr.kind, pr.name, pr.comment, pr.encoding);
+    return createUserRegion({
+      id,
+      start,
+      end,
+      kind: pr.kind,
+      name: pr.name,
+      comment: pr.comment,
+      encoding: pr.encoding,
+      view: pr.view,
+    });
   });
 }
 

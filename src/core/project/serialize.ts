@@ -234,7 +234,8 @@ function regionEntryLine(
   kind: string,
   name?: string,
   comment?: string,
-  encoding?: string
+  encoding?: string,
+  view?: string
 ): string {
   const hex = (n: number) => "$" + n.toString(16).toUpperCase().padStart(4, "0");
   const parts = [
@@ -248,6 +249,9 @@ function regionEntryLine(
   // Absent means ASCII, recorded by absence like every other default here.
   if (encoding !== undefined && encoding !== "ascii") {
     parts.push(`"encoding": ${JSON.stringify(encoding)}`);
+  }
+  if (view !== undefined) {
+    parts.push(`"view": ${JSON.stringify(view)}`);
   }
   return `${indent}{ ${parts.join(", ")} }`;
 }
@@ -444,6 +448,7 @@ export function upsertRegion(
     name?: string;
     comment?: string;
     encoding?: string;
+    view?: string;
   }
 ): string {
   const lines = raw.split("\n");
@@ -468,6 +473,7 @@ export function upsertRegion(
       // a layer takes this branch, so declaring a text region and setting its
       // encoding in one call lost the encoding and rendered as ASCII.
       ...(region.encoding !== undefined ? { encoding: region.encoding as never } : {}),
+      ...(region.view !== undefined ? { view: region.view } : {}),
     });
     return formatProject(project);
   }
@@ -488,7 +494,8 @@ export function upsertRegion(
     region.kind,
     region.name,
     region.comment,
-    region.encoding
+    region.encoding,
+    region.view
   );
 
   const at = findEntryById(lines, span, region.id);

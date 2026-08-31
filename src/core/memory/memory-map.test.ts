@@ -216,8 +216,8 @@ describe("MemoryMap", () => {
       const lower = constLayer("lower", 0x1000, 0x100, 0x00);
       const upper = constLayer("upper", 0x1000, 0x100, 0xff);
 
-      lower.regions.addRegion(createUserRegion("rgn_1000", 0x1000, 0x1010, "text", "lowerText"));
-      upper.regions.addRegion(createUserRegion("rgn_1000", 0x1000, 0x1010, "jumptable", "upperTable"));
+      lower.regions.addRegion(createUserRegion({ id: "rgn_1000", start: 0x1000, end: 0x1010, kind: "text", name: "lowerText" }));
+      upper.regions.addRegion(createUserRegion({ id: "rgn_1000", start: 0x1000, end: 0x1010, kind: "jumptable", name: "upperTable" }));
 
       map.addLayer(lower);
       map.addLayer(upper); // upper on top
@@ -233,7 +233,7 @@ describe("MemoryMap", () => {
       const lower = constLayer("lower", 0x1000, 0x100, 0x00);
       const upper = constLayer("upper", 0x1000, 0x100, 0xff);
 
-      lower.regions.addRegion(createUserRegion("rgn_1000", 0x1000, 0x1010, "text", "lowerText"));
+      lower.regions.addRegion(createUserRegion({ id: "rgn_1000", start: 0x1000, end: 0x1010, kind: "text", name: "lowerText" }));
       map.addLayer(lower);
       map.addLayer(upper);
 
@@ -250,7 +250,7 @@ describe("MemoryMap", () => {
     it("falls back to the layer default outside any declared region", () => {
       const map = new MemoryMap();
       const layer = constLayer("layer", 0x1000, 0x100, 0x00);
-      layer.regions.addRegion(createUserRegion("rgn_1000", 0x1000, 0x1010, "text"));
+      layer.regions.addRegion(createUserRegion({ id: "rgn_1000", start: 0x1000, end: 0x1010, kind: "text" }));
       map.addLayer(layer);
 
       expect(map.getKindAt(0x1005)).toBe("text");
@@ -261,8 +261,8 @@ describe("MemoryMap", () => {
     it("resolves nested regions innermost-first", () => {
       const map = new MemoryMap();
       const layer = constLayer("layer", 0x1000, 0x100, 0x00);
-      layer.regions.addRegion(createUserRegion("rgn_1000", 0x1000, 0x1080, "data", "outer"));
-      layer.regions.addRegion(createUserRegion("rgn_1010", 0x1010, 0x1020, "text", "inner"));
+      layer.regions.addRegion(createUserRegion({ id: "rgn_1000", start: 0x1000, end: 0x1080, kind: "data", name: "outer" }));
+      layer.regions.addRegion(createUserRegion({ id: "rgn_1010", start: 0x1010, end: 0x1020, kind: "text", name: "inner" }));
       map.addLayer(layer);
 
       expect(map.getRegionAt(0x1005)?.name).toBe("outer");
@@ -277,7 +277,7 @@ describe("MemoryMap", () => {
       map.addLayer(lower);
       map.addLayer(upper);
 
-      const owner = map.attachRegion(createUserRegion("rgn_1000", 0x1000, 0x1010, "text"));
+      const owner = map.attachRegion(createUserRegion({ id: "rgn_1000", start: 0x1000, end: 0x1010, kind: "text" }));
 
       expect(owner).toBe(upper);
       expect(upper.regions.size).toBe(1);
@@ -288,7 +288,7 @@ describe("MemoryMap", () => {
       const map = new MemoryMap();
       map.addLayer(constLayer("layer", 0x1000, 0x100, 0x00));
 
-      expect(map.attachRegion(createUserRegion("rgn_9000", 0x9000, 0x9010, "data"))).toBeUndefined();
+      expect(map.attachRegion(createUserRegion({ id: "rgn_9000", start: 0x9000, end: 0x9010, kind: "data" }))).toBeUndefined();
     });
   });
 });

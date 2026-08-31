@@ -266,14 +266,21 @@ region
   .description("Type a range of memory")
   .argument("<project>", "Project file (.re64)")
   .argument("<range>", "Range, e.g. $8080:$80A0 or $8080+$20")
-  .argument("<kind>", "code | data | text | jumptable | unknown")
+  .argument("<kind>", "code | data | text | jumptable | bitmap | unknown")
   .option("-n, --name <name>", "Name the region")
   .option("-a, --author <name>", "Who made this edit", "cli")
   .action((projectPath: string, rangeArg: string, kind: string, options) => {
     const { start, length } = parseRange(rangeArg);
     const editor = openProject(projectPath);
     const layerId = editor.owningLayerId(start);
-    const op = editor.regionSetOp(layerId, start, start + length, kind as never, options.name);
+    const op = editor.regionSetOp(
+      layerId,
+      start,
+      start + length,
+      kind as never,
+      options.name,
+      options.view
+    );
     console.log(editor.run([op], options.author ?? "cli", Date.now())[0]);
   });
 

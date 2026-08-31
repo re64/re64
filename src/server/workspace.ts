@@ -30,6 +30,7 @@ import {
   runBlock,
   REGISTER_NAMES,
   blobPaths,
+  isBitmapView,
   buildMemoryMap,
   describeOp,
   labelDeleteOp,
@@ -797,7 +798,11 @@ export class Workspace {
         const kind = loaded.map.getKindAt(address);
         // Explained: something decoded here, or someone said what it holds.
         const explained =
-          covered.has(address) || kind === "data" || kind === "text" || kind === "jumptable";
+          covered.has(address) ||
+          kind === "data" ||
+          kind === "text" ||
+          kind === "jumptable" ||
+          kind === "bitmap";
         if (explained) close(address);
         else if (run === undefined) run = address;
       }
@@ -1551,7 +1556,8 @@ export class Workspace {
     kind: RegionKind,
     name?: string,
     comment?: string,
-    encoding?: TextEncoding
+    encoding?: TextEncoding,
+    view?: string
   ): EditResult {
     if (end <= start) {
       throw new Error(
@@ -1579,9 +1585,26 @@ export class Workspace {
       );
     }
 
+    if (view !== undefined && !isBitmapView(view)) {
+      throw new Error(
+        `"${view}" is not a view this can draw. Use bits:<bytes per row>, ` +
+          `char:<columns>, sprite:<columns> or sprite-multi:<columns> — for ` +
+          `example "char:8" for a character set eight glyphs wide, or "bits:3" ` +
+          `to slide a raw bit run at a sprite's width until a picture appears.`
+      );
+    }
+    if (kind === "bitmap" && view === undefined) {
+      throw new Error(
+        `A bitmap region needs a view saying how to read the bytes: ` +
+          `char:<columns> for a character set, sprite:<columns> or ` +
+          `sprite-multi:<columns> for sprites, bits:<bytes per row> for ` +
+          `anything else.`
+      );
+    }
+
     const result = this.edit(
       caller,
-      (loaded) => [regionSetOp(loaded, start, end, kind, name, comment, encoding)],
+      (loaded) => [regionSetOp(loaded, start, end, kind, name, comment, encoding, view)],
       { start, end }
     );
     return {

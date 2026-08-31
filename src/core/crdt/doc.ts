@@ -252,7 +252,16 @@ export function projectFromDoc(doc: Y.Doc): Project {
 // A label no longer carries a comment: comments are their own objects. Read
 // from an older document, the key is simply absent.
 const LABEL_FIELDS = ["id", "address", "name", "type", "extent"] as const;
-const REGION_FIELDS = ["id", "start", "end", "kind", "name", "comment", "encoding"] as const;
+const REGION_FIELDS = [
+  "id",
+  "start",
+  "end",
+  "kind",
+  "name",
+  "comment",
+  "encoding",
+  "view",
+] as const;
 const COMMENT_FIELDS = ["id", "address", "placement", "text"] as const;
 const USE_FIELDS = ["id", "address", "constant"] as const;
 const LABEL_USE_FIELDS = ["id", "address", "label"] as const;

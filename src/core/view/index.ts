@@ -16,6 +16,9 @@ export {
   BitmapOptions,
   C64_PALETTE,
   bitmapToText,
+  bytesPerCell,
+  isBitmapView,
+  parseBitmapView,
   cellCount,
   decodeBitmap,
 } from "./bitmap-view.js";

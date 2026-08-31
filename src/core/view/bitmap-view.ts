@@ -230,3 +230,48 @@ export function bitmapToText(bitmap: Bitmap, options: { pixelWidth?: number } = 
   }
   return lines.join("\n");
 }
+
+/**
+ * A region's `view` string, as decoder options.
+ *
+ * One short field rather than three — `format`, `stride`, `columns` — because
+ * every one of those would have to be threaded through the project schema, the
+ * line serializer, the CRDT assignment, the op type, the diff, the inverse and
+ * four call signatures. `char:8` says the same thing, diffs readably, and leaves
+ * room for `snippet:<id>` later without another round of plumbing.
+ *
+ * Unparseable or unknown returns undefined rather than guessing a format, so a
+ * caller can say the view is not understood instead of drawing the wrong thing.
+ */
+export function parseBitmapView(view: string | undefined): BitmapOptions | undefined {
+  if (!view) return undefined;
+  const [name, count] = view.trim().split(":");
+  const format = name as BitmapFormat;
+  if (!["bits", "char", "sprite", "sprite-multi"].includes(format)) return undefined;
+
+  const n = count === undefined ? undefined : Number.parseInt(count, 10);
+  if (count !== undefined && (!Number.isFinite(n) || (n as number) < 1)) return undefined;
+
+  // The number means bytes-per-row for a raw bit run and cells-per-row for the
+  // cell formats, because those are the knob each one actually has.
+  return format === "bits"
+    ? { format, stride: n ?? 1 }
+    : { format, columns: n ?? 1 };
+}
+
+/** Whether a `view` string names something this can draw. */
+export const isBitmapView = (view: string | undefined): boolean =>
+  parseBitmapView(view) !== undefined;
+
+/** How many bytes one cell of this view consumes. */
+export function bytesPerCell(options: BitmapOptions): number {
+  switch (options.format ?? "bits") {
+    case "char":
+      return 8;
+    case "sprite":
+    case "sprite-multi":
+      return 63;
+    case "bits":
+      return Math.max(1, options.stride ?? 1);
+  }
+}

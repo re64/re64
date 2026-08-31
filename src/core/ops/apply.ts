@@ -128,6 +128,7 @@ export function applyOp(raw: string, op: Op): string {
         name: op.name,
         comment: op.comment,
         encoding: op.encoding,
+        view: op.view,
       });
 
     case "region.delete":
@@ -370,6 +371,7 @@ export function invertOp(raw: string, op: Op): Op {
         name: found.entry.name,
         comment: found.entry.comment,
         encoding: found.entry.encoding,
+        view: found.entry.view,
       };
     }
 
@@ -386,6 +388,7 @@ export function invertOp(raw: string, op: Op): Op {
         name: found.entry.name,
         comment: found.entry.comment,
         encoding: found.entry.encoding,
+        view: found.entry.view,
       };
     }
 

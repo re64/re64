@@ -913,6 +913,8 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     "Say what a span of memory holds. Marking data stops it being disassembled " +
       "as garbage, marking code starts decoding at its first address, and " +
       "marking a jumptable decodes the code it points at, which no control-flow " +
+      "walk can reach on its own, and marking a bitmap draws the bytes as a " +
+      "picture instead of a hex column. " +
       "walk can reach on its own. Give start with either end (exclusive) or " +
       "length; the reply says which bytes it actually took. The span must lie " +
       "in a layer that supplies bytes — a region says how to read bytes, so " +
@@ -929,7 +931,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         .min(1)
         .optional()
         .describe("How many bytes, as an alternative to end. No off-by-one to get wrong."),
-      kind: z.enum(["code", "data", "text", "jumptable", "unknown"]),
+      kind: z.enum(["code", "data", "text", "jumptable", "bitmap", "unknown"]),
       name: z.string().optional(),
       comment: z.string().optional(),
       encoding: z
@@ -940,6 +942,16 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
             "bytes destined for screen RAM, ascii by default. Neither C64 " +
             "encoding is ASCII, so the default misreads most C64 text."
         ),
+      view: z
+        .string()
+        .optional()
+        .describe(
+          "For kind:bitmap, how to read the bytes as a picture. " +
+            "char:<columns> for a character set, sprite:<columns> or " +
+            "sprite-multi:<columns> for sprites, bits:<bytes per row> for " +
+            "anything else. The listing then draws it, in the browser and in " +
+            "exported text alike."
+        ),
       expectVersion: z.string().optional(),
     },
     (args: {
@@ -947,9 +959,10 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       start: number;
       end?: number;
       length?: number;
-      kind: "code" | "data" | "text" | "jumptable" | "unknown";
+      kind: "code" | "data" | "text" | "jumptable" | "bitmap" | "unknown";
       name?: string;
       comment?: string;
+      view?: string;
       encoding?: "ascii" | "petscii" | "screen";
       expectVersion?: string;
     }) => {
@@ -971,7 +984,8 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         args.kind,
         args.name,
         args.comment,
-        args.encoding
+        args.encoding,
+        args.view
       );
     }
   );

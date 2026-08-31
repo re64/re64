@@ -49,6 +49,8 @@ export interface RegionSetOp {
   comment?: string;
   /** How to read a text region's bytes. */
   encoding?: TextEncoding;
+  /** How to draw a `bitmap` region. */
+  view?: string;
 }
 
 export interface RegionDeleteOp {

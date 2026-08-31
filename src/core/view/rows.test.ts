@@ -25,14 +25,21 @@ function project(
   bytes: number[],
   extra: {
     labels?: { address: number; name: string; type?: "function" | "code" | "address" }[];
-    regions?: { start: number; end: number; kind: RegionKind; name?: string }[];
+    regions?: { start: number; end: number; kind: RegionKind; name?: string; view?: string }[];
   } = {}
 ): LoadedProject {
   const map = new MemoryMap();
   const layer = new FileLayer("test", "test.prg", ORG, new Uint8Array(bytes), undefined, true, true);
 
   for (const r of extra.regions ?? []) {
-    layer.regions.addRegion(createUserRegion(`rgn_${r.start.toString(16)}`, r.start, r.end, r.kind, r.name));
+    layer.regions.addRegion(createUserRegion({
+      id: `rgn_${r.start.toString(16)}`,
+      start: r.start,
+      end: r.end,
+      kind: r.kind,
+      name: r.name,
+      view: r.view,
+    }));
   }
 
   const userLabels = new LabelIndex();
@@ -299,5 +306,34 @@ describe("wrapping a comment", () => {
 
   it("terminates on a word longer than the width", () => {
     expect(wrapCommentText("aaaaaaaaaaaaaaaa bb", 4)).toEqual(["aaaaaaaaaaaaaaaa", "bb"]);
+  });
+});
+
+describe("a region that holds a picture", () => {
+  /** Two glyphs: a solid block, then a vertical bar. */
+  const bytes = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, ...new Array(8).fill(0x18)];
+  const charset = (view = "char:2") =>
+    project(bytes, { regions: [{ start: ORG, end: ORG + 16, kind: "bitmap", name: "Glyphs", view }] });
+
+  it("draws the bytes instead of listing them", () => {
+    const rows = analyze(charset()).rows.filter((r) => r.kind === "bitmap");
+    // Eight scanlines, one per pixel row of an 8x8 cell.
+    expect(rows).toHaveLength(8);
+    // The solid glyph on the left, the bar on the right.
+    expect(rows[0].text).toContain("@@@@@@@@@@@@@@@@");
+    // And no hex column: this row is a picture, not a dump.
+    expect(rows.every((r) => !r.text.includes("|"))).toBe(true);
+  });
+
+  it("carries the address on every line, as a multi-line comment does", () => {
+    const rows = analyze(charset()).rows.filter((r) => r.kind === "bitmap");
+    expect(rows.every((r) => r.address === ORG)).toBe(true);
+  });
+
+  it("still draws when the view says nothing useful", () => {
+    // An unreadable view must not stop the region rendering — the bytes are
+    // still there and still worth looking at.
+    expect(analyze(charset("nonsense")).rows.filter((r) => r.kind === "bitmap").length)
+      .toBeGreaterThan(0);
   });
 });

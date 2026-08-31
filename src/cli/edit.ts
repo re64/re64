@@ -86,9 +86,12 @@ export class ProjectEditor {
     start: number,
     end: number,
     kind: RegionKind,
-    name?: string
+    name?: string,
+    view?: string
   ): Op {
-    return regionSetOp(this.loadedProject(), start, end, kind, name);
+    // `comment` and `encoding` still have no CLI surface; `view` does, because
+    // a bitmap region without one cannot be drawn at all.
+    return regionSetOp(this.loadedProject(), start, end, kind, name, undefined, undefined, view);
   }
 
   regionDeleteOp(start: number): Op | undefined {
