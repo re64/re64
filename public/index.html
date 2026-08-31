@@ -365,6 +365,7 @@
           <button class="tab" data-tab="debug">Debug</button>
         </div>
         <button id="toggle-map" title="Show or hide the memory map">▤ Map</button>
+        <button id="toggle-wrap" title="Wrap long lines instead of letting them run off the edge (w)">⏎ Wrap</button>
         <button id="back">← Back</button>
         <button id="undo" title="Undo">↶</button>
         <button id="redo" title="Redo">↷</button>
@@ -447,6 +448,21 @@
             program or code region. All three are disassembly entry points; only
             <span class="tok-labeltype type-function">[fn]</span> is yours to set
             here — edit the project file for the rest.
+          </dd>
+        </dl>
+
+        <h3>View</h3>
+        <dl>
+          <dt><kbd>w</kbd></dt>
+          <dd>
+            Wrap long rows instead of letting them run off the edge — mainly for
+            comments, which have no columns to protect. Off by default, and
+            remembered.
+          </dd>
+          <dt><kbd>▤ Map</kbd></dt>
+          <dd>
+            Show or hide the memory map. Dragging the divider to the edge does
+            the same thing, and the width you chose comes back.
           </dd>
         </dl>
 

@@ -9,7 +9,13 @@
  * text — see "UI Design Decisions" in CLAUDE.md.
  */
 
-import { EditorState, StateEffect, StateField, RangeSetBuilder } from "@codemirror/state";
+import {
+  Compartment,
+  EditorState,
+  StateEffect,
+  StateField,
+  RangeSetBuilder,
+} from "@codemirror/state";
 import {
   EditorView,
   Decoration,
@@ -716,6 +722,7 @@ const navKeymap = keymap.of([
   { key: "Backspace", run: () => (goBack(), true) },
   { key: "n", run: () => (nameCurrentLine(), true) },
   { key: "f", run: () => (toggleFunctionOnCurrentLine(), true) },
+  { key: "w", run: () => (toggleWrap(), true) },
   { key: "Escape", run: () => (endLabelEdit(), true) },
   { key: "Mod-z", run: () => (void undoEdit(), true) },
   { key: "Mod-Shift-z", run: () => (void redoEdit(), true) },
@@ -739,10 +746,21 @@ const navKeymap = keymap.of([
   },
 ]);
 
+/**
+ * Line wrapping, reconfigurable rather than fixed.
+ *
+ * A compartment because it is a toggle: `lineWrapping` cannot be added or
+ * removed from a running editor any other way, and rebuilding the state would
+ * throw away the scroll position and the selection at the moment somebody is
+ * reading.
+ */
+const wrapping = new Compartment();
+
 const disasmView = new EditorView({
   state: EditorState.create({
     doc: "Loading…",
     extensions: [
+      wrapping.of([]),
       arrowGutter,
       highlightActiveLine(),
       decorationField,
@@ -768,11 +786,24 @@ const disasmView = new EditorView({
           fontFamily: "'SF Mono', Menlo, Consolas, monospace",
           paddingLeft: "6px",
           whiteSpace: "pre",
+          // A wrapped row is taller than one line and so is its gutter cell.
+          // The arrow belongs beside the row's *first* visual line, where the
+          // instruction it points at is; centring it in a tall cell slides it
+          // away from what it refers to.
+          display: "block",
         },
         ".cm-arrow-gutter .arrow-glyphs": {
           display: "inline-block",
           transform: "scaleY(1.45)",
           transformOrigin: "center",
+        },
+        // Continuation lines clear the address column, so a wrapped comment
+        // reads as one paragraph rather than restarting under the hex. Negative
+        // text-indent with matching padding is the hanging indent; it applies
+        // only while wrapping is on, since without it every row would shift.
+        "&.wrap .cm-line": {
+          textIndent: "-8ch",
+          paddingLeft: "calc(4px + 8ch)",
         },
         ".label-edit": {
           font: "inherit",
@@ -1435,6 +1466,41 @@ function store(key: string, value: string): void {
   }
 }
 
+/**
+ * Wrap long rows, or let them run off the edge.
+ *
+ * Off by default: a disassembly is columnar, and wrapping puts an instruction's
+ * operand under its own address, which costs more than it saves on the rows that
+ * fit. Comments are the case it is for — a paragraph about a routine has no
+ * column structure to protect and is unreadable at three screens wide.
+ */
+let wrapEnabled = false;
+
+function setWrapped(on: boolean): void {
+  wrapEnabled = on;
+  disasmView.dispatch({
+    effects: wrapping.reconfigure(
+      on
+        ? [
+            EditorView.lineWrapping,
+            // Through the editor's own attributes, not `dom.classList`: CodeMirror
+            // rewrites `className` wholesale when it updates — adding `cm-focused`
+            // is enough — so a class set from outside survives until the first
+            // click and then silently disappears, taking the hanging indent with
+            // it.
+            EditorView.editorAttributes.of({ class: "wrap" }),
+          ]
+        : []
+    ),
+  });
+  $("#toggle-wrap").classList.toggle("active", on);
+  store("re64.wrap", on ? "1" : "0");
+}
+
+const toggleWrap = () => setWrapped(!wrapEnabled);
+
+$("#toggle-wrap").addEventListener("click", toggleWrap);
+
 function setMapVisible(visible: boolean): void {
   split.classList.toggle("collapsed", !visible);
   split.position = visible ? lastMapWidth : 0;
@@ -1482,12 +1548,15 @@ updateBackButton();
 showTab("disasm");
 
 let mapVisible = true;
+let startWrapped = false;
 try {
   mapVisible = localStorage.getItem("re64.map") !== "0";
   const width = Number(localStorage.getItem("re64.mapWidth"));
   if (width > 0 && width < 100) lastMapWidth = width;
+  startWrapped = localStorage.getItem("re64.wrap") === "1";
 } catch {
-  // Defaults: shown, at the standard width.
+  // Defaults: map shown at the standard width, rows unwrapped.
 }
 setMapVisible(mapVisible);
+setWrapped(startWrapped);
 void loadDisassembly();

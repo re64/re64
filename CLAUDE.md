@@ -516,6 +516,38 @@ Enter commits, Escape reverts, and **blur reverts rather than saving**: an empty
 name means "delete this label", so a blur-commit would turn an accidentally
 cleared field into a silent deletion.
 
+**Line wrapping is a toggle, off by default** (`w`, or the Wrap button). A
+disassembly is columnar and wrapping puts an operand under its own address, which
+costs more than it saves on rows that fit; comments are the case it exists for,
+since a paragraph about a routine has no columns to protect and is unreadable at
+three screens wide. Wrapped rows get a hanging indent so continuations clear the
+address column and the comment reads as one paragraph.
+
+It lives in a `Compartment`, because `lineWrapping` cannot be added to a running
+editor otherwise and rebuilding the state would throw away the scroll position
+and selection while somebody is reading.
+
+Two things that cost a browser round trip to find:
+
+- **CodeMirror owns `view.dom.className` and rewrites it wholesale.** A class
+  added with `dom.classList.add` survives until the first update that touches it
+  — gaining `cm-focused` on the first click is enough — and then vanishes, taking
+  whatever CSS depended on it. Go through `EditorView.editorAttributes` instead,
+  inside the same compartment, so the class is part of the configuration rather
+  than something applied beside it.
+- **A duplicate key in a theme object silently drops the earlier rule.** It is a
+  plain object literal, so adding a second entry for `.cm-arrow-gutter
+  .cm-gutterElement` would have thrown away its font and padding without a
+  warning. Merge, never append.
+
+**Known cosmetic cost:** the arrow gutter's vertical connector breaks across a
+wrapped row. The gutter arrives as one pre-rendered string per row and a glyph
+does not stretch to a cell grown to three lines, so a long comment with an arrow
+passing it shows a gap. The arrow endpoints stay correct and anchored to the
+row's first visual line. Fixing it properly means drawing the verticals as
+geometry rather than as box-drawing characters, which would cost the CLI the
+gutter it shares.
+
 Two gotchas worth remembering:
 
 - A read-only view (`EditorView.editable.of(false)`) is **not focusable**. Without
