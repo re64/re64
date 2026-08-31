@@ -24,9 +24,12 @@ import {
   BlockRun,
   analyze,
   analyzeProgram,
+  analyzeRoutines,
+  Effects,
   blockAt,
   blockEffects,
   describeEffects,
+  formatVarnode,
   runBlock,
   REGISTER_NAMES,
   bitmapToText,
@@ -697,6 +700,76 @@ export class Workspace {
       };
     }
     return { ...common, kind: "text", lines: decoded.lines };
+  }
+
+  /**
+   * What a routine touches — its own code, and everything it calls.
+   *
+   * The question naming one requires, and the first answer here that crosses a
+   * call. Its extent is *derived*: 20 of the 50 routines in the reference
+   * project are not one contiguous span, one of them tail-jumping across a
+   * 2602-byte hole, so a declared extent could not have described them.
+   *
+   * A **may** answer — everything the routine can touch. An intersection over
+   * paths is often unanswerable, and a "must" that is quietly sometimes a "may"
+   * is worse than not offering one.
+   */
+  routineEffects(address: number): Record<string, unknown> {
+    const program = this.program();
+    const routines = analyzeRoutines(
+      program.blocks,
+      program.labels.filter({ type: "function" }).map((l) => l.address)
+    );
+
+    const found =
+      routines.get(address) ??
+      // The address of any block in a routine is a fair way to ask about it —
+      // a reader has a line, not necessarily an entry point.
+      [...routines.values()].find((r) =>
+        r.spans.some((span) => address >= span.start && address < span.end)
+      );
+
+    if (!found) {
+      throw new Error(
+        `${hex4(address)} is not in a routine this can see. A routine starts where ` +
+          `something calls it, or where mark_function says one starts — and this ` +
+          `address is in neither.`
+      );
+    }
+
+    const name = (at: number) => {
+      const label = program.labels.resolve(at);
+      return label && label.offset === 0 ? `${hex4(at)} (${label.label.name})` : hex4(at);
+    };
+    const show = (effects: Effects) => ({
+      reads: [
+        ...effects.reads.map(formatVarnode),
+        ...(effects.readsComputedMemory ? ["memory at a computed address"] : []),
+      ],
+      writes: [
+        ...effects.writes.map(formatVarnode),
+        ...(effects.writesComputedMemory ? ["memory at a computed address"] : []),
+      ],
+    });
+
+    return {
+      routine: name(found.entry),
+      blocks: found.blocks,
+      // More than one whenever it tail-jumps away, which is why no single
+      // declared span could have described it.
+      spans: found.spans.map((s) => `${hex4(s.start)}-${hex4(s.end - 1)}`),
+      itself: show(found.own),
+      including_what_it_calls: show(found.total),
+      calls: found.calls.map(name),
+      incomplete:
+        found.incomplete.length > 0
+          ? found.incomplete
+          : undefined,
+      note:
+        "Everything this routine *can* touch, not what it must. Reachability is " +
+        "static, so a computed jump or an RTS-dispatch leads somewhere this " +
+        "cannot follow — see list_warnings.",
+    };
   }
 
   /**

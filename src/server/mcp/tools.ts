@@ -298,6 +298,24 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "routine_effects",
+    "What a routine touches — registers, flags and memory — both its own code " +
+      "and everything it calls. The question naming one requires: `writes " +
+      "$(0xD418) and $(0xD40F)` says it makes a noise whatever it is called. " +
+      "Give any address inside it, not only its first. " +
+      "Its extent is worked out from control flow, not declared, because a " +
+      "routine that tail-jumps away is in two places and no single span " +
+      "describes it. " +
+      "This is what it *can* touch, never what it must: an intersection over " +
+      "paths is often unanswerable, and a maybe dressed as a certainty is worse " +
+      "than neither. Reachability is static, so a computed jump leads somewhere " +
+      "this cannot follow.",
+    { project, address },
+    ({ project: id, address: at }: { project?: string; address: number }) =>
+      context().workspace(id).routineEffects(at)
+  );
+
+  tool(
     "block_effects",
     "What the straight-line block at an address reads and writes, without " +
       "running it. The first question about a routine nobody has named: not " +

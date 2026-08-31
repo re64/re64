@@ -1111,6 +1111,51 @@ from. Without one that answer falls back to the nearest preceding flow label,
 which on a real routine is usually a local branch target — so "who calls this"
 came back naming `b81BC` for two call sites both inside `DrawGrid`.
 
+### What a routine touches
+
+The question naming one requires, and the first answer here that crosses a call.
+Everything it needed already existed — blocks with the strict definition, a
+lifter over the documented instruction set, and `blockEffects` reading a block's
+reads and writes off its operations. Four decisions, each settled by measuring
+the reference project rather than by argument:
+
+**The extent is derived, and a declared one would be actively wrong.** Not merely
+coarse — *wrong*: 20 of 50 routines here are not one contiguous span, and the
+worst tail-jumps across a 2602-byte hole. One real answer has **twelve** spans
+between `$8015` and `$8DCA`. A declared extent is a single range and cannot say
+that, so `mark_function` does not need one — which also frees the label field it
+was sharing with array extents, and with it the bug where declaring a routine
+turned `BPL loc_8050` into `BPL UpdateExplosion + $0010`.
+
+**Ownership is not a partition and does not need to be.** 87 of 431 blocks are
+reachable from more than one entry — the shared-tail idiom, one block reached
+from five routines. For a *may* answer that is fine: effects are a union over
+what is reachable, and over-approximating is the sound direction. No dominators,
+no arbitrating who owns a shared tail.
+
+**A tail jump belongs to the routine**, so the walk follows jumps and does not
+stop at another entry: control goes there and never comes back. That could have
+swallowed the program and does not — median routine 5 blocks, largest 93 of 450.
+
+**May, never must.** A union is always answerable; an intersection over paths
+often is not, and a "must" that is quietly sometimes a "may" is worse than not
+offering one.
+
+Two details worth keeping. The interprocedural pass is a **fixpoint** rather than
+one bottom-up sweep, even though this call graph is acyclic — a program that
+calls itself is ordinary, and a walk assuming otherwise would not terminate.
+And `PC` and `SP` are **left out of the reported sets**: every `JSR` and `RTS`
+moves both, so including them would put the same two entries on the answer for
+essentially every routine. Neither is a data effect, which is the question being
+asked — where control went is the exit and the call list, and what happened to
+the stack is `stackDelta`, which says more than "touched" ever could.
+
+What it says it cannot see: an instruction with no modelled semantics leaves both
+sets short by an unknown amount; a routine whose `stackDelta` at a `ret` is not
+`-2` does not return where its caller expects — `$87FE` is `PLA PLA RTS`, which
+returns to its caller's caller and has no absolute callers at all; and
+reachability is static, so a computed jump leads somewhere no walk follows.
+
 ### The server analyses now, and that is a reversal
 
 The old rule was that the server does not know what a 6502 is. That was about
@@ -1151,6 +1196,7 @@ Orient, read, decide, act, catch up:
 | `list_projects`, `describe_project` | what is here, and how far along it is |
 | `read_disassembly`, `list_labels` | structured rows, never rendered text — an agent cannot use character offsets into a text column |
 | `find_references`, `find_unnamed` | who calls this, and what is worth naming next |
+| `routine_effects` | what a whole routine touches, its own code and its callees |
 | `block_effects`, `run_block` | what a routine *does*, statically and by running it |
 | `set_label`, `remove_label`, `mark_function`, `unmark_function` | naming |
 | `set_region`, `remove_region` | exposed to agents **before** the web UI; the ops and the CLI already did this, so it was wiring rather than new capability |
