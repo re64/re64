@@ -464,6 +464,10 @@ export function upsertRegion(
       kind: region.kind as never,
       ...(region.name !== undefined ? { name: region.name } : {}),
       ...(region.comment !== undefined ? { comment: region.comment } : {}),
+      // Dropped here, silently, until now: the *first* region ever written into
+      // a layer takes this branch, so declaring a text region and setting its
+      // encoding in one call lost the encoding and rendered as ASCII.
+      ...(region.encoding !== undefined ? { encoding: region.encoding as never } : {}),
     });
     return formatProject(project);
   }

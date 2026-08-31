@@ -12,7 +12,7 @@ import {
   createLabelUse,
   createUserLabel,
 } from "../memory/label.js";
-import { TextEncoding } from "../c64/text.js";
+import { TEXT_ENCODINGS, TextEncoding } from "../c64/text.js";
 import { Region, RegionKind, createUserRegion } from "../memory/region.js";
 import { derivedId } from "./identity.js";
 
@@ -365,6 +365,15 @@ export function parseProject(json: string): Project {
         throw new Error(
           `Unknown region kind "${region.kind}" at ${String(region.start)} in ${where}. ` +
             `Expected one of: ${REGION_KINDS.join(", ")}`
+        );
+      }
+      // Unvalidated until now, and `decodeText` used to fall through to ASCII,
+      // so a typo like "petsci" was accepted, written back, and rendered as
+      // confident nonsense with nothing said anywhere.
+      if (region.encoding !== undefined && !TEXT_ENCODINGS.includes(region.encoding)) {
+        throw new Error(
+          `Unknown text encoding "${region.encoding}" at ${String(region.start)} in ${where}. ` +
+            `Expected one of: ${TEXT_ENCODINGS.join(", ")}`
         );
       }
     }

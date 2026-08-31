@@ -10,3 +10,12 @@ export {
 } from "./rows.js";
 export { formatRows, formatWarnings } from "./format.js";
 export { RegionNode, LayerView, MapView, buildRegionTree, buildMapView } from "./map-view.js";
+export {
+  Bitmap,
+  BitmapFormat,
+  BitmapOptions,
+  C64_PALETTE,
+  bitmapToText,
+  cellCount,
+  decodeBitmap,
+} from "./bitmap-view.js";

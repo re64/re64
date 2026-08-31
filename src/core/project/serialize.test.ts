@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { upsertLabel, deleteLabel, migrateIds, normalizeProjectText } from "./serialize.js";
+import {
+  upsertLabel,
+  upsertRegion,
+  deleteLabel,
+  migrateIds,
+  normalizeProjectText,
+} from "./serialize.js";
 import { parseProject } from "./project.js";
 
 /**
@@ -240,5 +246,75 @@ describe("normalizeProjectText", () => {
   it("ensures a trailing newline without doubling one", () => {
     expect(normalizeProjectText("{}")).toBe("{}\n");
     expect(normalizeProjectText("{}\n")).toBe("{}\n");
+  });
+});
+
+describe("writing a region into a layer that has none yet", () => {
+  /** A layer with bytes and no `regions` array, which is the branch in question. */
+  const bare = JSON.stringify(
+    {
+      name: "subject",
+      layers: [{ id: "lay_a", type: "bytes", address: "$8000", bytes: "48 45 4C 4C 4F" }],
+    },
+    null,
+    2
+  );
+
+  it("keeps the encoding", () => {
+    // The first region ever written into a layer takes a different path from
+    // every later one — it reformats rather than editing lines — and that path
+    // dropped `encoding` on the floor. So declaring a text region and saying how
+    // to read it in one call produced a region that rendered as ASCII, with
+    // nothing said anywhere.
+    const written = upsertRegion(bare, 0, {
+      id: "rgn_a",
+      start: 0x8000,
+      end: 0x8005,
+      kind: "text",
+      encoding: "petscii",
+    });
+
+    expect(parseProject(written).layers[0].regions?.[0]).toMatchObject({
+      kind: "text",
+      encoding: "petscii",
+    });
+  });
+
+  it("still keeps it on the second region, which takes the other path", () => {
+    const once = upsertRegion(bare, 0, {
+      id: "rgn_a",
+      start: 0x8000,
+      end: 0x8002,
+      kind: "text",
+      encoding: "petscii",
+    });
+    const twice = upsertRegion(once, 0, {
+      id: "rgn_b",
+      start: 0x8002,
+      end: 0x8005,
+      kind: "text",
+      encoding: "screen",
+    });
+
+    const regions = parseProject(twice).layers[0].regions ?? [];
+    expect(regions.map((r) => r.encoding)).toEqual(["petscii", "screen"]);
+  });
+});
+
+describe("refusing a text encoding nobody implements", () => {
+  it("names what it expected instead of rendering nonsense", () => {
+    // Accepted, persisted and silently read as ASCII until now.
+    const typo = JSON.stringify({
+      name: "subject",
+      layers: [
+        {
+          type: "bytes",
+          address: "$8000",
+          bytes: "48 49",
+          regions: [{ start: "$8000", end: "$8002", kind: "text", encoding: "petsci" }],
+        },
+      ],
+    });
+    expect(() => parseProject(typo)).toThrow(/Unknown text encoding "petsci"/);
   });
 });

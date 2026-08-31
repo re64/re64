@@ -133,9 +133,31 @@ export function fromAscii(byte: number): string {
 
 /** Decode a run of bytes in the given encoding. */
 export function decodeText(bytes: readonly number[], encoding: TextEncoding): string {
-  const decode =
-    encoding === "petscii" ? fromPetscii : encoding === "screen" ? fromScreenCode : fromAscii;
-  return bytes.map(decode).join("");
+  return bytes.map(decoderFor(encoding)).join("");
+}
+
+/**
+ * The decoder for an encoding, exhaustively.
+ *
+ * A `switch` with a `never` default rather than a ternary chain, so adding a
+ * value to `TextEncoding` fails to compile here instead of silently falling
+ * through to ASCII — which is what a chain ending in `: fromAscii` does, and it
+ * would have rendered a whole new encoding as plausible nonsense with nothing
+ * to indicate it.
+ */
+function decoderFor(encoding: TextEncoding): (byte: number) => string {
+  switch (encoding) {
+    case "petscii":
+      return fromPetscii;
+    case "screen":
+      return fromScreenCode;
+    case "ascii":
+      return fromAscii;
+    default: {
+      const unhandled: never = encoding;
+      throw new Error(`unhandled text encoding: ${String(unhandled)}`);
+    }
+  }
 }
 
 export const TEXT_ENCODINGS: readonly TextEncoding[] = ["ascii", "petscii", "screen"];
