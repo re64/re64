@@ -1529,49 +1529,37 @@ Do not mistake it for a solution to the bytes. Whenever the byte problem is
 taken on, it is one piece of work covering all three, and it starts with what a
 row means.
 
-### A label inside an instruction corrupts the decode around it
+### A label inside an instruction: fixed, and the label is still invisible
 
-**Known, reproducible, and deferred.** The only defect found so far that
-produces a *wrong* disassembly rather than an incomplete one, and it reports
-success:
+**This section described a defect that the overlap work removed, and said so for
+too long.** An agent in experiment 2 checked it and reported the correction,
+which is the most useful thing a stale note can produce.
+
+What actually happens now, and it turns on the label's *type* — because only
+`entry`, `function` and `code` are queued for decoding, and `address` is not:
 
 ```
-before   8D59  85 35      STA $35
-         8D5B  4C 8E 8D   JMP loc_8D8E
+set_label $8D5A type=address    delta 0, decode untouched
+set_label $8D5A type=function
 
-set_label $8D5A  ->  {"ok": true, "delta": 1}
-
-after    8D59  85 35      STA $35
-         8D5B  4C                       |L|
-         8D5C  8E 8D CE   STX dat_CE8D
+    8D59  85 35      STA selectedLevel
+    8D5A  ; also decodes from here, sharing bytes above
+    8D5A  35 4C      AND $4C,X
 ```
 
-A label one byte into `STA $35` makes `$8D5A` an entry point, the walk decodes
-from there, and the second stream desynchronises the first: the `JMP` becomes an
-orphan byte and everything after it resyncs one byte late into garbage. The
-label itself is not rendered either.
+The second reading is *shown*, marked, and shares its bytes with the first,
+because the disassembler follows a contested address as its own stream and
+`rows.ts` emits every block in order of where it starts. The `JMP` that used to
+become an orphan byte, and the garbage that resynchronised one byte late, are
+gone. Branching into the middle of an instruction stays legitimate 6502 — the
+reference disassembly of Gridrunner does it twice — and the model represents it
+rather than refusing it.
 
-**Do not "fix" this by refusing mid-instruction labels.** Branching into the
-middle of an instruction is legitimate 6502 — a byte that is an operand on one
-path and an opcode on another — and the reference disassembly of Gridrunner uses
-it twice (`b8737 = *+$01`, `b8D5A = *+$01`). The model is right to permit
-overlapping decode. What cannot cope is `rows.ts`, which assumes one linear
-instruction stream and has no way to draw two claims on the same byte.
-
-Note that the same operation is harmless at `$807F` (`CopyrightLine = *-$01`),
-where it resolves correctly in `LDA CopyrightLine,X` and damages nothing — while
-still being invisible in the listing. Whether it corrupts anything depends on
-whether the second stream happens to resynchronise, which is why it cannot be
-left to chance.
-
-Fixing it properly means deciding how a row shows a byte that two instructions
-claim, and that is a rendering design question rather than a patch.
-
-Until then it at least announces itself. The disassembler already emits an
-`overlap` warning naming both addresses, so `list_warnings` shows it — and every
-write returns the warnings *it* introduced, so the caller learns at the moment
-it becomes true rather than never. That is the difference between a wrong answer
-and a wrong answer that says so.
+**What is still true:** the label itself renders nowhere. `set_label` on a
+mid-instruction address reports success, the name resolves correctly in operands
+(`LDA CopyrightLine,X` at `$807F` has always worked), and the listing shows no
+row for it. That is a real gap and a small one, and it is the whole of what is
+left here.
 
 ### Text Region Rendering
 
