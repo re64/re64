@@ -165,10 +165,25 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     {
       project,
       address,
+      // Spelled out rather than `z.record` over an enum of the names, which
+      // makes every key *required* — so passing one register was rejected for
+      // omitting the other ten, and the tool could not be called at all.
       registers: z
-        .record(z.enum(["A", "X", "Y", "SP", "C", "Z", "I", "D", "B", "V", "N"]), z.number().int())
+        .strictObject({
+          A: z.number().int().min(0).max(255).optional(),
+          X: z.number().int().min(0).max(255).optional(),
+          Y: z.number().int().min(0).max(255).optional(),
+          SP: z.number().int().min(0).max(255).optional(),
+          C: z.number().int().min(0).max(1).optional(),
+          Z: z.number().int().min(0).max(1).optional(),
+          I: z.number().int().min(0).max(1).optional(),
+          D: z.number().int().min(0).max(1).optional(),
+          B: z.number().int().min(0).max(1).optional(),
+          V: z.number().int().min(0).max(1).optional(),
+          N: z.number().int().min(0).max(1).optional(),
+        })
         .optional()
-        .describe("Starting registers and flags; flags are 0 or 1. Omitted means zero"),
+        .describe("Starting registers and flags; anything omitted starts at zero"),
       memory: z
         .record(z.string(), z.number().int().min(0).max(255))
         .optional()

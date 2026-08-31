@@ -19,6 +19,7 @@ import {
   ProgramAnalysis,
   Reference,
   RegionKind,
+  BasicBlock,
   BlockRun,
   analyze,
   analyzeProgram,
@@ -463,6 +464,29 @@ export class Workspace {
   }
 
   /**
+   * The block covering an address, or a refusal that says where to go instead.
+   *
+   * "No decoded block covers $8000" is true and useless — the address may be
+   * data, may be unreachable, or may simply be one byte before a block start.
+   * Naming the nearest block turns a dead end into the next call.
+   */
+  private blockCovering(address: number): BasicBlock {
+    const program = this.program();
+    const found = blockAt(program.blocks, address);
+    if (found) return found;
+
+    const nearest = program.blocks
+      .map((b) => ({ b, distance: Math.abs(b.start - address) }))
+      .sort((a, b) => a.distance - b.distance)[0];
+
+    throw new Error(
+      `No decoded block covers ${hex4(address)}` +
+        (nearest ? `; the nearest starts at ${hex4(nearest.b.start)}` : "; nothing decoded at all") +
+        `. It may be data, or unreachable from any entry point — find_undecoded says which.`
+    );
+  }
+
+  /**
    * What the block at an address reads and writes, without running it.
    *
    * The first question about a routine nobody has named: not what it is called,
@@ -485,9 +509,7 @@ export class Workspace {
     note?: string;
   } {
     const program = this.program();
-    const block = blockAt(program.blocks, address);
-    if (!block) throw new Error(`No decoded block covers ${hex4(address)}`);
-
+    const block = this.blockCovering(address);
     const effects = blockEffects(block.instructions);
     const described = describeEffects(effects);
 
@@ -546,8 +568,7 @@ export class Workspace {
     warnings: string[];
   } {
     const program = this.program();
-    const block = blockAt(program.blocks, address);
-    if (!block) throw new Error(`No decoded block covers ${hex4(address)}`);
+    const block = this.blockCovering(address);
 
     const memory: Record<number, number> = {};
     for (const [key, value] of Object.entries(inputs.memory ?? {})) {
