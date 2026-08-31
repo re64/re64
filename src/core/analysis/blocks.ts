@@ -66,6 +66,48 @@ export interface BasicBlock {
   readonly calls: readonly number[];
   /** How the last instruction leaves: what ended the block. */
   readonly exit: "branch" | "jump" | "call" | "ret" | "halt" | "fallthrough";
+  /**
+   * Net bytes this block leaves on the stack, or undefined when that cannot be
+   * known.
+   *
+   * Computable exactly *because* a block is straight-line — there is no branch
+   * inside one for the count to depend on, which is a dividend of splitting
+   * strictly rather than loosely.
+   *
+   * It exists because an `RTS` on this machine does not reliably return to its
+   * caller. Pushing an address and returning is a standard computed jump, and
+   * popping the return address to read inline data is a standard way to pass
+   * arguments. A block that ends in `ret` with a non-zero delta is doing one of
+   * those, and any call graph that assumed the ordinary return edge would be
+   * wrong about it.
+   *
+   * Undefined after `TXS`, which sets the stack pointer outright: the delta is
+   * then whatever the program decided, and saying zero would be a guess.
+   */
+  readonly stackDelta?: number;
+}
+
+/** What one instruction does to the stack pointer, in bytes. */
+function stackEffect(mnemonic: string): number | undefined {
+  switch (mnemonic) {
+    case "PHA":
+    case "PHP":
+      return 1;
+    case "PLA":
+    case "PLP":
+      return -1;
+    case "JSR":
+      return 2;
+    case "RTS":
+      return -2;
+    case "RTI":
+      return -3;
+    case "TXS":
+      // Sets the pointer rather than moving it. Nothing here can say to what.
+      return undefined;
+    default:
+      return 0;
+  }
 }
 
 /**
@@ -169,8 +211,21 @@ export function buildBlocks(
       // that is a worse lie than this one.
       successors.push(after);
     }
-    // A return or a halt has no successor here. Where a `RTS` goes back to is a
-    // property of the call, not of this block.
+    // A return or a halt is an exit of *this* graph, which is intraprocedural.
+    // The return edge is real and belongs to the call graph, where it is
+    // computed from call sites — one `RTS` returns to as many places as the
+    // routine has callers, and the block knows none of them. See `stackDelta`
+    // for why even that edge cannot simply be assumed on this machine.
+
+    let stackDelta: number | undefined = 0;
+    for (const instr of body) {
+      const effect = stackEffect(instr.mnemonic);
+      if (effect === undefined) {
+        stackDelta = undefined;
+        break;
+      }
+      stackDelta += effect;
+    }
 
     blocks.push({
       start,
@@ -179,6 +234,7 @@ export function buildBlocks(
       successors: successors.filter((s) => instructions.has(s)),
       calls,
       exit,
+      ...(stackDelta === undefined ? {} : { stackDelta }),
     });
   }
 

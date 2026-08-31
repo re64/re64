@@ -927,12 +927,32 @@ Holding it means splitting at more places than a loose definition would:
   A, X and Y with no calling convention, so "what does A hold after this call"
   is precisely the question a boundary exists to ask.
 
-A `ret` has no successor here — where an `RTS` goes back to is a property of the
-call, which is why the call graph is a separate question rather than a bigger
-walk. A call's successor *is* recorded, as the address it returns to; that
-assumes it returns, which is stated rather than hidden, because a routine that
-never returns would otherwise make the rest of its caller look unreachable, and
-that is the worse lie.
+A `ret` is an **exit of this graph**, which is intraprocedural — not a claim
+that control goes nowhere. The return edge is real and belongs to the call
+graph, computed from call sites, because one `RTS` returns to as many places as
+the routine has callers and the block knows none of them. A call's successor
+*is* recorded, as the address it returns to; that assumes it returns, which is
+stated rather than hidden, because a routine that never returns would otherwise
+make the rest of its caller look unreachable, and that is the worse lie.
+
+**And on this machine even that edge cannot be assumed**, which is why each
+block carries a `stackDelta`: net bytes left on the stack, computable *exactly*
+because a block is straight-line — no branch inside one for the count to depend
+on, which is a dividend of splitting strictly. Undefined after `TXS`, which sets
+the pointer outright and where saying zero would be a guess.
+
+An ordinary routine ending in `ret` is `-2`: the return address it pops.
+Anything else has been at the stack deliberately. Gridrunner has two of 62, and
+both are real:
+
+- `$83E2` `PLA TAY PLA TAX PLA RTI` — an interrupt handler restoring registers.
+- `$87FE` `PLA PLA RTS` — a routine that **discards its own return address** and
+  returns to its caller's caller. Any call graph assuming the ordinary return
+  edge is wrong about this one, and the human reference does not remark on it.
+
+Two more blocks have an unknowable delta. That is four addresses in the program
+where interprocedural reasoning has to be careful, found by counting, and worth
+having before a call graph rather than after.
 
 The invariant is asserted against Gridrunner: every control-flow edge lands on a
 block start, zero exceptions, data references excluded since reading a byte

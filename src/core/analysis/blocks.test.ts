@@ -206,3 +206,37 @@ const GRIDRUNNER_SHAPED = [
   0x60,             // 100B  RTS
   0x60,             // 100C  RTS           — the callee
 ];
+
+describe("what a block does to the stack", () => {
+  it("counts pushes and pops exactly, because a block is straight-line", () => {
+    //  PHA / PHA / RTS — the computed-jump idiom: push an address, return to it
+    const { index, entryPoints } = program([0x48, 0x48, 0x60]);
+    const block = buildBlocks(index, entryPoints)[0];
+
+    // Two pushes and a return that pops two: net zero, but the return goes
+    // where the pushes said, not back to any caller.
+    expect(block.stackDelta).toBe(0);
+    expect(block.exit).toBe("ret");
+  });
+
+  it("shows a routine that eats its own return address", () => {
+    //  PLA / PLA / RTS — pops the return address, then returns to whatever is
+    //  underneath. A caller expecting control back does not get it.
+    const { index, entryPoints } = program([0x68, 0x68, 0x60]);
+    expect(buildBlocks(index, entryPoints)[0].stackDelta).toBe(-4);
+  });
+
+  it("says nothing rather than guessing after TXS", () => {
+    //  LDX #$FF / TXS / RTS — the stack pointer is set outright.
+    const { index, entryPoints } = program([0xa2, 0xff, 0x9a, 0x60]);
+    expect(buildBlocks(index, entryPoints)[0].stackDelta).toBeUndefined();
+  });
+
+  it("counts the return itself, so an ordinary routine is -2", () => {
+    // LDA #$01 / STA $02 / RTS touches nothing but the return address, which
+    // the RTS pops. An ordinary block ending in ret is -2; anything else has
+    // been at the stack on purpose.
+    const { index, entryPoints } = program([0xa9, 0x01, 0x85, 0x02, 0x60]);
+    expect(buildBlocks(index, entryPoints)[0].stackDelta).toBe(-2);
+  });
+});
