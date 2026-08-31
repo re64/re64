@@ -1127,6 +1127,13 @@ that, so `mark_function` does not need one — which also frees the label field 
 was sharing with array extents, and with it the bug where declaring a routine
 turned `BPL loc_8050` into `BPL UpdateExplosion + $0010`.
 
+**It answers the complaint it was built for.** `find_references` had to be told a
+routine's extent to say which routine a call site sat in, and without one fell
+back to the nearest preceding flow label — a local branch target on any real
+routine. Reader-3 in experiment 2 got 20 of 35 callers of one routine attributed
+to `loc_XXXX`. Deriving the routine needs nobody to declare anything: all 35 now
+name a routine entry, none a branch target.
+
 **Ownership is not a partition and does not need to be.** 87 of 431 blocks are
 reachable from more than one entry — the shared-tail idiom, one block reached
 from five routines. For a *may* answer that is fine: effects are a union over

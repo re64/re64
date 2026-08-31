@@ -26,6 +26,7 @@ import {
   analyzeProgram,
   analyzeRoutines,
   Effects,
+  RoutineEffects,
   blockAt,
   blockEffects,
   describeEffects,
@@ -156,6 +157,7 @@ function describeExit(
 export class Workspace {
   private cached?: { key: string; loaded: LoadedProject; program: ProgramAnalysis };
   private cachedRows?: { key: string; rows: AnalysisResult };
+  private cachedRoutines?: { key: string; routines: Map<number, RoutineEffects> };
   /** The document counter last looked at, and what the project looked like then. */
   private seenVersion = -1;
   private seenProjection = "";
@@ -204,6 +206,25 @@ export class Workspace {
     }
 
     return `${this.projectVersion}:${fingerprint}`;
+  }
+
+  /**
+   * Every routine, cached with the analysis it is derived from.
+   *
+   * Cheap — about 7ms on the reference project — but `find_references` asks per
+   * call site, so recomputing it each time would turn one answer into hundreds.
+   */
+  routines(): Map<number, RoutineEffects> {
+    const key = this.key();
+    if (this.cachedRoutines?.key === key) return this.cachedRoutines.routines;
+
+    const program = this.program();
+    const routines = analyzeRoutines(
+      program.blocks,
+      program.labels.filter({ type: "function" }).map((l) => l.address)
+    );
+    this.cachedRoutines = { key, routines };
+    return routines;
   }
 
   /** The analysed program, rebuilt only when something it depends on moved. */
@@ -416,21 +437,24 @@ export class Workspace {
     // labels that mark somewhere execution can start count: a data name above
     // the call site would be a confident wrong answer.
     const enclosing = (from: number): string | undefined => {
-      // A declared extent first. Without one this answers with the nearest
-      // preceding label of any flow-bearing kind, which on a real routine is a
-      // local branch target — so "who calls this, from where" came back naming
-      // `b81BC` for two call sites both inside DrawGrid.
-      const containing = program.labels
-        .getAllLabels()
-        .filter(
-          (l) =>
-            (l.type === "function" || l.type === "entry") &&
-            l.extent !== undefined &&
-            from >= l.address &&
-            from < l.address + l.extent
-        )
-        .sort((a, b) => a.extent! - b.extent!)[0];
-      if (containing) return containing.name;
+      // Which routine a call site sits in, worked out from control flow.
+      //
+      // This used to need a *declared* extent and fell back, without one, to the
+      // nearest preceding flow label — which on a real routine is a local branch
+      // target, so "who calls this" answered `b81BC` for two call sites both
+      // inside DrawGrid, and 20 of 35 callers of one routine came back named
+      // `loc_XXXX`. Deriving it needs nobody to have declared anything, and
+      // handles the 20 of 50 routines here whose code is not one contiguous
+      // span and which no declared extent could have described.
+      const owning = [...this.routines().values()]
+        .filter((r) => r.spans.some((s) => from >= s.start && from < s.end))
+        // Innermost first: a shared tail belongs to several, and the smallest
+        // claim is the most specific thing that can be said.
+        .sort((a, b) => a.blocks - b.blocks)[0];
+      if (owning) {
+        const label = program.labels.resolve(owning.entry);
+        return label && label.offset === 0 ? label.label.name : hex4(owning.entry);
+      }
 
       for (let at = from; at >= from - 0x400 && at >= 0; at--) {
         const label = program.labels
@@ -716,10 +740,7 @@ export class Workspace {
    */
   routineEffects(address: number): Record<string, unknown> {
     const program = this.program();
-    const routines = analyzeRoutines(
-      program.blocks,
-      program.labels.filter({ type: "function" }).map((l) => l.address)
-    );
+    const routines = this.routines();
 
     const found =
       routines.get(address) ??
@@ -1689,21 +1710,22 @@ export class Workspace {
    * so is what makes `find_references` able to answer "from which routine"
    * instead of naming the nearest branch target above the call.
    */
-  markFunction(
-    caller: Caller,
-    address: number,
-    name?: string,
-    extent?: number
-  ): EditResult {
-    return this.edit(caller, (loaded) => {
-      const ops = markFunctionOps(loaded, address, name);
-      if (extent === undefined) return ops;
-
-      // The extent rides on the label the ops just wrote.
-      return ops.map((op) =>
-        op.op === "label.set" && op.address === address ? { ...op, extent } : op
-      );
-    });
+  /**
+   * Say an address starts a routine.
+   *
+   * It used to take an extent as well, and that did real damage. A label's
+   * `extent` means "this name covers N bytes", so an operand landing inside one
+   * renders as `NAME + $000F` — right for an array, wrong for a routine, where
+   * it replaced every local branch target: `BPL loc_8050` became
+   * `BPL UpdateExplosion + $0010` and the `loc_8050:` row disappeared. Two
+   * readers in experiment 2 backed it out of 73 routines between them.
+   *
+   * Nothing needs it now. A routine's extent is worked out from control flow by
+   * `routineEffects`, which also handles the case a declared one never could:
+   * 20 of the 50 routines here are not a single contiguous span.
+   */
+  markFunction(caller: Caller, address: number, name?: string): EditResult {
+    return this.edit(caller, (loaded) => markFunctionOps(loaded, address, name));
   }
 
   unmarkFunction(caller: Caller, address: number): EditResult {

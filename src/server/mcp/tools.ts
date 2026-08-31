@@ -945,31 +945,18 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       project,
       address,
       name: z.string().optional(),
-      extent: z
-        .number()
-        .int()
-        .min(1)
-        .max(0x10000)
-        .optional()
-        .describe(
-          "How many bytes the routine runs for, if you know. Never inferred — " +
-            "working out where a routine ends needs analysis re64 does not do, " +
-            "and a wrong extent is not visibly wrong. Saying so is what lets " +
-            "find_references answer which routine a call came from."
-        ),
       expectVersion: z.string().optional(),
     },
     (args: {
       project?: string;
       address: number;
       name?: string;
-      extent?: number;
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.markFunction(caller, args.address, args.name, args.extent);
+      return space.markFunction(caller, args.address, args.name);
     }
   );
 

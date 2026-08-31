@@ -1276,10 +1276,12 @@ describe("the rest of trial 3's list", () => {
     expect(workspace.describe().description).toContain("Jeff Minter");
   });
 
-  it("names the routine a call sits in, once one has an extent", () => {
-    // Without an extent this answers with the nearest preceding flow label,
-    // which on a real routine is a local branch target.
-    workspace.markFunction(agent, 0x8850, "DrawSomething", 0x60);
+  it("names the routine a call sits in, without being told its extent", () => {
+    // This used to need a declared extent and, without one, answered with the
+    // nearest preceding flow label — which on a real routine is a local branch
+    // target, so callers came back named `loc_XXXX`. The routine is worked out
+    // from control flow now, so marking the entry is all it takes.
+    workspace.markFunction(agent, 0x8850, "DrawSomething");
     const { inbound } = workspace.references(0x8870, "in");
 
     expect(inbound!.some((r) => r.inRoutine === "DrawSomething")).toBe(true);
