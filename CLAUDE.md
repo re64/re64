@@ -106,7 +106,14 @@ Tests live alongside source files with `.test.ts` suffix. Use vitest.
 
 ## Guidelines
 
-- Minimal dependencies - only add packages when clearly beneficial.
+- Minimal dependencies - only add packages when clearly beneficial. `ses` is the
+  second knowing exception, after `@modelcontextprotocol/sdk`: it is bought to
+  run **decoders somebody else wrote**, and the property it provides — a
+  function with no ambient authority — is not one you can approximate by
+  deleting globals, because a constructor chain gets them back. Verified rather
+  than assumed: inside a compartment `fetch`, `process` and `require` are
+  undefined, `Date.now()` and `Math.random()` throw, and
+  `(function(){}).constructor("return typeof process")()` is refused.
   `@modelcontextprotocol/sdk` is the one place this was knowingly spent: **33 of
   the 43 production packages exist only for it**, including `hono`, `cors`, and
   `express-rate-limit`, which npm installs and this code never imports. Bought
@@ -1696,6 +1703,50 @@ mid-instruction address reports success, the name resolves correctly in operands
 (`LDA CopyrightLine,X` at `$807F` has always worked), and the listing shows no
 row for it. That is a real gap and a small one, and it is the whole of what is
 left here.
+
+### Decoders somebody else wrote
+
+The escape hatch that stops this growing a mechanism per oddity. A character set
+is a permutation and a sprite is a bitmap — both built in — but a title screen
+packed with run-length encoding and partial frame updates is *assembler logic*,
+and the only honest way to express that is code. A decoder is a way for a reverse
+engineer to say it in a modern language.
+
+**A decoder is a pure function from bytes to data**, never to a picture and never
+to markup. That is what lets one serve the browser, the CLI and an agent at once,
+and it is also the whole of the safety story: a function that can only return
+numbers cannot inject anything, whatever it does inside. A bitmap comes back to
+an agent drawn as text, because the caller may be something that cannot look at
+pixels.
+
+**Two mechanisms, because neither is sufficient alone.** SES removes the
+*authority* to have side effects — a `Compartment` has no ambient globals, and
+`lockdown()` freezes the intrinsics so one decoder cannot poison another. A
+worker thread supplies the one thing SES cannot: an infinite loop is not a
+permissions problem and no compartment can interrupt one. The thread also keeps
+`lockdown()` off the main realm, which matters because hardening intrinsics is
+process-wide and the server shares its realm with everything else. That
+isolation is not an optimisation.
+
+Determinism comes free and is worth having: `Date.now()` and `Math.random()`
+throw inside a compartment, so the same bytes give the same answer and a listing
+cannot flicker.
+
+**The worker source is inline, not a file beside the runner.** A path resolves
+differently from source and from `dist`, and the failure mode of getting that
+wrong is running a *stale* sandbox — not a class of bug to accept in the one
+file whose job is to contain somebody else's code.
+
+**Not used for listing rows, and that is a real limit.** `analyze()` is
+synchronous and this is not. The built-in formats draw the listing; decoders
+drive the explorer and the tools. Rendering a decoder inline means caching
+results out of band and repainting when they arrive, which is a separate and
+larger decision.
+
+**Not stored yet.** `run_decoder` takes its source inline, so a decoder can be
+used before there is a decision about where it lives. Putting one in the project
+is another twelve-site schema change, and it is worth letting the mechanism be
+used first.
 
 ### Bytes as pictures
 

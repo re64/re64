@@ -237,6 +237,48 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   // --- understanding a routine ----------------------------------------
 
   tool(
+    "run_decoder",
+    "Run a decoder you write over a span of bytes, and see what it produces. " +
+      "For data whose layout is not one of the built-in ones — a packed screen, " +
+      "a run-length-encoded animation, a font in an order somebody invented — " +
+      "where the only honest description is code. " +
+      "The body receives `bytes` (a plain array of numbers) and `params`, and " +
+      "must return {kind:\"bitmap\", width, height, pixels, palette}, " +
+      "{kind:\"frames\", delayMs, frames}, or {kind:\"text\", lines}. A bitmap " +
+      "comes back drawn as text so you can read it. " +
+      "It runs with no access to anything: no network, no files, no clock, no " +
+      "randomness — so it is a pure function of the bytes — and it is stopped if " +
+      "it does not finish quickly.",
+    {
+      project,
+      start: address,
+      length: z.number().int().min(1).max(0x10000).describe("How many bytes to hand it"),
+      source: z
+        .string()
+        .min(1)
+        .max(20000)
+        .describe("The body of the function. Use `return` to produce the result."),
+      params: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe("Passed through as `params`, for anything the body should not hard-code"),
+    },
+    ({
+      project: id,
+      start,
+      length,
+      source,
+      params,
+    }: {
+      project?: string;
+      start: number;
+      length: number;
+      source: string;
+      params?: Record<string, unknown>;
+    }) => context().workspace(id).decode(source, start, length, params ?? {})
+  );
+
+  tool(
     "block_effects",
     "What the straight-line block at an address reads and writes, without " +
       "running it. The first question about a routine nobody has named: not " +

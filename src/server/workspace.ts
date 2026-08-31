@@ -29,6 +29,7 @@ import {
   describeEffects,
   runBlock,
   REGISTER_NAMES,
+  bitmapToText,
   blobPaths,
   isBitmapView,
   buildMemoryMap,
@@ -51,6 +52,7 @@ import {
   unmarkFunctionOps,
 } from "../core/index.js";
 import { chatMessages, postChatMessage, projectFromDoc } from "../core/crdt/index.js";
+import { runDecoder } from "../sandbox/run.js";
 import { databaseFileBytes } from "../store/load.js";
 import { CommentPlacement, TextEncoding, describeWarning } from "../core/index.js";
 import { FileStorage, ProjectStore, SqliteStorage } from "../store/index.js";
@@ -597,6 +599,54 @@ export class Workspace {
     return posted
       ? { posted: true, at: new Date(posted.at).toISOString(), as: posted.name }
       : { posted: false };
+  }
+
+  /**
+   * Run a decoder over a span, and describe what came out.
+   *
+   * The escape hatch that stops this growing a mechanism per oddity. A character
+   * set is a permutation and a sprite is a bitmap — both are built in — but a
+   * title screen packed with run-length encoding and partial frame updates is
+   * assembler logic, and the only honest way to express that is code.
+   *
+   * A bitmap comes back as **text art**, because the caller may be something
+   * that cannot look at pixels. That is the same reasoning as everywhere else
+   * here: the decoder returns data, and each consumer renders it its own way.
+   */
+  async decode(
+    source: string,
+    start: number,
+    length: number,
+    params: Record<string, unknown> = {}
+  ): Promise<Record<string, unknown>> {
+    const bytes = this.program().loaded.map.readBytes(start, length);
+    const result = await runDecoder(source, bytes, params);
+
+    if (!result.ok || !result.decoded) {
+      return { ok: false, why: result.why, ms: result.ms };
+    }
+
+    const decoded = result.decoded;
+    const common = { ok: true, ms: result.ms, from: hex4(start), bytes: length };
+
+    if (decoded.kind === "bitmap") {
+      return { ...common, kind: "bitmap", width: decoded.width, height: decoded.height,
+               picture: bitmapToText(decoded) };
+    }
+    if (decoded.kind === "frames") {
+      return {
+        ...common,
+        kind: "frames",
+        frames: decoded.frames.length,
+        delayMs: decoded.delayMs,
+        width: decoded.frames[0].width,
+        height: decoded.frames[0].height,
+        // One frame drawn, because thirty would be unreadable and the count
+        // plus the first is what says whether the decode worked.
+        firstFrame: bitmapToText(decoded.frames[0]),
+      };
+    }
+    return { ...common, kind: "text", lines: decoded.lines };
   }
 
   /**

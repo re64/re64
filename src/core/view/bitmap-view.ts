@@ -275,3 +275,92 @@ export function bytesPerCell(options: BitmapOptions): number {
       return Math.max(1, options.stride ?? 1);
   }
 }
+
+/**
+ * What a decoder is allowed to hand back.
+ *
+ * A decoder is a pure function from bytes to *data* — never to a picture, and
+ * never to markup. That is what lets one decoder serve the browser, the CLI and
+ * an agent at once, and it is also the whole of the safety story for
+ * user-written ones: a function that can only return numbers cannot inject
+ * anything, whatever it does inside.
+ */
+export type Decoded =
+  | ({ kind: "bitmap" } & Bitmap)
+  | { kind: "frames"; delayMs: number; frames: Bitmap[] }
+  | { kind: "text"; lines: string[] };
+
+/** Everything a returned bitmap must satisfy before anything will draw it. */
+const MAX_PIXELS = 4_000_000;
+
+function checkBitmap(value: unknown, where: string): string | undefined {
+  if (typeof value !== "object" || value === null) return `${where} is not an object`;
+  const bitmap = value as Partial<Bitmap>;
+
+  if (!Number.isInteger(bitmap.width) || (bitmap.width as number) < 1) {
+    return `${where}.width must be a positive whole number`;
+  }
+  if (!Number.isInteger(bitmap.height) || (bitmap.height as number) < 1) {
+    return `${where}.height must be a positive whole number`;
+  }
+
+  const expected = (bitmap.width as number) * (bitmap.height as number);
+  if (expected > MAX_PIXELS) return `${where} is ${expected} pixels, which is more than anything can show`;
+
+  const pixels = bitmap.pixels as ArrayLike<number> | undefined;
+  if (!pixels || typeof pixels.length !== "number") return `${where}.pixels is missing`;
+  if (pixels.length !== expected) {
+    return `${where}.pixels has ${pixels.length} entries, but width × height is ${expected}`;
+  }
+  if (!Array.isArray(bitmap.palette) || bitmap.palette.length === 0) {
+    return `${where}.palette must be a non-empty array of #rrggbb strings`;
+  }
+  if (!bitmap.palette.every((c) => typeof c === "string" && /^#[0-9a-fA-F]{6}$/.test(c))) {
+    return `${where}.palette entries must look like #rrggbb`;
+  }
+  return undefined;
+}
+
+/**
+ * Check what came back, and say precisely what is wrong when it did not.
+ *
+ * Written as a returned message rather than a thrown error because the caller
+ * is usually showing it to whoever wrote the decoder, and "pixels has 63
+ * entries, but width × height is 504" is the sentence that fixes it.
+ */
+export function validateDecoded(value: unknown): { ok: true; decoded: Decoded } | { ok: false; why: string } {
+  if (typeof value !== "object" || value === null) {
+    return { ok: false, why: "a decoder must return an object, with a `kind` of bitmap, frames or text" };
+  }
+  const decoded = value as { kind?: unknown };
+
+  if (decoded.kind === "bitmap") {
+    const why = checkBitmap(value, "the bitmap");
+    return why ? { ok: false, why } : { ok: true, decoded: value as Decoded };
+  }
+
+  if (decoded.kind === "frames") {
+    const frames = (value as { frames?: unknown }).frames;
+    if (!Array.isArray(frames) || frames.length === 0) {
+      return { ok: false, why: "frames must be a non-empty array of bitmaps" };
+    }
+    for (const [index, frame] of frames.entries()) {
+      const why = checkBitmap(frame, `frame ${index}`);
+      if (why) return { ok: false, why };
+    }
+    return { ok: true, decoded: value as Decoded };
+  }
+
+  if (decoded.kind === "text") {
+    const lines = (value as { lines?: unknown }).lines;
+    if (!Array.isArray(lines) || !lines.every((l) => typeof l === "string")) {
+      return { ok: false, why: "text must carry `lines`, an array of strings" };
+    }
+    return { ok: true, decoded: value as Decoded };
+  }
+
+  return {
+    ok: false,
+    why: `kind must be "bitmap", "frames" or "text"; got ${JSON.stringify(decoded.kind)}`,
+  };
+}
