@@ -1008,6 +1008,7 @@ Orient, read, decide, act, catch up:
 | `list_projects`, `describe_project` | what is here, and how far along it is |
 | `read_disassembly`, `list_labels` | structured rows, never rendered text — an agent cannot use character offsets into a text column |
 | `find_references`, `find_unnamed` | who calls this, and what is worth naming next |
+| `block_effects`, `run_block` | what a routine *does*, statically and by running it |
 | `set_label`, `remove_label`, `mark_function`, `unmark_function` | naming |
 | `set_region`, `remove_region` | exposed to agents **before** the web UI; the ops and the CLI already did this, so it was wiring rather than new capability |
 | `undo` | the same inverse the CLI and the browser use |
@@ -1027,6 +1028,47 @@ worse than a gap:
 - **Auto-generated labels are marked `writable: false` and their ids withheld.**
   Those ids are derived, not stored. Handing one to a model invites a write
   carrying an identity nothing owns.
+
+### Asking what a routine does, two ways
+
+The read tools answered what code *is* — rows, labels, references. None answered
+what a routine *does*, which is what naming it requires. Two tools, deliberately
+kept apart, because they answer different questions with different standing:
+
+- **`block_effects`** is static: what the block at an address reads and writes,
+  unioned over its lifted operations. True for every input. Sound only because a
+  block is straight-line, which is the analysis dividend of splitting strictly —
+  at calls and at every jump target — rather than loosely.
+- **`run_block`** is concrete: execute it with values the caller chose. It
+  reports the address a computed operand *actually reached* — with `X=2` the read
+  was `$1502` — which is the question no static reading can answer, and it
+  reports which way the branch went, which turns a conditional into a decision
+  you can watch being made.
+
+**One block, and not a routine.** A block has no branch inside it, so the
+instructions that run are known before it starts and no path is chosen on the
+caller's behalf. Running further means following jumps whose targets depend on
+state nobody supplied — an emulator, with everything an emulator has to be right
+about. The scope is what makes the answer honest, not a limitation to be lifted
+later.
+
+**Every value says where it came from, three ways**, because collapsing them
+would let the weakest borrow credibility from the strongest:
+
+| | means | worth |
+|---|---|---|
+| `given` | the caller vouched for it | as good as the caller |
+| `image` | the program as loaded | true of a constant table; usually false of anything initialised at runtime |
+| `unknown` | nothing knew | read as zero, and zero produces a real-looking result |
+
+The last two each raise their own warning. A result that silently assumed zeros
+looks exactly like one that did not, which is the failure mode worth spending
+output on.
+
+A label is attached to a read only on an exact match or *inside a declared
+extent*. `explosionXPosArray` declares none, so a read of `$1502` is reported
+bare rather than as `+2` — the same rule operand rendering follows, and a reason
+for an agent to declare extents.
 
 ### A change cursor, because the agent has no socket
 
@@ -1277,6 +1319,36 @@ opcode table.
   2016, with three other contributors since. So the design is one thing and the
   current text is another: usable as a reference whose reasoning is already
   understood, not as source to copy into an MIT project.
+
+### The lifter, and what a block can now say about itself
+
+Written, and all 56 documented instructions are in it. Gridrunner lifts
+completely: 1449 of 1449 instructions, 446 of 446 blocks fully modelled.
+
+Two conventions carry the design, and both are about refusing to blur a
+distinction:
+
+**A statically known address becomes a `ram` varnode, not a `LOAD`.** `LDA $10`
+lifts to a read of `$(0x10)` directly, so a block's inputs and outputs name the
+zero-page cells it uses — which on this machine is most of the interesting
+traffic, since zero page *is* the variable space. `LDA $10,X` cannot name
+anything; it lifts to a `LOAD` from a computed varnode, and the static answer is
+"reads memory at a computed address". Losing that distinction would mean either
+inventing an address or reporting none.
+
+**Hardware quirks are modelled rather than smoothed over.** Zero-page indexing
+wraps inside the page, `($ff,X)` takes its high byte from `$00`, and
+`JMP ($10ff)` reads its high byte from `$1000`. These are not edge cases in
+hand-written C64 code — they are things people relied on.
+
+Decimal mode is still not modelled: `ADC` and `SBC` lift to binary arithmetic
+regardless of `D`. What changed is that it now says so at the point of use
+rather than being a footnote.
+
+The arithmetic is tested by *running* it, against the four carry/overflow cases
+where the two published references disagree and both are wrong — which is the
+whole argument for the interpreter existing, and why it was written before the
+lifter rather than after.
 
 `stackDelta` on a basic block is a **stopgap** and should be retired when the IL
 lands. It hand-models nine opcodes to answer one question; a real semantic model
