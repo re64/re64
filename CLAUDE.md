@@ -540,13 +540,33 @@ Two things that cost a browser round trip to find:
   .cm-gutterElement` would have thrown away its font and padding without a
   warning. Merge, never append.
 
-**Known cosmetic cost:** the arrow gutter's vertical connector breaks across a
-wrapped row. The gutter arrives as one pre-rendered string per row and a glyph
-does not stretch to a cell grown to three lines, so a long comment with an arrow
-passing it shows a gap. The arrow endpoints stay correct and anchored to the
-row's first visual line. Fixing it properly means drawing the verticals as
-geometry rather than as box-drawing characters, which would cost the CLI the
-gutter it shares.
+**Comments are wrapped in the row model, at a fixed column**, and that is what
+keeps the arrow gutter correct. A wrapped line becomes *another comment row at
+the same address*, identical in every way to one the author broke with a
+newline — so there is no continuation row to style, no special case in the
+gutter, and no way for the two to drift apart. The gutter is rendered per row,
+so a comment occupying three rows gets three cells and its verticals connect.
+
+Soft wrapping cannot do this: a soft-wrapped line is still one document line and
+gets one gutter cell, so the connector breaks across it. That is the whole
+reason the wrap lives in the model rather than in the view.
+
+**Fixed at 100 columns, not derived from the viewport, and that is the point.**
+Wrapping to the window would make the row model depend on the window: every
+resize would rebuild the document, on top of whatever selection or inline editor
+was open. A column is a property of a listing, the way it is in a hand-written
+disassembly, so nothing recomputes when a pane moves — and the CLI gets the same
+listing for free. `AnalyzeOptions.commentWidth` is the seam for making it
+configurable; nothing sets it yet.
+
+Two things it deliberately does not touch. An **inline** comment shares its row
+with an instruction and cannot be broken, so those rows may still exceed the
+column — the only ones that do. And a **word longer than the width** is left
+long rather than split, since it is usually an identifier or an address and
+breaking it makes it unselectable to save a column.
+
+The soft toggle stays, for the residual case of a window narrower than the
+column.
 
 Two gotchas worth remembering:
 

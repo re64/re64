@@ -90,6 +90,71 @@ export interface AnalysisResult {
 
 
 const hex4 = (n: number) => n.toString(16).toUpperCase().padStart(4, "0");
+
+/**
+ * How wide a comment row may be, in columns.
+ *
+ * **Fixed, not derived from the viewport, and that is the whole point.** Wrapping
+ * to the window would make the row model depend on the window: every resize
+ * would rebuild the document, on top of whatever selection or inline editor was
+ * open at the time. A column is a property of the listing, the way it is in a
+ * hand-written disassembly, so nothing has to be recomputed when a pane moves.
+ *
+ * The soft-wrap toggle in the browser handles the residual case — a window
+ * narrower than this — without the model knowing anything about it.
+ */
+const COMMENT_ROW_WIDTH = 100;
+
+/** `8040  ; ` — what every comment row carries before its text. */
+const COMMENT_PREFIX = `${hex4(0)}  ; `.length;
+
+/**
+ * A comment's text as the lines it renders on.
+ *
+ * A wrapped line is **the same thing as one the author broke by hand**: another
+ * comment row at the same address, carrying the address again. That is not a
+ * compromise, it is the point — there is no continuation row to style, no
+ * special case in the gutter, and no way for the two to drift apart, because
+ * hard-split comment rows already worked and this produces exactly those.
+ *
+ * The arrow gutter comes out right for free as a consequence: it is rendered per
+ * row, so a comment occupying three rows gets three cells and its verticals
+ * connect. Soft wrapping cannot do that — a soft-wrapped line is still one row
+ * and gets one cell, which is why the connector breaks there.
+ *
+ * Leading whitespace is carried onto continuations, so an indented list stays
+ * indented. A single word longer than the width is left long rather than split:
+ * it is usually an identifier or an address, and breaking it makes it
+ * unselectable to save a column.
+ */
+export function wrapCommentText(text: string, width = COMMENT_ROW_WIDTH - COMMENT_PREFIX): string[] {
+  const lines: string[] = [];
+
+  for (const paragraph of text.split("\n")) {
+    const indent = /^\s*/.exec(paragraph)?.[0] ?? "";
+    const words = paragraph.slice(indent.length).split(/ +/).filter((w) => w.length > 0);
+
+    // A blank line separates paragraphs and is kept as one.
+    if (words.length === 0) {
+      lines.push(paragraph);
+      continue;
+    }
+
+    let line = indent;
+    for (const word of words) {
+      const candidate = line.length > indent.length ? `${line} ${word}` : line + word;
+      if (candidate.length > width && line.length > indent.length) {
+        lines.push(line);
+        line = indent + word;
+      } else {
+        line = candidate;
+      }
+    }
+    lines.push(line);
+  }
+
+  return lines;
+}
 const hex2 = (n: number) => n.toString(16).toUpperCase().padStart(2, "0");
 
 
@@ -112,6 +177,13 @@ export interface AnalyzeOptions {
    */
   annotations?: boolean;
   /**
+   * Column at which comment text is wrapped onto another row.
+   *
+   * Fixed rather than viewport-derived — see `COMMENT_ROW_WIDTH`. Exposed here
+   * so a caller can widen it; nothing sets it yet.
+   */
+  commentWidth?: number;
+  /**
    * Entry points to disassemble from, overriding the ones derived from the
    * project and its layers. The CLI exposes this as -e.
    */
@@ -126,8 +198,11 @@ export function analyze(
   const {
     labelTolerance = 1,
     annotations = true,
+    commentWidth = COMMENT_ROW_WIDTH,
     entryPoints: entryPointOverride,
   } = typeof options === "number" ? { labelTolerance: options } : options;
+
+  const commentTextWidth = Math.max(8, commentWidth - COMMENT_PREFIX);
 
 
   const { map } = loaded;
@@ -197,13 +272,13 @@ export function analyze(
     // then appeared nowhere a reader would look.
     const region = map.getRegionAt(addr);
     if (region?.comment && region.start === addr) {
-      for (const line of region.comment.split("\n")) {
+      for (const line of wrapCommentText(region.comment, commentTextWidth)) {
         push({ address: addr, kind: "comment", text: `${hex4(addr)}  ; ${line}`, tokens: [] });
       }
     }
 
     for (const comment of loaded.comments.at(addr, "before")) {
-      for (const line of comment.text.split("\n")) {
+      for (const line of wrapCommentText(comment.text, commentTextWidth)) {
         const text = `${hex4(addr)}  ; ${line}`;
         push({ address: addr, kind: "comment", text, tokens: [] });
       }
@@ -219,7 +294,7 @@ export function analyze(
    */
   const emitAfter = (addr: number) => {
     for (const comment of loaded.comments.at(addr, "after")) {
-      for (const line of comment.text.split("\n")) {
+      for (const line of wrapCommentText(comment.text, commentTextWidth)) {
         push({ address: addr, kind: "comment", text: `${hex4(addr)}  ; ${line}`, tokens: [] });
       }
     }

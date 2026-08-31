@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { analyze } from "./rows.js";
+import { analyze, wrapCommentText } from "./rows.js";
 import { MemoryMap } from "../memory/memory-map.js";
 import { FileLayer } from "../memory/file-layer.js";
 import { LabelIndex, createUserLabel } from "../memory/label.js";
@@ -261,5 +261,43 @@ describe("a byte read two ways", () => {
 
     expect(rows.some((r) => r.kind === "overlap")).toBe(false);
     expect(rows.some((r) => r.text.includes("also decodes"))).toBe(false);
+  });
+});
+
+describe("wrapping a comment", () => {
+  it("leaves a line that fits alone", () => {
+    expect(wrapCommentText("short enough", 40)).toEqual(["short enough"]);
+  });
+
+  it("breaks on spaces, never mid-word", () => {
+    const lines = wrapCommentText("alpha bravo charlie delta echo", 12);
+    expect(lines).toEqual(["alpha bravo", "charlie", "delta echo"]);
+    expect(lines.every((l) => l.length <= 12)).toBe(true);
+  });
+
+  it("treats an author's own newline as a paragraph break", () => {
+    // The whole design: a wrapped line and a hand-broken one are the same
+    // thing, so both arrive here as separate lines and neither is special.
+    expect(wrapCommentText("one two\nthree four", 40)).toEqual(["one two", "three four"]);
+  });
+
+  it("keeps a blank line, which separates paragraphs", () => {
+    expect(wrapCommentText("first\n\nsecond", 40)).toEqual(["first", "", "second"]);
+  });
+
+  it("carries an indent onto continuations, so a list stays a list", () => {
+    const lines = wrapCommentText("    alpha bravo charlie", 16);
+    expect(lines).toEqual(["    alpha bravo", "    charlie"]);
+  });
+
+  it("leaves a word longer than the width long rather than splitting it", () => {
+    // Usually an identifier or an address. Breaking it saves a column and makes
+    // it unselectable, which is the worse trade.
+    const lines = wrapCommentText("see UpdateExplosionXPositionArrayForLevel now", 12);
+    expect(lines).toContain("UpdateExplosionXPositionArrayForLevel");
+  });
+
+  it("terminates on a word longer than the width", () => {
+    expect(wrapCommentText("aaaaaaaaaaaaaaaa bb", 4)).toEqual(["aaaaaaaaaaaaaaaa", "bb"]);
   });
 });
