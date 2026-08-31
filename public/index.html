@@ -83,6 +83,10 @@
       button:hover:not(:disabled) { border-color: var(--accent-dim); }
       button:disabled { opacity: 0.4; cursor: default; }
       button.active { color: var(--accent); border-color: var(--accent-dim); }
+      /* Nothing is wide enough to wrap, so the toggle has nothing to do. Still
+         clickable — dimmed rather than disabled, because "no effect right now"
+         is a different statement from "not available". */
+      button.idle { opacity: 0.45; }
 
       #goto { width: 90px; font-family: 'SF Mono', Menlo, Consolas, monospace; }
 
@@ -365,7 +369,7 @@
           <button class="tab" data-tab="debug">Debug</button>
         </div>
         <button id="toggle-map" title="Show or hide the memory map">▤ Map</button>
-        <button id="toggle-wrap" title="Wrap long lines instead of letting them run off the edge (w)">⏎ Wrap</button>
+        <button id="toggle-wrap">⏎ Wrap</button>
         <button id="back">← Back</button>
         <button id="undo" title="Undo">↶</button>
         <button id="redo" title="Redo">↷</button>

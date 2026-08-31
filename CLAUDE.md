@@ -566,7 +566,27 @@ long rather than split, since it is usually an identifier or an address and
 breaking it makes it unselectable to save a column.
 
 The soft toggle stays, for the residual case of a window narrower than the
-column.
+column — **and it says when that is not the case.** Once comments wrap in the
+model, a wide pane has nothing left for soft wrap to do, so the button became
+genuinely inert and therefore looked broken. It dims when no row is wider than
+the pane, which turns "does nothing" into "has nothing to do", and stays
+clickable, because those are different statements.
+
+Two things that made this harder than it should have been, both worth keeping:
+
+- **Match CodeMirror's own `.cm-line` padding when adding a hanging indent.** It
+  is `6px`; using anything else shifts the entire listing sideways on toggle,
+  which on rows that do not wrap is the *only* thing the button appears to do.
+- **Measure on the next frame, never inside the handler that changed the
+  layout.** A pane's new width is not readable from the `sl-reposition` handler
+  that resized it, so the button settles one event behind. Coalesced on
+  `requestAnimationFrame`, like repaints.
+
+And the trap this project already knew about, met again: **a hidden tab gets no
+animation frames.** Driving the page from a background tab makes an
+rAF-scheduled update look like dead code — three separate diagnostics here
+"proved" the affordance never ran, and every one of them was measuring a tab
+Chrome had stopped painting.
 
 Two gotchas worth remembering:
 

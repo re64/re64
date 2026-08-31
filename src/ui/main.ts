@@ -801,9 +801,13 @@ const disasmView = new EditorView({
         // reads as one paragraph rather than restarting under the hex. Negative
         // text-indent with matching padding is the hanging indent; it applies
         // only while wrapping is on, since without it every row would shift.
+        // The 6px matches CodeMirror's own `.cm-line` padding, so the *first*
+        // line of every row lands exactly where it did with wrapping off.
+        // Getting it wrong shifts the whole listing sideways on toggle, which
+        // is all the button appears to do on rows that do not wrap.
         "&.wrap .cm-line": {
           textIndent: "-8ch",
-          paddingLeft: "calc(4px + 8ch)",
+          paddingLeft: "calc(6px + 8ch)",
         },
         ".label-edit": {
           font: "inherit",
@@ -1070,6 +1074,7 @@ function render(restoreAddress?: number): void {
 
   if (restoreAddress !== undefined) goToAddress(restoreAddress, false);
 
+  scheduleWrapAffordance();
   timings.renderMs = performance.now() - startedRender;
   refreshEditButtons();
   if (currentTab === "debug") void renderDebug();
@@ -1495,9 +1500,59 @@ function setWrapped(on: boolean): void {
   });
   $("#toggle-wrap").classList.toggle("active", on);
   store("re64.wrap", on ? "1" : "0");
+  scheduleWrapAffordance();
 }
 
 const toggleWrap = () => setWrapped(!wrapEnabled);
+
+/**
+ * Say when wrapping would change nothing.
+ *
+ * Comments already wrap at a fixed column in the row model, so on a wide pane
+ * nothing is too wide and the toggle is genuinely inert — which looks exactly
+ * like a broken button. Dimming it turns "does nothing" into "has nothing to
+ * do", and it stays clickable, because those are different statements.
+ *
+ * Measured from row lengths and the editor's own character width rather than
+ * from `scrollWidth`, which reports no overflow while wrapping is *on* and so
+ * cannot answer the question the button is about.
+ */
+function updateWrapAffordance(): void {
+  const rows = analysis?.rows;
+  const width = disasmView.scrollDOM.clientWidth;
+  if (!rows || !width) return;
+
+  const widest = rows.reduce((n, row) => Math.max(n, row.text.length), 0);
+  const fits = widest * disasmView.defaultCharacterWidth <= width;
+
+  const button = $("#toggle-wrap");
+  button.classList.toggle("idle", fits);
+  button.title = fits
+    ? "Nothing here is wider than the pane — comments already wrap at 100 columns (w)"
+    : "Wrap rows too wide for the pane instead of letting them run off the edge (w)";
+}
+
+/**
+ * Measure on the next frame, not now.
+ *
+ * The pane's new width is not readable from inside the handler that changed it —
+ * the browser has not laid out yet, so `clientWidth` is still the old one and
+ * the button settles one event behind. Coalesced on a frame, like repaints, so
+ * a drag measures once at the end rather than on every step.
+ */
+let wrapAffordanceQueued = false;
+function scheduleWrapAffordance(): void {
+  if (wrapAffordanceQueued) return;
+  wrapAffordanceQueued = true;
+  requestAnimationFrame(() => {
+    wrapAffordanceQueued = false;
+    updateWrapAffordance();
+  });
+}
+
+// View-only: it measures, it never rebuilds the document, so a resize costs a
+// couple of comparisons rather than an analysis.
+window.addEventListener("resize", scheduleWrapAffordance);
 
 $("#toggle-wrap").addEventListener("click", toggleWrap);
 
@@ -1506,6 +1561,7 @@ function setMapVisible(visible: boolean): void {
   split.position = visible ? lastMapWidth : 0;
   $("#toggle-map").classList.toggle("active", visible);
   store("re64.map", visible ? "1" : "0");
+  scheduleWrapAffordance();
 }
 
 $("#toggle-map").addEventListener("click", () => {
@@ -1523,6 +1579,8 @@ split.addEventListener("sl-reposition", () => {
     store("re64.map", "1");
     store("re64.mapWidth", String(lastMapWidth));
   }
+  // The pane changed width without the window doing so.
+  scheduleWrapAffordance();
 });
 
 $("#back").addEventListener("click", goBack);
