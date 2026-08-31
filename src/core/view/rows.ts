@@ -10,7 +10,7 @@
 
 import { analyzeProgram } from "../analysis/program.js";
 import { describeWarning } from "../arch/mos6502/disassembler.js";
-import { overlappingBlocks } from "../analysis/blocks.js";
+import { BasicBlock } from "../analysis/blocks.js";
 import { decodeText } from "../c64/text.js";
 import {
   LabelIndex,
@@ -135,9 +135,8 @@ export function analyze(
   // What the program *is*, computed once and no longer thrown away — see
   // core/analysis/program.ts. This function's job from here is rendering it.
   const program = analyzeProgram(loaded, { labelTolerance, entryPoints: entryPointOverride });
-  // Empty for almost every program: only a byte genuinely read two ways
-  // produces one, and then only where somebody has said so.
-  const alternates = overlappingBlocks(program.blocks);
+  // In address order, so the walk can ask "did I step over any of these".
+  const blocksByStart = [...program.blocks].sort((a, b) => a.start - b.start);
   const { instructions: index, labels: allLabels } = program;
   const result = { references: program.xrefs.raw(), warnings: program.warnings };
 
@@ -247,42 +246,53 @@ export function analyze(
   };
 
   /**
-   * Second readings of the bytes just emitted.
+   * Blocks the walk stepped over, emitted where it stepped over them.
    *
-   * A byte can be an operand on one path and an opcode on another. The listing
-   * is address-ordered and can only put one instruction on a row, so the other
-   * reading is emitted immediately after the instruction whose bytes it shares,
-   * out of address order and marked as such — which is where a reader wants it
-   * and is the only place it can go without pretending one reading won.
+   * The listing is address-ordered and a row holds one instruction, so a byte
+   * read two ways cannot be shown in place. Rather than choosing a winner —
+   * which was going to need a policy, and every candidate policy was arbitrary
+   * — every block is emitted, in order of where it starts, and one whose start
+   * the walk has already passed is emitted there and marked.
+   *
+   * That makes "primary" mean nothing more than "reached first in address
+   * order", and the question of which reading wins does not arise. It also
+   * covers the case where the main decode overlaps *itself*: occupancy reports
+   * an address inside an instruction but not one that starts a new instruction
+   * over claimed bytes, so two main blocks can share a byte, and this shows
+   * both without caring which is which.
    */
-  const emitOverlapping = (addr: number, length: number) => {
-    for (const { block, overlaps } of alternates) {
-      if (block.start <= addr || block.start >= addr + length) continue;
+  const emitted = new Set<number>();
 
+  const emitBlockRows = (block: BasicBlock) => {
+    push({
+      address: block.start,
+      kind: "comment",
+      text: `${hex4(block.start)}  ; also decodes from here, sharing bytes above`,
+      tokens: [],
+    });
+
+    for (const instr of block.instructions) {
+      const prefix = `${hex4(instr.address)}  ${bytesColumn([...instr.bytes]).padEnd(8)}  `;
+      const marker = instr.illegal ? "*" : " ";
+      const operand = formatOperand(instr.operand, resolveLabel);
       push({
-        address: block.start,
-        kind: "comment",
-        text:
-          `${hex4(block.start)}  ; also decodes from here, sharing bytes with ` +
-          `${hex4(overlaps.start)} above`,
+        address: instr.address,
+        kind: "overlap",
+        text: `${prefix}${marker}${instr.mnemonic}${operand ? ` ${operand}` : ""}`,
         tokens: [],
+        illegal: instr.illegal,
       });
+    }
+  };
 
-      for (const instr of block.instructions) {
-        const prefix = `${hex4(instr.address)}  ${bytesColumn([...instr.bytes]).padEnd(8)}  `;
-        const marker = instr.illegal ? "*" : " ";
-        push({
-          address: instr.address,
-          kind: "overlap",
-          text: `${prefix}${marker}${instr.mnemonic}${
-            formatOperand(instr.operand, resolveLabel)
-              ? ` ${formatOperand(instr.operand, resolveLabel)}`
-              : ""
-          }`,
-          tokens: [],
-          illegal: instr.illegal,
-        });
-      }
+  /** Any block starting in `[from, to)` that has not been shown yet. */
+  const emitBlocksIn = (from: number, to: number) => {
+    for (const block of blocksByStart) {
+      if (block.start < from) continue;
+      if (block.start >= to) break;
+      if (emitted.has(block.start)) continue;
+      emitted.add(block.start);
+      emitBlockRows(block);
     }
   };
 
@@ -407,13 +417,29 @@ export function analyze(
       text = withInline(addr, text);
       push({ address: addr, kind: "instruction", text, tokens, illegal: instr.illegal });
       emitAfter(addr);
-      emitOverlapping(addr, instr.bytes.length);
+      // This block is being shown inline; anything starting inside this
+      // instruction was stepped over and is shown right after it.
+      emitted.add(addr);
+      emitBlocksIn(addr + 1, addr + instr.bytes.length);
       // A second inline comment has no room on the row it belongs to, so it
       // goes underneath, indented to where the first one starts. Redundant by
       // construction and meant to look it.
       emitExtraInline(addr, text);
 
       addr += instr.bytes.length;
+      continue;
+    }
+
+    // A block can begin exactly here without the main index having an
+    // instruction at this address — the other reading of a contested byte. Show
+    // it rather than rendering the byte as unexplained data.
+    const shown = emitted.size;
+    emitBlocksIn(addr, addr + 1);
+    if (emitted.size > shown && !index.has(addr)) {
+      // The byte belongs to the reading just shown, so it is not undecoded
+      // data. One step, because the rest of that block's bytes may still be
+      // claimed by the main decode and have their own rows to come.
+      addr += 1;
       continue;
     }
 

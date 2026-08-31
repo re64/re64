@@ -1248,7 +1248,7 @@ discards its own return address — but it is not the beginning of an IL, and
 growing it one opcode at a time is how a project ends up with a semantic model
 nobody planned.
 
-### Overlap: both readings are kept, and which one is primary is unsettled
+### Overlap: every reading is kept, and shown
 
 The decoder now follows a contested address as its **own stream**, with its own
 occupancy so the two readings do not fight over the same bytes, stopping where
@@ -1269,19 +1269,35 @@ routinely — a block beginning inside a longer one's span is ordinary — so
 instructions as second readings. Only a block from a shadow stream is an
 alternate.
 
-**What is not settled: which reading becomes primary.** It is currently
-whichever the work queue reached first, which is arbitrary. Declaring a label
-one byte inside an instruction still leaves the listing with an orphan byte and
-a resynchronised garbage run, because the contested reading that got dropped was
-the one a reader wanted. Candidate rules, none chosen:
+**Which reading is "primary" turned out not to be a question.** It looked like a
+policy decision — fall-through wins, or the declared entry point wins, or the
+longer decode wins — and every candidate was arbitrary. It dissolves instead:
+emit **every** block in order of where it starts, and mark any whose start the
+walk has already passed. "Primary" then means nothing more than "reached first
+in address order", and nothing has to be chosen.
 
-- the reading reached by fall-through from a lower address wins, since that is
-  the path already being read;
-- a reading from a user-declared entry point wins, since somebody asked for it;
-- the longer reading wins, on the grounds that a wrong decode desynchronises
-  quickly.
+The listing shows all of it. Declaring a label one byte inside `STA $35`:
 
-Until that is decided, overlap is *representable* and not yet *right*.
+```
+8D57  A5 35      LDA selectedLevel
+8D59  85 35      STA selectedLevel
+8D5A  ; also decodes from here, sharing bytes above
+8D5A  35 4C      AND $4C,X            <- the label's reading
+8D5C  8E 8D CE   STX dat_CE8D
+...
+8D5B  ; also decodes from here, sharing bytes above
+8D5B  4C 8E 8D   JMP DisplayTitleScreen   <- the reading that used to be destroyed
+8D5C  8E 8D CE   STX dat_CE8D
+```
+
+Two details found while building it. A jump target that lands *inside* an
+instruction never becomes a block leader, because `leaders()` gates on
+`instructions.has(target)` and that map is keyed by instruction start — which is
+exactly why such a target falls through to the contested path instead. And the
+main decode can overlap *itself*: `Occupancy.covering` reports an address inside
+an instruction but not one that starts a new instruction over claimed bytes, so
+two main blocks can share a byte. Emitting by position rather than by provenance
+covers that case too, without knowing it was there.
 
 ### Flow into a non-code region stops, and says so
 

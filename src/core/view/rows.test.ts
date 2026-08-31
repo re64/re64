@@ -235,3 +235,31 @@ describe("naming in zero page", () => {
     expect(text).not.toContain("previousYPosition-1");
   });
 });
+
+describe("a byte read two ways", () => {
+  it("shows every reading rather than choosing one", () => {
+    // BNE +1 lands on the $A9's operand, so $1003 is an opcode one way and an
+    // operand the other. The listing is address-ordered and a row holds one
+    // instruction, so the alternate is shown where the walk stepped over it.
+    //
+    // Choosing a winner was going to need a policy and every candidate was
+    // arbitrary. Emitting every block in order of where it starts, and marking
+    // one whose start has already been passed, makes "primary" mean nothing
+    // more than "reached first" — and the question does not arise.
+    const loaded = project([0xd0, 0x01, 0xa9, 0x60]);
+    const rows = analyze(loaded, { annotations: false }).rows;
+
+    expect(rows.some((r) => r.kind === "overlap")).toBe(true);
+    expect(rows.filter((r) => r.kind === "overlap")[0].text).toContain("RTS");
+    // And the main reading is untouched.
+    expect(rows.some((r) => r.kind === "instruction" && r.text.includes("LDA"))).toBe(true);
+  });
+
+  it("says nothing extra when no byte is contested", () => {
+    const loaded = project([0xa9, 0x01, 0x85, 0x02, 0x60]);
+    const rows = analyze(loaded, { annotations: false }).rows;
+
+    expect(rows.some((r) => r.kind === "overlap")).toBe(false);
+    expect(rows.some((r) => r.text.includes("also decodes"))).toBe(false);
+  });
+});
