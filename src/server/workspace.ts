@@ -18,6 +18,7 @@ import {
   Op,
   ProgramAnalysis,
   Reference,
+  Row,
   RegionKind,
   BasicBlock,
   BlockRun,
@@ -81,6 +82,29 @@ export interface Room {
 }
 
 const hex4 = (address: number) => `$${address.toString(16).toUpperCase().padStart(4, "0")}`;
+
+/**
+ * The row at an address that carries its *content*, not its decoration.
+ *
+ * `lineForAddress` maps an address to its **first** row, which is right for
+ * navigation and wrong for quoting: at a labelled or commented address the first
+ * row is the label or the comment, so "the line that calls this" came back as
+ * the caller's own name — and at a well-annotated routine head, as somebody's
+ * prose. The better a project was annotated, the less useful the answer got.
+ */
+function contentRowAt(
+  rows: readonly Row[],
+  lineForAddress: Record<number, number>,
+  address: number
+): Row | undefined {
+  const first = lineForAddress[address];
+  if (first === undefined) return undefined;
+
+  for (let i = first; i < rows.length && rows[i].address === address; i++) {
+    if (rows[i].kind !== "label" && rows[i].kind !== "comment") return rows[i];
+  }
+  return rows[first];
+}
 
 /**
  * Where a run ended, named rather than tagged.
@@ -290,13 +314,26 @@ export class Workspace {
       from = best;
     }
 
-    const slice = rows.slice(from, from + limit);
-    const truncated = from + limit < rows.length;
+    // One address can own many rows — a label, a comment running to several
+    // lines, the instruction. `lineForAddress` points at the *first* of them, so
+    // a cursor landing inside such a run resolves backwards and the walk stops
+    // advancing: `nextStart` comes back equal to `start`, forever. Extending the
+    // page to the end of whatever address it stops inside makes the next address
+    // a guaranteed step forward.
+    //
+    // Found by an agent writing a 47-line comment about a character set and then
+    // being unable to page past it — so the failure arrived through following
+    // the instructions well, which is the worst way for a bug to be reachable.
+    let end = Math.min(from + limit, rows.length);
+    while (end < rows.length && rows[end].address === rows[end - 1].address) end++;
+
+    const slice = rows.slice(from, end);
+    const truncated = end < rows.length;
 
     return {
       start: hex4(slice[0]?.address ?? start),
       truncated,
-      nextStart: truncated ? hex4(rows[from + limit].address) : undefined,
+      nextStart: truncated ? hex4(rows[end].address) : undefined,
       lines: slice.map((row) => {
         const instruction = program.instructions.get(row.address);
         const outbound = program.outbound.from(row.address)[0];
@@ -330,7 +367,7 @@ export class Workspace {
   } {
     const program = this.program();
     const { rows, lineForAddress } = this.rows();
-    const lineAt = (a: number) => rows[lineForAddress[a]]?.text;
+    const lineAt = (a: number) => contentRowAt(rows, lineForAddress, a)?.text;
 
     // The nearest named address at or before this one, which is as close to
     // "the routine containing it" as anything gets without a call graph. Only
@@ -1012,7 +1049,11 @@ export class Workspace {
     // covers eight bytes, so asking for $808C used to skip to $8090 and leave
     // out the row that was being checked.
     const begin = start === undefined ? 0 : rowContaining(rows, start);
-    const page = rows.slice(begin, begin + lines);
+    // Same rule as `disassembly`: stop on an address boundary, or a page ending
+    // inside a long comment hands back a cursor pointing at itself.
+    let last = Math.min(begin + lines, rows.length);
+    while (last < rows.length && rows[last].address === rows[last - 1].address) last++;
+    const page = rows.slice(begin, last);
 
     const covered = new Set(page.map((r) => r.address));
     const used = this.program().loaded.constants.used((a) => covered.has(a));
@@ -1022,7 +1063,7 @@ export class Workspace {
 
     const body = page.map((r) => r.text);
     const text = [...equates, ...(equates.length ? [""] : []), ...body].join("\n");
-    const after = rows[begin + lines];
+    const after = rows[last];
 
     return {
       start: hex4(page[0]?.address ?? start ?? 0),
@@ -1215,7 +1256,7 @@ export class Workspace {
           address: hex4(i.address),
           value: `$${immediate.value.toString(16).toUpperCase().padStart(2, "0")}`,
           boundTo: program.loaded.constants.nameAt(i.address),
-          text: rows[lineForAddress[i.address]]?.text,
+          text: contentRowAt(rows, lineForAddress, i.address)?.text,
         };
       }),
     };

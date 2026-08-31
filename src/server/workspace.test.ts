@@ -1357,3 +1357,57 @@ describe("understanding a block", () => {
     expect(() => workspace.blockEffects(0xffff)).toThrow(/No decoded block/);
   });
 });
+
+describe("paging through a listing", () => {
+  it("keeps advancing past an address that owns more rows than a page", () => {
+    // A comment running to more lines than the page size puts every one of its
+    // rows at one address. `lineForAddress` points at the first of them, so a
+    // cursor landing inside the run used to resolve backwards and hand back
+    // `nextStart === start` — forever.
+    //
+    // Found by an agent writing a 47-line comment about a character set and
+    // then being unable to page past it: the failure arrives through following
+    // the brief well, which is the worst way for a bug to be reachable.
+    const long = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n");
+    workspace.setComment(agent, 0x8040, long, "before");
+
+    let start = 0x8000;
+    const visited = new Set<number>();
+    for (let page = 0; page < 500; page++) {
+      const result = workspace.disassembly(start, 10);
+      if (!result.nextStart) return;
+      const next = Number(result.nextStart.replace("$", "0x"));
+      expect(next).not.toBe(start);
+      expect(visited.has(next)).toBe(false);
+      visited.add(next);
+      start = next;
+    }
+    throw new Error("never reached the end of the listing");
+  });
+
+  it("does the same for the rendered listing", () => {
+    const long = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n");
+    workspace.setComment(agent, 0x8040, long, "before");
+
+    const first = workspace.listing(0x8000, 10);
+    expect(first.nextStart).toBeDefined();
+    const second = workspace.listing(Number(first.nextStart!.replace("$", "0x")), 10);
+    expect(second.start).not.toBe(first.start);
+  });
+});
+
+describe("quoting the line that refers to something", () => {
+  it("quotes the instruction, not the label sitting above it", () => {
+    // Both readers in experiment 2 hit this independently: at a labelled or
+    // commented caller the quoted line was the caller's own name, or somebody's
+    // prose. The better the project was annotated, the worse the answer got.
+    workspace.setLabel(agent, 0x81c4, "SomewhereThatCalls");
+    workspace.setComment(agent, 0x81c4, "and here is why", "before");
+
+    const { inbound } = workspace.references(0x8172);
+    const caller = inbound?.find((i) => i.from === "$81C4");
+    expect(caller?.text).toContain("JSR");
+    expect(caller?.text).not.toContain("SomewhereThatCalls:");
+    expect(caller?.text).not.toContain("and here is why");
+  });
+});
