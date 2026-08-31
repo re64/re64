@@ -24,11 +24,26 @@ export type Flow =
   /** An effect that is real and not modelled; the machine cannot go on honestly. */
   | { kind: "unmodelled" };
 
+/**
+ * Notified of every memory access as it happens.
+ *
+ * The only way a computed address becomes visible. `LDA $10,X` reads an address
+ * no static analysis can name, and the whole value of running the thing is
+ * finding out which one — so the access is reported rather than reconstructed.
+ */
+export interface Watcher {
+  read(address: number, size: number, value: number): void;
+  write(address: number, size: number, value: number): void;
+}
+
 /** Everything a 6502 program can observe. */
 export class Machine {
   readonly memory = new Uint8Array(0x10000);
   private readonly registers = new Uint16Array(16);
   private readonly temporaries = new Map<number, number>();
+
+  /** Set to observe memory traffic; left unset it costs one comparison. */
+  watch?: Watcher;
 
   get(node: Varnode): number {
     switch (node.space) {
@@ -64,11 +79,19 @@ export class Machine {
   read(address: number, size: number): number {
     let value = 0;
     for (let i = size - 1; i >= 0; i--) value = (value << 8) | this.memory[(address + i) & 0xffff];
-    return value >>> 0;
+    value = value >>> 0;
+    this.watch?.read(address & 0xffff, size, value);
+    return value;
   }
 
   write(address: number, value: number, size: number): void {
     for (let i = 0; i < size; i++) this.memory[(address + i) & 0xffff] = (value >>> (8 * i)) & 0xff;
+    this.watch?.write(address & 0xffff, size, value & mask(size));
+  }
+
+  /** A register by offset, for reporting final state. */
+  register(offset: number): number {
+    return this.registers[offset];
   }
 
   /** Temporaries do not survive the instruction that made them. */

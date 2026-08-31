@@ -43,22 +43,9 @@ type LabelType = "entry" | "function" | "code" | "address";
  * the project file.
  */
 
-interface RowToken {
-  start: number;
-  end: number;
-  kind: "operand" | "label" | "xref" | "mnemonic" | "labeltype";
-  target?: number;
-  name?: string;
-  labelType?: LabelType;
-}
-
-interface Row {
-  address: number;
-  kind: "label" | "instruction" | "data" | "text" | "word";
-  text: string;
-  tokens: RowToken[];
-  illegal?: boolean;
-}
+// Re-declared here once and drifted: a row kind added in `core/view` type-checked
+// everywhere except the one file that renders rows. Imported now, so it cannot.
+import type { Row, RowToken } from "../core/view/rows.js";
 
 interface Analysis {
   name: string;
