@@ -1382,6 +1382,43 @@ claude mcp add --transport http re64 http://127.0.0.1:5164/mcp \
 
 The user id is one from `list_users`; the server does not verify it.
 
+## Where the algebra is incomplete
+
+Written down because it is the kind of thing that is obvious while building and
+invisible six weeks later. None of it is urgent; all of it is real.
+
+**One hole in the operation vocabulary.** There is `layer.add` and
+`layer.remove`, and no `layer.set` — a layer can be created and destroyed, never
+modified. So nothing can rename a layer or **reorder the stack**, and z-order is
+invoked throughout this file as the *reason* annotations belong to layers:
+"reordering the layer stack moves them with the bytes they describe rather than
+leaving them pointing at whatever else lands at that address." That property has
+never been exercisable through any surface. A documented behaviour with no
+operation behind it is worse than a missing feature, because it reads as
+supported. Relatedly, `add_layer` makes only `symbols` layers, so a byte layer
+cannot be added at all — which is why the shadowing it is supposed to enable
+cannot be tested end to end.
+
+**The debt is really in the surfaces, and it is lopsided:**
+
+| | reaches |
+|---|---|
+| MCP | ~41 tools — nearly the whole vocabulary |
+| CLI | labels, regions, undo/redo, import/export |
+| Browser | labels and regions, and nothing else |
+
+The browser cannot write a comment, declare a constant, or set a primary label,
+though all three are modelled, rendered and reachable by an agent. For a project
+whose premise is *four consumers and none of them primary*, the human's surface
+is the least capable by a wide margin.
+
+**That skew is predictable, not accidental**, and it is the standing hazard of
+prioritising on evidence: the evidence so far came from experiments 1 and 2, and
+both were **agents**. Following it meant following that consumer. The method is
+sound and the sample was one-sided, which is a different problem and has a
+different fix — experiment 3 puts a person in the loop, and the friction it
+surfaces is the missing half.
+
 ## Known Limitations & Future Features
 
 ### What "reachable" means, and what the binary might be doing
