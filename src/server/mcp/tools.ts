@@ -333,6 +333,68 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "find_instructions",
+    "Every instruction matching a mnemonic, an operand range, or both — each " +
+      "with the routine it sits in. " +
+      "On this machine the range is the meaning: $D000-$D02E is the VIC-II " +
+      "(sprites, colours, raster), $D400-$D418 the SID, $DC00-$DC0F the CIA " +
+      "(joystick, keyboard). So \"what makes a sound\" is stores into $D400, and " +
+      "\"what draws\" is stores into $D000. " +
+      "For immediate values — how many lives, which colour — use find_immediates " +
+      "instead: an immediate names no address and cannot be in a range.",
+    {
+      project,
+      mnemonic: z.string().optional().describe("STA, LDA, JSR … case does not matter"),
+      from: address.optional().describe("Lowest operand address to match"),
+      to: address.optional().describe("Highest operand address to match"),
+      limit: z.number().int().min(1).max(500).optional().describe("Default 100"),
+    },
+    ({
+      project: id,
+      mnemonic,
+      from,
+      to,
+      limit,
+    }: {
+      project?: string;
+      mnemonic?: string;
+      from?: number;
+      to?: number;
+      limit?: number;
+    }) => {
+      if (mnemonic === undefined && from === undefined && to === undefined) {
+        throw new Error("Give a mnemonic, an operand range, or both — otherwise this is every instruction in the program.");
+      }
+      return context().workspace(id).instructions({ mnemonic, from, to, limit });
+    }
+  );
+
+  tool(
+    "call_graph",
+    "Who calls a routine, and what it calls, to a depth. The shape of a program " +
+      "rather than one address at a time — where to start reading, and what a " +
+      "change would reach. " +
+      "Sees absolute JSRs only, so a routine reached through a computed jump or " +
+      "an RTS dispatch looks unconnected. It says so on every answer.",
+    {
+      project,
+      address,
+      depth: z.number().int().min(1).max(4).optional().describe("How far down to follow. Default 2"),
+    },
+    ({ project: id, address: at, depth }: { project?: string; address: number; depth?: number }) =>
+      context().workspace(id).callGraph(at, depth ?? 2)
+  );
+
+  tool(
+    "list_comments",
+    "Everything written about this project, in address order — what has been " +
+      "understood so far, without reading the listing to find it.",
+    { project, limit: z.number().int().min(1).max(500).optional().describe("Default 200") },
+    ({ project: id, limit }: { project?: string; limit?: number }) =>
+      context().workspace(id).comments(limit ?? 200)
+  );
+
+  tool(
     "list_decoders",
     "Decoders this project carries, with their source. One kept here can be run " +
       "again, and by anyone else in the project, without pasting it.",

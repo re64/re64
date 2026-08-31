@@ -1227,7 +1227,7 @@ Orient, read, decide, act, catch up:
 |---|---|
 | `list_projects`, `describe_project` | what is here, and how far along it is |
 | `read_disassembly`, `list_labels` | structured rows, never rendered text — an agent cannot use character offsets into a text column |
-| `find_references`, `find_unnamed` | who calls this, and what is worth naming next |
+| `find_references`, `find_unnamed`, `find_instructions`, `call_graph` | who calls this, what touches the SID, and the shape of the whole |
 | `routine_effects` | what a whole routine touches, its own code and its callees |
 | `block_effects`, `run_block` | what a routine *does*, statically and by running it |
 | `set_label`, `remove_label`, `mark_function`, `unmark_function` | naming |
@@ -1309,6 +1309,31 @@ transport in `src/server/mcp/transport.test.ts`, which is the only layer where
 this class of bug exists. The rule that follows: **if a tool grows an argument,
 it grows a transport test**, because "the logic is tested" is exactly the belief
 that let these ship.
+
+### The tools agents invented
+
+Experiment 2's transcript records seven tools readers reached for that did not
+exist. That list is worth more than any of their prose, because inventing a tool
+name is an unguarded statement about what the API should have had — and all
+seven are now built or answered.
+
+Two of them turned out to be **one** tool. `find_hardware_access` over
+`$D000-$DFFF` and `find_instructions` with an operand pattern are the same
+question with the range filled in, so building both would have been the
+mechanism-per-oddity mistake. `find_instructions` takes a mnemonic, an operand
+range, or both, and its description names the ranges — `$D000` VIC, `$D400` SID,
+`$DC00` CIA — so the hardware question stays discoverable without a second tool
+to find.
+
+Each site says **which routine it is in**, which is what makes a list of fifty
+addresses usable rather than a haystack: "what makes a sound" comes back as 57
+stores across 13 named routines rather than 57 addresses.
+
+That attribution needed one correction worth keeping. `routineEntries` took
+`function`-typed labels only, so everything reachable *solely from where the
+program starts* belonged to no routine — most of the initialisation code, showing
+as `in -` on half the answers. An `entry` label is a routine root as much as
+anything a `JSR` points at.
 
 ### A change cursor, because the agent has no socket
 

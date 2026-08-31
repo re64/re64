@@ -1644,3 +1644,60 @@ describe("keeping a decoder in the project", () => {
     expect(workspace.decoders().total).toBe(0);
   });
 });
+
+describe("finding things across the whole program", () => {
+  it("finds every write into a hardware range, with the routine each is in", () => {
+    // Two readers invented this, one as find_instructions and one as
+    // find_hardware_access over $D000-$DFFF — the same question with the range
+    // filled in, which is why it is one tool.
+    const found = workspace.instructions({ from: 0xd400, to: 0xd418, limit: 500 });
+    expect(found.total).toBeGreaterThan(20);
+    // The routine is what makes a list of fifty addresses usable.
+    expect(found.sites.every((s) => s.inRoutine !== undefined)).toBe(true);
+  });
+
+  it("counts an entry point as a routine root, not only a call target", () => {
+    // Without this, everything reachable only from where the program starts
+    // belongs to no routine — which was most of the initialisation code, and
+    // showed up as `in -` on half the answers.
+    const found = workspace.instructions({ from: 0xd400, to: 0xd418, limit: 500 });
+    expect(found.sites.some((s) => s.inRoutine === "InitializeGame")).toBe(true);
+  });
+
+  it("filters by mnemonic", () => {
+    const found = workspace.instructions({ mnemonic: "jsr", limit: 500 });
+    expect(found.total).toBeGreaterThan(50);
+    expect(found.sites.every((s) => s.text.includes("JSR"))).toBe(true);
+  });
+
+  it("refuses a search with no criteria, which is every instruction", () => {
+    // Not an error worth being clever about, but returning 1449 rows to a
+    // caller who forgot an argument is worse than saying so.
+    expect(workspace.instructions({ limit: 5 }).total).toBeGreaterThan(1000);
+  });
+
+  it("shows what a routine calls, and who calls it", () => {
+    const graph = workspace.callGraph(0x81a2, 1) as {
+      routine: string;
+      calledBy: unknown[];
+      calls: { routine: string }[];
+    };
+    expect(graph.routine).toContain("DrawGrid");
+    expect(graph.calls.length).toBeGreaterThan(0);
+    expect(graph.calledBy.length).toBeGreaterThan(0);
+  });
+
+  it("stops a call graph from looping forever", () => {
+    // Depth bounds it, and a routine already shown is marked rather than
+    // expanded again — a program that calls itself is ordinary.
+    const graph = workspace.callGraph(0x8300, 4);
+    expect(JSON.stringify(graph).length).toBeLessThan(200_000);
+  });
+
+  it("lists what has been understood so far", () => {
+    workspace.setComment(agent, 0x8100, "the entry point", "before");
+    const listed = workspace.comments();
+    expect(listed.total).toBeGreaterThan(0);
+    expect(listed.comments.some((c) => c.text === "the entry point")).toBe(true);
+  });
+});

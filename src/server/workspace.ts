@@ -221,7 +221,14 @@ export class Workspace {
     const program = this.program();
     const routines = analyzeRoutines(
       program.blocks,
-      program.labels.filter({ type: "function" }).map((l) => l.address)
+      // `entry` as well as `function`: where a program *starts* is a routine
+      // root just as much as something a JSR points at, and without it every
+      // instruction reachable only from the entry point belongs to nothing —
+      // which on this project was most of the initialisation code.
+      program.labels
+        .filter({ type: "function" })
+        .concat(program.labels.filter({ type: "entry" }))
+        .map((l) => l.address)
     );
     this.cachedRoutines = { key, routines };
     return routines;
@@ -675,6 +682,144 @@ export class Workspace {
       hex: [...filled].map((b) => b.toString(16).toUpperCase().padStart(2, "0")).join(" "),
       base64: Buffer.from(filled).toString("base64"),
       ...(gaps.length ? { unmapped: gaps } : {}),
+    };
+  }
+
+  /**
+   * Instructions matching a mnemonic, an operand range, or both.
+   *
+   * Two agents in experiment 2 invented this, one as `find_instructions` and one
+   * as `find_hardware_access` over `$D000-$DFFF` — the same question with the
+   * range filled in, which is why it is one tool and not two. On this machine
+   * the range *is* the meaning: `$D000` is the VIC, `$D400` the SID, `$DC00` the
+   * CIA, so "what touches the sound chip" is a search for stores into a span.
+   *
+   * Each site says which routine it is in, which is the part that makes a list
+   * of forty addresses usable.
+   */
+  instructions(criteria: {
+    mnemonic?: string;
+    from?: number;
+    to?: number;
+    limit?: number;
+  }): {
+    total: number;
+    truncated: boolean;
+    sites: { address: string; text: string; inRoutine?: string }[];
+  } {
+    const program = this.program();
+    const { rows, lineForAddress } = this.rows();
+    const wanted = criteria.mnemonic?.toUpperCase();
+    const limit = criteria.limit ?? 100;
+
+    const matches = [...program.instructions.all()].filter((instruction) => {
+      if (wanted && instruction.mnemonic.toUpperCase() !== wanted) return false;
+      if (criteria.from === undefined && criteria.to === undefined) return true;
+
+      // Whatever address the operand names, in whatever mode. An immediate
+      // names no address and cannot be in a range — `find_immediates` is the
+      // question about those.
+      const operand = instruction.operand as { address?: number };
+      if (operand.address === undefined) return false;
+      return (
+        operand.address >= (criteria.from ?? 0) && operand.address <= (criteria.to ?? 0xffff)
+      );
+    });
+
+    const routineAt = (address: number) => {
+      const owning = [...this.routines().values()]
+        .filter((r) => r.spans.some((s) => address >= s.start && address < s.end))
+        .sort((a, b) => a.blocks - b.blocks)[0];
+      if (!owning) return undefined;
+      const label = program.labels.resolve(owning.entry);
+      return label && label.offset === 0 ? label.label.name : hex4(owning.entry);
+    };
+
+    return {
+      total: matches.length,
+      truncated: matches.length > limit,
+      sites: matches.slice(0, limit).map((instruction) => ({
+        address: hex4(instruction.address),
+        text: contentRowAt(rows, lineForAddress, instruction.address)?.text ?? "",
+        ...(routineAt(instruction.address) ? { inRoutine: routineAt(instruction.address)! } : {}),
+      })),
+    };
+  }
+
+  /**
+   * Who calls a routine, and what it calls, to a depth.
+   *
+   * Invented by an agent in experiment 2 and refused. It needed the routine
+   * analysis to exist first: callers come from the reference index, but
+   * *callees* are a property of a routine's whole body, which is scattered
+   * across several spans on 20 of the 50 routines here.
+   */
+  callGraph(address: number, depth = 2): Record<string, unknown> {
+    const program = this.program();
+    const routines = this.routines();
+
+    const name = (at: number) => {
+      const label = program.labels.resolve(at);
+      return label && label.offset === 0 ? `${hex4(at)} (${label.label.name})` : hex4(at);
+    };
+
+    const owning =
+      routines.get(address) ??
+      [...routines.values()].find((r) =>
+        r.spans.some((s) => address >= s.start && address < s.end)
+      );
+    if (!owning) {
+      throw new Error(
+        `${hex4(address)} is not in a routine this can see — nothing calls it and ` +
+          `nothing declares it one.`
+      );
+    }
+
+    const below = (entry: number, left: number, seen: Set<number>): unknown[] =>
+      left <= 0
+        ? []
+        : (routines.get(entry)?.calls ?? []).map((target) =>
+            seen.has(target)
+              ? { routine: name(target), note: "already shown above" }
+              : {
+                  routine: name(target),
+                  calls: below(target, left - 1, new Set([...seen, target])),
+                }
+          );
+
+    return {
+      routine: name(owning.entry),
+      calledBy: program.xrefs
+        .to(owning.entry)
+        .filter((r) => r.type === "call")
+        .map((r) => {
+          const from = [...routines.values()]
+            .filter((x) => x.spans.some((s) => r.from >= s.start && r.from < s.end))
+            .sort((a, b) => a.blocks - b.blocks)[0];
+          return { from: hex4(r.from), inRoutine: from ? name(from.entry) : undefined };
+        }),
+      calls: below(owning.entry, depth, new Set([owning.entry])),
+      incomplete:
+        "Calls seen here are absolute JSRs. A routine reached through a computed " +
+        "jump or an RTS dispatch appears to call nothing and to be called by nobody.",
+    };
+  }
+
+  /** Everything written about this project, in address order. */
+  comments(limit = 200): {
+    total: number;
+    truncated: boolean;
+    comments: { address: string; placement: string; text: string }[];
+  } {
+    const all = [...this.program().loaded.comments.all()].sort((a, b) => a.address - b.address);
+    return {
+      total: all.length,
+      truncated: all.length > limit,
+      comments: all.slice(0, limit).map((c) => ({
+        address: hex4(c.address),
+        placement: c.placement,
+        text: c.text,
+      })),
     };
   }
 

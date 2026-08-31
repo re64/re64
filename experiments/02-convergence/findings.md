@@ -185,8 +185,13 @@ Per the standing rule, only what blocks the next experiment gets fixed.
   readers wanted it
 - The change log is per-op: 875 rows for ~25 actions
 - A mid-instruction label renders nowhere, though it resolves correctly
-- Tools reached for and refused: `find_hardware_access`, `find_instructions`,
-  `call_graph`, `list_comments`, `run_routine`, `whoami`
+- ~~Tools reached for and refused~~ — **all seven are now built or answered**:
+  `read_bytes` and `whoami` outright; `render_charset` by bitmap regions, the
+  pixel explorer and `run_decoder`; `run_routine` by `run_block` and
+  `routine_effects`; `find_hardware_access` and `find_instructions` as one tool,
+  since the first is the second with a range filled in; `call_graph` and
+  `list_comments` as themselves. Only `set_text_encoding` with a `charsetAt`
+  remains, and a decoder covers it in substance
 - `run_block` cannot carry state between calls. Reader-3: "run `InitScreen`, then
   run `CalcRowAddress` in the memory that left behind." This program builds its
   tables at runtime, so most routines read zeros out of the cartridge image — the
