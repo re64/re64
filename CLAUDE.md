@@ -1228,6 +1228,37 @@ is a very large dependency for a project with almost none. Writing the IL in
 TypeScript is therefore the only shape that fits, and is not reinvention: there
 is no wheel of this shape.
 
+**Neither reference is correct about flags, and they are wrong differently.**
+Checked before writing anything, on `ADC`, `SBC` and the flag macros:
+
+| | Ghidra `6502.slaspec` | panopticon `semantic.rs` |
+|---|---|---|
+| `N` | `value s< 0` — right | signed `<=` , so `$00` sets N — wrong |
+| `SBC` | `A - op1 - !C` — right | `A - r + C`, no borrow — wrong |
+| `ADC` carry | computed before adding carry-in, so `$FF+$00+C` reports none | `AND` where the rule needs `OR`; reduces to `(res==A) && C_in` |
+| `ADC` overflow | `V = C` — plainly wrong, V is *signed* overflow | same `AND`-shaped bug |
+| decimal mode | no `D` check at all | written, then commented out |
+
+So porting one and checking it against the other would have produced a wrong
+lifter whichever won a disagreement. **Use them for structure and coverage, not
+for arithmetic**: Ghidra for how instructions decompose and which flags each
+touches, panopticon for the illegal opcodes Ghidra omits, and the ISA definition
+for what the flags actually are:
+
+```
+sum   = A + M + C
+result= sum & 0xFF
+C     = sum > 0xFF
+V     = (~(A ^ M) & (A ^ result) & 0x80) != 0
+N     = result & 0x80
+Z     = result == 0
+```
+
+This is the argument for making Klaus Dormann's 6502 functional test suite the
+acceptance bar rather than a nicety. Reading two references agreeing would not
+have caught any of the above; running the program does, and names the
+instruction.
+
 **Two references, with different standing.**
 
 - Ghidra's `Ghidra/Processors/6502/data/languages/6502.slaspec` is complete,
