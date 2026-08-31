@@ -602,6 +602,56 @@ export class Workspace {
   }
 
   /**
+   * The bytes at an address, as the analysis sees them.
+   *
+   * There was no way to get these, and it showed: every reader in experiment 2
+   * ended up scraping the hex column out of `export_listing`'s rendered text
+   * with a regular expression, which is a lot of work to undo formatting that
+   * only existed for a human.
+   *
+   * "As the analysis sees them" is the point, and the reason reading the `.prg`
+   * yourself is not the same thing: a project is a *stack* of layers and the
+   * topmost one supplying an address wins, so a patch layer or a second file
+   * changes what is really there. These are the bytes every other answer here
+   * was computed from.
+   *
+   * Addresses nothing supplies are reported rather than zero-filled. A gap in
+   * the map is a fact about the project, and a decoder handed silent zeroes
+   * would draw something that looks like data.
+   */
+  bytes(start: number, length: number): {
+    start: string;
+    length: number;
+    hex: string;
+    base64: string;
+    unmapped?: { from: string; to: string }[];
+  } {
+    const read = this.program().loaded.map.readBytes(start, length);
+
+    const gaps: { from: string; to: string }[] = [];
+    let run: number | undefined;
+    read.forEach((byte, index) => {
+      if (byte === undefined && run === undefined) run = index;
+      if (byte !== undefined && run !== undefined) {
+        gaps.push({ from: hex4(start + run), to: hex4(start + index - 1) });
+        run = undefined;
+      }
+    });
+    if (run !== undefined) gaps.push({ from: hex4(start + run), to: hex4(start + read.length - 1) });
+
+    const filled = Uint8Array.from(read, (b) => b ?? 0);
+    return {
+      start: hex4(start),
+      length: read.length,
+      // Both, because they answer different questions: hex is readable in a
+      // transcript, base64 is what you paste into your own tooling.
+      hex: [...filled].map((b) => b.toString(16).toUpperCase().padStart(2, "0")).join(" "),
+      base64: Buffer.from(filled).toString("base64"),
+      ...(gaps.length ? { unmapped: gaps } : {}),
+    };
+  }
+
+  /**
    * Run a decoder over a span, and describe what came out.
    *
    * The escape hatch that stops this growing a mechanism per oddity. A character

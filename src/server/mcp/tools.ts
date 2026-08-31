@@ -237,6 +237,25 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   // --- understanding a routine ----------------------------------------
 
   tool(
+    "read_bytes",
+    "The raw bytes at an address, as hex and as base64. " +
+      "For when you want to work on the data yourself rather than read a " +
+      "listing — your own script, your own decoder, your own arithmetic. " +
+      "These are the bytes the analysis sees, which is not the same as reading " +
+      "the file: a project is a stack of layers and the topmost one supplying " +
+      "an address wins, so a patch or a second file changes what is really " +
+      "there. Addresses nothing supplies are listed as unmapped rather than " +
+      "quietly returned as zero.",
+    {
+      project,
+      start: address,
+      length: z.number().int().min(1).max(8192).describe("How many bytes; 8192 at a time"),
+    },
+    ({ project: id, start, length }: { project?: string; start: number; length: number }) =>
+      context().workspace(id).bytes(start, length)
+  );
+
+  tool(
     "run_decoder",
     "Run a decoder you write over a span of bytes, and see what it produces. " +
       "For data whose layout is not one of the built-in ones — a packed screen, " +

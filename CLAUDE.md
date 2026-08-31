@@ -1763,6 +1763,25 @@ drive the explorer and the tools. Rendering a decoder inline means caching
 results out of band and repainting when they arrive, which is a separate and
 larger decision.
 
+**Running it here is a convenience, not the only way, and the tools say so.**
+An agent may prefer its own tooling, and nothing should push it towards a
+sandbox it did not ask for — so `read_bytes` hands over the same bytes and
+imposes nothing on what happens next. What `run_decoder` buys is that the
+isolation is already there and the result comes back drawn.
+
+`read_bytes` also closes the loudest finding of experiment 2. There was no way
+to get bytes at all, so every reader scraped the hex column out of
+`export_listing`'s rendered text with a regular expression — a lot of work to
+undo formatting that existed only for a human. It returns hex *and* base64
+because those answer different questions: one is readable in a transcript, the
+other is what you paste into your own script.
+
+It reads through the **memory map**, and that is the part reading the `.prg`
+cannot reproduce: a project is a stack of layers and the topmost one supplying
+an address wins. Addresses nothing supplies are reported as unmapped rather than
+zero-filled, because a gap is a fact about the project and silent zeroes would
+let a decoder draw something that looks like data.
+
 **Not stored yet.** `run_decoder` takes its source inline, so a decoder can be
 used before there is a decision about where it lives. Putting one in the project
 is another twelve-site schema change, and it is worth letting the mechanism be

@@ -1555,3 +1555,37 @@ describe("naming a region rather than guessing which one", () => {
     expect(workspace.describe().regions.length).toBe(before - 1);
   });
 });
+
+describe("handing over the bytes", () => {
+  it("gives the cartridge header as hex and base64", () => {
+    // What every reader in experiment 2 had to get by regexing the hex column
+    // out of a rendered listing.
+    const read = workspace.bytes(0x8000, 9);
+    expect(read.hex).toBe("C1 83 E2 83 C3 C2 CD 38 30");
+    expect(Buffer.from(read.base64, "base64")).toEqual(
+      Buffer.from([0xc1, 0x83, 0xe2, 0x83, 0xc3, 0xc2, 0xcd, 0x38, 0x30])
+    );
+  });
+
+  it("says which addresses nothing supplies, rather than returning zero", () => {
+    // A gap is a fact about the project. Silent zeroes would let a decoder draw
+    // something that looks like data.
+    const read = workspace.bytes(0x8ff8, 16);
+    expect(read.unmapped).toEqual([{ from: "$9000", to: "$9007" }]);
+  });
+
+  it("reports nothing unmapped when everything is there", () => {
+    expect(workspace.bytes(0x8100, 16).unmapped).toBeUndefined();
+  });
+
+  it("reads through the memory map, which is what makes it more than the file", () => {
+    // The reason reading the .prg yourself is not equivalent: this goes through
+    // the layer stack, where the topmost layer supplying an address wins. With
+    // one layer the two agree; with a patch stacked over it they would not, and
+    // this is the path that stays right.
+    const map = workspace.program().loaded.map;
+    const direct = [...Array(8)].map((_, i) => map.readByte(0x8100 + i) ?? 0);
+    const shown = workspace.bytes(0x8100, 8).hex.split(" ").map((h) => parseInt(h, 16));
+    expect(shown).toEqual(direct);
+  });
+});
