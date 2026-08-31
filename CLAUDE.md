@@ -1412,12 +1412,33 @@ though all three are modelled, rendered and reachable by an agent. For a project
 whose premise is *four consumers and none of them primary*, the human's surface
 is the least capable by a wide margin.
 
-**That skew is predictable, not accidental**, and it is the standing hazard of
-prioritising on evidence: the evidence so far came from experiments 1 and 2, and
-both were **agents**. Following it meant following that consumer. The method is
-sound and the sample was one-sided, which is a different problem and has a
-different fix — experiment 3 puts a person in the loop, and the friction it
-surfaces is the missing half.
+**That skew is deliberate, and it is not debt in the usual sense.** The agent
+surface is being built out first on purpose, for three reasons worth writing
+down because the lopsided table above otherwise looks like neglect:
+
+- **The deep work is surface-independent.** Basic blocks, the P-Code lifter,
+  decoders, the analysis cache — all of it had to exist whatever consumed it.
+  Which surface exposes it first changes nothing about whether it gets built.
+- **A tool is cheaper than a panel.** Exposing something through MCP is a schema
+  and a `Workspace` method. The same thing in the browser is markup, styles,
+  state, event wiring and repaint discipline — and the repaint discipline is the
+  part that keeps going wrong.
+- **Agents are not gated on the author.** Progress through MCP does not wait for
+  anyone to sit down and click.
+
+So "when and whether it appears in the web UI" is a genuinely separable
+question for most features, and deferring it is a schedule, not an oversight.
+
+The one thing this does *not* excuse is the missing `layer.set` above: that is in
+the vocabulary itself, not in a surface, and no amount of exposing things
+elsewhere reaches it.
+
+Nor is human-side evidence actually missing, which an earlier version of this
+note got wrong. It arrives directly from whoever is building this — line
+wrapping, the arrow gutter, pictures in a sidebar, the chat panel, and the
+observation that *sliding the width until an image appears* is the whole
+pleasure of the thing. None of that came out of an agent transcript, and none of
+it would have.
 
 ## Known Limitations & Future Features
 
