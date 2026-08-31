@@ -189,6 +189,56 @@
       }
       #chat-input::placeholder { color: var(--dim); }
       #chat-input:disabled { background: var(--bg); }
+      /* The explorer is where you *find* a picture — sliding the width until one
+         appears — so it is a panel with controls, not a view of the model. It
+         writes nothing until you say so. */
+      #split-right {
+        height: 100%;
+        min-width: 0;
+        --min: 0px;
+        --max: 100%;
+        --divider-width: 3px;
+      }
+      #split-right::part(divider) { background: var(--border); }
+      #split-right::part(divider):hover { background: var(--accent-dim); }
+      #split-right.collapsed { --min: 100%; --max: 100%; }
+
+      #pixels {
+        height: 100%;
+        overflow: auto;
+        background: var(--bg);
+        border-left: 1px solid var(--border);
+        padding: 8px 10px 12px;
+      }
+      .pixel-controls { display: flex; flex-direction: column; gap: 5px; margin: 6px 0 10px; }
+      .pixel-controls label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--dim); }
+      .pixel-controls label.check { color: var(--fg); }
+      .pixel-controls input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
+      .pixel-controls output { color: var(--fg); min-width: 2ch; text-align: right; }
+      #px-address, #px-format {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        color: var(--fg);
+        font: inherit;
+        font-size: 11px;
+        padding: 2px 5px;
+      }
+      #px-canvas-wrap {
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: #000;
+        padding: 6px;
+        overflow: auto;
+        /* Checkerboard so an all-black picture is still visibly a picture. */
+        background-image: linear-gradient(45deg, #111 25%, transparent 25%),
+          linear-gradient(-45deg, #111 25%, transparent 25%);
+        background-size: 12px 12px;
+      }
+      #px-canvas { display: block; image-rendering: pixelated; }
+      .pixel-foot { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+      #px-note { font-size: 11px; color: var(--dim); }
+
       #content { height: 100%; position: relative; }
       /* Each pane fills the content box; only its own contents scroll. */
       #disasm, #project, #debug { position: absolute; inset: 0; }
@@ -417,6 +467,7 @@
           <button class="tab" data-tab="debug">Debug</button>
         </div>
         <button id="toggle-map" title="Show or hide the memory map">▤ Map</button>
+        <button id="toggle-pixels" title="Look at bytes as a picture (p)">▦ Pixels</button>
         <button id="back">← Back</button>
         <button id="undo" title="Undo">↶</button>
         <button id="redo" title="Redo">↷</button>
@@ -445,11 +496,47 @@
               </form>
             </section>
           </aside>
-          <div id="content" slot="end">
-            <div id="disasm"></div>
-            <div id="project" style="display: none"></div>
-            <div id="debug" style="display: none"></div>
-          </div>
+          <sl-split-panel id="split-right" slot="end" position="70" snap="100%" snap-threshold="24">
+            <div id="content" slot="start">
+              <div id="disasm"></div>
+              <div id="project" style="display: none"></div>
+              <div id="debug" style="display: none"></div>
+            </div>
+            <aside id="pixels" slot="end">
+              <div class="map-title">Pixels</div>
+              <div class="pixel-controls">
+                <label>at <input id="px-address" size="6" value="$8000" /></label>
+                <label>
+                  <select id="px-format">
+                    <option value="bits">raw bits</option>
+                    <option value="char">characters</option>
+                    <option value="sprite">sprites</option>
+                    <option value="sprite-multi">sprites, multicolour</option>
+                  </select>
+                </label>
+                <label id="px-width-label">
+                  width <output id="px-width-value">3</output>
+                  <input id="px-width" type="range" min="1" max="24" value="3" />
+                </label>
+                <label>
+                  rows <output id="px-rows-value">24</output>
+                  <input id="px-rows" type="range" min="1" max="64" value="24" />
+                </label>
+                <label>
+                  zoom <output id="px-zoom-value">3</output>
+                  <input id="px-zoom" type="range" min="1" max="8" value="3" />
+                </label>
+                <label class="check">
+                  <input id="px-follow" type="checkbox" checked /> follow the cursor
+                </label>
+              </div>
+              <div id="px-canvas-wrap"><canvas id="px-canvas"></canvas></div>
+              <div class="pixel-foot">
+                <button id="px-declare">Declare as a region</button>
+                <span id="px-note"></span>
+              </div>
+            </aside>
+          </sl-split-panel>
         </sl-split-panel>
       </main>
       <footer>
@@ -518,6 +605,13 @@
 
         <h3>View</h3>
         <dl>
+          <dt><kbd>p</kbd></dt>
+          <dd>
+            The pixel explorer: look at bytes as a picture. Point it at an
+            address, choose a format, and slide the width until something
+            appears — it writes nothing until you declare a region, so being
+            wrong costs nothing.
+          </dd>
           <dt><kbd>▤ Map</kbd></dt>
           <dd>
             Show or hide the memory map. Dragging the divider to the edge does

@@ -29,7 +29,14 @@ import {
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { json } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { analyze, buildMapView } from "../core/index.js";
+import {
+  Bitmap,
+  BitmapFormat,
+  analyze,
+  buildMapView,
+  bytesPerCell,
+  decodeBitmap,
+} from "../core/index.js";
 import { ProjectSession } from "../client/index.js";
 import type SlSplitPanel from "@shoelace-style/shoelace/dist/components/split-panel/split-panel.js";
 // Registers <sl-split-panel>. Components are imported individually so the
@@ -721,6 +728,7 @@ const navKeymap = keymap.of([
   { key: "Backspace", run: () => (goBack(), true) },
   { key: "n", run: () => (nameCurrentLine(), true) },
   { key: "f", run: () => (toggleFunctionOnCurrentLine(), true) },
+  { key: "p", run: () => (setPixelsVisible(rightSplit.position >= 99), true) },
   { key: "Escape", run: () => (endLabelEdit(), true) },
   { key: "Mod-z", run: () => (void undoEdit(), true) },
   { key: "Mod-Shift-z", run: () => (void redoEdit(), true) },
@@ -755,6 +763,12 @@ const disasmView = new EditorView({
       editDecorations,
       clickHandler,
       navKeymap,
+      // The first update listener in this file. Coalesced on a frame like every
+      // other repaint, so dragging a selection does not redraw a canvas per
+      // keystroke.
+      EditorView.updateListener.of((update) => {
+        if (update.selectionSet) schedulePixelFollow();
+      }),
       EditorState.readOnly.of(true),
       EditorView.editable.of(false),
       // A non-editable content DOM is not focusable on its own, so clicking a
@@ -1012,6 +1026,150 @@ $("#chat-form").addEventListener("submit", (event) => {
   renderChat();
 });
 
+/**
+ * The pixel explorer.
+ *
+ * Deliberately a place to *look*, not a view of the model: it writes nothing to
+ * the project until you press the button. That matches how anyone actually finds
+ * graphics in a memory dump — point at an address, slide the width, and stop
+ * when a picture appears — and it means being wrong costs nothing. Once you have
+ * found something, declaring it records what you found.
+ *
+ * It repaints itself on a slider drag without going through `render()`, which
+ * would re-analyse the program for a change that is purely about looking.
+ */
+let pixelFormat: BitmapFormat = "bits";
+let pixelAddress = 0x8000;
+let pixelWidth = 3;
+let pixelRows = 24;
+let pixelZoom = 3;
+
+const pixelOptions = () =>
+  pixelFormat === "bits"
+    ? { format: pixelFormat, stride: pixelWidth }
+    : { format: pixelFormat, columns: pixelWidth };
+
+/** Bytes one row of the current view consumes. */
+const pixelBytesPerRow = () =>
+  pixelFormat === "bits" ? pixelWidth : bytesPerCell(pixelOptions()) * pixelWidth;
+
+function paint(canvas: HTMLCanvasElement, bitmap: Bitmap, zoom: number): void {
+  const context = canvas.getContext("2d");
+  if (!context) return;
+
+  // Drawn at one pixel per pixel, then scaled with smoothing off: scaling the
+  // ImageData directly would blur a bitmap whose whole content is hard edges.
+  const source = document.createElement("canvas");
+  source.width = bitmap.width;
+  source.height = bitmap.height;
+  const sourceContext = source.getContext("2d");
+  if (!sourceContext) return;
+
+  const image = sourceContext.createImageData(bitmap.width, bitmap.height);
+  for (let i = 0; i < bitmap.pixels.length; i++) {
+    const colour = parseInt((bitmap.palette[bitmap.pixels[i]] ?? "#000000").slice(1), 16);
+    image.data[i * 4] = (colour >> 16) & 0xff;
+    image.data[i * 4 + 1] = (colour >> 8) & 0xff;
+    image.data[i * 4 + 2] = colour & 0xff;
+    image.data[i * 4 + 3] = 0xff;
+  }
+  sourceContext.putImageData(image, 0, 0);
+
+  canvas.width = bitmap.width * zoom;
+  canvas.height = bitmap.height * zoom;
+  context.imageSmoothingEnabled = false;
+  context.drawImage(source, 0, 0, canvas.width, canvas.height);
+}
+
+function renderPixels(): void {
+  if (!session) return;
+
+  const options = pixelOptions();
+  const length = pixelBytesPerRow() * pixelRows;
+  const bytes = session.loaded.map.readBytes(pixelAddress, length);
+  paint($("#px-canvas") as HTMLCanvasElement, decodeBitmap(bytes, options), pixelZoom);
+
+  ($("#px-width-value") as HTMLOutputElement).value = String(pixelWidth);
+  ($("#px-rows-value") as HTMLOutputElement).value = String(pixelRows);
+  ($("#px-zoom-value") as HTMLOutputElement).value = String(pixelZoom);
+  $("#px-width-label").firstChild!.textContent =
+    pixelFormat === "bits" ? "bytes per row " : "columns ";
+
+  const supplied = bytes.filter((b) => b !== undefined).length;
+  $("#px-note").textContent =
+    supplied === length
+      ? `${hex4(pixelAddress)}–${hex4(pixelAddress + length - 1)}, ${length} bytes as ` +
+        `${pixelFormat}:${pixelWidth}`
+      : `${length - supplied} of ${length} bytes are past the end of the loaded map`;
+}
+
+function bindPixelControls(): void {
+  const onSlider = (id: string, set: (value: number) => void) =>
+    $(id).addEventListener("input", (event) => {
+      set(Number((event.target as HTMLInputElement).value));
+      renderPixels();
+    });
+
+  onSlider("#px-width", (v) => (pixelWidth = v));
+  onSlider("#px-rows", (v) => (pixelRows = v));
+  onSlider("#px-zoom", (v) => (pixelZoom = v));
+
+  $("#px-format").addEventListener("change", (event) => {
+    pixelFormat = (event.target as HTMLSelectElement).value as BitmapFormat;
+    // A sprite has one legal stride, so the width slider means columns instead;
+    // starting at one keeps the first look readable.
+    if (pixelFormat !== "bits") pixelWidth = Math.min(pixelWidth, 8);
+    ($("#px-width") as HTMLInputElement).value = String(pixelWidth);
+    renderPixels();
+  });
+
+  $("#px-address").addEventListener("change", (event) => {
+    const raw = (event.target as HTMLInputElement).value.trim().replace(/^[$#]|^0x/i, "");
+    const parsed = parseInt(raw, 16);
+    if (!Number.isNaN(parsed)) {
+      pixelAddress = parsed & 0xffff;
+      ($("#px-follow") as HTMLInputElement).checked = false;
+      renderPixels();
+    }
+  });
+
+  $("#px-declare").addEventListener("click", () => {
+    if (!session) return;
+    const length = pixelBytesPerRow() * pixelRows;
+    void edit(
+      (s) =>
+        s.setRegion(
+          pixelAddress,
+          pixelAddress + length,
+          "bitmap",
+          undefined,
+          `${pixelFormat}:${pixelWidth}`
+        ),
+      () => `${hex4(pixelAddress)} is now a ${pixelFormat}:${pixelWidth} bitmap, ${length} bytes`
+    );
+  });
+}
+
+let pixelFollowQueued = false;
+function schedulePixelFollow(): void {
+  if (pixelFollowQueued) return;
+  pixelFollowQueued = true;
+  requestAnimationFrame(() => {
+    pixelFollowQueued = false;
+    pixelsFollowCursor();
+  });
+}
+
+/** Follow the cursor, so the panel is about the line you are reading. */
+function pixelsFollowCursor(): void {
+  if (!($("#px-follow") as HTMLInputElement).checked) return;
+  const address = currentAddress();
+  if (address === null || address === pixelAddress) return;
+  pixelAddress = address;
+  ($("#px-address") as HTMLInputElement).value = hex4(address);
+  renderPixels();
+}
+
 function renderPresence(): void {
   const here = $("#here");
   here.innerHTML = "";
@@ -1124,6 +1282,8 @@ function render(restoreAddress?: number): void {
     changes: { from: 0, to: disasmView.state.doc.length, insert: rows.map((r) => r.text).join("\n") },
     effects: setRows.of(rows),
   });
+
+  if (rightSplit.position < 99) renderPixels();
 
   const { instructions, labels, regions, arrows, arrowsDemoted } = analysis.stats;
   $("#stats").textContent =
@@ -1537,6 +1697,36 @@ function setMapVisible(visible: boolean): void {
   store("re64.map", visible ? "1" : "0");
 }
 
+const rightSplit = $("#split-right") as SlSplitPanel;
+const DEFAULT_PIXELS_WIDTH = 70;
+let lastPixelsPosition = DEFAULT_PIXELS_WIDTH;
+
+function setPixelsVisible(visible: boolean): void {
+  rightSplit.classList.toggle("collapsed", !visible);
+  // The explorer is the *end* pane, so hiding it means giving the whole width
+  // to the listing — the mirror image of how the map collapses to zero.
+  rightSplit.position = visible ? lastPixelsPosition : 100;
+  $("#toggle-pixels").classList.toggle("active", visible);
+  store("re64.pixels", visible ? "1" : "0");
+  if (visible) renderPixels();
+}
+
+$("#toggle-pixels").addEventListener("click", () => {
+  setPixelsVisible(rightSplit.position >= 99);
+});
+
+rightSplit.addEventListener("sl-reposition", () => {
+  const collapsed = rightSplit.position >= 99;
+  $("#toggle-pixels").classList.toggle("active", !collapsed);
+  if (collapsed) {
+    store("re64.pixels", "0");
+  } else {
+    lastPixelsPosition = rightSplit.position;
+    store("re64.pixels", "1");
+    store("re64.pixelsWidth", String(lastPixelsPosition));
+  }
+});
+
 $("#toggle-map").addEventListener("click", () => {
   setMapVisible(split.position === 0);
 });
@@ -1585,4 +1775,15 @@ try {
   // Defaults: shown, at the standard width.
 }
 setMapVisible(mapVisible);
+
+let pixelsVisible = false;
+try {
+  pixelsVisible = localStorage.getItem("re64.pixels") === "1";
+  const width = Number(localStorage.getItem("re64.pixelsWidth"));
+  if (width > 0 && width < 100) lastPixelsPosition = width;
+} catch {
+  // Default: hidden. It is a tool you reach for, not a thing you read past.
+}
+bindPixelControls();
+setPixelsVisible(pixelsVisible);
 void loadDisassembly();

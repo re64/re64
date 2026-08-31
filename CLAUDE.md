@@ -1734,6 +1734,18 @@ blue. Authenticity would be unreadable both as terminal shading and as a
 thumbnail, and the real colours live in colour RAM somewhere else entirely, so
 any choice here is a viewing default rather than a claim about the program.
 
+**The explorer is a place to look, not a view of the model.** It writes nothing
+to the project until you press the button, which matches how anyone actually
+finds graphics in a dump — point at an address, slide the width, stop when a
+picture appears — and means being wrong costs nothing. Once you have found
+something, declaring it records what you found. It repaints itself on a slider
+drag without going through `render()`, which would re-analyse the program for a
+change that is purely about looking.
+
+It brought the **first `EditorView.updateListener` in the codebase**, so the
+panel can follow the cursor; `currentAddress()` had only ever been polled on
+demand. Coalesced on a frame like every other repaint.
+
 **Adding a `RegionKind` has exactly one compile-time guard and nine silent
 sites.** `rowStrategy`'s `never` default is the guard. The rest — the runtime
 `REGION_KINDS` whitelist, the MCP `z.enum` *and* its hand-duplicated arg union,

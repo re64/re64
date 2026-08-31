@@ -263,8 +263,14 @@ export class ProjectSession {
     if (op) this.run([op]);
   }
 
-  setRegion(start: number, end: number, kind: RegionKind, name?: string): void {
-    this.run([regionSetOp(this.loaded, start, end, kind, name)]);
+  setRegion(
+    start: number,
+    end: number,
+    kind: RegionKind,
+    name?: string,
+    view?: string
+  ): void {
+    this.run([regionSetOp(this.loaded, start, end, kind, name, undefined, undefined, view)]);
   }
 
   removeRegion(start: number): void {
