@@ -67,6 +67,22 @@ The game ships a 64-glyph font at `$8E00`, copied to `$2000`. `set_region` offer
 is the normal case rather than an exotic one. Readers called
 `set_region encoding:"custom" charset:"$2000"` and were refused.
 
+**It is specifically the *custom* mapping that is missing, and nothing else.**
+Worth stating, because the obvious hypothesis — that the encoding feature was
+too hidden to find — is wrong, and the evidence is in the transcript. Readers
+passed `encoding` seven times without being told to: six `screen`, one
+`petscii`. That `petscii` call was reader-3 declaring the cartridge signature,
+which renders correctly:
+
+```
+8004  CBM80Signature:
+8004  C3 C2 CD 38 30           .TEXT "CBM80"
+```
+
+So the built-in encodings are discoverable, reached for unprompted, and right.
+The three refused calls — two `custom`, one `charset` — are the whole of the
+gap.
+
 This was already recorded in `CLAUDE.md` as "still not solved". It is now the
 top item, measured rather than guessed: it is the only gap that cost every
 reader real time, and the workaround is a script.
