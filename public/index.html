@@ -236,6 +236,20 @@
         background-size: 12px 12px;
       }
       #px-canvas { display: block; image-rendering: pixelated; }
+      #px-decoder { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+      #px-source {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        color: var(--fg);
+        font-family: "SF Mono", Menlo, Consolas, monospace;
+        font-size: 11px;
+        min-height: 130px;
+        padding: 6px;
+        resize: vertical;
+        outline: none;
+      }
+      #px-source::placeholder { color: var(--dim); }
       .pixel-foot { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
       #px-note { font-size: 11px; color: var(--dim); }
 
@@ -512,6 +526,7 @@
                     <option value="char">characters</option>
                     <option value="sprite">sprites</option>
                     <option value="sprite-multi">sprites, multicolour</option>
+                    <option value="decoder">a decoder you write…</option>
                   </select>
                 </label>
                 <label id="px-width-label">
@@ -529,6 +544,14 @@
                 <label class="check">
                   <input id="px-follow" type="checkbox" checked /> follow the cursor
                 </label>
+              </div>
+              <div id="px-decoder" style="display: none">
+                <textarea
+                  id="px-source"
+                  spellcheck="false"
+                  placeholder="bytes and params come in; return {kind:'bitmap', width, height, pixels, palette}"
+                ></textarea>
+                <button id="px-run">Run it</button>
               </div>
               <div id="px-canvas-wrap"><canvas id="px-canvas"></canvas></div>
               <div class="pixel-foot">

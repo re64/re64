@@ -37,6 +37,7 @@ import {
   bytesPerCell,
   decodeBitmap,
 } from "../core/index.js";
+import { runDecoder } from "./decoders.js";
 import { ProjectSession } from "../client/index.js";
 import type SlSplitPanel from "@shoelace-style/shoelace/dist/components/split-panel/split-panel.js";
 // Registers <sl-split-panel>. Components are imported individually so the
@@ -1038,20 +1039,23 @@ $("#chat-form").addEventListener("submit", (event) => {
  * It repaints itself on a slider drag without going through `render()`, which
  * would re-analyse the program for a change that is purely about looking.
  */
-let pixelFormat: BitmapFormat = "bits";
+/** The built-in formats, plus `decoder` for one somebody wrote. */
+let pixelFormat: BitmapFormat | "decoder" = "bits";
 let pixelAddress = 0x8000;
 let pixelWidth = 3;
 let pixelRows = 24;
 let pixelZoom = 3;
 
-const pixelOptions = () =>
-  pixelFormat === "bits"
-    ? { format: pixelFormat, stride: pixelWidth }
+const pixelOptions = (): { format: BitmapFormat; stride?: number; columns?: number } =>
+  pixelFormat === "bits" || pixelFormat === "decoder"
+    ? { format: "bits", stride: pixelWidth }
     : { format: pixelFormat, columns: pixelWidth };
 
 /** Bytes one row of the current view consumes. */
 const pixelBytesPerRow = () =>
-  pixelFormat === "bits" ? pixelWidth : bytesPerCell(pixelOptions()) * pixelWidth;
+  pixelFormat === "bits" || pixelFormat === "decoder"
+    ? pixelWidth
+    : bytesPerCell(pixelOptions()) * pixelWidth;
 
 function paint(canvas: HTMLCanvasElement, bitmap: Bitmap, zoom: number): void {
   const context = canvas.getContext("2d");
@@ -1081,8 +1085,45 @@ function paint(canvas: HTMLCanvasElement, bitmap: Bitmap, zoom: number): void {
   context.drawImage(source, 0, 0, canvas.width, canvas.height);
 }
 
+/**
+ * Draw whatever a decoder returned.
+ *
+ * Kept apart from `renderPixels` because it is asynchronous and the built-in
+ * formats are not: a decoder runs in a worker, so the panel shows the last good
+ * picture until a new one arrives rather than blanking while it waits.
+ */
+async function renderDecoded(): Promise<void> {
+  if (!session) return;
+  const source = ($("#px-source") as HTMLTextAreaElement).value;
+  if (!source.trim()) {
+    $("#px-note").textContent = "Write a decoder and press Run it.";
+    return;
+  }
+
+  const length = pixelBytesPerRow() * pixelRows;
+  $("#px-note").textContent = "running…";
+  const outcome = await runDecoder(source, session.loaded.map.readBytes(pixelAddress, length));
+
+  if (!outcome.ok || !outcome.decoded) {
+    $("#px-note").textContent = outcome.why ?? "the decoder produced nothing";
+    return;
+  }
+
+  const decoded = outcome.decoded;
+  const shown = decoded.kind === "frames" ? decoded.frames[0] : decoded.kind === "bitmap" ? decoded : undefined;
+  if (shown) paint($("#px-canvas") as HTMLCanvasElement, shown, pixelZoom);
+
+  $("#px-note").textContent =
+    decoded.kind === "frames"
+      ? `${decoded.frames.length} frames, ${shown!.width}×${shown!.height}, in ${outcome.ms}ms`
+      : decoded.kind === "bitmap"
+        ? `${decoded.width}×${decoded.height}, in ${outcome.ms}ms`
+        : `${decoded.lines.length} lines, in ${outcome.ms}ms`;
+}
+
 function renderPixels(): void {
   if (!session) return;
+  if (pixelFormat === "decoder") return void renderDecoded();
 
   const options = pixelOptions();
   const length = pixelBytesPerRow() * pixelRows;
@@ -1114,8 +1155,11 @@ function bindPixelControls(): void {
   onSlider("#px-rows", (v) => (pixelRows = v));
   onSlider("#px-zoom", (v) => (pixelZoom = v));
 
+  $("#px-run").addEventListener("click", () => void renderDecoded());
+
   $("#px-format").addEventListener("change", (event) => {
-    pixelFormat = (event.target as HTMLSelectElement).value as BitmapFormat;
+    pixelFormat = (event.target as HTMLSelectElement).value as BitmapFormat | "decoder";
+    $("#px-decoder").style.display = pixelFormat === "decoder" ? "flex" : "none";
     // A sprite has one legal stride, so the width slider means columns instead;
     // starting at one keeps the first look readable.
     if (pixelFormat !== "bits") pixelWidth = Math.min(pixelWidth, 8);

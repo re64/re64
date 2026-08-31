@@ -1732,10 +1732,30 @@ Determinism comes free and is worth having: `Date.now()` and `Math.random()`
 throw inside a compartment, so the same bytes give the same answer and a listing
 cannot flicker.
 
-**The worker source is inline, not a file beside the runner.** A path resolves
-differently from source and from `dist`, and the failure mode of getting that
-wrong is running a *stale* sandbox — not a class of bug to accept in the one
-file whose job is to contain somebody else's code.
+**It runs on both sides, and the browser's is the one that matters.** A decoder
+is *analysis*, and analysis belongs where the person is — the same rule that put
+disassembly in the browser so a rename does not round-trip. Sliding a width in
+the explorer and watching the picture change has exactly that feel, and a network
+hop inside a loop somebody is doing by hand would ruin it. The server keeps its
+own runner for agents, who have no browser to run one in. That is the same split
+as `analyzeProgram`: both sides do it, each for its own consumer.
+
+The two workers must stay mirrors. The same source has to mean the same thing
+whoever runs it, or a decoder that works for a person fails for an agent looking
+at the same project. They are separate files only because one is a Node worker
+thread and the other a bundled browser worker; `validateDecoded` in core is
+literally the same function on both paths, so a result rejected in one place is
+rejected in the other for the same reason.
+
+The browser worker is **its own esbuild entry**, so the 84KB of SES is fetched
+the first time somebody runs a decoder rather than by everyone at first paint.
+The main bundle does not move. That measurement is why running decoders on the
+server was the wrong call: the cost I assumed it avoided was not there.
+
+**The Node worker's source is inline, not a file beside the runner.** A path
+resolves differently from source and from `dist`, and the failure mode of
+getting that wrong is running a *stale* sandbox — not a class of bug to accept in
+the one file whose job is to contain somebody else's code.
 
 **Not used for listing rows, and that is a real limit.** `analyze()` is
 synchronous and this is not. The built-in formats draw the listing; decoders
