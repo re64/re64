@@ -209,7 +209,15 @@ export function regionSetOp(
   name?: string,
   comment?: string,
   encoding?: TextEncoding,
-  view?: string
+  view?: string,
+  /**
+   * The region being revised, when the caller knows which.
+   *
+   * Everything below this is a guess made because it usually is not given, and
+   * an id makes the guess unnecessary: it says *this* region, whatever its span
+   * is now. `describe_project` reports them for exactly this.
+   */
+  id?: string
 ): Op {
   const owner = loaded.map.layerAt(start);
   if (!owner || !owner.hasBytes) {
@@ -245,12 +253,21 @@ export function regionSetOp(
   // Case 1 has to be checked before case 2, and that is not a detail: without
   // it, re-declaring the same span inside a larger region nests again on every
   // call, and two identical spans then race to be the innermost.
+  // Named outright: no inference, and it works however far the region has moved.
+  const named = id === undefined ? undefined : regions.find((r) => r.id === id);
+  if (id !== undefined && !named) {
+    throw new Error(
+      `No region ${id} in the layer holding $${hex4(start)}. ` +
+        `describe_project lists the regions there with their ids.`
+    );
+  }
+
   const exact = startsHere.find((r) => parseProjectAddress(r.end) === end);
   const extending =
     startsHere.length === 1 && end >= parseProjectAddress(startsHere[0].end)
       ? startsHere[0]
       : undefined;
-  const existing = exact ?? extending;
+  const existing = named ?? exact ?? extending;
 
   return {
     op: "region.set",
@@ -267,12 +284,41 @@ export function regionSetOp(
 }
 
 /** Searches every layer, since a region's owner is not implied by its start. */
-export function regionDeleteOp(loaded: LoadedProject, start: number): Op | undefined {
+/**
+ * Remove a region, by id or by where it starts.
+ *
+ * A start address stopped being a unique handle the moment regions could nest:
+ * declaring part of a span leaves two regions beginning at the same place, and
+ * picking whichever the array happened to list first would delete the wrong one
+ * silently. So an ambiguous start is refused, and it names the candidates —
+ * which is also how a caller learns the ids it should have passed.
+ */
+export function regionDeleteOp(
+  loaded: LoadedProject,
+  start: number,
+  id?: string
+): Op | undefined {
   for (const layer of loaded.project.layers) {
-    const found = layer.regions?.find((r) => parseProjectAddress(r.start) === start);
-    if (found?.id && layer.id) {
-      return { op: "region.delete", id: found.id, layerId: layer.id };
+    if (!layer.id) continue;
+
+    if (id !== undefined) {
+      const named = layer.regions?.find((r) => r.id === id);
+      if (named) return { op: "region.delete", id, layerId: layer.id };
+      continue;
     }
+
+    const here = (layer.regions ?? []).filter((r) => parseProjectAddress(r.start) === start);
+    if (here.length === 0) continue;
+    if (here.length > 1) {
+      const shown = here
+        .map((r) => `${r.id} (${r.kind}${r.name ? ` "${r.name}"` : ""} to $${String(r.end)})`)
+        .join(", ");
+      throw new Error(
+        `Several regions start at $${hex4(start)}, so that does not say which to ` +
+          `remove: ${shown}. Pass the id of the one you mean.`
+      );
+    }
+    if (here[0].id) return { op: "region.delete", id: here[0].id, layerId: layer.id };
   }
   return undefined;
 }

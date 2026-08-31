@@ -269,7 +269,7 @@ export class Workspace {
     version: string;
     entryPoints: string[];
     layers: { level: number; name: string; start: string; end: string; labels: number }[];
-    regions: { start: string; end: string; kind: string; name?: string }[];
+    regions: { id?: string; start: string; end: string; kind: string; name?: string }[];
     counts: {
       instructions: number;
       namedByHand: number;
@@ -301,6 +301,10 @@ export class Workspace {
         labels: layer.getLabels().length,
       })),
       regions: loaded.map.getAllRegions().map((r) => ({
+        // Reported so a caller can name one. Without this, `set_region` and
+        // `remove_region` had to infer which region was meant from its start
+        // address — which stopped being unique the moment regions could nest.
+        id: r.id,
         start: hex4(r.start),
         end: hex4(r.end),
         kind: r.kind,
@@ -1557,7 +1561,8 @@ export class Workspace {
     name?: string,
     comment?: string,
     encoding?: TextEncoding,
-    view?: string
+    view?: string,
+    id?: string
   ): EditResult {
     if (end <= start) {
       throw new Error(
@@ -1605,11 +1610,15 @@ export class Workspace {
     // Worked out before the edit, because afterwards the enclosing region is no
     // longer the one that was there first.
     const enclosing = this.program().loaded.map.getRegionAt(start);
-    const nests = enclosing !== undefined && enclosing.start <= start && end < enclosing.end;
+    const nests =
+      id === undefined &&
+      enclosing !== undefined &&
+      enclosing.start <= start &&
+      end < enclosing.end;
 
     const result = this.edit(
       caller,
-      (loaded) => [regionSetOp(loaded, start, end, kind, name, comment, encoding, view)],
+      (loaded) => [regionSetOp(loaded, start, end, kind, name, comment, encoding, view, id)],
       { start, end }
     );
     return {
@@ -1629,9 +1638,9 @@ export class Workspace {
     };
   }
 
-  removeRegion(caller: Caller, start: number): EditResult {
+  removeRegion(caller: Caller, start: number, id?: string): EditResult {
     return this.edit(caller, (loaded) => {
-      const op = regionDeleteOp(loaded, start);
+      const op = regionDeleteOp(loaded, start, id);
       if (!op) throw new Error(`No region starts at ${hex4(start)}`);
       return [op];
     });

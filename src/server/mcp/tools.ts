@@ -942,6 +942,14 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
             "bytes destined for screen RAM, ascii by default. Neither C64 " +
             "encoding is ASCII, so the default misreads most C64 text."
         ),
+      id: z
+        .string()
+        .optional()
+        .describe(
+          "The region to revise, from describe_project. Without one, a " +
+            "declaration strictly inside an existing region creates a new, " +
+            "nested region rather than resizing the one already there."
+        ),
       view: z
         .string()
         .optional()
@@ -962,6 +970,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       kind: "code" | "data" | "text" | "jumptable" | "bitmap" | "unknown";
       name?: string;
       comment?: string;
+      id?: string;
       view?: string;
       encoding?: "ascii" | "petscii" | "screen";
       expectVersion?: string;
@@ -985,22 +994,30 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         args.name,
         args.comment,
         args.encoding,
-        args.view
+        args.view,
+        args.id
       );
     }
   );
 
   tool(
     "remove_region",
-    "Drop the region starting at an address, so the span falls back to whatever " +
-      "kind its layer declares. Identified by start, since that is what a reader " +
-      "of the disassembly can see.",
-    { project, start: address, expectVersion: z.string().optional() },
-    (args: { project?: string; start: number; expectVersion?: string }) => {
+    "Drop a region, so its span falls back to whatever the region around it — or " +
+      "its layer — declares. A start address is enough while only one region " +
+      "begins there; where several do, because one is nested inside another, it " +
+      "refuses and names them so you can say which by id. describe_project " +
+      "reports the ids.",
+    {
+      project,
+      start: address,
+      id: z.string().optional().describe("Which region, when several start at that address"),
+      expectVersion: z.string().optional(),
+    },
+    (args: { project?: string; start: number; id?: string; expectVersion?: string }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.removeRegion(caller, args.start);
+      return space.removeRegion(caller, args.start, args.id);
     }
   );
 

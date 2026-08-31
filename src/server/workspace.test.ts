@@ -1503,3 +1503,55 @@ describe("declaring a picture", () => {
     expect(workspace.describe().regions.length).toBe(before);
   });
 });
+
+describe("naming a region rather than guessing which one", () => {
+  it("revises the region you name, whatever its span", () => {
+    // The point of ids. Without one, a smaller span inside an existing region
+    // is read as a new nested statement — which is right when you meant it and
+    // wrong when you meant to resize. Naming the region removes the guess.
+    const first = workspace.setRegion(agent, 0x8e00, 0x9000, "data", "Whole");
+    void first;
+    const id = workspace.describe().regions.find((r) => r.name === "Whole")?.id;
+    expect(id).toBeDefined();
+
+    const before = workspace.describe().regions.length;
+    const result = workspace.setRegion(
+      agent, 0x8e00, 0x8e20, "bitmap", "Whole", undefined, undefined, "char:4", id
+    );
+
+    expect(workspace.describe().regions.length).toBe(before);
+    expect(result.nestedInside).toBeUndefined();
+    const region = workspace.describe().regions.find((r) => r.id === id);
+    expect(region).toMatchObject({ start: "$8E00", end: "$8E20", kind: "bitmap" });
+  });
+
+  it("says so when the id names nothing", () => {
+    expect(() =>
+      workspace.setRegion(agent, 0x8e00, 0x8e20, "data", "X", undefined, undefined, undefined, "rgn_nope")
+    ).toThrow(/No region rgn_nope/);
+  });
+
+  it("refuses an ambiguous removal instead of deleting the wrong one", () => {
+    // Nesting made a start address stop being a unique handle, so picking
+    // whichever the array listed first would silently delete the wrong region.
+    workspace.setRegion(agent, 0x8004, 0x800c, "text", "inner", undefined, "screen");
+    expect(() => workspace.removeRegion(agent, 0x8004)).toThrow(/Several regions start/);
+  });
+
+  it("removes the one you name", () => {
+    workspace.setRegion(agent, 0x8004, 0x800c, "text", "inner", undefined, "screen");
+    const id = workspace.describe().regions.find((r) => r.name === "inner")?.id;
+    const before = workspace.describe().regions.length;
+
+    workspace.removeRegion(agent, 0x8004, id);
+
+    expect(workspace.describe().regions.length).toBe(before - 1);
+    expect(workspace.describe().regions.find((r) => r.name === "initData")).toBeDefined();
+  });
+
+  it("still takes a bare start address while only one region begins there", () => {
+    const before = workspace.describe().regions.length;
+    workspace.removeRegion(agent, 0x8004);
+    expect(workspace.describe().regions.length).toBe(before - 1);
+  });
+});

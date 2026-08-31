@@ -1769,6 +1769,16 @@ which is what overlap is for. The model already supported it — regions may
 overlap and `getRegionAt` resolves innermost-first — so the inner one renders
 inside its span, the outer one either side, and nothing becomes unexplained.
 
+**A region has an id, and that is the way to name one.** `describe_project`
+reports them and `set_region`/`remove_region` accept them, which removes the
+inference entirely: an id says *this* region, however far its span has moved.
+That is the same rule everything else here follows — "an address cannot identify
+a label", and a region's start is no better, which the identity section said long
+before regions could nest.
+
+The inference below is what happens when no id is given, because usually none
+is: a person reading a listing sees an address, not an id.
+
 Three cases, strongest signal first:
 
 | declaration | meaning |
@@ -1782,7 +1792,13 @@ same span inside a larger region nests again on every call, and two identical
 spans then race to be the innermost — which showed up as a test that passed
 eight times in a row and then failed twice.
 
-To genuinely shrink a region, remove it first. The edit result says so:
+**Nesting also cost the start address its uniqueness**, which `remove_region`
+had been relying on: two regions can now begin in the same place, and picking
+whichever the array listed first would delete the wrong one silently. An
+ambiguous start is refused and names the candidates, which is also how a caller
+learns the ids it should have passed.
+
+To shrink a region without naming it, remove it first. The edit result says so:
 `nestedInside` names the enclosing region and how to replace it instead, because
 "I declared 32 bytes and a 512-byte region is still there" should not have to be
 discovered by reading the map afterwards.
