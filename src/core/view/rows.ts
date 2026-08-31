@@ -10,6 +10,7 @@
 
 import { analyzeProgram } from "../analysis/program.js";
 import { describeWarning } from "../arch/mos6502/disassembler.js";
+import { overlappingBlocks } from "../analysis/blocks.js";
 import { decodeText } from "../c64/text.js";
 import {
   LabelIndex,
@@ -47,7 +48,15 @@ export const LABEL_TYPE_TAGS: Record<LabelType, string> = {
   address: "addr",
 };
 
-export type RowKind = "label" | "instruction" | "data" | "text" | "word" | "comment";
+export type RowKind =
+  | "label"
+  | "instruction"
+  | "data"
+  | "text"
+  | "word"
+  | "comment"
+  /** A second reading of bytes already shown above. */
+  | "overlap";
 
 /** One rendered line of the disassembly view. */
 export interface Row {
@@ -126,6 +135,9 @@ export function analyze(
   // What the program *is*, computed once and no longer thrown away — see
   // core/analysis/program.ts. This function's job from here is rendering it.
   const program = analyzeProgram(loaded, { labelTolerance, entryPoints: entryPointOverride });
+  // Empty for almost every program: only a byte genuinely read two ways
+  // produces one, and then only where somebody has said so.
+  const alternates = overlappingBlocks(program.blocks);
   const { instructions: index, labels: allLabels } = program;
   const result = { references: program.xrefs.raw(), warnings: program.warnings };
 
@@ -231,6 +243,46 @@ export function analyze(
     for (const extra of loaded.comments.at(addr, "inline").slice(1)) {
       const indent = " ".repeat(Math.max(0, text.length - extra.text.length - 2));
       push({ address: addr, kind: "comment", text: `${indent}; ${extra.text}`, tokens: [] });
+    }
+  };
+
+  /**
+   * Second readings of the bytes just emitted.
+   *
+   * A byte can be an operand on one path and an opcode on another. The listing
+   * is address-ordered and can only put one instruction on a row, so the other
+   * reading is emitted immediately after the instruction whose bytes it shares,
+   * out of address order and marked as such — which is where a reader wants it
+   * and is the only place it can go without pretending one reading won.
+   */
+  const emitOverlapping = (addr: number, length: number) => {
+    for (const { block, overlaps } of alternates) {
+      if (block.start <= addr || block.start >= addr + length) continue;
+
+      push({
+        address: block.start,
+        kind: "comment",
+        text:
+          `${hex4(block.start)}  ; also decodes from here, sharing bytes with ` +
+          `${hex4(overlaps.start)} above`,
+        tokens: [],
+      });
+
+      for (const instr of block.instructions) {
+        const prefix = `${hex4(instr.address)}  ${bytesColumn([...instr.bytes]).padEnd(8)}  `;
+        const marker = instr.illegal ? "*" : " ";
+        push({
+          address: instr.address,
+          kind: "overlap",
+          text: `${prefix}${marker}${instr.mnemonic}${
+            formatOperand(instr.operand, resolveLabel)
+              ? ` ${formatOperand(instr.operand, resolveLabel)}`
+              : ""
+          }`,
+          tokens: [],
+          illegal: instr.illegal,
+        });
+      }
     }
   };
 
@@ -355,6 +407,7 @@ export function analyze(
       text = withInline(addr, text);
       push({ address: addr, kind: "instruction", text, tokens, illegal: instr.illegal });
       emitAfter(addr);
+      emitOverlapping(addr, instr.bytes.length);
       // A second inline comment has no room on the row it belongs to, so it
       // goes underneath, indented to where the first one starts. Redundant by
       // construction and meant to look it.

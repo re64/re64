@@ -1248,33 +1248,40 @@ discards its own return address — but it is not the beginning of an IL, and
 growing it one opcode at a time is how a project ends up with a semantic model
 nobody planned.
 
-### Overlap needs the decoder, not just blocks
+### Overlap: both readings are kept, and which one is primary is unsettled
 
-Blocks are the right model for a byte read two ways — two runs whose ranges
-intersect, each internally consistent — and they are **not sufficient on their
-own**. The decoder never produces the second reading to put in one.
+The decoder now follows a contested address as its **own stream**, with its own
+occupancy so the two readings do not fight over the same bytes, stopping where
+it rejoins the main decode — which is the natural end, since a byte read two
+ways converges again as soon as both agree where an instruction starts. Bounded
+at 64 instructions and 32 streams so a pathological binary cannot fork forever.
+Shadow references are deliberately not collected: a speculative reading's idea
+of what refers to what would be mixed into the graph with no way to tell it
+apart.
 
-The walk checks occupancy, finds the contested address already claimed, emits an
-`overlap` warning and skips. So on `D0 01 A9 60` — a `BNE` that lands on the
-`$A9`'s operand, the trick the reference uses twice — `$1002` decodes and `$1003`
-does not exist at all. Anything built on `InstructionIndex` inherits that,
-because `Map<address, Instruction>` is where "one reading per byte" actually
-lives.
+`DisassemblyResult.shadows` carries them, `buildBlocks(..., {alternate: true})`
+marks the blocks, and the listing emits an alternate immediately after the
+instruction whose bytes it shares, out of address order and marked.
 
-Making it work needs the decoder to keep both, and the shape of that is a real
-decision:
+**Provenance, never geometry.** Two blocks of the *same* decode intersect
+routinely — a block beginning inside a longer one's span is ordinary — so
+"does this overlap something" is the wrong question and reported main-decode
+instructions as second readings. Only a block from a shadow stream is an
+alternate.
 
-- **Record the contested instruction and stop there.** Cheap, gives a footnote —
-  "this byte also decodes as `LDA #$60`" — and no second block.
-- **Follow the second reading as its own stream**, with its own occupancy so the
-  two do not fight. Gives a genuine second block and is what SSA or a call graph
-  would want later. More machinery, and it needs a bound so a pathological
-  binary cannot fork forever.
+**What is not settled: which reading becomes primary.** It is currently
+whichever the work queue reached first, which is arbitrary. Declaring a label
+one byte inside an instruction still leaves the listing with an orphan byte and
+a resynchronised garbage run, because the contested reading that got dropped was
+the one a reader wanted. Candidate rules, none chosen:
 
-Then rendering, which is the easy part once the model holds both: collect
-reachable blocks, sort by start, walk with a cursor, and any block starting
-behind the cursor is by construction a second reading of bytes already emitted —
-so it is emitted after, marked, with a warning naming what it overlaps.
+- the reading reached by fall-through from a lower address wins, since that is
+  the path already being read;
+- a reading from a user-declared entry point wins, since somebody asked for it;
+- the longer reading wins, on the grounds that a wrong decode desynchronises
+  quickly.
+
+Until that is decided, overlap is *representable* and not yet *right*.
 
 ### Flow into a non-code region stops, and says so
 

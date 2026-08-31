@@ -67,6 +67,16 @@ export interface BasicBlock {
   /** How the last instruction leaves: what ended the block. */
   readonly exit: "branch" | "jump" | "call" | "ret" | "halt" | "fallthrough";
   /**
+   * True when this block comes from an alternate reading of contested bytes.
+   *
+   * Provenance, not geometry. Two blocks in the *same* decode can intersect
+   * without either being an alternate — a block beginning inside another's span
+   * is ordinary wherever the earlier one is longer — so asking "does this
+   * overlap something" is the wrong question and renders main-decode blocks as
+   * second readings.
+   */
+  readonly alternate?: boolean;
+  /**
    * Net bytes this block leaves on the stack, or undefined when that cannot be
    * known.
    *
@@ -164,7 +174,8 @@ function leaders(instructions: InstructionIndex, entryPoints: readonly number[])
  */
 export function buildBlocks(
   instructions: InstructionIndex,
-  entryPoints: readonly number[] = []
+  entryPoints: readonly number[] = [],
+  options: { alternate?: boolean } = {}
 ): BasicBlock[] {
   const starts = leaders(instructions, entryPoints);
   const blocks: BasicBlock[] = [];
@@ -235,6 +246,7 @@ export function buildBlocks(
       calls,
       exit,
       ...(stackDelta === undefined ? {} : { stackDelta }),
+      ...(options.alternate ? { alternate: true } : {}),
     });
   }
 
@@ -242,25 +254,26 @@ export function buildBlocks(
 }
 
 /**
- * Blocks whose ranges intersect another's.
+ * Alternate readings, each paired with a block of the main decode it shares
+ * bytes with.
  *
- * Rare and always worth knowing: a byte read two ways means either a
- * deliberate 6502 trick or a decode that went wrong, and both want a reader's
- * attention. Returned in address order, each paired with what it overlaps.
+ * Selected by provenance rather than by geometry: only a block from a shadow
+ * stream is an alternate. Two blocks of one decode can intersect without either
+ * being a second reading, so pairing everything that intersects reports
+ * ordinary blocks as alternates — which is exactly what it did.
  */
 export function overlappingBlocks(
   blocks: readonly BasicBlock[]
 ): { block: BasicBlock; overlaps: BasicBlock }[] {
-  const sorted = [...blocks].sort((a, b) => a.start - b.start);
+  const main = blocks.filter((b) => !b.alternate);
   const found: { block: BasicBlock; overlaps: BasicBlock }[] = [];
 
-  for (let i = 0; i < sorted.length; i++) {
-    for (let j = i + 1; j < sorted.length && sorted[j].start < sorted[i].end; j++) {
-      found.push({ block: sorted[j], overlaps: sorted[i] });
-    }
+  for (const block of blocks.filter((b) => b.alternate)) {
+    const shares = main.find((m) => block.start >= m.start && block.start < m.end);
+    if (shares) found.push({ block, overlaps: shares });
   }
 
-  return found;
+  return found.sort((a, b) => a.block.start - b.block.start);
 }
 
 /** The block containing an address, innermost first where blocks overlap. */

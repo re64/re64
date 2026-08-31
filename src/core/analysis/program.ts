@@ -150,7 +150,18 @@ export function analyzeProgram(
   labels.addLabels(autoLabels);
 
   const instructions = new InstructionIndex(result.instructions);
-  const blocks = buildBlocks(instructions, entryPoints);
+  // Blocks from the main reading, plus one set per alternate reading of a
+  // contested byte. Each stream is decoded against its own occupancy, so each
+  // set is internally consistent; between sets they intersect, which is the
+  // whole point and what `overlappingBlocks` then finds.
+  const blocks = [
+    ...buildBlocks(instructions, entryPoints),
+    ...result.shadows.flatMap((stream) =>
+      buildBlocks(new InstructionIndex(stream.instructions), [stream.from], {
+        alternate: true,
+      })
+    ),
+  ];
 
   return {
     loaded,

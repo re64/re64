@@ -102,17 +102,40 @@ describe("a byte read two ways", () => {
   // disassembly of Gridrunner does this twice.
   const overlapping = [0xd0, 0x01, 0xa9, 0x60];
 
-  it("cannot see the second reading yet, because the decoder discards it", () => {
-    // The blocking finding, pinned so it is not mistaken for working. The walk
-    // sees the contested address is already claimed, warns, and skips — so the
-    // second decode never exists to be put in a block. Blocks are the right
-    // model for overlap and are not sufficient on their own: the decoder has to
-    // keep both readings first.
-    const { index, entryPoints } = program(overlapping);
+  it("keeps the second reading as its own stream", () => {
+    // The main decode still holds one instruction per address — everything
+    // downstream depends on that — so the alternate is decoded separately,
+    // against its own occupancy so the two do not fight over the same bytes.
+    const map = new MemoryMap();
+    map.addLayer(new BytesLayer("test", ORG, new Uint8Array(overlapping)));
+    const result = disassemble(map, { entryPoints: [ORG] });
 
-    expect(index.has(0x1002)).toBe(true);
-    expect(index.has(0x1003)).toBe(false);
-    expect(overlappingBlocks(buildBlocks(index, entryPoints))).toEqual([]);
+    expect(result.instructions.has(0x1002)).toBe(true);
+    expect(result.instructions.has(0x1003)).toBe(false);
+
+    expect(result.shadows).toHaveLength(1);
+    expect(result.shadows[0].from).toBe(0x1003);
+    // $60 is the operand of LDA #$60 one way and an RTS the other.
+    expect([...result.shadows[0].instructions.values()][0].mnemonic).toBe("RTS");
+  });
+
+  it("produces blocks that intersect, once both readings exist", () => {
+    const map = new MemoryMap();
+    map.addLayer(new BytesLayer("test", ORG, new Uint8Array(overlapping)));
+    const result = disassemble(map, { entryPoints: [ORG] });
+
+    const blocks = [
+      ...buildBlocks(new InstructionIndex(result.instructions), [ORG]),
+      ...result.shadows.flatMap((s) =>
+        buildBlocks(new InstructionIndex(s.instructions), [s.from], { alternate: true })
+      ),
+    ];
+
+    const found = overlappingBlocks(blocks);
+    expect(found.length).toBeGreaterThan(0);
+    const [{ block, overlaps }] = found;
+    expect(block.start).toBeGreaterThan(overlaps.start);
+    expect(block.start).toBeLessThan(overlaps.end);
   });
 
   it("reports an overlap even though it cannot render one", () => {
@@ -238,5 +261,19 @@ describe("what a block does to the stack", () => {
     // been at the stack on purpose.
     const { index, entryPoints } = program([0xa9, 0x01, 0x85, 0x02, 0x60]);
     expect(buildBlocks(index, entryPoints)[0].stackDelta).toBe(-2);
+  });
+});
+
+describe("telling an alternate from an ordinary overlap", () => {
+  it("does not call a main-decode block an alternate", () => {
+    // Two blocks of one decode can intersect without either being a second
+    // reading — a block beginning inside a longer one's span is ordinary.
+    // Pairing everything that intersects reported those as alternates, which
+    // put main-decode instructions in the listing marked as second readings.
+    const { index, entryPoints } = program([0xd0, 0x03, 0xea, 0xea, 0xea, 0x60]);
+    const blocks = buildBlocks(index, entryPoints);
+
+    expect(blocks.every((b) => b.alternate === undefined)).toBe(true);
+    expect(overlappingBlocks(blocks)).toEqual([]);
   });
 });

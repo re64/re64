@@ -75,6 +75,28 @@ export interface DisassemblyResult {
   warnings: DisassemblyWarning[];
   /** References discovered during disassembly, keyed by target address */
   references: Map<number, Reference[]>;
+  /**
+   * Second readings of bytes the main decode already claimed.
+   *
+   * A byte can be an operand on one path and an opcode on another — a branch
+   * that lands mid-instruction, which is legitimate 6502 and which the
+   * reference disassembly of Gridrunner does twice. One map cannot hold both,
+   * so each contested reading gets its own stream, decoded with its own
+   * occupancy so the two do not fight over the same bytes.
+   *
+   * Empty for almost every program. Kept separate rather than merged so that
+   * everything downstream sees the same primary decode it always did, and can
+   * choose whether to look at the alternates.
+   */
+  shadows: ShadowStream[];
+}
+
+/** One alternate reading, self-consistent within itself. */
+export interface ShadowStream {
+  /** The contested address this reading starts from. */
+  from: number;
+  /** Its own instructions, which overlap the main decode by construction. */
+  instructions: Map<number, Instruction>;
 }
 
 /** Options for the disassembler */
@@ -209,6 +231,7 @@ export function disassemble(
   const occupied = new Occupancy();
   const warnings: DisassemblyWarning[] = [];
   const references = new Map<number, Reference[]>();
+  const contested: number[] = [];
   const regions = options.regions;
 
   // Build initial queue from explicit entry points plus jumptable entries
@@ -258,6 +281,9 @@ export function disassemble(
         address,
         existingAddress: overlap,
       });
+      // Kept, to be followed as its own stream once this walk is done. Decoding
+      // it here would fight the instruction already claiming those bytes.
+      contested.push(address);
       continue;
     }
 
@@ -300,7 +326,81 @@ export function disassemble(
     }
   }
 
-  return { instructions, warnings, references };
+  return {
+    instructions,
+    warnings,
+    references,
+    shadows: followContested(reader, regions, instructions, contested),
+  };
+}
+
+/**
+ * How far an alternate reading is followed before giving up.
+ *
+ * A second stream normally rejoins the first within a handful of instructions —
+ * that is what makes the trick usable, since the program has to carry on
+ * afterwards.
+ * A stream that does not rejoin is either a long deliberate alternate path or a
+ * decode wandering through data, and neither is worth chasing indefinitely.
+ */
+const SHADOW_LIMIT = 64;
+
+/** At most this many alternate readings, so a pathological binary cannot fork forever. */
+const SHADOW_STREAMS = 32;
+
+/**
+ * Follow each contested address as its own decode.
+ *
+ * Its own occupancy, so it is not blocked by the instructions it overlaps, and
+ * stopping where it rejoins the main reading — which is the natural end, since
+ * a byte read two ways converges again as soon as both agree on where an
+ * instruction starts.
+ *
+ * References are deliberately not collected from these. A speculative reading's
+ * idea of what refers to what would be mixed into the reference graph with no
+ * way to tell it apart, and being wrong there is worse than being silent.
+ */
+function followContested(
+  reader: ByteReader,
+  regions: RegionLookup | undefined,
+  main: ReadonlyMap<number, Instruction>,
+  contested: readonly number[]
+): ShadowStream[] {
+  const streams: ShadowStream[] = [];
+
+  for (const seed of contested.slice(0, SHADOW_STREAMS)) {
+    const own = new Occupancy();
+    const found = new Map<number, Instruction>();
+    const seen = new Set<number>();
+    const queue = [seed];
+
+    while (queue.length > 0 && found.size < SHADOW_LIMIT) {
+      const address = queue.shift()!;
+      if (seen.has(address)) continue;
+      seen.add(address);
+
+      if (!shouldDisassemble(regions, address)) continue;
+      if (own.covering(address) !== undefined) continue;
+      // Rejoined the main reading: both now agree an instruction starts here,
+      // so there is nothing further that is alternate about this path.
+      if (found.size > 0 && main.has(address)) continue;
+
+      const decoded = decode(reader, address);
+      if (!decoded.ok) continue;
+
+      const instr = decoded.instruction;
+      found.set(address, instr);
+      own.claim(address, instr.bytes.length);
+
+      for (const target of getTargets(instr)) {
+        if (!seen.has(target)) queue.push(target);
+      }
+    }
+
+    if (found.size > 0) streams.push({ from: seed, instructions: found });
+  }
+
+  return streams;
 }
 
 /**
