@@ -130,6 +130,40 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "whoami",
+    "Who this server thinks you are, and whether your session is your own. " +
+      "Identity comes from the X-Re64-User header and is never a tool argument, " +
+      "so there is no other way to find out — and an edit recorded against the " +
+      "wrong name is invisible until somebody reads the history. Worth one call " +
+      "at the start if you care how your work is attributed.",
+    {},
+    () => {
+      const { caller } = context();
+      const identity = caller.identity ?? "claimed";
+      return {
+        userId: caller.userId,
+        name: caller.label,
+        identity,
+        session: caller.sessionId,
+        codename: caller.codename,
+        ownSession: !caller.sharedSession,
+        notes: [
+          identity === "claimed" &&
+            `"${caller.userId}" is not a user on this server. It is believed and ` +
+              "recorded as given, so your edits are attributable — but list_projects " +
+              "shows the known users if you meant to be one of them.",
+          identity === "anonymous" &&
+            "No identity was presented, so edits are recorded as anonymous.",
+          caller.sharedSession &&
+            "No session handle was presented, so this lease is keyed by identity " +
+              "alone: anyone calling as the same user shares this session and this " +
+              "undo scope. Send X-Re64-Session to get one of your own.",
+        ].filter(Boolean),
+      };
+    }
+  );
+
+  tool(
     "describe_project",
     "What a project contains: its layers, its declared regions, where " +
       "disassembly starts, and how much of it has been named by a person " +

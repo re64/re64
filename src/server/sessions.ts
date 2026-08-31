@@ -177,6 +177,14 @@ export class SessionLeases {
  * shares one lease, and therefore one undo scope. Whether that fallback is the
  * common case or the rare one depends on whether a host opens one MCP client
  * per agent, which is recorded in the transcript and not yet measured.
+ *
+ * It is deliberately **not** salted to force a session per request. Two callers
+ * who present no handle and no identity are indistinguishable by definition, so
+ * a fresh key would not be telling them apart — it would be giving one caller a
+ * new client id, a new lease and a new undo scope on every single call, which
+ * makes undo useless and fills the sessions table. Sharing is the honest
+ * answer; `sharedSession` on the `Caller` is how it is reported, and `whoami`
+ * is how a caller can see it.
  */
 export function sessionKeyOf(
   headers: Record<string, string | string[] | undefined>,

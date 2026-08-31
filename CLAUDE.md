@@ -364,6 +364,39 @@ change how a session is issued, not what one is.
 Presence is `y-protocols/awareness`, relayed but never persisted: who is looking
 at what is not part of the project.
 
+**An identity that matches nothing is kept, not swapped.** `resolveCaller` used
+to end in `?? known[0]`, so an unrecognised claim silently became *the first row
+of the users table*. Three agents in experiment 2 announced themselves as
+`reader-1/2/3` and every edit they made was recorded as `usr_agent` with nothing
+said — and that database merely happens to list `agent` first; had it listed
+`you` first, every agent edit would have been attributed to the person watching.
+
+Three outcomes now, kept apart, and the source is **stated** on the `Caller`
+rather than inferred by comparing id to label:
+
+| claim | identity |
+|---|---|
+| matches a user by id or name | `user` |
+| present, matches nothing | `claimed` — believed and recorded as given |
+| absent | `anonymous` |
+
+Believing an unmatched claim rather than refusing it is what the socket already
+does with `?author=`, so this makes the two surfaces agree instead of inventing
+a third rule. Nothing downstream needs the caller to exist: `sessions.user_id`
+and `ops.author` are unconstrained text, and `changes_since` resolves display
+names from the sessions table.
+
+The session key is **deliberately not salted** for the anonymous case. Two
+callers presenting neither a handle nor an identity are indistinguishable by
+definition, so a fresh key would not tell them apart — it would hand one caller
+a new client id, lease and undo scope on every call. Sharing is the honest
+answer; `sharedSession` reports it and `whoami` is how a caller sees it.
+
+`whoami` exists because an agent invented and called it during experiment 2.
+Identity rides on a header and is never a tool argument, so there was no way to
+ask — and an edit recorded against the wrong name is invisible until somebody
+reads the history.
+
 ### Undo: two features that must not be merged
 
 - **In the browser**, `Y.UndoManager` scoped to the session. `captureTimeout: 0`,

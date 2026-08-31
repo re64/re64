@@ -833,6 +833,15 @@ interface User {
   colour: string;
 }
 
+/**
+ * Presence colour for a name this project has never seen.
+ *
+ * Distinct from every colour in the users table on purpose: an identity that
+ * came from the URL rather than from the project should not be mistaken for one
+ * somebody set up.
+ */
+const STRANGER_COLOUR = "#8b93a6";
+
 let users: User[] = [];
 let me: User | undefined;
 let projects: { id: string; name: string }[] = [];
@@ -901,19 +910,29 @@ async function loadUsers(): Promise<void> {
     users = [];
   }
 
+  // A name that matches nobody is *kept*, not quietly swapped for whoever sorts
+  // first — the same rule the MCP endpoint follows. Silently editing as someone
+  // else is the one outcome worth ruling out, and the socket believes any
+  // author it is handed anyway, so an unknown name is a real identity here.
   const wanted = preferredUserId();
-  me = users.find((u) => u.id === wanted || u.name === wanted) ?? users[0];
+  const matched = users.find((u) => u.id === wanted || u.name === wanted);
+  if (matched) me = matched;
+  else if (wanted) me = { id: wanted, name: wanted, colour: STRANGER_COLOUR };
+  else me = users[0];
 
   const picker = $("#who") as HTMLSelectElement;
   picker.innerHTML = "";
-  for (const user of users) {
+  // So the name you are actually editing as is visible in the list, rather than
+  // the list showing somebody else selected.
+  const shown = matched || !wanted ? users : [...users, me];
+  for (const user of shown) {
     const option = document.createElement("option");
     option.value = user.id;
     option.textContent = user.name;
     option.selected = user.id === me?.id;
     picker.appendChild(option);
   }
-  picker.style.display = users.length ? "" : "none";
+  picker.style.display = shown.length ? "" : "none";
 }
 
 $("#who").addEventListener("change", (event) => {

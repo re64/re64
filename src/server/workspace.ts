@@ -65,6 +65,16 @@ import { nodeFileBytes } from "../node-files.js";
 export interface Caller {
   userId: string;
   label: string;
+  /**
+   * Where the identity came from, stated rather than inferred.
+   *
+   * `user` matched a row in the users table, `claimed` was asserted and
+   * believed, `anonymous` was never given. A caller cannot work this out by
+   * comparing `userId` to `label` — a user row whose id equals its name would
+   * read as unrecognised — and the difference is exactly what was invisible
+   * when an unknown claim silently became somebody else.
+   */
+  identity?: "user" | "claimed" | "anonymous";
   sessionId?: string;
   codename?: string;
   /**
