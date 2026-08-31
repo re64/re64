@@ -1285,3 +1285,75 @@ describe("the rest of trial 3's list", () => {
     expect(inbound!.some((r) => r.inRoutine === "DrawSomething")).toBe(true);
   });
 });
+
+describe("understanding a block", () => {
+  it("says what it reads and writes without being run", () => {
+    // $8030: AND #$1F / CMP #$18 / branch.
+    const effects = workspace.blockEffects(0x8030);
+    expect(effects.reads).toEqual(["A"]);
+    expect(effects.writes).toEqual(expect.arrayContaining(["A", "Z", "N", "C"]));
+    expect(effects.unmodelled).toEqual([]);
+  });
+
+  it("admits to an address that depends on a register", () => {
+    // $8040 indexes explosionXPosArray by X, so no static answer names a cell.
+    const effects = workspace.blockEffects(0x8040);
+    expect(effects.reads).toContain("memory at a computed address");
+    expect(effects.reads).toContain("X");
+  });
+
+  it("names the address a computed operand actually reached", () => {
+    const run = workspace.runBlock(0x8040, {
+      registers: { X: 2 },
+      memory: { $1502: 0x28 },
+    });
+    // The question `block_effects` cannot answer: with X=2 it was $1502.
+    //
+    // Unlabelled, though explosionXPosArray is declared two bytes below —
+    // without an extent that is a guess, and the rule is the same one operand
+    // rendering follows. Declaring the extent is what earns `+2`.
+    expect(run.memoryRead).toContainEqual({
+      address: "$1502",
+      value: "$28",
+      source: "given",
+    });
+    expect(run.memoryWritten).toContainEqual({ address: "$1502", value: "$27" });
+  });
+
+  it("takes the branch or does not, and says which", () => {
+    // BPL at $804A. $28 decrements to $27, which compares equal and is
+    // positive; $10 decrements to $0F, which is below and is not.
+    const taken = workspace.runBlock(0x8040, { registers: { X: 2 }, memory: { $1502: 0x28 } });
+    expect(taken.exit).toMatchObject({ kind: "goto", to: "$8050 (loc_8050)" });
+
+    const notTaken = workspace.runBlock(0x8040, { registers: { X: 2 }, memory: { $1502: 0x10 } });
+    expect(notTaken.exit).toMatchObject({ kind: "fallthrough", to: "$804C" });
+  });
+
+  it("does not pretend to know a byte the program never loaded", () => {
+    // explosionXPosArray lives in RAM the PRG does not cover, so nothing knows
+    // what is there. It reads as zero, which is a real value that produces a
+    // real-looking result — hence the warning rather than a bare answer.
+    const run = workspace.runBlock(0x8040, { registers: { X: 2 } });
+    expect(run.memoryRead.find((m) => m.address === "$1502")?.source).toBe("unknown");
+    expect(run.warnings.join(" ")).toContain("read as zero");
+  });
+
+  it("distinguishes a byte the program did load from one it did not", () => {
+    // $8100 is inside the PRG, so its value is known and is right until
+    // something writes there. Different claim, reported differently.
+    const run = workspace.runBlock(0x8040, {
+      registers: { X: 0 },
+      memory: {},
+    });
+    expect(run.memoryRead.every((m) => m.source !== "given")).toBe(true);
+
+    const inFile = workspace.runBlock(0x8036, {});
+    const image = inFile.memoryRead.filter((m) => m.source === "image");
+    if (image.length) expect(inFile.warnings.join(" ")).toContain("as loaded");
+  });
+
+  it("refuses an address no block covers rather than inventing one", () => {
+    expect(() => workspace.blockEffects(0xffff)).toThrow(/No decoded block/);
+  });
+});

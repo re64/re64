@@ -19,8 +19,14 @@ import {
   ProgramAnalysis,
   Reference,
   RegionKind,
+  BlockRun,
   analyze,
   analyzeProgram,
+  blockAt,
+  blockEffects,
+  describeEffects,
+  runBlock,
+  REGISTER_NAMES,
   blobPaths,
   buildMemoryMap,
   describeOp,
@@ -74,6 +80,37 @@ export interface Room {
 }
 
 const hex4 = (address: number) => `$${address.toString(16).toUpperCase().padStart(4, "0")}`;
+
+/**
+ * Where a run ended, named rather than tagged.
+ *
+ * A block's exit is the answer to "and then what", which for a conditional
+ * block is the whole reason to run it — reporting `goto $8100` for one input
+ * and `fallthrough` for another is what turns a branch into a decision you can
+ * see being made.
+ */
+function describeExit(
+  exit: BlockRun["exit"],
+  name: (address: number) => string | undefined
+): Record<string, unknown> {
+  const at = (address: number) => {
+    const label = name(address);
+    return label ? `${hex4(address)} (${label})` : hex4(address);
+  };
+
+  switch (exit.kind) {
+    case "fallthrough":
+      return { kind: "fallthrough", to: at(exit.to) };
+    case "goto":
+      return { kind: "goto", to: at(exit.to) };
+    case "call":
+      return { kind: "call", to: at(exit.to), returnsTo: at(exit.returnsTo) };
+    case "return":
+      return { kind: "return", ...(exit.to === undefined ? {} : { to: at(exit.to) }) };
+    case "stopped":
+      return { kind: "stopped", at: hex4(exit.at), reason: exit.reason };
+  }
+}
 
 export class Workspace {
   private cached?: { key: string; loaded: LoadedProject; program: ProgramAnalysis };
@@ -422,6 +459,145 @@ export class Workspace {
       source: label.source.kind,
       references: program.xrefs.count(label.address),
       writable: !invented && !builtIn,
+    };
+  }
+
+  /**
+   * What the block at an address reads and writes, without running it.
+   *
+   * The first question about a routine nobody has named: not what it is called,
+   * but what it depends on and what it leaves behind. Both are unions over the
+   * block's lifted operations, which is sound only because a block is
+   * straight-line — every instruction in it runs, so nothing has to be assumed
+   * about a path.
+   *
+   * Says which of the two questions it cannot answer rather than guessing:
+   * `readsComputedMemory` means an address depended on a register, and an
+   * `unmodelled` instruction means both lists are incomplete by an unknown
+   * amount.
+   */
+  blockEffects(address: number): {
+    block: { start: string; end: string; instructions: number; exit: string };
+    reads: string[];
+    writes: string[];
+    flags: string[];
+    unmodelled: { at: string; mnemonic: string }[];
+    note?: string;
+  } {
+    const program = this.program();
+    const block = blockAt(program.blocks, address);
+    if (!block) throw new Error(`No decoded block covers ${hex4(address)}`);
+
+    const effects = blockEffects(block);
+    const described = describeEffects(effects);
+
+    return {
+      block: {
+        start: hex4(block.start),
+        end: hex4(block.end),
+        instructions: block.instructions.length,
+        exit: block.exit,
+      },
+      reads: described.reads,
+      writes: described.writes,
+      flags: effects.flags.map((offset) => REGISTER_NAMES[offset] ?? String(offset)),
+      unmodelled: effects.unmodelled.map((u) => ({ at: hex4(u.address), mnemonic: u.mnemonic })),
+      ...(effects.unmodelled.length
+        ? {
+            note:
+              "An instruction here has no modelled semantics, so these lists are " +
+              "incomplete by an unknown amount.",
+          }
+        : {}),
+    };
+  }
+
+  /**
+   * Run the block at an address with values somebody chose, and report what
+   * came out.
+   *
+   * The complement of `blockEffects`: that says which slots a block touches for
+   * every input, this says what happens to them for one. Reading `LDA $D012 /
+   * AND #$07 / CMP #$03` tells you the shape; running it with `$D012 = $2A`
+   * tells you it takes the branch, which is often the faster route to what the
+   * code is for.
+   *
+   * Deliberately one block and not a routine. A block has no branch inside it,
+   * so the instructions that run are known before it starts and no path was
+   * chosen on the caller's behalf; running further means following jumps whose
+   * targets depend on state nobody supplied, which is an emulator and has to be
+   * right about everything an emulator is right about.
+   *
+   * Every result carries what it rests on — memory read but never given, an
+   * instruction with no semantics, decimal arithmetic — because a result that
+   * silently assumed zeros looks exactly like one that did not.
+   */
+  runBlock(
+    address: number,
+    inputs: { registers?: Record<string, number>; memory?: Record<string, number> } = {}
+  ): {
+    block: { start: string; end: string };
+    executed: { address: string; text: string }[];
+    registers: Record<string, string>;
+    changed: string[];
+    memoryRead: { address: string; value: string; source: string; label?: string }[];
+    memoryWritten: { address: string; value: string; label?: string }[];
+    exit: Record<string, unknown>;
+    warnings: string[];
+  } {
+    const program = this.program();
+    const block = blockAt(program.blocks, address);
+    if (!block) throw new Error(`No decoded block covers ${hex4(address)}`);
+
+    const memory: Record<number, number> = {};
+    for (const [key, value] of Object.entries(inputs.memory ?? {})) {
+      memory[parseProjectAddress(key)] = value & 0xff;
+    }
+
+    const run = runBlock(block, {
+      registers: inputs.registers as never,
+      memory,
+      // The program as loaded stands behind anything the caller did not pin
+      // down, and is reported as such: a constant table really does hold these
+      // bytes, and zero page really does not.
+      image: (at) => program.loaded.map.readByte(at),
+    });
+
+    // Exact matches, or inside a declared extent — `explosionXPosArray+2` is
+    // the useful answer for an indexed read and is not a guess, because the
+    // extent was declared. A merely *nearby* label is dropped: attaching
+    // "SpriteTable" to an address six bytes past it reads as a fact.
+    const name = (at: number) => {
+      const found = program.labels.resolve(at);
+      if (!found) return undefined;
+      if (found.offset === 0) return found.label.name;
+      return found.within ? `${found.label.name}+${found.offset}` : undefined;
+    };
+    const byte = (v: number) => `$${v.toString(16).toUpperCase().padStart(2, "0")}`;
+
+    const registers: Record<string, string> = {};
+    for (const key of Object.keys(run.registers)) {
+      registers[key] = byte(run.registers[key as keyof typeof run.registers]);
+    }
+
+    return {
+      block: { start: hex4(block.start), end: hex4(block.end) },
+      executed: run.executed.map((e) => ({ address: hex4(e.address), text: e.text })),
+      registers,
+      changed: run.changed,
+      memoryRead: run.memoryRead.map((r) => ({
+        address: hex4(r.address),
+        value: byte(r.value),
+        source: r.source,
+        ...(name(r.address) ? { label: name(r.address)! } : {}),
+      })),
+      memoryWritten: run.memoryWritten.map((w) => ({
+        address: hex4(w.address),
+        value: byte(w.value),
+        ...(name(w.address) ? { label: name(w.address)! } : {}),
+      })),
+      exit: describeExit(run.exit, name),
+      warnings: run.warnings,
     };
   }
 

@@ -43,9 +43,29 @@ const OFFSETS: Record<RegisterName, number> = {
 export interface BlockInputs {
   /** Starting register and flag values. Anything omitted starts at zero. */
   registers?: Partial<Record<RegisterName, number>>;
-  /** Starting memory, by address. Anything omitted reads as zero and is reported. */
+  /** Starting memory, by address. What the caller decided to pin down. */
   memory?: Record<number, number>;
+  /**
+   * The program as loaded, for everything the caller did not pin down.
+   *
+   * Kept apart from `memory` rather than merged into it because the two carry
+   * different confidence and the difference is the whole point. A byte from the
+   * load image is what a constant table really holds; the same byte in zero
+   * page is whatever happened to be in the file before the program initialised
+   * it, and is very likely wrong. Merging them would let the second borrow the
+   * credibility of the first.
+   */
+  image?: (address: number) => number | undefined;
 }
+
+/** How much to trust a value the block read. */
+export type ValueSource =
+  /** The caller said so. */
+  | "given"
+  /** The program's bytes as loaded — right until something wrote there. */
+  | "image"
+  /** Nothing knew. It read as zero, and zero is a real value. */
+  | "unknown";
 
 /** Where control went when the block finished. */
 export type BlockExit =
@@ -69,12 +89,12 @@ export interface BlockRun {
   /** Final value at each address the block wrote, in address order. */
   memoryWritten: { address: number; value: number }[];
   /**
-   * Each address the block read, and whether a value was supplied for it.
+   * Each address the block read, what it found, and where that came from.
    *
    * Includes addresses reached through indexing and indirection, which is the
    * question no static reading of the block can answer.
    */
-  memoryRead: { address: number; value: number; supplied: boolean }[];
+  memoryRead: { address: number; value: number; source: ValueSource }[];
   exit: BlockExit;
   /** Anything that makes the result less trustworthy than it looks. */
   warnings: string[];
@@ -119,12 +139,30 @@ export function stepMachine(
 export function runBlock(block: BasicBlock, inputs: BlockInputs = {}): BlockRun {
   const machine = new Machine();
 
-  const supplied = new Set<number>();
+  const given = new Set<number>();
   for (const [address, value] of Object.entries(inputs.memory ?? {})) {
     const at = Number(address) & 0xffff;
     machine.memory[at] = value & 0xff;
-    supplied.add(at);
+    given.add(at);
   }
+
+  // The image is copied in, but provenance is not read back off the machine:
+  // "there is a byte here" and "somebody vouched for this byte" are different
+  // claims, and collapsing them is what would make every read look accounted
+  // for. `given` is the only record of the second.
+  const inImage = new Set<number>();
+  if (inputs.image) {
+    for (let at = 0; at <= 0xffff; at++) {
+      if (given.has(at)) continue;
+      const byte = inputs.image(at);
+      if (byte === undefined) continue;
+      machine.memory[at] = byte & 0xff;
+      inImage.add(at);
+    }
+  }
+
+  const sourceOf = (at: number): ValueSource =>
+    given.has(at) ? "given" : inImage.has(at) ? "image" : "unknown";
 
   const before = {} as Record<RegisterName, number>;
   for (const name of REGISTER_NAMES) {
@@ -136,14 +174,14 @@ export function runBlock(block: BasicBlock, inputs: BlockInputs = {}): BlockRun 
   // Reads are recorded on first sight so a cell read twice reports the value it
   // held on entry, which is what "the block's input" means. Writes report the
   // last value, which is what "the block's output" means.
-  const reads = new Map<number, { value: number; supplied: boolean }>();
+  const reads = new Map<number, { value: number; source: ValueSource }>();
   const writes = new Map<number, number>();
   machine.watch = {
     read(address, size, value) {
       for (let i = 0; i < size; i++) {
         const at = (address + i) & 0xffff;
         if (reads.has(at) || writes.has(at)) continue;
-        reads.set(at, { value: (value >>> (8 * i)) & 0xff, supplied: supplied.has(at) });
+        reads.set(at, { value: (value >>> (8 * i)) & 0xff, source: sourceOf(at) });
       }
     },
     write(address, size, value) {
@@ -191,12 +229,24 @@ export function runBlock(block: BasicBlock, inputs: BlockInputs = {}): BlockRun 
     if (registers[name] !== before[name]) changed.push(name);
   }
 
-  const assumed = [...reads].filter(([, r]) => !r.supplied).map(([a]) => a);
-  if (assumed.length) {
+  const listOf = (source: ValueSource) =>
+    [...reads].filter(([, r]) => r.source === source).map(([a]) => a);
+
+  const unknown = listOf("unknown");
+  if (unknown.length) {
     warnings.push(
-      `Read ${assumed.length} address${assumed.length === 1 ? "" : "es"} no value was given ` +
-        `for (${assumed.slice(0, 6).map((a) => `$${hex(a)}`).join(", ")}` +
-        `${assumed.length > 6 ? ", …" : ""}); they read as zero`
+      `Read ${plural(unknown.length, "address", "addresses")} nothing supplies a value for ` +
+        `(${names(unknown)}); they read as zero, and zero is a real value that ` +
+        `produces a real-looking result`
+    );
+  }
+
+  const image = listOf("image");
+  if (image.length) {
+    warnings.push(
+      `Read ${plural(image.length, "address", "addresses")} from the program as loaded ` +
+        `(${names(image)}); that is right until something has written there, which for ` +
+        `zero page it usually has`
     );
   }
 
@@ -210,7 +260,7 @@ export function runBlock(block: BasicBlock, inputs: BlockInputs = {}): BlockRun 
       .map(([address, value]) => ({ address, value })),
     memoryRead: [...reads]
       .sort((a, b) => a[0] - b[0])
-      .map(([address, r]) => ({ address, value: r.value, supplied: r.supplied })),
+      .map(([address, r]) => ({ address, value: r.value, source: r.source })),
     exit,
     warnings,
   };
@@ -221,3 +271,10 @@ const usesDecimal = (instr: Instruction): boolean =>
   instr.mnemonic === "ADC" || instr.mnemonic === "SBC";
 
 const hex = (n: number) => n.toString(16).toUpperCase().padStart(4, "0");
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** At most a handful, so a warning stays a sentence. */
+const names = (addresses: readonly number[]) =>
+  addresses.slice(0, 6).map((a) => `$${hex(a)}`).join(", ") +
+  (addresses.length > 6 ? ", …" : "");

@@ -186,7 +186,7 @@ describe("saying what the answer rests on", () => {
   it("warns about memory it read but was never given", () => {
     const result = run([0xad, 0x20, 0xd0]); // LDA $D020
     expect(result.registers.A).toBe(0);
-    expect(result.memoryRead).toEqual([{ address: 0xd020, value: 0, supplied: false }]);
+    expect(result.memoryRead).toEqual([{ address: 0xd020, value: 0, source: "unknown" }]);
     expect(result.warnings.join(" ")).toContain("$D020");
   });
 

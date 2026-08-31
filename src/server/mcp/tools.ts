@@ -133,6 +133,60 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     }) => context().workspace(id).references(at, direction ?? "both")
   );
 
+  // --- understanding a routine ----------------------------------------
+
+  tool(
+    "block_effects",
+    "What the straight-line block at an address reads and writes, without " +
+      "running it. The first question about a routine nobody has named: not " +
+      "what it is called but what it depends on and what it leaves behind. " +
+      "Holds for every input. Says so where it cannot answer — an address that " +
+      "depends on a register cannot be named, and an instruction with no " +
+      "modelled semantics makes both lists incomplete.",
+    { project, address },
+    ({ project: id, address: at }: { project?: string; address: number }) =>
+      context().workspace(id).blockEffects(at)
+  );
+
+  tool(
+    "run_block",
+    "Execute the block at an address with values you choose, and see what " +
+      "comes out. The complement of block_effects: that says which slots the " +
+      "block touches for any input, this says what happens for one. Often the " +
+      "fastest route to what a routine is for — pick values, look at the exit " +
+      "and the bytes written, and the intent shows. " +
+      "One block only, deliberately: a block has no branch inside it, so the " +
+      "instructions that run are known before it starts and no path is chosen " +
+      "on your behalf. " +
+      "Unset registers start at zero and unset memory comes from the program " +
+      "as loaded; every result reports which values it actually read and where " +
+      "each came from, so you can see what an answer rests on. Decimal mode is " +
+      "not modelled and says so.",
+    {
+      project,
+      address,
+      registers: z
+        .record(z.enum(["A", "X", "Y", "SP", "C", "Z", "I", "D", "B", "V", "N"]), z.number().int())
+        .optional()
+        .describe("Starting registers and flags; flags are 0 or 1. Omitted means zero"),
+      memory: z
+        .record(z.string(), z.number().int().min(0).max(255))
+        .optional()
+        .describe("Starting bytes, keyed by address as $D012 or decimal"),
+    },
+    ({
+      project: id,
+      address: at,
+      registers,
+      memory,
+    }: {
+      project?: string;
+      address: number;
+      registers?: Record<string, number>;
+      memory?: Record<string, number>;
+    }) => context().workspace(id).runBlock(at, { registers, memory })
+  );
+
   tool(
     "find_unnamed",
     "Addresses the disassembler had to invent a name for, most-referenced " +
