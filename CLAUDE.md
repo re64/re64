@@ -1350,6 +1350,37 @@ where the two published references disagree and both are wrong — which is the
 whole argument for the interpreter existing, and why it was written before the
 lifter rather than after.
 
+**The functional test found two defects that every hand-written case had
+passed**, which is the argument for it in one line. Both were invisible to
+inspection and to the tests written alongside the code:
+
+- `RETURN` discarded its address, so every `RTS` continued at the byte *after
+  itself* rather than at its caller. Nothing noticed until something actually
+  returned. The address is not decoration even in the ordinary case, and on this
+  machine a routine that rewrites its own return address is a standard computed
+  jump.
+- Signed overflow across a three-way add combined with `BOOL_OR`. Both halves
+  **can** overflow, and then they *cancel*: `$FF + $80 + 1` is `-128`, which is
+  representable, so V is clear. Carry genuinely cannot happen twice — a carry
+  out of `A + M` leaves at most `$FE`, and `$FE + 1` does not carry — so carry
+  keeps its `OR`. The asymmetry is the trap, and the code says so where it
+  happens.
+
+It now reaches the decimal section (test case 42) having executed all 56
+documented instructions, and stops there. That boundary is asserted by
+`src/core/il/functional.test.ts` rather than described, so the gap is a passing
+test instead of prose, and nothing can regress into looking like a decimal
+failure. It is opt-in twice: the binary is fetched rather than committed, and
+26 million instructions take about thirteen seconds.
+
+Decimal is the one thing left, and it does not touch the subject at hand —
+Gridrunner has a single `CLD` at `$83C2` and no `SED` anywhere. When it is
+wanted, the shape is a **branchless select** rather than intra-instruction
+control flow: `mask = INT_SUB(#0, D)` is `$00` or `$FF`, and
+`result = binary ^ ((binary ^ decimal) & mask)` picks between them without a
+`CBRANCH` — which matters because the effect sets must stay identical either
+way, and because `execute` has no way to skip operations.
+
 `stackDelta` on a basic block is a **stopgap** and should be retired when the IL
 lands. It hand-models nine opcodes to answer one question; a real semantic model
 answers it as a special case of dataflow, along with every other question of the

@@ -124,7 +124,9 @@ export function stepMachine(
   const after = (address + instruction.bytes.length) & 0xffff;
 
   const next =
-    flow.kind === "goto" || flow.kind === "call" ? flow.address : after;
+    flow.kind === "goto" || flow.kind === "call" || flow.kind === "return"
+      ? flow.address
+      : after;
   return { instruction, flow, next };
 }
 
@@ -218,7 +220,7 @@ export function runBlock(block: BasicBlock, inputs: BlockInputs = {}): BlockRun 
     const after = (instruction.address + instruction.bytes.length) & 0xffff;
     if (flow.kind === "goto") exit = { kind: "goto", to: flow.address };
     else if (flow.kind === "call") exit = { kind: "call", to: flow.address, returnsTo: after };
-    else if (flow.kind === "return") exit = { kind: "return", to: machine.pc };
+    else if (flow.kind === "return") exit = { kind: "return", to: flow.address };
     else exit = { kind: "fallthrough", to: after };
   }
 

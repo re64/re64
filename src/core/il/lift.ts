@@ -253,11 +253,21 @@ function compare(seq: Sequence, register: Varnode, value: Varnode): void {
 /**
  * `A + operand + C`, binary.
  *
- * Three-way, so carry and overflow each have two chances to occur and neither
- * can occur twice — which is why they combine with `BOOL_OR` rather than
- * anything cleverer. This is where the two published references we checked
- * disagree with each other and both are wrong, so the operations are written to
- * be executed against a functional test rather than to read well.
+ * Three-way, so carry and overflow each get two chances to occur — and they
+ * combine differently, which is the whole trap:
+ *
+ * - **Carry combines with OR**, because it cannot happen twice. A carry out of
+ *   `A + M` leaves a partial sum of at most `$FE`, and `$FE + 1` does not carry.
+ * - **Overflow combines with XOR**, because it can happen twice and then
+ *   *cancels*. `$FF + $80 + 1` overflows negative on the first add and positive
+ *   on the second, and the true answer is `-128`, which is representable — so V
+ *   is clear. An `OR` here reports overflow on a sum that did not overflow.
+ *
+ * That case is not hypothetical: it is where Klaus Dormann's functional test
+ * caught this code, having passed every hand-written case first. It is also the
+ * reason the interpreter exists — the two published references disagree about
+ * these flags and both are wrong, so the only way to be right is to run a
+ * program somebody else wrote.
  */
 function addWithCarry(seq: Sequence, value: Varnode): void {
   const carryA = seq.into("INT_CARRY", 1, reg(REG.A), value);
@@ -267,7 +277,7 @@ function addWithCarry(seq: Sequence, value: Varnode): void {
   const overflowB = seq.into("INT_SCARRY", 1, partial, reg(REG.C));
   seq.to(reg(REG.A), "INT_ADD", partial, reg(REG.C));
   seq.to(reg(REG.C), "BOOL_OR", carryA, carryB);
-  seq.to(reg(REG.V), "BOOL_OR", overflowA, overflowB);
+  seq.to(reg(REG.V), "BOOL_XOR", overflowA, overflowB);
   setZN(seq, reg(REG.A));
 }
 
@@ -546,14 +556,20 @@ export function lift(instr: Instruction): PcodeOp[] {
     }
 
     case "BRK": {
-      // The stack effect is real and modelled; where control goes is not, since
-      // that is whatever the interrupt vector points at.
+      // One byte that behaves like two: the pushed address is `BRK` plus two,
+      // so the byte after it is skipped on return and is conventionally a
+      // reason code.
       const ret = (instr.address + 2) & 0xffff;
       push(seq, constant((ret >> 8) & 0xff));
       push(seq, constant(ret & 0xff));
+      // `statusByte` already sets bit 4, which is what distinguishes a pushed
+      // `BRK` from a pushed interrupt and is the only way a handler can tell.
       push(seq, statusByte(seq));
       seq.to(reg(REG.I), "COPY", constant(1));
-      seq.effect("CALLOTHER", constant(0));
+      // Where it goes is not a mystery: the IRQ vector is two fixed addresses,
+      // so this is an ordinary indirect jump rather than something unmodelled.
+      const target = seq.into("PIECE", 2, ram(0xffff), ram(0xfffe));
+      seq.effect("BRANCHIND", target);
       return seq.ops;
     }
 

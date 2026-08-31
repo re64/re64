@@ -96,7 +96,13 @@ describe("where control goes", () => {
     expect(run([{ op: "CALL", inputs: [constant(0x8000, 2)] }]).flow).toMatchObject({
       kind: "call",
     });
-    expect(run([{ op: "RETURN", inputs: [] }]).flow).toEqual({ kind: "return" });
+    // The address is carried, not implied. Dropping it made every RTS continue
+    // at the byte after itself, which the functional test caught and no
+    // hand-written case here did.
+    expect(run([{ op: "RETURN", inputs: [constant(0x9042, 2)] }]).flow).toEqual({
+      kind: "return",
+      address: 0x9042,
+    });
   });
 
   it("stops at an effect it does not model, rather than inventing one", () => {

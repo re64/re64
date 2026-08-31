@@ -20,7 +20,16 @@ export type Flow =
   | { kind: "next" }
   | { kind: "goto"; address: number }
   | { kind: "call"; address: number }
-  | { kind: "return" }
+  /**
+   * Returned, to the address the operation carried.
+   *
+   * The address is not decoration. `RTS` pops it off the stack, and a routine
+   * that rewrote its own return address — a standard computed jump on this
+   * machine — returns somewhere its caller never chose. Dropping it made every
+   * `RTS` continue at the byte after itself, which is wrong even in the
+   * ordinary case and silently so.
+   */
+  | { kind: "return"; address: number }
   /** An effect that is real and not modelled; the machine cannot go on honestly. */
   | { kind: "unmodelled" };
 
@@ -262,7 +271,7 @@ export function execute(ops: readonly PcodeOp[], machine: Machine): Flow {
         flow = { kind: "call", address: input(0) };
         break;
       case "RETURN":
-        flow = { kind: "return" };
+        flow = { kind: "return", address: input(0) };
         break;
 
       // Real, and not described here. Carrying on would invent a result.
