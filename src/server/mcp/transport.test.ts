@@ -171,6 +171,60 @@ describe("working on a project", () => {
   });
 });
 
+describe("asking what a routine does", () => {
+  it("says what a block touches without running it", async () => {
+    const { value } = await callTool("block_effects", { address: "$8015" });
+    const effects = value as { reads: string[]; writes: string[]; unmodelled: unknown[] };
+    expect(effects.reads).toContain("X");
+    expect(effects.writes).toContain("Z");
+    expect(effects.unmodelled).toEqual([]);
+  });
+
+  it("points somewhere useful when no block covers the address", async () => {
+    // "No decoded block covers $8000" is true and a dead end. The nearest block
+    // start is the next call.
+    const { isError, text } = await callTool("block_effects", { address: "$8000" });
+    expect(isError).toBe(true);
+    expect(text).toMatch(/nearest starts at \$[0-9A-F]{4}/);
+  });
+
+  it("runs a block with only the registers the caller cares about", async () => {
+    // Every reader in experiment 2 passed one register and was rejected for
+    // omitting the other ten. The schema demanded a complete set and nothing
+    // said so.
+    const { value } = await callTool("run_block", { address: "$8015", registers: { X: 5 } });
+    expect((value as { registers: Record<string, string> }).registers.X).toBe("$06");
+  });
+
+  it("takes a byte the way it takes an address", async () => {
+    // This API accepts $8100 for an address, so refusing $05 for a value is
+    // inconsistent with itself — which is exactly how every caller found out.
+    for (const x of [5, "5", "$05", "0x05"]) {
+      const { value } = await callTool("run_block", { address: "$8015", registers: { X: x } });
+      expect((value as { registers: Record<string, string> }).registers.X).toBe("$06");
+    }
+  });
+
+  it("reports which way the branch went, which is the point of running it", async () => {
+    // INX / CPX #$07 / BNE. At 6 the counter reaches 7 and falls through; below
+    // that it branches. The same block, two decisions.
+    const branched = await callTool("run_block", { address: "$8015", registers: { X: "$01" } });
+    expect((branched.value as { exit: { kind: string } }).exit.kind).toBe("goto");
+
+    const fell = await callTool("run_block", { address: "$8015", registers: { X: "$06" } });
+    expect((fell.value as { exit: { kind: string } }).exit.kind).toBe("fallthrough");
+  });
+
+  it("says which values it had to assume", async () => {
+    const { value } = await callTool("run_block", { address: "$8040", registers: { X: 2 } });
+    const run = value as { warnings: string[]; memoryRead: { address: string }[] };
+    expect(run.memoryRead.map((m) => m.address)).toContain("$1502");
+    // Nothing supplied $1502 and the PRG does not cover it, so it read as zero.
+    // Reporting the result without saying so would look identical to knowing.
+    expect(run.warnings.join(" ")).toMatch(/read as zero/);
+  });
+});
+
 describe("editing as an agent", () => {
   it("names an address and says what it did", async () => {
     const { value } = await callTool("set_label", {

@@ -1070,6 +1070,24 @@ extent*. `explosionXPosArray` declares none, so a read of `$1502` is reported
 bare rather than as `+2` — the same rule operand rendering follows, and a reason
 for an agent to declare extents.
 
+### A schema is not covered by testing what it calls
+
+Both `run_block` bugs got through a green suite, and the reason is structural
+rather than an oversight: `Workspace` is tested thoroughly and network-free, and
+the schema in front of it was tested by nothing. Everything the tests exercised
+worked perfectly; the tool could not be called at all.
+
+- `z.record` over an enum of the register names makes every key **required**, so
+  passing one register was rejected for omitting the other ten.
+- Byte values had to be numbers while addresses could be `$8100`, so the API was
+  inconsistent with itself and every caller found out by being rejected.
+
+Neither is visible from inside. Tool schemas are now exercised over the real
+transport in `src/server/mcp/transport.test.ts`, which is the only layer where
+this class of bug exists. The rule that follows: **if a tool grows an argument,
+it grows a transport test**, because "the logic is tested" is exactly the belief
+that let these ship.
+
 ### A change cursor, because the agent has no socket
 
 Statelessness removes the channel by which anything learns a project moved. A
