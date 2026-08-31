@@ -26,6 +26,7 @@ import {
   bindLabel,
   deleteComment,
   deleteConstant,
+  deleteDecoder,
   deleteLabel,
   deleteRegion,
   insertLayer,
@@ -36,6 +37,7 @@ import {
   unbindLabel,
   upsertComment,
   upsertConstant,
+  upsertDecoder,
   upsertLabel,
   upsertRegion,
 } from "../project/serialize.js";
@@ -165,6 +167,12 @@ export function applyOp(raw: string, op: Op): string {
 
     case "constant.delete":
       return deleteConstant(raw, op.id);
+
+    case "decoder.set":
+      return upsertDecoder(raw, { id: op.id, name: op.name, source: op.source });
+
+    case "decoder.delete":
+      return deleteDecoder(raw, op.id);
 
     case "constant.bind":
       return bindConstant(raw, layerIndexOf(project, op.layerId), {
@@ -312,6 +320,20 @@ export function invertOp(raw: string, op: Op): Op {
         name: found.name,
         value: parseProjectAddress(found.value),
       };
+    }
+
+    case "decoder.set": {
+      const found = project.decoders?.find((d) => d.id === op.id);
+      // Undoing the creation of a decoder is removing it; undoing an edit is
+      // putting the old source back.
+      if (!found) return { op: "decoder.delete", id: op.id };
+      return { op: "decoder.set", id: op.id, name: found.name, source: found.source };
+    }
+
+    case "decoder.delete": {
+      const found = project.decoders?.find((d) => d.id === op.id);
+      if (!found) return op;
+      return { op: "decoder.set", id: op.id, name: found.name, source: found.source };
     }
 
     case "constant.bind": {

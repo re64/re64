@@ -111,6 +111,19 @@ export interface ConstantSetOp {
   value: number;
 }
 
+export interface DecoderSetOp {
+  op: "decoder.set";
+  id: string;
+  name: string;
+  /** The body of a function taking `(bytes, params)`. */
+  source: string;
+}
+
+export interface DecoderDeleteOp {
+  op: "decoder.delete";
+  id: string;
+}
+
 export interface ConstantDeleteOp {
   op: "constant.delete";
   id: string;
@@ -177,6 +190,8 @@ export type Op =
   | LabelUnbindOp
   | ConstantSetOp
   | ConstantDeleteOp
+  | DecoderSetOp
+  | DecoderDeleteOp
   | ConstantBindOp
   | ConstantUnbindOp
   | LayerAddOp
@@ -255,6 +270,11 @@ export function describeOp(op: Op): string {
       return `define ${op.name} as $${op.value.toString(16).toUpperCase().padStart(2, "0")}`;
     case "constant.delete":
       return `delete constant ${op.id}`;
+
+    case "decoder.set":
+      return `define decoder ${op.name}`;
+    case "decoder.delete":
+      return `remove decoder ${op.id}`;
     case "constant.bind":
       return `read ${hex(op.address)} as a constant`;
     case "constant.unbind":

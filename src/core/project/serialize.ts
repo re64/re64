@@ -16,6 +16,7 @@ import {
   Project,
   ProjectComment,
   ProjectConstant,
+  ProjectDecoder,
   ProjectConstantUse,
   ProjectLabel,
   ProjectLabelUse,
@@ -94,6 +95,15 @@ export function formatProject(project: Project): string {
       .map((c) => `    ${compactObject(c as unknown as Record<string, unknown>)}`)
       .join(",\n");
     body.push(`  "constants": [\n${entries}\n  ]`);
+  }
+
+  if (project.decoders?.length) {
+    // One per line like everything else, so a decoder's source shows up as one
+    // changed line in a diff rather than as a reformatted block.
+    const entries = project.decoders
+      .map((d) => `    ${compactObject(d as unknown as Record<string, unknown>)}`)
+      .join(",\n");
+    body.push(`  "decoders": [\n${entries}\n  ]`);
   }
 
   const primary = Object.entries(project.primaryLabels ?? {});
@@ -765,6 +775,28 @@ export function upsertConstant(raw: string, constant: ProjectConstant): string {
   } else {
     constants.push(constant);
   }
+  return formatProject(project);
+}
+
+export function upsertDecoder(raw: string, decoder: ProjectDecoder): string {
+  const project = parseProject(raw);
+  const decoders = (project.decoders ??= []);
+  const at = decoders.findIndex((d) => d.id === decoder.id);
+  if (at >= 0) {
+    if (decoders[at].name === decoder.name && decoders[at].source === decoder.source) return raw;
+    decoders[at] = decoder;
+  } else {
+    decoders.push(decoder);
+  }
+  return formatProject(project);
+}
+
+export function deleteDecoder(raw: string, id: string): string {
+  const project = parseProject(raw);
+  if (!project.decoders?.some((d) => d.id === id)) return raw;
+
+  project.decoders = project.decoders.filter((d) => d.id !== id);
+  if (project.decoders.length === 0) delete project.decoders;
   return formatProject(project);
 }
 

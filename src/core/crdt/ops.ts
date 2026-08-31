@@ -153,6 +153,21 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         doc.getMap<Y.Map<unknown>>("constants").delete(op.id);
         break;
 
+      case "decoder.set": {
+        const decoders = doc.getMap<Y.Map<unknown>>("decoders");
+        let entry = decoders.get(op.id);
+        if (!entry) {
+          entry = new Y.Map<unknown>();
+          decoders.set(op.id, entry);
+        }
+        assign(entry, { id: op.id, name: op.name, source: op.source });
+        break;
+      }
+
+      case "decoder.delete":
+        doc.getMap<Y.Map<unknown>>("decoders").delete(op.id);
+        break;
+
       case "constant.bind": {
         const uses = childMap(layerById(doc, op.layerId), "constantUses");
         let entry = uses.get(op.id);
@@ -244,6 +259,9 @@ export function undoManagerFor(doc: Y.Doc, origin: unknown = "local"): Y.UndoMan
       doc.getArray("layers"),
       doc.getMap("primaryLabels"),
       doc.getMap("meta"),
+      // Without this a decoder edit is invisible to undo — the same gap
+      // `constants` still has, and worth not repeating.
+      doc.getMap("decoders"),
     ],
     {
       trackedOrigins: new Set([origin]),

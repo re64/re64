@@ -678,6 +678,38 @@ export class Workspace {
     };
   }
 
+  /** The decoders this project carries, with their source. */
+  decoders(): { total: number; decoders: { id: string; name: string; source: string }[] } {
+    const all = this.program().loaded.project.decoders ?? [];
+    return {
+      total: all.length,
+      decoders: all.map((d) => ({ id: d.id ?? "", name: d.name, source: d.source })),
+    };
+  }
+
+  /**
+   * Keep a decoder in the project, so it can be used again and by somebody else.
+   *
+   * At project level for the same reason a constant declaration is: it
+   * describes no bytes, so there is no layer for it to move with when the stack
+   * is reordered. A *use* — a region's `view: "snippet:<id>"` — does belong to a
+   * layer, because that is about those bytes.
+   */
+  setDecoder(caller: Caller, name: string, source: string, id?: string): EditResult {
+    const existing = (this.program().loaded.project.decoders ?? []).find(
+      (d) => d.id === id || (id === undefined && d.name === name)
+    );
+    return this.edit(caller, () => [
+      { op: "decoder.set", id: existing?.id ?? newId("dec"), name, source },
+    ]);
+  }
+
+  removeDecoder(caller: Caller, id: string): EditResult {
+    const found = (this.program().loaded.project.decoders ?? []).find((d) => d.id === id);
+    if (!found) throw new Error(`No decoder ${id}. list_decoders shows what this project has.`);
+    return this.edit(caller, () => [{ op: "decoder.delete", id }]);
+  }
+
   /**
    * Run a decoder over a span, and describe what came out.
    *

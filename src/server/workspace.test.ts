@@ -1276,15 +1276,28 @@ describe("the rest of trial 3's list", () => {
     expect(workspace.describe().description).toContain("Jeff Minter");
   });
 
-  it("names the routine a call sits in, without being told its extent", () => {
-    // This used to need a declared extent and, without one, answered with the
-    // nearest preceding flow label — which on a real routine is a local branch
-    // target, so callers came back named `loc_XXXX`. The routine is worked out
-    // from control flow now, so marking the entry is all it takes.
-    workspace.markFunction(agent, 0x8850, "DrawSomething");
-    const { inbound } = workspace.references(0x8870, "in");
+  it("names the routine a call sits in, without being told anything", () => {
+    // This used to need a declared extent, and without one answered with the
+    // nearest preceding flow label — a local branch target on any real routine,
+    // so callers came back named `loc_XXXX`. Derived from control flow, nobody
+    // has to declare anything at all.
+    const { inbound } = workspace.references(0x8172, "in");
 
-    expect(inbound!.some((r) => r.inRoutine === "DrawSomething")).toBe(true);
+    expect(inbound!.length).toBeGreaterThan(20);
+    // Every caller names a routine, and none names a local branch target.
+    expect(inbound!.every((r) => r.inRoutine !== undefined)).toBe(true);
+    expect(inbound!.some((r) => /^(loc_|b)[0-9A-F]{4}$/.test(r.inRoutine!))).toBe(false);
+  });
+
+  it("attributes a call site far from its routine's entry", () => {
+    // $8A25 sits about 0x2D0 bytes past $87CB, in a different span of the same
+    // routine, which is reached by a tail jump. A declared extent is a single
+    // range and could never have covered it — this is the case derivation
+    // exists for.
+    const { inbound } = workspace.references(0x8870, "in");
+    const distant = inbound!.find((r) => r.from === "$8A25");
+
+    expect(distant?.inRoutine).toBe("sub_87CB");
   });
 });
 
@@ -1589,5 +1602,45 @@ describe("handing over the bytes", () => {
     const direct = [...Array(8)].map((_, i) => map.readByte(0x8100 + i) ?? 0);
     const shown = workspace.bytes(0x8100, 8).hex.split(" ").map((h) => parseInt(h, 16));
     expect(shown).toEqual(direct);
+  });
+});
+
+describe("keeping a decoder in the project", () => {
+  const source = 'return { kind: "text", lines: ["ran"] };';
+
+  it("stores it and hands it back", () => {
+    workspace.setDecoder(agent, "charset, reversed", source);
+    const kept = workspace.decoders();
+    expect(kept.total).toBe(1);
+    expect(kept.decoders[0]).toMatchObject({ name: "charset, reversed", source });
+    expect(kept.decoders[0].id).toMatch(/^dec_/);
+  });
+
+  it("revises one by id rather than adding another", () => {
+    workspace.setDecoder(agent, "first", source);
+    const id = workspace.decoders().decoders[0].id;
+    workspace.setDecoder(agent, "second", "return null;", id);
+
+    const kept = workspace.decoders();
+    expect(kept.total).toBe(1);
+    expect(kept.decoders[0]).toMatchObject({ id, name: "second" });
+  });
+
+  it("reaches the project, which is what makes it travel", () => {
+    workspace.setDecoder(agent, "charset, reversed", source);
+    expect(workspace.program().loaded.project.decoders?.[0]).toMatchObject({
+      name: "charset, reversed",
+      source,
+    });
+  });
+
+  it("refuses to remove one that is not there", () => {
+    expect(() => workspace.removeDecoder(agent, "dec_nope")).toThrow(/No decoder dec_nope/);
+  });
+
+  it("removes the one named", () => {
+    workspace.setDecoder(agent, "doomed", source);
+    workspace.removeDecoder(agent, workspace.decoders().decoders[0].id);
+    expect(workspace.decoders().total).toBe(0);
   });
 });

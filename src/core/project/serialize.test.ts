@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   upsertLabel,
   upsertRegion,
+  upsertDecoder,
+  deleteDecoder,
   deleteLabel,
   migrateIds,
   normalizeProjectText,
@@ -316,5 +318,44 @@ describe("refusing a text encoding nobody implements", () => {
       ],
     });
     expect(() => parseProject(typo)).toThrow(/Unknown text encoding "petsci"/);
+  });
+});
+
+describe("a decoder in a project file", () => {
+  const source = 'return { kind: "text", lines: ["ran"] };';
+
+  it("survives being written and read back", () => {
+    // The point of keeping one in the project: it travels with the file, so
+    // whoever opens it next gets the decoder too.
+    const written = upsertDecoder(
+      JSON.stringify({ name: "subject", layers: [] }, null, 2),
+      { id: "dec_a", name: "charset, reversed", source }
+    );
+    expect(parseProject(written).decoders?.[0]).toEqual({
+      id: "dec_a",
+      name: "charset, reversed",
+      source,
+    });
+  });
+
+  it("replaces one with the same id instead of stacking", () => {
+    let raw = upsertDecoder(JSON.stringify({ name: "s", layers: [] }), {
+      id: "dec_a",
+      name: "first",
+      source,
+    });
+    raw = upsertDecoder(raw, { id: "dec_a", name: "second", source: "return null;" });
+    const decoders = parseProject(raw).decoders ?? [];
+    expect(decoders).toHaveLength(1);
+    expect(decoders[0].name).toBe("second");
+  });
+
+  it("removes the key entirely when the last one goes", () => {
+    const raw = upsertDecoder(JSON.stringify({ name: "s", layers: [] }), {
+      id: "dec_a",
+      name: "only",
+      source,
+    });
+    expect(parseProject(deleteDecoder(raw, "dec_a")).decoders).toBeUndefined();
   });
 });

@@ -151,6 +151,8 @@ export function diffProjects(from: Project, to: Project): Op[] {
   const afterLabelUses = labelUsesById(to);
   const beforeConstants = new Map((from.constants ?? []).filter((c) => c.id).map((c) => [c.id!, c]));
   const afterConstants = new Map((to.constants ?? []).filter((c) => c.id).map((c) => [c.id!, c]));
+  const beforeDecoders = new Map((from.decoders ?? []).filter((d) => d.id).map((d) => [d.id!, d]));
+  const afterDecoders = new Map((to.decoders ?? []).filter((d) => d.id).map((d) => [d.id!, d]));
 
   for (const [id, owned] of beforeLabels) {
     if (!afterLabels.has(id)) ops.push({ op: "label.delete", id, layerId: owned.layerId });
@@ -185,6 +187,16 @@ export function diffProjects(from: Project, to: Project): Op[] {
       type: owned.entry.type,
       extent: owned.entry.extent,
     });
+  }
+
+  // Removals before additions, as everywhere else here.
+  for (const id of beforeDecoders.keys()) {
+    if (!afterDecoders.has(id)) ops.push({ op: "decoder.delete", id });
+  }
+  for (const [id, decoder] of afterDecoders) {
+    const before = beforeDecoders.get(id);
+    if (before && before.name === decoder.name && before.source === decoder.source) continue;
+    ops.push({ op: "decoder.set", id, name: decoder.name, source: decoder.source });
   }
 
   for (const [id, constant] of afterConstants) {

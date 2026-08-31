@@ -276,7 +276,12 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         .string()
         .min(1)
         .max(20000)
+        .optional()
         .describe("The body of the function. Use `return` to produce the result."),
+      decoder: z
+        .string()
+        .optional()
+        .describe("Id of a decoder kept in the project, instead of source. See list_decoders."),
       params: z
         .record(z.string(), z.unknown())
         .optional()
@@ -287,14 +292,26 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       start,
       length,
       source,
+      decoder,
       params,
     }: {
       project?: string;
       start: number;
       length: number;
-      source: string;
+      source?: string;
+      decoder?: string;
       params?: Record<string, unknown>;
-    }) => context().workspace(id).decode(source, start, length, params ?? {})
+    }) => {
+      const space = context().workspace(id);
+      if ((source === undefined) === (decoder === undefined)) {
+        throw new Error("Give exactly one of source or decoder.");
+      }
+      const body = source ?? space.decoders().decoders.find((d) => d.id === decoder)?.source;
+      if (body === undefined) {
+        throw new Error(`No decoder ${decoder}. list_decoders shows what this project has.`);
+      }
+      return space.decode(body, start, length, params ?? {});
+    }
   );
 
   tool(
@@ -313,6 +330,55 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     { project, address },
     ({ project: id, address: at }: { project?: string; address: number }) =>
       context().workspace(id).routineEffects(at)
+  );
+
+  tool(
+    "list_decoders",
+    "Decoders this project carries, with their source. One kept here can be run " +
+      "again, and by anyone else in the project, without pasting it.",
+    { project },
+    ({ project: id }: { project?: string }) => context().workspace(id).decoders()
+  );
+
+  tool(
+    "set_decoder",
+    "Keep a decoder in the project so it can be used again and by somebody " +
+      "else. Give an id to revise one, or leave it out to add one. " +
+      "It lives at project level rather than on a layer, because a way of " +
+      "*reading* bytes describes none of its own — the same reason a constant " +
+      "declaration does.",
+    {
+      project,
+      name: z.string().min(1).describe("What it is for, shown in a listing and a menu"),
+      source: z.string().min(1).max(20000).describe("The body of a function taking (bytes, params)"),
+      id: z.string().optional().describe("Which decoder to revise; omit to add one"),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      name: string;
+      source: string;
+      id?: string;
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.setDecoder(caller, args.name, args.source, args.id);
+    }
+  );
+
+  tool(
+    "remove_decoder",
+    "Drop a decoder from the project. Anything referring to it falls back to " +
+      "showing the bytes, the way a dangling constant renders its literal.",
+    { project, id: z.string(), expectVersion: z.string().optional() },
+    (args: { project?: string; id: string; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.removeDecoder(caller, args.id);
+    }
   );
 
   tool(

@@ -1232,6 +1232,7 @@ Orient, read, decide, act, catch up:
 | `block_effects`, `run_block` | what a routine *does*, statically and by running it |
 | `set_label`, `remove_label`, `mark_function`, `unmark_function` | naming |
 | `set_region`, `remove_region` | exposed to agents **before** the web UI; the ops and the CLI already did this, so it was wiring rather than new capability |
+| `list_decoders`, `set_decoder`, `remove_decoder` | decoders the project carries |
 | `undo` | the same inverse the CLI and the browser use |
 | `changes_since` | what happened while the agent was not looking |
 
@@ -1938,10 +1939,29 @@ an address wins. Addresses nothing supplies are reported as unmapped rather than
 zero-filled, because a gap is a fact about the project and silent zeroes would
 let a decoder draw something that looks like data.
 
-**Not stored yet.** `run_decoder` takes its source inline, so a decoder can be
-used before there is a decision about where it lives. Putting one in the project
-is another twelve-site schema change, and it is worth letting the mechanism be
-used first.
+**A decoder lives at project level**, and the shape was already decided by
+precedent rather than invented: it is exactly the split a constant has.
+
+| | declaration | use |
+|---|---|---|
+| constant | `{id, name, value}` at project level | `{id, address, constantId}` in the layer holding that instruction |
+| decoder | `{id, name, source}` at project level | `view: "snippet:<id>"` on the region holding those bytes |
+
+Same justification, word for word: a way of *reading* bytes describes none of its
+own, so there is no layer for it to move with when the stack is reordered. It
+travels with the file, so whoever opens the project next has it.
+
+Two things this does **not** do. It does not let a decoder draw a listing row —
+`analyze()` is synchronous and running one is not, which is a separate and larger
+decision. And it does not change the safety story, though it does change when the
+question becomes real: inline source is code you pasted, stored source is code
+that arrived with a project somebody handed you. Nothing runs until it is asked
+to, and the sandbox is the same either way.
+
+Adding the op surfaced three exhaustiveness holes at compile time — `applyOp`,
+`inverseOp` and `describeOp` — which is the vocabulary being closed doing its
+job. `decoders` is also added to the undo manager's tracked roots; `constants`
+is still missing from that list, which is a separate and pre-existing gap.
 
 ### Bytes as pictures
 

@@ -14,7 +14,7 @@
 import type { Project } from "./project.js";
 
 /** Prefix marks what an id refers to, so a stray id in a diff is readable. */
-export type IdPrefix = "lbl" | "rgn" | "cmt" | "cst" | "lay" | "fil" | "msg";
+export type IdPrefix = "lbl" | "rgn" | "cmt" | "cst" | "lay" | "fil" | "msg" | "dec";
 
 const ID_CHARS = "0123456789abcdefghijklmnopqrstuvwxyz";
 

@@ -75,6 +75,19 @@ export interface ProjectLabelUse {
  * project-level, because a name for a value describes no bytes and so has
  * nothing to move with when the stack is reordered.
  */
+export interface ProjectDecoder {
+  id?: string;
+  /** What it is for, in a listing and in a menu. */
+  name: string;
+  /**
+   * The body of a function taking `(bytes, params)` and returning a `Decoded`.
+   *
+   * Stored as source rather than compiled anything, so a `.re64` stays a text
+   * file somebody can read and diff — and so what runs is what you can see.
+   */
+  source: string;
+}
+
 export interface ProjectConstantUse {
   id?: string;
   address: number | string;
@@ -175,6 +188,16 @@ export interface Project {
    * Which one an operand means is recorded per site, in the owning layer.
    */
   constants?: ProjectConstant[];
+  /**
+   * Decoders somebody wrote, for data whose layout is not one of the built-in
+   * ones.
+   *
+   * At project level for the same reason a constant declaration is: it
+   * describes no bytes, so there is no layer for it to move with when the stack
+   * is reordered. Where it is *used* — a region's `view: "snippet:<id>"` — does
+   * belong to a layer, because that is about those bytes.
+   */
+  decoders?: ProjectDecoder[];
 }
 
 export interface ProjectConstant {
