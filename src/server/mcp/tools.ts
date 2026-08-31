@@ -35,6 +35,48 @@ const address = z
     return parsed;
   });
 
+/**
+ * A byte, written however an address is written.
+ *
+ * Accepts `$05`, `0x05`, `"5"` and `5`, because a tool that takes `$8100` for
+ * an address and then refuses `$05` for a value is inconsistent with itself,
+ * and every caller found that out by being rejected. Addresses in this API are
+ * hex strings; values had to be numbers, and nothing said so until the schema
+ * failed.
+ */
+const byte = z
+  .union([z.number().int(), z.string()])
+  .describe("A byte, as $1F, 0x1F, or decimal")
+  .transform((value, ctx) => {
+    const parsed =
+      typeof value === "number"
+        ? value
+        : value.trim().startsWith("$")
+          ? parseInt(value.trim().slice(1), 16)
+          : value.trim().startsWith("0x")
+            ? parseInt(value.trim().slice(2), 16)
+            : parseInt(value.trim(), 10);
+
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 0xff) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Not a byte: ${value}` });
+      return z.NEVER;
+    }
+    return parsed;
+  });
+
+/** A flag: 0 or 1, and the same spellings a byte takes. */
+const flag = z
+  .union([z.number().int(), z.string()])
+  .describe("0 or 1")
+  .transform((value, ctx) => {
+    const parsed = typeof value === "number" ? value : parseInt(String(value).trim(), 10);
+    if (parsed !== 0 && parsed !== 1) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Not a flag: ${value}` });
+      return z.NEVER;
+    }
+    return parsed;
+  });
+
 const project = z.string().optional().describe("Which project; the only one if omitted");
 
 interface Server {
@@ -170,22 +212,22 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       // omitting the other ten, and the tool could not be called at all.
       registers: z
         .strictObject({
-          A: z.number().int().min(0).max(255).optional(),
-          X: z.number().int().min(0).max(255).optional(),
-          Y: z.number().int().min(0).max(255).optional(),
-          SP: z.number().int().min(0).max(255).optional(),
-          C: z.number().int().min(0).max(1).optional(),
-          Z: z.number().int().min(0).max(1).optional(),
-          I: z.number().int().min(0).max(1).optional(),
-          D: z.number().int().min(0).max(1).optional(),
-          B: z.number().int().min(0).max(1).optional(),
-          V: z.number().int().min(0).max(1).optional(),
-          N: z.number().int().min(0).max(1).optional(),
+          A: byte.optional(),
+          X: byte.optional(),
+          Y: byte.optional(),
+          SP: byte.optional(),
+          C: flag.optional(),
+          Z: flag.optional(),
+          I: flag.optional(),
+          D: flag.optional(),
+          B: flag.optional(),
+          V: flag.optional(),
+          N: flag.optional(),
         })
         .optional()
         .describe("Starting registers and flags; anything omitted starts at zero"),
       memory: z
-        .record(z.string(), z.number().int().min(0).max(255))
+        .record(z.string(), byte)
         .optional()
         .describe("Starting bytes, keyed by address as $D012 or decimal"),
     },
