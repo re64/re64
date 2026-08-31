@@ -164,6 +164,31 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "read_messages",
+    "What people and agents working this project have said to each other. " +
+      "Newest last. This is where somebody tells you what they are already " +
+      "working on, or what they have concluded that is not yet in the listing.",
+    { project, limit: z.number().int().min(1).max(200).optional().describe("Default 50") },
+    ({ project: id, limit }: { project?: string; limit?: number }) =>
+      context().workspace(id).messages(limit ?? 50)
+  );
+
+  tool(
+    "post_message",
+    "Say something to whoever else is in this project — people in a browser see " +
+      "it live. Use it to say what you are about to work on, ask about something " +
+      "ambiguous, or report what you found. " +
+      "It is not an annotation: it goes nowhere near the listing, leaves no " +
+      "history entry, cannot be undone, and is not in the exported file. Put a " +
+      "conclusion in a comment; put a conversation here.",
+    { project, text: z.string().min(1).max(2000) },
+    ({ project: id, text }: { project?: string; text: string }) => {
+      const { workspace, caller } = context();
+      return workspace(id).postMessage(caller, text);
+    }
+  );
+
+  tool(
     "describe_project",
     "What a project contains: its layers, its declared regions, where " +
       "disassembly starts, and how much of it has been named by a person " +

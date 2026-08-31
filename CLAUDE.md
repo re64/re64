@@ -397,6 +397,48 @@ Identity rides on a header and is never a tool argument, so there was no way to
 ask — and an edit recorded against the wrong name is invisible until somebody
 reads the history.
 
+### Chat: the one root the project cannot see
+
+People and agents working the same document need somewhere to talk, and a
+message is not an annotation — it describes no bytes, belongs to no layer, and
+has no business in a `.re64`. So it lives at a **fifth top-level root**, and that
+single decision is what keeps it out of everything else.
+
+`projectFromDoc` is an explicit whitelist of four roots. It never looks at
+`chat`, so a message never reaches a `Project`, never reaches the export, never
+moves `version()`, and produces no `ops` row. **Nothing was written to exclude
+it** — which is exactly why there is a test: a property that holds by omission is
+one a later edit can quietly take away, and the first symptom would be somebody's
+conversation in a file they handed to someone else.
+
+**Deliberately not an operation.** `src/core/ops` is a closed vocabulary of edits
+with computable inverses, and "unsay that" is not one; the boundary test forbids
+Yjs there anyway. For the same reason chat is outside the undo manager's tracked
+roots, so Ctrl-Z cannot eat what somebody said.
+
+**The trap, and it is the whole reason this needed care.** Every document update
+bumps a counter that the browser rebuilds on and the server caches analysis
+against. Left alone, *every line of conversation would re-derive the model and
+re-analyse the program* — tens of milliseconds and a repaint, per message. Both
+sides now check whether the **projection** actually changed before doing the
+work, which costs a fraction of a millisecond and catches anything invisible to
+the project rather than only the case known today. The browser check is in
+`ProjectSession`; the server's is in `Workspace.key()`, which was already
+computing the projection and merely keying on the wrong thing.
+
+Messages are plain scalars in a `Y.Map`, never `Y.Text`: `gc: false` is justified
+on the grounds that this document holds maps of scalars rather than
+character-by-character text, and collaborative rich text here would undermine
+that argument for the whole document to make a chat box marginally nicer. The
+consequence to know: with collection off, a deleted message stays recoverable in
+the update log forever. Chat is not private.
+
+A message records **how its author was named at the time**, rather than resolving
+the name on read — a log says who spoke *then*, and looking it up later would
+rewrite history every time somebody was renamed. Agents post under their session
+codename, because a user id is the same string for two agents sharing one
+credential and a person watching needs to tell them apart.
+
 ### Undo: two features that must not be merged
 
 - **In the browser**, `Y.UndoManager` scoped to the session. `captureTimeout: 0`,

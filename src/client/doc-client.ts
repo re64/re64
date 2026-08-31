@@ -13,7 +13,16 @@
  */
 
 import { WebsocketProvider } from "y-websocket";
-import { CrdtDoc, applyOpsToDoc, emptyDoc, undoManagerFor } from "../core/crdt/index.js";
+import {
+  ChatMessage,
+  CrdtDoc,
+  applyOpsToDoc,
+  chatMessages,
+  emptyDoc,
+  onChatChange,
+  postChatMessage,
+  undoManagerFor,
+} from "../core/crdt/index.js";
 import { Op } from "../core/index.js";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
@@ -144,6 +153,26 @@ export class DocClient {
   /** Called whenever the document changes, local or remote. */
   onChange(listener: () => void): void {
     this.doc.on("update", listener);
+  }
+
+  /** Everything said in this project, oldest first. */
+  chat(): ChatMessage[] {
+    return chatMessages(this.doc);
+  }
+
+  /**
+   * Say something, as the identity this connection announced.
+   *
+   * Goes into the shared document like any other change, so it reaches every
+   * participant over the same socket — but at a root the project cannot see, so
+   * it never lands in the exported file.
+   */
+  postChat(author: string, name: string, text: string): ChatMessage | undefined {
+    return postChatMessage(this.doc, { author, name, text }, this.sessionId);
+  }
+
+  onChat(listener: () => void): () => void {
+    return onChatChange(this.doc, listener);
   }
 
   onStatus(listener: (status: ConnectionStatus) => void): void {

@@ -947,6 +947,71 @@ $("#who").addEventListener("change", (event) => {
 });
 
 /** Who else is in this project, as coloured dots. */
+/**
+ * Everything said, and a box to say something.
+ *
+ * Rebuilt wholesale like the memory map, for the same reason: a conversation is
+ * short and rebuilding it is cheaper to reason about than diffing it. It is a
+ * *sibling* of `#map` rather than a child, because `renderMap` clears that
+ * container and would take the chat with it.
+ */
+function renderChat(): void {
+  const log = $("#chat-log");
+  const wasAtBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
+  log.textContent = "";
+
+  const messages = session?.chat() ?? [];
+  if (messages.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "Nothing said yet.";
+    log.appendChild(empty);
+  }
+
+  for (const message of messages) {
+    const line = document.createElement("div");
+    line.className = "line";
+
+    const who = document.createElement("span");
+    who.className = "who";
+    who.textContent = `${message.name}: `;
+    // Coloured by whoever is present under that name, so the chat and the
+    // presence dots agree about who is who.
+    const present = session?.participants().find((p) => p.name === message.name);
+    if (present) who.style.color = present.colour;
+    line.appendChild(who);
+
+    // textContent throughout: a message is somebody else's text arriving over a
+    // socket, and this panel is the one place it is rendered.
+    line.appendChild(document.createTextNode(message.text));
+
+    const when = document.createElement("span");
+    when.className = "when";
+    when.textContent = new Date(message.at).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    line.appendChild(when);
+
+    log.appendChild(line);
+  }
+
+  // Follow the conversation only if the reader was already at the bottom;
+  // yanking them down while they scroll back is how a chat box becomes
+  // unusable.
+  if (wasAtBottom) log.scrollTop = log.scrollHeight;
+}
+
+$("#chat-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const input = $("#chat-input") as HTMLInputElement;
+  const text = input.value;
+  if (!session || !text.trim()) return;
+  session.postChat(me?.id ?? "anonymous", me?.name ?? "anonymous", text);
+  input.value = "";
+  renderChat();
+});
+
 function renderPresence(): void {
   const here = $("#here");
   here.innerHTML = "";
@@ -975,7 +1040,13 @@ async function loadDisassembly(restoreAddress?: number): Promise<void> {
 
   // Every change arrives through the same door from here, whoever caused it.
   session.onChange(() => scheduleRepaint());
-  session.onPresence(() => renderPresence());
+  session.onPresence(() => {
+    renderPresence();
+    // Names are coloured from presence, so a new arrival changes the log.
+    renderChat();
+  });
+  session.onChat(() => renderChat());
+  renderChat();
   if (me) session.announce({ name: me.name, colour: me.colour });
   renderPresence();
   render(restoreAddress);

@@ -30,7 +30,7 @@ import {
   regionSetOp,
   resolveOwningLayer,
 } from "../core/index.js";
-import { projectFromDoc } from "../core/crdt/index.js";
+import { ChatMessage, projectFromDoc } from "../core/crdt/index.js";
 import { ConnectionStatus, DocClient, OpenOptions } from "./doc-client.js";
 
 /** What the debug view reports. Read-only; nothing acts on it. */
@@ -49,6 +49,8 @@ export interface SessionDebug {
 export class ProjectSession {
   private lastBuildMs = 0;
   private changeCount = 0;
+  /** The last projection acted on, so a change invisible to it can be skipped. */
+  private lastProjection = "";
   private readonly listeners: (() => void)[] = [];
   private refreshing: Promise<void> | undefined;
 
@@ -85,8 +87,25 @@ export class ProjectSession {
     // serialised because rebuilding is async — a burst of updates would
     // otherwise interleave two rebuilds and leave the later one's result
     // overwritten by the earlier one's.
+    session.lastProjection = JSON.stringify(projectFromDoc(client.doc));
+
     client.onChange(() => {
       session.changeCount++;
+
+      // Not every document change is a change to the *project*. Chat lives at
+      // its own root, so a message is an update that the projection cannot see
+      // — and rebuilding for one would re-derive the model and re-analyse the
+      // whole program per line of conversation.
+      //
+      // Compared by projection rather than by asking which Yjs types moved,
+      // because that catches anything invisible to the project rather than only
+      // the one case known today, and it keeps the check on this side of the
+      // CRDT boundary. `projectFromDoc` is a fraction of a millisecond; a
+      // rebuild is tens.
+      const projection = JSON.stringify(projectFromDoc(client.doc));
+      if (projection === session.lastProjection) return;
+      session.lastProjection = projection;
+
       session.refreshing = (session.refreshing ?? Promise.resolve())
         .then(() => session.refresh())
         .then(() => {
@@ -111,6 +130,7 @@ export class ProjectSession {
    */
   async refresh(): Promise<void> {
     const project = projectFromDoc(this.client.doc);
+    this.lastProjection = JSON.stringify(project);
     // A remote edit can introduce a layer whose bytes are not here yet.
     await this.fetchMissingBlobs(project);
     this.loaded = this.build();
@@ -153,6 +173,32 @@ export class ProjectSession {
 
   participants(): { clientId: number; name: string; colour: string; isMe: boolean }[] {
     return this.client.participants();
+  }
+
+  /** Everything said in this project, oldest first. */
+  chat(): ChatMessage[] {
+    return this.client.chat();
+  }
+
+  /**
+   * Say something.
+   *
+   * Not an operation: `src/core/ops` is a closed vocabulary of edits with
+   * computable inverses, and "unsay that" is not one. So this does not go
+   * through `runOps`, leaves no `ops` row, and is not reachable by undo.
+   */
+  postChat(author: string, name: string, text: string): ChatMessage | undefined {
+    return this.client.postChat(author, name, text);
+  }
+
+  /**
+   * Called when anything is said.
+   *
+   * Separate from `onChange`, which fires when the *model* has been rebuilt — a
+   * message changes no model, so it must not wait on one and must not cause one.
+   */
+  onChat(listener: () => void): () => void {
+    return this.client.onChat(listener);
   }
 
   private async fetchMissingBlobs(project: Project): Promise<void> {

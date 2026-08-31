@@ -171,6 +171,51 @@ describe("working on a project", () => {
   });
 });
 
+describe("talking to whoever else is here", () => {
+  it("says something and reads it back", async () => {
+    await callTool("post_message", { text: "$8000 is a cartridge header, not code" });
+    const { value } = await callTool("read_messages", {});
+    const chat = value as { total: number; messages: { from: string; text: string }[] };
+    expect(chat.total).toBe(1);
+    expect(chat.messages[0].text).toBe("$8000 is a cartridge header, not code");
+  });
+
+  it("is attributed to the session codename, so two agents are distinguishable", async () => {
+    // The user id would be the same string for two agents sharing a credential.
+    await callTool("post_message", { text: "working on the zapper routines" });
+    const { value } = await callTool("read_messages", {});
+    const chat = value as { messages: { from: string }[] };
+    expect(chat.messages.at(-1)!.from).toMatch(/^[a-z]+$/);
+  });
+
+  it("leaves no history entry, because a conversation is not an edit", async () => {
+    const before = (await callTool("changes_since", {})).value as { cursor: number };
+    await callTool("post_message", { text: "not an annotation" });
+    const after = (await callTool("changes_since", { cursor: before.cursor })).value as {
+      changes: unknown[];
+    };
+    expect(after.changes).toEqual([]);
+  });
+
+  it("does not reach the exported project", async () => {
+    // The load-bearing property. Chat lives at a root `projectFromDoc` never
+    // looks at, so it cannot end up in the file somebody hands to someone else.
+    await callTool("post_message", { text: "keep-this-out-of-the-file" });
+    const { value } = await callTool("export_listing", {});
+    expect(JSON.stringify(value)).not.toContain("keep-this-out-of-the-file");
+
+    const { value: described } = await callTool("describe_project", {});
+    expect(JSON.stringify(described)).not.toContain("keep-this-out-of-the-file");
+  });
+
+  it("refuses an empty message rather than posting a blank row", async () => {
+    const { isError } = await callTool("post_message", { text: "   " });
+    const { value } = await callTool("read_messages", {});
+    const chat = value as { messages: { text: string }[] };
+    expect(isError || chat.messages.every((m) => m.text.trim().length > 0)).toBe(true);
+  });
+});
+
 describe("asking what a routine does", () => {
   it("says what a block touches without running it", async () => {
     const { value } = await callTool("block_effects", { address: "$8015" });

@@ -337,3 +337,45 @@ describe("the exported view", () => {
 });
 
 const settle = () => new Promise((r) => setTimeout(r, 250));
+
+describe("talking about the work", () => {
+  it("reaches the other session", async () => {
+    const a = await open();
+    const b = await open();
+
+    a.postChat("usr_you", "marcus", "$8000 is a cartridge header, not code");
+    await b.settled();
+
+    expect(b.chat().map((m) => m.text)).toEqual(["$8000 is a cartridge header, not code"]);
+    expect(b.chat()[0]).toMatchObject({ author: "usr_you", name: "marcus" });
+  });
+
+  it("does not rebuild the model, which would re-analyse the program per message", () => {
+    // The whole reason chat lives at its own root. A message is a document
+    // change the projection cannot see, so the session must not treat it as one
+    // — unhandled, every line of conversation costs a full re-derivation and, in
+    // the browser, a repaint.
+    return (async () => {
+      const a = await open();
+      const b = await open();
+
+      let rebuilds = 0;
+      b.onChange(() => rebuilds++);
+
+      for (let i = 0; i < 5; i++) a.postChat("usr_you", "marcus", `message ${i}`);
+      await b.settled();
+
+      expect(b.chat()).toHaveLength(5);
+      expect(rebuilds).toBe(0);
+    })();
+  });
+
+  it("is not undoable, because unsaying a thing is not an edit", async () => {
+    const a = await open();
+    a.postChat("usr_you", "marcus", "said out loud");
+    await a.settled();
+
+    expect(a.debug().undo.canUndo).toBe(false);
+    expect(a.chat()).toHaveLength(1);
+  });
+});

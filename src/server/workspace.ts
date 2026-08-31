@@ -49,7 +49,7 @@ import {
   regionSetOp,
   unmarkFunctionOps,
 } from "../core/index.js";
-import { projectFromDoc } from "../core/crdt/index.js";
+import { chatMessages, postChatMessage, projectFromDoc } from "../core/crdt/index.js";
 import { databaseFileBytes } from "../store/load.js";
 import { CommentPlacement, TextEncoding, describeWarning } from "../core/index.js";
 import { FileStorage, ProjectStore, SqliteStorage } from "../store/index.js";
@@ -150,6 +150,11 @@ function describeExit(
 export class Workspace {
   private cached?: { key: string; loaded: LoadedProject; program: ProgramAnalysis };
   private cachedRows?: { key: string; rows: AnalysisResult };
+  /** The document counter last looked at, and what the project looked like then. */
+  private seenVersion = -1;
+  private seenProjection = "";
+  /** Moves only when the *project* moves, which is what an analysis depends on. */
+  private projectVersion = 0;
 
   constructor(private readonly room: Room) {}
 
@@ -175,7 +180,24 @@ export class Workspace {
       )
       .join(",");
 
-    return `${store.docVersion}:${fingerprint}`;
+    // `docVersion` moves whenever the *document* does, and not everything that
+    // moves the document moves the project: chat lives at a root the projection
+    // cannot see, so keying on the counter alone would throw away the analysis
+    // once per message and re-derive it on the next question anyone asked.
+    //
+    // Confirming costs a `JSON.stringify` of the projection, and only when the
+    // counter has moved — the hit path stays free, which is the whole reason
+    // the counter was preferred to a content hash in the first place.
+    if (store.docVersion !== this.seenVersion) {
+      this.seenVersion = store.docVersion;
+      const projection = JSON.stringify(project);
+      if (projection !== this.seenProjection) {
+        this.seenProjection = projection;
+        this.projectVersion++;
+      }
+    }
+
+    return `${this.projectVersion}:${fingerprint}`;
   }
 
   /** The analysed program, rebuilt only when something it depends on moved. */
@@ -531,6 +553,45 @@ export class Workspace {
         (nearest ? `; the nearest starts at ${hex4(nearest.b.start)}` : "; nothing decoded at all") +
         `. It may be data, or unreachable from any entry point — find_undecoded says which.`
     );
+  }
+
+  /**
+   * Everything said in this project, newest last.
+   *
+   * Not an operation and not part of the project: chat lives at its own root in
+   * the shared document, so it reaches every participant over the same socket
+   * and never lands in the exported `.re64`. It leaves no `ops` row, is not
+   * undoable, and does not invalidate the analysis — a conversation is not an
+   * edit.
+   */
+  messages(limit = 50): {
+    total: number;
+    messages: { at: string; from: string; text: string }[];
+  } {
+    const all = chatMessages(this.room.store.document());
+    const shown = all.slice(Math.max(0, all.length - limit));
+    return {
+      total: all.length,
+      messages: shown.map((m) => ({
+        at: new Date(m.at).toISOString(),
+        from: m.name,
+        text: m.text,
+      })),
+    };
+  }
+
+  /** Say something to whoever else is in this project. */
+  postMessage(caller: Caller, text: string): { posted: boolean; at?: string; as?: string } {
+    const posted = postChatMessage(
+      this.room.store.document(),
+      // The codename is how a person watching a live transcript tells two
+      // agents apart; the user id alone would be the same string for both.
+      { author: caller.userId, name: caller.codename ?? caller.label, text },
+      caller.sessionId
+    );
+    return posted
+      ? { posted: true, at: new Date(posted.at).toISOString(), as: posted.name }
+      : { posted: false };
   }
 
   /**

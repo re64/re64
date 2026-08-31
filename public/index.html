@@ -137,7 +137,58 @@
       }
       #split.collapsed { --min: 0px; --max: 0px; }
 
-      #map { height: 100%; overflow: auto; background: var(--bg); }
+      /* The sidebar is a column: the map scrolls, chat sits under it. Chat is a
+         sibling rather than a child because renderMap() clears #map wholesale
+         and would take the conversation with it. */
+      #side {
+        height: 100%;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        /* Without this the column can grow past the panel and push the input
+           box below the fold, which is exactly what it did. */
+        overflow: hidden;
+        background: var(--bg);
+      }
+      #map { flex: 1; min-height: 0; overflow: auto; }
+
+      #chat {
+        display: flex;
+        flex-direction: column;
+        border-top: 1px solid var(--border);
+        /* A definite height, so the log takes what is left after the title and
+           the input rather than the input being pushed out of the panel. Tall
+           enough to be a conversation, short enough that the map stays the point
+           of the sidebar. */
+        flex: none;
+        height: 28vh;
+        min-height: 120px;
+        max-height: 50%;
+      }
+      #chat-log {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 4px 10px 8px;
+        font-size: 12px;
+      }
+      #chat-log .line { margin: 3px 0; overflow-wrap: anywhere; }
+      #chat-log .who { font-weight: 600; }
+      #chat-log .when { color: var(--dim); font-size: 10px; margin-left: 4px; }
+      #chat-log .empty { color: var(--dim); font-style: italic; }
+      #chat-form { display: flex; border-top: 1px solid var(--border); }
+      #chat-input {
+        flex: 1;
+        min-width: 0;
+        background: var(--panel);
+        border: none;
+        color: var(--fg);
+        font: inherit;
+        padding: 7px 10px;
+        outline: none;
+      }
+      #chat-input::placeholder { color: var(--dim); }
+      #chat-input:disabled { background: var(--bg); }
       #content { height: 100%; position: relative; }
       /* Each pane fills the content box; only its own contents scroll. */
       #disasm, #project, #debug { position: absolute; inset: 0; }
@@ -378,7 +429,21 @@
       </header>
       <main>
         <sl-split-panel id="split" position="24" snap="0% 24%" snap-threshold="24">
-          <aside id="map" slot="start"></aside>
+          <aside id="side" slot="start">
+            <div id="map"></div>
+            <section id="chat">
+              <div class="map-title" style="padding: 8px 10px 2px">Chat</div>
+              <div id="chat-log"></div>
+              <form id="chat-form">
+                <input
+                  id="chat-input"
+                  autocomplete="off"
+                  maxlength="2000"
+                  placeholder="Say something to whoever else is here…"
+                />
+              </form>
+            </section>
+          </aside>
           <div id="content" slot="end">
             <div id="disasm"></div>
             <div id="project" style="display: none"></div>
