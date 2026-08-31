@@ -1259,6 +1259,13 @@ acceptance bar rather than a nicety. Reading two references agreeing would not
 have caught any of the above; running the program does, and names the
 instruction.
 
+**Deferred, with a shape in mind: illegal opcodes as a chip variant.** They lift
+to `CALLOTHER` meanwhile, so clobber analysis stays conservative rather than
+quietly wrong. Worth knowing when that arrives: the C64's processor is a **6510**,
+a 6502 with an on-chip I/O port at `$0000`/`$0001` — and that port is the bank
+switching register, so a chip option reaches the memory model and not only the
+opcode table.
+
 **Two references, with different standing.**
 
 - Ghidra's `Ghidra/Processors/6502/data/languages/6502.slaspec` is complete,

@@ -17,3 +17,4 @@ export {
   reads,
   flagsWritten,
 } from "./pcode.js";
+export { Machine, Flow, execute } from "./interpret.js";
