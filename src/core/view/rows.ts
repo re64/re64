@@ -140,20 +140,30 @@ export function wrapCommentText(text: string, width = COMMENT_ROW_WIDTH - COMMEN
 
   for (const paragraph of text.split("\n")) {
     const indent = /^\s*/.exec(paragraph)?.[0] ?? "";
-    const words = paragraph.slice(indent.length).split(/ +/).filter((w) => w.length > 0);
+    // Each word with the gap that preceded it, rather than words alone. A run
+    // of spaces is sometimes the content — a comment quoting bytes, or lining
+    // up a small table — and collapsing `HES  PRESS` to `HES PRESS` silently
+    // edits what somebody wrote.
+    const parts = [...paragraph.slice(indent.length).matchAll(/( *)(\S+)/g)].map((m) => ({
+      gap: m[1],
+      word: m[2],
+    }));
 
     // A blank line separates paragraphs and is kept as one.
-    if (words.length === 0) {
+    if (parts.length === 0) {
       lines.push(paragraph);
       continue;
     }
 
     let line = indent;
-    for (const word of words) {
-      const candidate = line.length > indent.length ? `${line} ${word}` : line + word;
+    for (const part of parts) {
+      // The gap is dropped at a line start: a wrapped line begins at the
+      // indent, not at whatever spacing happened to precede the word.
+      const gap = line.length > indent.length ? part.gap || " " : "";
+      const candidate = line + gap + part.word;
       if (candidate.length > width && line.length > indent.length) {
         lines.push(line);
-        line = indent + word;
+        line = indent + part.word;
       } else {
         line = candidate;
       }

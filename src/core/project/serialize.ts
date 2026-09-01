@@ -318,6 +318,41 @@ function lastEntryLine(lines: string[], span: ArraySpan): number {
 }
 
 /**
+ * Whether every entry in this span sits on exactly one line.
+ *
+ * The line editor's whole method is "find the entry's line, replace it", and on
+ * a pretty-printed file that method silently produces invalid JSON: `keyOf`
+ * matches the `"address"` line *inside* an object and the new entry is spliced
+ * between that object's own fields. `upsertLabel`'s `parseProject` guard then
+ * throws, `applyOps` abandons the batch, and — because the only writer of the
+ * file is a detached timer — the caller is told `ok` while nothing reaches disk.
+ * That cost experiment 4 a quarter of its run.
+ *
+ * A `.re64` need not be in this shape. It is ordinary JSON and anything may
+ * write it, so the editor has to cope with a file it did not format rather than
+ * assume its own output.
+ */
+function isLineFormatted(lines: string[], span: ArraySpan): boolean {
+  for (let i = span.open + 1; i < span.close; i++) {
+    const text = lines[i].trim();
+    if (!text) continue;
+    if (!text.startsWith("{") || !/\},?$/.test(text)) return false;
+  }
+  return true;
+}
+
+/**
+ * The same text, in the one-entry-per-line shape the line editor requires.
+ *
+ * Reformatting loses hand-authored layout, which is the cost the line editor
+ * exists to avoid — so it happens once, on a file that was never in that shape,
+ * and every edit after it is a one-line diff again. The alternative on offer is
+ * a corrupt file, and the same escape hatch is already taken when a layer has no
+ * array to edit at all.
+ */
+const reformatted = (raw: string): string => formatProject(parseProject(raw));
+
+/**
  * Insert or rename a label, editing the raw text line-by-line.
  *
  * New labels go in address order where the surrounding list is sorted, which it
@@ -339,6 +374,10 @@ export function upsertLabel(
     throw new Error(`No layer at index ${layerIndex} to own a label at ${address.toString(16)}`);
   }
   const span = findArraySpan(lines, "labels", layer.open, layer.close);
+
+  if (span && !isLineFormatted(lines, span)) {
+    return upsertLabel(reformatted(raw), id, address, name, type, layerIndex, extent);
+  }
 
   // The layer has no labels array yet — a structural write adds one. This
   // reformats the file, but only happens once per layer.
@@ -417,6 +456,7 @@ export function deleteLabel(raw: string, id: string, layerIndex: number): string
   if (!layer) return raw;
   const span = findArraySpan(lines, "labels", layer.open, layer.close);
   if (!span) return raw;
+  if (!isLineFormatted(lines, span)) return deleteLabel(reformatted(raw), id, layerIndex);
 
   // By id only. An un-migrated entry has no id to match, and deleting "the
   // first line without one" would remove an arbitrary label — the caller
@@ -466,6 +506,10 @@ export function upsertRegion(
   if (!layer) throw new Error(`No layer at index ${layerIndex}`);
 
   const span = findArraySpan(lines, "regions", layer.open, layer.close);
+
+  if (span && !isLineFormatted(lines, span)) {
+    return upsertRegion(reformatted(raw), layerIndex, region);
+  }
 
   // No regions array yet: a structural write adds one. Reformats the file, but
   // only ever once per layer.
@@ -528,6 +572,7 @@ export function deleteRegion(raw: string, layerIndex: number, id: string): strin
   if (!layer) return raw;
   const span = findArraySpan(lines, "regions", layer.open, layer.close);
   if (!span) return raw;
+  if (!isLineFormatted(lines, span)) return deleteRegion(reformatted(raw), layerIndex, id);
 
   const at = findEntryById(lines, span, id);
   if (at < 0) return raw;

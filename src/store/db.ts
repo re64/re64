@@ -111,6 +111,30 @@ CREATE TABLE IF NOT EXISTS ops (
   undone     INTEGER NOT NULL DEFAULT 0
 );
 
+-- A named point somebody wanted to be able to come back to. A tag, in the git
+-- sense, and about as cheap: it stores no state of its own.
+--
+-- cursor is an ops.seq, which is what changes_since already takes -- so "what
+-- has happened since I tagged this" needs no new machinery, and a tag costs one
+-- row rather than a copy of the project. version is the projection hash at the
+-- time, so a tag can also answer the different question of whether the project
+-- has actually moved, rather than only whether operations were recorded
+-- against it.
+-- Keyed by name, unlike everything in the document, and deliberately: a tag
+-- is not edited, so the reason ids exist there -- that a rename must not change
+-- what a thing is -- does not arise. Git names tags this way for the same
+-- reason.
+CREATE TABLE IF NOT EXISTS tags (
+  project_id TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  cursor     INTEGER NOT NULL,
+  version    TEXT NOT NULL,
+  at         INTEGER NOT NULL,
+  author     TEXT,
+  note       TEXT,
+  PRIMARY KEY (project_id, name)
+);
+
 -- Binaries, by content. Deduplicated, and a hash is what lets a project say
 -- which bytes its addresses were named against.
 -- Who can be selected in the interface. No authentication yet: choosing a name

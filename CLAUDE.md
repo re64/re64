@@ -1380,27 +1380,257 @@ usually that the *general* one is missing something — not that the narrow one
 should exist. `find_hardware_access` was invented because `find_instructions`
 could not see indirect writes, which is a gap in the general tool.
 
-### Indirect writes, and how far constant folding gets
+### Indirect writes: run them, do not pattern-match them
 
 `STA ($02),Y` names no address, so a range search cannot see it — and that is not
 a corner case: Gridrunner writes the VIC-II *only* through a pointer, so
 searching `$D000-$D02E` returned one dead instruction and missed every write that
 mattered. Both readers in the second run hit it.
 
-The pointer is usually built from immediate loads a few instructions earlier, so
-folding those recovers it: `LDA #$D0 / STA $03` with `LDA #$00 / STA $02` makes
-`($02),Y` mean `$D000,Y`. That is constant folding, not symbolic execution — no
-path exploration, no solver.
+**This was constant folding first, and that was the mistake.** A hand-written
+backward walk looked for `LDA #imm` immediately before `STA $zp` — a mechanism
+built beside one that already existed. The lifter describes all 56 documented
+instructions and the interpreter runs them, so the address a block reaches is
+something the machine **computes exactly**, not something a pattern
+reconstructs. The pattern could not see past its own shape either:
 
-**It stops rather than guessing**, in two places that matter. At a **join**,
-because walking back through single predecessors is path-insensitive *and sound*
-only while there is one way in. And at a **computed store** — Gridrunner's screen
-pointer comes from a table, so it genuinely depends on runtime state.
+- It required the load to sit *immediately* before the store, so
+  `LDA #$D0 / TAX / STX $03` defeated it.
+- It never folded the **index**, so all three of Gridrunner's VIC writes reported
+  the shared base `$D000` instead of `$D018`, `$D020`, `$D021` — which is the
+  difference between "something writes the VIC" and "the character base is set
+  to $2000 here".
+- It read `($zp,X)` from `$zp` whatever X held, which is silently wrong for any X
+  but zero. The interpreter just does the addressing, so that is right for free.
 
-On the reference project that resolves 3 of 18 indirect accesses, and the three
-are exactly the writes that were invisible. The other 15 are reported as
-unresolved on the answer itself, so a caller knows the search had a blind spot
-rather than reading an empty result as an absence.
+**Running is exact only when nothing was assumed, and that is a certificate
+rather than a hope.** The run is seeded with **nothing** — no load image, because
+zero page in a `.prg` holds whatever was in the file before the program
+initialised it, which is exactly where pointers live. Any cell the path did not
+write itself therefore reads as `unknown`, and one such read refuses the answer.
+
+Two exemptions, both load-bearing:
+
+- **A cell the run wrote is `computed`, not unknown.** The pointer this block
+  built out of literals is not an assumption, and counting it as one would refuse
+  every answer worth having. `TraceSource` carries that third case; the
+  block-level summary has no use for it because such a cell is not an *input*.
+- **At the access itself only the pointer cells are checked.** The last read *is*
+  the target, and its value is precisely what nobody claims to know — requiring
+  it to be supplied would refuse every load through a pointer, which is half the
+  question.
+
+**It stops rather than guessing**, in the same two places as before and for the
+same reasons. At a **join**, because walking back through single predecessors is
+path-insensitive *and sound* only while there is one way in. And at a **computed
+store** — Gridrunner's screen pointer comes from a table, so it genuinely depends
+on runtime state, and that read is `unknown`.
+
+Paths are tried **shortest first**. The refusal is deliberately blunt, so a
+longer path can only ever poison an answer a shorter one gave; trying them in
+order is what keeps the extra reach from costing precision.
+
+**An unassigned index gives a base and not an address.** With Y never assigned
+the machine runs it as zero, so the address it touched *is* the pointer —
+reporting that as the address would dress an assumption as a finding. Both are
+returned, and the answer says which it has.
+
+On the reference project this resolves 3 of 18 indirect accesses — **the same
+three** the folder did. What changed is not coverage but precision, and that
+there is no second mechanism to maintain. The other 15 are not a folding failure:
+they are loop bodies with several predecessors whose pointer comes from the
+screen-line table and genuinely differs per iteration. Running the path through
+unique predecessors was measured and gains nothing, because there is no unique
+predecessor to run. They are reported as unresolved on the answer itself, so a
+caller knows the search had a blind spot rather than reading an empty result as
+an absence.
+
+### Finding the character set, and what actually cost the time
+
+Experiment 2's readers all had to work out that `$8E00` was a character set.
+Measuring the transcripts settles what was hard, and it was not what it looked
+like:
+
+| reader | calls | `find_undecoded` | reached `$8E00` | first decoder |
+|---|---|---|---|---|
+| agate | 105 | 10 | 26 | 27 |
+| amber | 248 | 17 | 24 | 25 |
+| basalt | 119 | 14 | 28 | 47 |
+
+**Locating was never the problem.** All three asked what was unexplained within
+the first seventeen calls and were looking at the right span by call 28; two ran a
+decoder on the very next call. The budget went on deciding *what the bytes were*.
+
+A statistical hint was considered and rejected. It works — bit-pattern symmetry
+separates the charset from every code window on this binary, where entropy does
+not — but it is the wrong kind of answer: mirror symmetry holds for simple glyphs
+and fails for complex ones, for most bitmaps and sprites, and reports flat `$00`
+or `$FF` filler as graphics. A confident wrong answer about what a span *is* is
+the failure this project refuses everywhere else.
+
+**The evidence is in the code, and following it needs no new mechanism.** The
+whole chain for Gridrunner:
+
+```
+find_instructions from:$D018 to:$D018
+  $810B  STA ($02),Y  →  $D018 = $18      in InitializeGame
+
+$18 puts the VIC character base at $2000
+
+find_instructions from:$2000
+  $82F1  STA charSetLocation,X            in LoadCharacterSetData
+  $82EE  LDA characterSetData,X    ← $8E00
+```
+
+Every link is a fact about the program. That chain is what the interpreter-based
+resolution above was built to make followable — with the pointer folded but not
+the index, step one returns three indistinguishable sites all claiming `$D000`,
+and the trail stops. It is pinned by a test for that reason.
+
+The general lesson, worth more than the instance: **ask what uses a span, not
+what it looks like.** Hardware writes say what a region is *for*, and on this
+machine they are the strongest available evidence — which is also why they must
+be resolved precisely enough to name a register.
+
+### The export had one writer, and it failed in silence
+
+Experiment 4 wrote into the document for a quarter of its run while the `.re64`
+never moved, and **every tool answered `ok`**. Three faults stacked, and each is
+worth keeping apart because each is a different lesson.
+
+**The serializer assumed its own output.** `insertEntry` finds the line whose
+address sorts after the new one and splices there. On a pretty-printed file
+every entry spans five lines, so it matched the `"address"` line *inside* an
+object and put the new entry between that object's own fields. `upsertLabel`'s
+`parseProject` guard then threw — correctly — and `applyOps` abandoned the whole
+batch, including the 47 labels that were fine.
+
+A `.re64` is ordinary JSON and anything may write one, so the line editor has to
+cope with a shape it did not produce. It now reformats such a file once, through
+the escape hatch it already used when a layer had no array to edit at all, and
+every edit after that is a one-line diff again. Layout is lost on a file that
+never had the layout this preserves; the alternative was corruption.
+
+**The failure reached nobody.** The live writer is a debounced timer, and
+`detached` swallows what it throws on the grounds that losing the server is worse
+than losing a write — which is right, and is not the same as losing the *record*.
+`ProjectStore` now keeps the last failure until one succeeds and
+`describe_project` reports `exportStale`, so the one question that mattered —
+"is what I am writing reaching the file?" — has an answer.
+
+**There was no tool to reach the export at all, and none to ask about it.** The
+agent went looking for `save_project`, found nothing, and located
+`POST /api/export` by reading the server's source. `export_project` now returns
+the `.re64` text.
+
+**Writing it to disk was tried and taken back out**, which is worth recording
+because the reasoning failed twice in opposite directions. First it was waved
+through as by design — wrongly, since `re64 export` writes the file and a
+capability the CLI has and the tool surface does not is a gap, not a principle.
+Then it was built, and that was worse: it overwrote **the file the project was
+imported from**, which this file says elsewhere is out of the picture the moment
+it is imported — and in the run that prompted it, that file was the experiment's
+own fixture.
+
+The deeper objection is that a path on disk is not a thing an MCP server can
+assume it shares with its caller. It works for an agent on this machine and means
+nothing over a network, so it is the wrong shape for the surface it was added to.
+
+**The question underneath was not about files at all.** *"An agent cannot save
+the project and cannot tell that it has not been saved"* is written by somebody
+who believes there is a save step. There is not — the document took every edit as
+it landed — and nothing said so, so the agent went looking for a save button,
+found a stale file instead, and had the wrong model confirmed. The bug made the
+misunderstanding look correct.
+
+Two things came out of that, and neither is a file:
+
+- **Server instructions.** The MCP `ServerOptions.instructions` field carries
+  what no per-tool description can, because it is a fact about the system rather
+  than about any one call: the project is live, every edit is durable when the
+  tool returns, there is nothing to save. Worth noting how this was nearly
+  missed — `McpServer` is dynamically imported here behind a hand-written type
+  that had only the first constructor argument, so passing instructions failed
+  to compile against a signature the SDK has always had. **Narrower-than-reality
+  is the failure mode of hand-typing a dynamic import**, and it is invisible
+  until something reaches for the part that was left out.
+- **Tags.** A named point, in the git sense, and cheap enough to be worth having
+  for that reason alone: it copies nothing. `cursor` is an `ops.seq`, which
+  `changes_since` already takes, so `changes_since(tag: "before-renames")` needed
+  no new machinery. `version` is the projection hash, which answers the
+  *different* question of whether the project has actually moved — an edit and
+  its undo move the count and not the content, and a tag reports both.
+
+  Keyed by **name**, unlike everything in the document. The reason ids exist
+  there is that a rename must not change what a thing is; a tag is never edited,
+  so that does not arise, and git names tags the same way for the same reason.
+  It also stays out of the export, alongside `ops` and `history`, which is the
+  parked question about history travelling with a project rather than a new one.
+
+Still open, and not built: getting the bytes out cheaply. Text costs tokens on
+every call, and an MCP **`ResourceLink`** — a uri and mimeType in the tool result,
+with the client fetching the body through `resources/read` — is the protocol's
+own answer, verified present in the shipped SDK alongside base64 `blob`
+resources. Nobody has needed it yet.
+
+The general shape, worth more than the instance: **a write path whose only
+failure channel is stderr is a write path with no failure channel.** Nothing
+downstream of the swallow could distinguish "saved" from "silently not saved",
+and no test could either, because every layer in isolation behaved correctly.
+
+### An operation nothing emits is a feature that exists only from the inside
+
+`meta.set` had a type, an `applyOp` case and a computable inverse, and
+`diffProjects` never produced one — so `set_project_description` reached the
+document, showed up in `describe_project`, and was absent from every export.
+`diffProjects` now diffs `name` and `description` like everything else.
+
+The same shape as the `layer.add` gap this file already records: the vocabulary
+being closed is checked by the compiler, and *whether anything ever emits a
+member of it* is not.
+
+### Smaller things experiment 4 found, and one it got wrong
+
+Fixed, each because the answer's shape was the problem rather than its content:
+
+- **`list_labels` advertised an address range it did not have.** `labels()` took
+  one all along; the schema in front of it did not, so "what is named in zero
+  page" meant fetching all 336 and filtering locally.
+- **`find_immediates` named no routine**, where the neighbouring
+  `find_instructions` does — and "does this value mean the same thing over
+  there" is unanswerable from bare addresses.
+- **An annotation inside an instruction is accepted and renders nowhere.** True
+  of labels, and equally of comments; two were lost that way. Both writes now
+  warn and name the instruction's start.
+- **`bind_constants` was all-or-nothing**, so one bad entry rejected 167 good
+  ones — in both runs that used it. It is partial now and reports what it
+  declined. A batch tool that fails whole is not a batch tool.
+- **A region's `view` could not be cleared.** Omitting the argument reads as
+  "leave it alone", so an explicit `""` now means "remove it".
+- **`export_listing` took `lines` where `set_region` takes `end`.** It takes
+  both.
+- **A long `inline` comment cannot wrap** — correctly, it shares a row — and
+  nothing said so, so a paragraph ran a listing line to several hundred
+  characters. The write hints; it does not refuse, because what fits depends on
+  the instruction beside it.
+
+Two claims did **not** reproduce, and are recorded rather than fixed:
+
+- **The text decoders' high half.** `fromScreenCode` masks `& 0x7f` and
+  `fromPetscii` maps `$C1-$DA` to `A-Z` already; `C3 C2 CD 38 30` decodes to
+  `CBM80` in PETSCII today. Reading it as *screen* codes gives graphics, which
+  is correct — the cartridge signature is PETSCII.
+- **A duplicated comment block in the listing.** Each renders exactly once from
+  the model; the duplication is an artifact of the agent's own paging loop
+  concatenating overlapping pages.
+
+Still open, and a **design question rather than a defect**: `routine_effects` is
+sound and useless on four of Gridrunner's six main-loop subsystems, because all
+four can reach a routine that resets the stack and jumps into the death path, so
+the may-analysis unions the whole program. The proposals on the table are to
+report effects up to the first non-returning transfer separately from those
+beyond it, or to let a caller mark a node as not returning. Neither is obviously
+right and neither should be guessed at.
 
 ### The tools agents invented
 

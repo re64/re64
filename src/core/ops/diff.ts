@@ -117,6 +117,14 @@ const sameRegion = (a: ProjectRegion, b: ProjectRegion) =>
 export function diffProjects(from: Project, to: Project): Op[] {
   const ops: Op[] = [];
 
+  // Name and description, which had an operation and an inverse and no way to
+  // be emitted — so `set_project_description` reached the document, showed up
+  // in `describe_project`, and was absent from every export. An op nothing
+  // produces is a feature that exists only from the inside.
+  for (const key of ["name", "description"] as const) {
+    if (from[key] !== to[key]) ops.push({ op: "meta.set", key, value: to[key] });
+  }
+
   // Layers first, and only symbols layers, which are the only kind an
   // operation can add. A layer holding bytes is a change to what the project
   // *is*, not an annotation, and arrives by another route.

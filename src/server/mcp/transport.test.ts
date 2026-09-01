@@ -420,4 +420,51 @@ describe("editing as an agent", () => {
     expect(missing.isError).toBe(true);
     expect(missing.text).toMatch(/no label at/i);
   });
+
+  // Every argument below reached a caller only as a rejection until it was
+  // added, and none of it was visible from inside: `Workspace` took a range and
+  // an end address all along, and the schema in front of it did not. That is
+  // the class of bug this file exists for.
+  it("narrows labels to an address range, which the description always promised", async () => {
+    const zeroPage = await callTool("list_labels", { from: "$00", to: "$FF" });
+    expect(zeroPage.isError).toBe(false);
+    const { labels } = zeroPage.value as { labels: { address: string }[] };
+    expect(labels.length).toBeGreaterThan(0);
+    for (const label of labels) expect(parseInt(label.address.slice(1), 16)).toBeLessThanOrEqual(0xff);
+  });
+
+  it("takes an end address on a listing, the way set_region does", async () => {
+    const page = await callTool("export_listing", { start: "$8100", end: "$8110" });
+    expect(page.isError).toBe(false);
+    expect((page.value as { text: string }).text.length).toBeGreaterThan(0);
+  });
+
+  it("tags a point over the wire, and takes the tag back as a cursor", async () => {
+    const tagged = await callTool("tag_project", { name: "wire-test", note: "over MCP" });
+    expect(tagged.isError).toBe(false);
+
+    await callTool("set_label", { address: "$8210", name: "afterWireTag" });
+
+    const since = await callTool("changes_since", { tag: "wire-test" });
+    expect(since.isError).toBe(false);
+    expect(since.text).toContain("afterWireTag");
+
+    const listed = await callTool("list_tags");
+    const { tags } = listed.value as { tags: { name: string; changesSince: number }[] };
+    expect(tags.some((t) => t.name === "wire-test")).toBe(true);
+
+    const gone = await callTool("remove_tag", { name: "wire-test" });
+    expect(gone.isError).toBe(false);
+    expect((await callTool("changes_since", { tag: "wire-test" })).isError).toBe(true);
+  });
+
+  it("returns the project as text an agent can read back", async () => {
+    // There was no tool for this at all: an agent had to reach past the surface
+    // to an HTTP route it could only find by reading the server.
+    const written = await callTool("export_project");
+    expect(written.isError).toBe(false);
+    const { text, bytes } = written.value as { text: string; bytes: number };
+    expect(bytes).toBeGreaterThan(0);
+    expect(() => JSON.parse(text)).not.toThrow();
+  });
 });

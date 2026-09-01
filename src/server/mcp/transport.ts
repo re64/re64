@@ -17,6 +17,30 @@ import type { Caller } from "./identity.js";
 import type { Workspace } from "../workspace.js";
 import { McpLog, McpLogEntry, replyOf } from "./log.js";
 
+/**
+ * What a caller cannot work out from the tool list.
+ *
+ * Experiment 4's agent went looking for `save_project`, did not find one, and
+ * concluded it could not save its work — then found the file it had imported
+ * from sitting stale on disk, which confirmed the wrong model. It spent effort
+ * on a step that does not exist, and reported the absence as a defect.
+ *
+ * Nothing in a per-tool description could have said this, because it is a fact
+ * about the *system* rather than about any one call. It belongs here.
+ */
+const INSTRUCTIONS = [
+  "The project is a live document and it is the truth. Every edit is durable " +
+    "the moment the tool returns — there is no save step, no commit, and no " +
+    "file that has to be written for your work to count. Other participants " +
+    "see it immediately.",
+  "export_project exists to get a readable .re64 copy out, not to save. " +
+    "tag_project marks a point you can name and come back to; changes_since " +
+    "takes a tag and tells you what has happened since.",
+  "Anything a tool cannot determine, it says so rather than guessing. Read " +
+    "the caveats on an answer: they are the difference between a fact about " +
+    "the program and an assumption that happened to render.",
+].join("\n\n");
+
 export interface McpContext {
   workspace: (projectId?: string) => Workspace;
   caller: Caller;
@@ -43,7 +67,14 @@ export async function createMcpEndpoint(options: {
   name?: string;
   version?: string;
 }): Promise<McpEndpoint | undefined> {
-  let McpServer: new (info: { name: string; version: string }) => Connectable;
+  // The second argument is `ServerOptions` in the shipped `.d.ts`; this local
+  // declaration had only the first, so passing instructions failed to compile
+  // against a signature the SDK has always had. Narrower-than-reality is the
+  // failure mode of hand-typing a dynamic import.
+  let McpServer: new (
+    info: { name: string; version: string },
+    options?: { instructions?: string }
+  ) => Connectable;
   let StreamableHTTPServerTransport: new (config: {
     sessionIdGenerator: undefined;
   }) => Transport;
@@ -72,10 +103,13 @@ export async function createMcpEndpoint(options: {
      * only, and costs nothing worth caching.
      */
     async handle(request, response, body) {
-      const server = new McpServer({
-        name: options.name ?? "re64",
-        version: options.version ?? "0.1.0",
-      });
+      const server = new McpServer(
+        {
+          name: options.name ?? "re64",
+          version: options.version ?? "0.1.0",
+        },
+        { instructions: INSTRUCTIONS }
+      );
       options.registerTools(server, options.context);
 
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });

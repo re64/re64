@@ -321,6 +321,25 @@ export class ProjectStore {
    *
    * Returns what changed, so a caller can decide whether it is worth recording.
    */
+  /**
+   * The last export write that failed, until one succeeds.
+   *
+   * Not an error to throw at the next caller — the write that failed was not
+   * theirs, and the document is unharmed. It is a fact about the project that
+   * anyone asking about it deserves to be told.
+   */
+  private writeFailure?: { at: number; message: string };
+
+  /** Whether the export is behind the document, and why, when it is. */
+  exportStatus(): { current: boolean; failedAt?: number; error?: string } {
+    if (!this.writeFailure) return { current: true };
+    return {
+      current: false,
+      failedAt: this.writeFailure.at,
+      error: this.writeFailure.message,
+    };
+  }
+
   writeFile(): Op[] {
     const doc = this.document();
     // The file can disappear under a live session — moved, deleted, or on a
@@ -332,11 +351,26 @@ export class ProjectStore {
     this.absorb(text);
     const ops = diffProjects(parseProject(text), projectFromDoc(doc));
     if (ops.length > 0) {
-      const updated = applyOps(text, ops);
+      let updated: string;
+      try {
+        updated = applyOps(text, ops);
+      } catch (error) {
+        // Recorded before rethrowing, because the only caller on the live path
+        // is a detached timer that swallows this to keep the server up. Without
+        // a record the failure reaches nobody: every tool answers `ok`, the
+        // document keeps the work, and the export silently stops moving —
+        // which is exactly what happened for a quarter of experiment 4.
+        this.writeFailure = {
+          at: Date.now(),
+          message: error instanceof Error ? error.message : String(error),
+        };
+        throw error;
+      }
       this.storage.writeText(updated);
       this.lastWritten = updated;
       this.sessionOps.push(...ops);
     }
+    this.writeFailure = undefined;
     // Note what is *not* here: the update log is not cleared. It was, when the
     // text was canonical and a write meant the log had served its purpose. Now
     // the log is the project and the text is the export, so clearing it here

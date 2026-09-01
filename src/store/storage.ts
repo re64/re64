@@ -47,6 +47,24 @@ export interface StoredUpdate {
  * process that would otherwise replay the entire history to rename one thing.
  */
 /** A recorded change, with the cursor position that identifies it. */
+/**
+ * A named point in a project's history — a tag, in the git sense.
+ *
+ * It holds no state of its own. `cursor` is an `ops.seq`, the same number
+ * `changes_since` takes, so a tag is a name for a position in a log that
+ * already exists; `version` is the projection hash, which answers the different
+ * question of whether the project has actually moved rather than merely
+ * recorded operations.
+ */
+export interface StoredTag {
+  name: string;
+  cursor: number;
+  version: string;
+  at: number;
+  author?: string;
+  note?: string;
+}
+
 export interface StoredChange extends Change {
   seq: number;
 }

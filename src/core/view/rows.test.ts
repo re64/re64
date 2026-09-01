@@ -276,6 +276,14 @@ describe("wrapping a comment", () => {
     expect(wrapCommentText("short enough", 40)).toEqual(["short enough"]);
   });
 
+  it("keeps a run of spaces, which is sometimes the content", () => {
+    // A comment quoting bytes, or lining up a small table, means the spacing it
+    // wrote. Splitting on /  +/ and rejoining with one space silently edited it:
+    // `HES  PRESS` came back as `HES PRESS`.
+    expect(wrapCommentText("HES  PRESS FIRE", 40)).toEqual(["HES  PRESS FIRE"]);
+    expect(wrapCommentText("a    b", 40)).toEqual(["a    b"]);
+  });
+
   it("breaks on spaces, never mid-word", () => {
     const lines = wrapCommentText("alpha bravo charlie delta echo", 12);
     expect(lines).toEqual(["alpha bravo", "charlie", "delta echo"]);

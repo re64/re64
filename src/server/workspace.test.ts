@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Caller, Workspace } from "./workspace.js";
@@ -1658,12 +1658,88 @@ describe("finding things across the whole program", () => {
     expect(found.sites.every((s) => s.inRoutine !== undefined)).toBe(true);
   });
 
+  it("separates three writes made through one pointer, and says what each stored", () => {
+    // The chain that finds the character set, and every link is evidence in the
+    // program rather than a statistic about the bytes: $D018 = $18 puts the VIC
+    // character base at $2000, and $2000 is where LoadCharacterSetData copies
+    // $8E00 to. Reporting the shared pointer $D000 for all three — which is what
+    // folding the pointer but not the index did — makes the character base, the
+    // border and the background indistinguishable, and the chain unfollowable.
+    const base = workspace.instructions({ from: 0xd018, to: 0xd018 });
+    expect(base.total).toBe(1);
+    expect(base.sites[0]).toMatchObject({
+      address: "$810B",
+      reaches: "$D018",
+      stores: "$18",
+      inRoutine: "InitializeGame",
+    });
+    // The pointer was built here, so the claim can be checked.
+    expect(base.sites[0].pointerSetAt).toEqual(["$8102", "$8106"]);
+
+    // And the other end of the chain: who reads the bytes $D018 pointed at.
+    const copy = workspace.instructions({ from: 0x8e00, to: 0x8fff });
+    expect(copy.sites.every((s) => s.inRoutine === "LoadCharacterSetData")).toBe(true);
+  });
+
   it("counts an entry point as a routine root, not only a call target", () => {
     // Without this, everything reachable only from where the program starts
     // belongs to no routine — which was most of the initialisation code, and
     // showed up as `in -` on half the answers.
     const found = workspace.instructions({ from: 0xd400, to: 0xd418, limit: 500 });
     expect(found.sites.some((s) => s.inRoutine === "InitializeGame")).toBe(true);
+  });
+
+  it("marks a point, and says what has happened since", () => {
+    // The answer to what experiment 4's agent was really asking. It went
+    // looking for a save button, could not find one, and concluded its work was
+    // not safe — when the document had held every edit as it landed. A tag is
+    // the thing that was actually missing: a position you can name.
+    const tag = workspace.tagProject(agent, "before-renames", "about to rename the zero page");
+    expect(tag.name).toBe("before-renames");
+
+    workspace.setLabel(agent, 0x8200, "afterTheTag");
+
+    const since = workspace.changesSince("before-renames");
+    expect(since.changes.length).toBeGreaterThan(0);
+    expect(JSON.stringify(since.changes)).toContain("afterTheTag");
+
+    const listed = workspace.listTags();
+    expect(listed.total).toBe(1);
+    expect(listed.tags[0].changesSince).toBeGreaterThan(0);
+    // The project moved, so the tag no longer describes how it looks.
+    expect(listed.tags[0].current).toBe(false);
+  });
+
+  it("costs nothing but a row: a fresh tag is current and has no changes after it", () => {
+    const listed = (workspace.tagProject(agent, "now"), workspace.listTags());
+    expect(listed.tags[0].current).toBe(true);
+    expect(listed.tags[0].changesSince).toBe(0);
+  });
+
+  it("will not quietly move a tag that already exists", () => {
+    workspace.tagProject(agent, "twice");
+    expect(() => workspace.tagProject(agent, "twice")).toThrow(/already a tag/i);
+  });
+
+  it("says so when a tag is asked for and is not there", () => {
+    expect(() => workspace.changesSince("never-made")).toThrow(/no tag called/i);
+    expect(() => workspace.removeTag("never-made")).toThrow(/no tag called/i);
+  });
+
+  it("takes an end address as well as a line count", () => {
+    // `set_region` takes an end, so reaching for one here is the natural first
+    // guess; it used to be rejected and cost a round trip to discover.
+    const page = workspace.listing(0x8100, undefined, 0x8110);
+    const addresses = page.text
+      .split("\n")
+      .map((line) => parseInt(line.slice(0, 4), 16))
+      .filter((n) => !Number.isNaN(n));
+    expect(addresses.length).toBeGreaterThan(0);
+    expect(Math.max(...addresses)).toBeLessThanOrEqual(0x8110);
+  });
+
+  it("runs to the end when nothing lies past the end address", () => {
+    expect(workspace.listing(0x8f00, undefined, 0xffff).text.split("\n").length).toBeGreaterThan(5);
   });
 
   it("filters by mnemonic", () => {

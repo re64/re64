@@ -104,6 +104,15 @@ export interface Room {
 const hex4 = (address: number) => `$${address.toString(16).toUpperCase().padStart(4, "0")}`;
 
 /**
+ * Where an inline comment stops fitting beside an instruction.
+ *
+ * Comments wrap at column 100 and an instruction row takes roughly a third of
+ * that, so past this the row runs long. A hint rather than a limit: what
+ * actually fits depends on the instruction it shares the row with.
+ */
+const INLINE_COMMENT_HINT = 60;
+
+/**
  * The row at an address that carries its *content*, not its decoration.
  *
  * `lineForAddress` maps an address to its **first** row, which is right for
@@ -336,9 +345,18 @@ export class Workspace {
       namedByPlatform: number;
     };
     warnings: number;
+    /**
+     * Said only when it is bad news: the export is behind the document and why.
+     *
+     * A write failure reaches nobody otherwise — the live writer is a detached
+     * timer that swallows the error to keep the server up, so every tool keeps
+     * answering `ok` while nothing leaves the document.
+     */
+    exportStale?: { failedAt: string; error: string };
   } {
     const program = this.program();
     const { loaded } = program;
+    const exportStatus = this.room.store.exportStatus();
     const auto = program.labels.filter({ source: "auto" });
     // Supplied by re64 rather than decided by anyone: the built-in C64 symbol
     // table, and the entry point a PRG layer labels from its load address.
@@ -382,7 +400,137 @@ export class Workspace {
         namedByPlatform: supplied.length,
       },
       warnings: program.warnings.length,
+      ...(exportStatus.current
+        ? {}
+        : {
+            exportStale: {
+              failedAt: new Date(exportStatus.failedAt!).toISOString(),
+              error: exportStatus.error!,
+            },
+          }),
     };
+  }
+
+  /**
+   * Write the export, and hand back what it says.
+   *
+   * An agent had no way to save a project and no way to learn it had not been
+   * saved: the live writer is a debounced timer, the failure path is silent,
+   * and `POST /api/export` is an HTTP route the tool surface never mentions.
+   * Reaching past the tools to find it meant reading the server's source.
+   *
+   * The text comes back rather than a path being written, because where a
+   * project lives is the caller's business and differs by storage mode: under
+   * SQLite the export target is a column, not a file on disk, which is the
+   * other thing nobody was told.
+   */
+  exportProject(): { changed: boolean; text: string; bytes: number } {
+    const ops = this.room.store.writeFile();
+    const text = this.room.storage.readText();
+    return { changed: ops.length > 0, text, bytes: Buffer.byteLength(text) };
+  }
+
+  /**
+   * Name this point, so it can be come back to and asked about.
+   *
+   * A tag, and cheap enough to be worth having for that reason alone: it copies
+   * nothing. The cursor is an `ops.seq`, which `changes_since` already takes, so
+   * "what has happened since" works the moment a tag exists.
+   *
+   * It is not a save. The document took every edit as it landed; this marks a
+   * point in a record that was already being kept — which is the distinction
+   * experiment 4's agent could not find anywhere and got wrong.
+   */
+  tagProject(caller: Caller, name: string, note?: string): {
+    name: string;
+    cursor: number;
+    version: string;
+    at: string;
+    author?: string;
+  } {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error("A tag needs a name.");
+
+    const storage = this.room.storage;
+    if (!(storage instanceof SqliteStorage)) {
+      throw new Error("Tags need a database; this project is a plain file.");
+    }
+    if (storage.tags().some((t) => t.name === trimmed)) {
+      throw new Error(
+        `There is already a tag called "${trimmed}". Tags name a point that ` +
+          `happened, so they are not moved; remove it first if you meant to.`
+      );
+    }
+
+    const tag = {
+      name: trimmed,
+      cursor: storage.opsCursor(),
+      version: this.room.store.version(),
+      at: Date.now(),
+      ...(caller.label ? { author: caller.label } : {}),
+      ...(note ? { note } : {}),
+    };
+    storage.addTag(tag);
+
+    return {
+      name: tag.name,
+      cursor: tag.cursor,
+      version: tag.version,
+      at: new Date(tag.at).toISOString(),
+      ...(tag.author ? { author: tag.author } : {}),
+    };
+  }
+
+  /** Every tag, oldest first, with how far the project has moved since each. */
+  listTags(): {
+    total: number;
+    tags: {
+      name: string;
+      at: string;
+      version: string;
+      cursor: number;
+      author?: string;
+      note?: string;
+      changesSince: number;
+      current: boolean;
+    }[];
+  } {
+    const storage = this.room.storage;
+    if (!(storage instanceof SqliteStorage)) return { total: 0, tags: [] };
+
+    const now = storage.opsCursor();
+    const version = this.room.store.version();
+    const tags = storage.tags().map((tag) => ({
+      name: tag.name,
+      at: new Date(tag.at).toISOString(),
+      version: tag.version,
+      cursor: tag.cursor,
+      ...(tag.author ? { author: tag.author } : {}),
+      ...(tag.note ? { note: tag.note } : {}),
+      changesSince: Math.max(0, now - tag.cursor),
+      // Operations can be recorded without the projection moving — an edit and
+      // its undo, say — so these are different questions and both are answered.
+      current: tag.version === version,
+    }));
+    return { total: tags.length, tags };
+  }
+
+  /** Forget a tag. The operations it pointed at are untouched. */
+  removeTag(name: string): { removed: boolean } {
+    const storage = this.room.storage;
+    if (!(storage instanceof SqliteStorage)) return { removed: false };
+    const removed = storage.removeTag(name);
+    if (!removed) throw new Error(`No tag called "${name}".`);
+    return { removed };
+  }
+
+  /** The cursor a tag names, for the tools that take one. */
+  private cursorOfTag(name: string): number {
+    const storage = this.room.storage;
+    const tag =
+      storage instanceof SqliteStorage ? storage.tags().find((t) => t.name === name) : undefined;
+    if (!tag) throw new Error(`No tag called "${name}". list_tags shows what there is.`);
+    return tag.cursor;
   }
 
   /** Disassembly as lines, capped, with a cursor when there is more. */
@@ -731,7 +879,17 @@ export class Workspace {
   }): {
     total: number;
     truncated: boolean;
-    sites: { address: string; text: string; inRoutine?: string }[];
+    sites: {
+      address: string;
+      text: string;
+      inRoutine?: string;
+      /** Where an indirect access goes, when running the path that built it says so. */
+      reaches?: string;
+      pointerSetAt?: string[];
+      stores?: string;
+      /** `reaches` is the pointer, not the address: nothing assigned the index. */
+      indexUnknown?: true;
+    }[];
   } {
     const program = this.program();
     const { rows, lineForAddress } = this.rows();
@@ -774,11 +932,23 @@ export class Workspace {
             ? { inRoutine: this.routineNameAt(instruction.address)! }
             : {}),
           // Said explicitly, because `STA ($02),Y` does not look like a write to
-          // $D000 and a reader is entitled to check the claim.
+          // $D018 and a reader is entitled to check the claim.
           ...(target?.indirect
             ? {
                 reaches: hex4(target.address),
                 pointerSetAt: target.setAt?.map(hex4),
+                // The byte actually stored, which is often the whole answer:
+                // $D018 = $18 says the character base is $2000, and that is how
+                // you find out what a span of unexplained bytes is for.
+                ...(target.value === undefined
+                  ? {}
+                  : { stores: `$${target.value.toString(16).toUpperCase().padStart(2, "0")}` }),
+                // An index nothing assigned on this path means the pointer is
+                // known and the offset into it is not. Reported rather than
+                // dropped, because the pointer still says which chip is being
+                // written; reported rather than presented as the address,
+                // because it is not one.
+                ...(target.exact ? {} : { indexUnknown: true }),
               }
             : {}),
         };
@@ -1333,7 +1503,7 @@ export class Workspace {
    * position held across an undo still means what it meant.
    */
   changesSince(
-    cursor = 0,
+    from: number | string = 0,
     limit = 100
   ): {
     cursor: number;
@@ -1348,6 +1518,9 @@ export class Workspace {
     }[];
     truncated: boolean;
   } {
+    // A tag is a name for a cursor, so it is resolved here rather than being a
+    // separate call that returns a number the caller then passes back.
+    const cursor = typeof from === "string" ? this.cursorOfTag(from) : from;
     const found = this.room.storage.readOps(cursor);
     const page = found.slice(0, limit);
     // Whose session it was, so a feed can say "basalt" rather than a bare id.
@@ -1390,7 +1563,7 @@ export class Workspace {
   ): EditResult {
     // A comment given here is a comment about the address, not a field on the
     // label — one action, two operations, so undo takes both back together.
-    return this.edit(caller, (loaded) => {
+    const result = this.edit(caller, (loaded) => {
       const { layerId, create } = ensureOwningLayer(loaded, address, this.room.projectId);
       const label: Op = create
         ? { op: "label.set", id: newId("lbl"), layerId, address, name, type, extent }
@@ -1415,6 +1588,10 @@ export class Workspace {
           : []),
       ];
     });
+    // A label inside an instruction resolves in operands and renders no row —
+    // the long-standing gap, now said out loud at the point of writing rather
+    // than left to be discovered in a listing.
+    return this.warnIfInsideInstruction(result, address, "label");
   }
 
   /**
@@ -1622,7 +1799,7 @@ export class Workspace {
    * construction. A declared constant nobody used does not appear, which is
    * why this is a listing and the `.re64` is the export that round-trips.
    */
-  listing(start?: number, lines = 200): {
+  listing(start?: number, lines?: number, end?: number): {
     start: string;
     text: string;
     truncated: boolean;
@@ -1633,9 +1810,19 @@ export class Workspace {
     // covers eight bytes, so asking for $808C used to skip to $8090 and leave
     // out the row that was being checked.
     const begin = start === undefined ? 0 : rowContaining(rows, start);
+    // An end address is the other natural way to ask, since that is what
+    // `set_region` takes; it becomes a row count here so there is one rule
+    // below rather than two.
+    const countTo = (limit: number): number => {
+      const stop = rows.findIndex((r, i) => i >= begin && r.address > limit);
+      // No row past the limit: the listing simply runs to the end.
+      return stop === -1 ? rows.length - begin : Math.max(1, stop - begin);
+    };
+    const count = lines ?? (end === undefined ? 200 : countTo(end));
+
     // Same rule as `disassembly`: stop on an address boundary, or a page ending
     // inside a long comment hands back a cursor pointing at itself.
-    let last = Math.min(begin + lines, rows.length);
+    let last = Math.min(begin + count, rows.length);
     while (last < rows.length && rows[last].address === rows[last - 1].address) last++;
     const page = rows.slice(begin, last);
 
@@ -1736,35 +1923,58 @@ export class Workspace {
   ): EditResult {
     if (bindings.length === 0) throw new Error("Give at least one binding.");
 
-    return this.edit(caller, (loaded) =>
-      bindings.map((entry) => {
+    // Partial rather than all-or-nothing. This tool exists because "an agent
+    // names forty", and rejecting forty over one bad entry means resubmitting
+    // the thirty-nine good ones — which is what happened in both experiment
+    // runs that used it. The offender is still named; it is simply named
+    // *beside* the work that succeeded rather than instead of it.
+    let rejected: { address: string; reason: string }[] = [];
+
+    const result = this.edit(caller, (loaded) => {
+      rejected = [];
+      const ops: Op[] = [];
+
+      for (const entry of bindings) {
+        const reject = (reason: string) =>
+          rejected.push({ address: hex4(entry.address), reason });
+
         const constant = loaded.constants.byName(entry.name);
         if (!constant) {
-          throw new Error(`No constant called ${entry.name}. Declare it first.`);
+          reject(`No constant called ${entry.name}. Declare it first.`);
+          continue;
         }
 
         const instruction = this.program().instructions.get(entry.address);
         if (!instruction || instruction.operand.type !== "immediate") {
-          throw new Error(
-            `${hex4(entry.address)} takes no immediate operand, so there is ` +
-              `no value to name.`
-          );
+          reject(`Takes no immediate operand, so there is no value to name.`);
+          continue;
         }
         if (instruction.operand.value !== constant.value) {
-          throw new Error(
-            `${hex4(entry.address)} loads a different value from ${entry.name}.`
-          );
+          reject(`Loads a different value from ${entry.name}.`);
+          continue;
         }
 
-        return {
+        ops.push({
           op: "constant.bind",
           id: newId("cst"),
           layerId: owningLayerId(loaded, entry.address),
           address: entry.address,
           constantId: constant.id,
-        } as Op;
-      })
-    );
+        } as Op);
+      }
+
+      // Nothing usable is still an error: a caller who got every entry wrong
+      // should hear that, not a success with an empty delta.
+      if (ops.length === 0) {
+        throw new Error(
+          `None of the ${bindings.length} bindings could be made. ` +
+            rejected.map((r) => `${r.address}: ${r.reason}`).join(" ")
+        );
+      }
+      return ops;
+    });
+
+    return rejected.length ? { ...result, rejected } : result;
   }
 
   /**
@@ -1821,7 +2031,13 @@ export class Workspace {
     limit = 100
   ): {
     total: number;
-    sites: { address: string; value: string; boundTo?: string; text?: string }[];
+    sites: {
+      address: string;
+      value: string;
+      boundTo?: string;
+      text?: string;
+      inRoutine?: string;
+    }[];
   } {
     const program = this.program();
     const { rows, lineForAddress } = this.rows();
@@ -1841,6 +2057,12 @@ export class Workspace {
           value: `$${immediate.value.toString(16).toUpperCase().padStart(2, "0")}`,
           boundTo: program.loaded.constants.nameAt(i.address),
           text: contentRowAt(rows, lineForAddress, i.address)?.text,
+          // The neighbouring `find_instructions` fills this in, and the whole
+          // question here is "does this value mean the same thing over there" —
+          // which is unanswerable from a bare list of addresses.
+          ...(this.routineNameAt(i.address)
+            ? { inRoutine: this.routineNameAt(i.address)! }
+            : {}),
         };
       }),
     };
@@ -1865,6 +2087,42 @@ export class Workspace {
    * `inline` shares the instruction's row. Setting the same slot twice revises
    * rather than stacking, since that is one person changing their mind.
    */
+  /**
+   * The instruction an address falls *inside*, when it is not the start of one.
+   *
+   * An annotation there is accepted, stored, and renders nowhere: the row model
+   * is keyed by instruction start, so nothing ever asks about a byte in the
+   * middle. Two comments were lost that way in experiment 4, and the loss is
+   * only visible by cross-checking addresses against an exported listing.
+   *
+   * Exact rather than approximate: no 6502 instruction exceeds three bytes, so
+   * two steps back covers every case.
+   */
+  private insideInstruction(address: number): number | undefined {
+    const program = this.program();
+    if (program.instructions.has(address)) return undefined;
+    for (let back = 1; back <= 2; back++) {
+      const instruction = program.instructions.get(address - back);
+      if (instruction && instruction.address + instruction.bytes.length > address) {
+        return instruction.address;
+      }
+    }
+    return undefined;
+  }
+
+  /** Append the mid-instruction warning to a result, when it applies. */
+  private warnIfInsideInstruction(result: EditResult, address: number, what: string): EditResult {
+    const inside = this.insideInstruction(address);
+    if (inside === undefined) return result;
+    result.warnings = [
+      ...(result.warnings ?? []),
+      `${hex4(address)} is inside the instruction at ${hex4(inside)}, so this ` +
+        `${what} is stored but will not appear in the listing. Put it at ` +
+        `${hex4(inside)} to have it render.`,
+    ];
+    return result;
+  }
+
   setComment(
     caller: Caller,
     address: number,
@@ -1877,7 +2135,7 @@ export class Workspace {
           "contain newlines. Use placement \"before\" for anything longer."
       );
     }
-    return this.edit(caller, (loaded) => {
+    const result = this.edit(caller, (loaded) => {
       const { layerId, create } = ensureOwningLayer(loaded, address, this.room.projectId);
       if (!create) return [commentSetOp(loaded, address, placement, text)];
       return [
@@ -1885,6 +2143,22 @@ export class Workspace {
         { op: "comment.set", id: newId("cmt"), layerId, address, placement, text } as Op,
       ];
     });
+
+    // An inline comment shares its row and therefore cannot be wrapped — which
+    // is correct, and means a paragraph attached inline runs the listing line
+    // to several hundred characters with nothing to say so. The rule is not
+    // enforced, because where the limit bites depends on the instruction it
+    // sits beside; it is said, once, at the point of writing.
+    if (placement === "inline" && text.length > INLINE_COMMENT_HINT) {
+      result.warnings = [
+        ...(result.warnings ?? []),
+        `This inline comment is ${text.length} characters and shares a row with ` +
+          `the instruction, so it cannot wrap and will run the line long. ` +
+          `Use placement "before" for anything this size.`,
+      ];
+    }
+
+    return this.warnIfInsideInstruction(result, address, "comment");
   }
 
   /**
@@ -2095,11 +2369,17 @@ export class Workspace {
       );
     }
 
+    // An explicit empty string clears the view. Omitting the argument is
+    // ambiguous — it reads as "leave it alone" — so there was no way to take a
+    // `snippet:` back off a region and return it to a built-in encoding, and
+    // the only route was to keep editing the decoder instead.
+    const viewOrCleared = view === "" ? undefined : view;
+
     // `snippet:<id>` hands the span to a decoder: as a picture for a bitmap
     // region, as characters for a text one. Checked here rather than at render
     // time, because a listing that quietly ignores an unknown decoder looks
     // exactly like one whose decoder is wrong.
-    const snippet = view?.startsWith("snippet:") ? view.slice("snippet:".length) : undefined;
+    const snippet = viewOrCleared?.startsWith("snippet:") ? viewOrCleared!.slice("snippet:".length) : undefined;
     if (snippet !== undefined) {
       const known = this.program().loaded.project.decoders ?? [];
       if (!known.some((d) => d.id === snippet)) {
@@ -2108,16 +2388,16 @@ export class Workspace {
             `and set_decoder adds one.`
         );
       }
-    } else if (view !== undefined && !isBitmapView(view)) {
+    } else if (viewOrCleared !== undefined && !isBitmapView(viewOrCleared)) {
       throw new Error(
-        `"${view}" is not a view this can draw. Use bits:<bytes per row>, ` +
+        `"${viewOrCleared}" is not a view this can draw. Use bits:<bytes per row>, ` +
           `char:<columns>, sprite:<columns> or sprite-multi:<columns>, or ` +
           `snippet:<decoder id> to hand the bytes to a decoder — for example ` +
           `"char:8" for a character set eight glyphs wide, or "bits:3" to slide ` +
           `a raw bit run at a sprite's width until a picture appears.`
       );
     }
-    if (kind === "bitmap" && view === undefined) {
+    if (kind === "bitmap" && viewOrCleared === undefined) {
       throw new Error(
         `A bitmap region needs a view saying how to read the bytes: ` +
           `char:<columns> for a character set, sprite:<columns> or ` +
@@ -2137,7 +2417,7 @@ export class Workspace {
 
     const result = this.edit(
       caller,
-      (loaded) => [regionSetOp(loaded, start, end, kind, name, comment, encoding, view, id)],
+      (loaded) => [regionSetOp(loaded, start, end, kind, name, comment, encoding, viewOrCleared, id)],
       { start, end }
     );
     return {
@@ -2336,6 +2616,13 @@ export interface EditResult {
    * itself, which the listing cannot render and which nothing else would say.
    */
   warnings?: string[];
+  /**
+   * Entries a batch declined, when it declined any but not all.
+   *
+   * A batch tool that fails whole makes its caller resubmit everything that
+   * was already right, which is the opposite of why it is a batch.
+   */
+  rejected?: { address: string; reason: string }[];
   /**
    * The span a region write actually took, inclusive at both ends.
    *

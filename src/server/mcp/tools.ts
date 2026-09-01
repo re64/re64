@@ -198,6 +198,17 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     ({ project: id }: { project?: string }) => context().workspace(id).describe()
   );
 
+  tool(
+    "export_project",
+    "Return the project as .re64 text. The document is the truth and holds " +
+      "every edit the moment it lands, so nothing needs saving — this is for " +
+      "getting a readable, diffable copy out. describe_project reports " +
+      "exportStale when a write to the stored copy has failed, which is " +
+      "otherwise silent.",
+    { project },
+    ({ project: id }: { project?: string }) => context().workspace(id).exportProject()
+  );
+
   // --- reading --------------------------------------------------------
 
   tool(
@@ -598,31 +609,96 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         .describe("user = someone chose it; auto = the disassembler invented it"),
       type: z.enum(["entry", "function", "code", "address"]).optional(),
       namePattern: z.string().optional().describe("Case-insensitive substring"),
+      // The description promised an address range and the schema did not have
+      // one, so "what is named in zero page" could only be answered by pulling
+      // every label and filtering locally. `labels()` took a range all along.
+      from: address.optional().describe("Inclusive; with `to`, narrows to a range"),
+      to: address.optional(),
       limit: z.number().int().min(1).max(500).optional().describe("Default 200"),
     },
-    ({ project: id, limit, ...criteria }: { project?: string; limit?: number }) =>
-      context().workspace(id).labels(criteria, limit ?? 200)
+    ({
+      project: id,
+      limit,
+      from,
+      to,
+      ...criteria
+    }: {
+      project?: string;
+      limit?: number;
+      from?: number;
+      to?: number;
+    }) =>
+      context()
+        .workspace(id)
+        .labels(
+          {
+            ...criteria,
+            ...(from === undefined && to === undefined
+              ? {}
+              : { range: { start: from ?? 0, end: to ?? 0xffff } }),
+          },
+          limit ?? 200
+        )
   );
 
   tool(
     "changes_since",
     "What has happened to a project since a position you were given. Use it " +
       "to catch up rather than re-reading everything: someone may be editing " +
-      "alongside you. Pass 0 the first time, then the cursor you get back.",
+      "alongside you. Pass 0 the first time, then the cursor you get back — or " +
+      "the name of a tag, to ask what has changed since you marked it.",
     {
       project,
       cursor: z.number().int().min(0).optional().describe("Default 0, from the beginning"),
+      tag: z.string().optional().describe("A tag name, instead of a cursor"),
       limit: z.number().int().min(1).max(500).optional().describe("Default 100"),
     },
     ({
       project: id,
       cursor,
+      tag,
       limit,
     }: {
       project?: string;
       cursor?: number;
+      tag?: string;
       limit?: number;
-    }) => context().workspace(id).changesSince(cursor ?? 0, limit ?? 100)
+    }) => context().workspace(id).changesSince(tag ?? cursor ?? 0, limit ?? 100)
+  );
+
+  tool(
+    "tag_project",
+    "Mark this point with a name you can come back to — a tag, in the git " +
+      "sense. It is not a save: the document already holds every edit the " +
+      "moment it lands. What a tag buys is a position you can ask about later, " +
+      "so changes_since takes its name and tells you what has happened since.",
+    {
+      project,
+      name: z.string().describe("Short, and unique within the project"),
+      note: z.string().optional().describe("Why this point is worth marking"),
+    },
+    ({ project: id, name, note }: { project?: string; name: string; note?: string }) => {
+      const { workspace, caller } = context();
+      return workspace(id).tagProject(caller, name, note);
+    }
+  );
+
+  tool(
+    "list_tags",
+    "Points that have been marked, oldest first, each with how many changes " +
+      "have been recorded since and whether the project still looks the way it " +
+      "did — which are different questions, since an edit and its undo move " +
+      "the count and not the content.",
+    { project },
+    ({ project: id }: { project?: string }) => context().workspace(id).listTags()
+  );
+
+  tool(
+    "remove_tag",
+    "Forget a tag. The history it pointed at is untouched.",
+    { project, name: z.string() },
+    ({ project: id, name }: { project?: string; name: string }) =>
+      context().workspace(id).removeTag(name)
   );
 
   // --- editing --------------------------------------------------------
@@ -827,9 +903,15 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       project,
       start: address.optional().describe("From the beginning if omitted"),
       lines: z.number().int().min(1).max(2000).optional().describe("Default 200"),
+      // `set_region` takes an end address, so reaching for one here is the
+      // natural first guess and cost a round trip to find out otherwise. Both
+      // are accepted; `lines` wins when somebody passes both.
+      end: address.optional().describe("Alternative to `lines`: stop at this address"),
     },
-    (args: { project?: string; start?: number; lines?: number }) =>
-      context().workspace(args.project).listing(args.start, args.lines ?? 200)
+    (args: { project?: string; start?: number; lines?: number; end?: number }) =>
+      context()
+        .workspace(args.project)
+        .listing(args.start, args.lines ?? (args.end === undefined ? 200 : undefined), args.end)
   );
 
   tool(

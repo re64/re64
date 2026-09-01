@@ -359,3 +359,64 @@ describe("a decoder in a project file", () => {
     expect(parseProject(deleteDecoder(raw, "dec_a")).decoders).toBeUndefined();
   });
 });
+
+describe("a project file this editor did not format", () => {
+  /**
+   * The same project, pretty-printed — every entry spanning five lines. A
+   * `.re64` is ordinary JSON and anything may write one, so the line editor has
+   * to cope with a shape it did not produce rather than assume its own output.
+   */
+  const pretty = () => JSON.stringify(parseProject(PROJECT), null, 2);
+
+  it("does not corrupt the file when inserting before an existing entry", () => {
+    // The failure this fixes: `insertEntry` matched the `"address"` line *inside*
+    // a multi-line object and spliced the new entry between that object's own
+    // fields, producing invalid JSON. `upsertLabel`'s own parse guard then threw,
+    // `applyOps` abandoned the whole batch, and the detached writer swallowed it
+    // — so every tool answered `ok` while nothing reached the file. A quarter of
+    // experiment 4's run was written into a document and never exported.
+    const updated = upsertLabel(pretty(), "lbl_new", 0x0001, "beforeEverything", "address", 0);
+    expect(() => parseProject(updated)).not.toThrow();
+
+    const labels = parseProject(updated).layers[0].labels ?? [];
+    expect(labels.some((l) => l.name === "beforeEverything")).toBe(true);
+  });
+
+  it("keeps every entry that was already there", () => {
+    const before = parseProject(PROJECT).layers[0].labels ?? [];
+    const updated = upsertLabel(pretty(), "lbl_new", 0x0001, "added", "address", 0);
+    const after = parseProject(updated).layers[0].labels ?? [];
+    expect(after).toHaveLength(before.length + 1);
+    for (const label of before) {
+      expect(after.some((l) => l.id === label.id && l.name === label.name)).toBe(true);
+    }
+  });
+
+  it("comes back in the one-per-line shape, so the next edit is a small diff", () => {
+    // Reformatting is the cost, and it is paid once: after this write the file
+    // is canonical and line editing works normally again.
+    const updated = upsertLabel(pretty(), "lbl_new", 0x0001, "added", "address", 0);
+    const entries = updated.split("\n").filter((l) => l.trim().startsWith('{ "id"'));
+    expect(entries.length).toBeGreaterThan(0);
+
+    const twice = upsertLabel(updated, "lbl_two", 0x0002, "second", "address", 0);
+    expect(() => parseProject(twice)).not.toThrow();
+  });
+
+  it("survives a region write and a delete just the same", () => {
+    const region = upsertRegion(pretty(), 1, {
+      id: "reg_new",
+      start: 0x8000,
+      end: 0x8010,
+      kind: "data",
+    });
+    expect(() => parseProject(region)).not.toThrow();
+
+    const first = (parseProject(PROJECT).layers[0].labels ?? [])[0];
+    const deleted = deleteLabel(pretty(), first.id!, 0);
+    expect(() => parseProject(deleted)).not.toThrow();
+    expect((parseProject(deleted).layers[0].labels ?? []).some((l) => l.id === first.id)).toBe(
+      false
+    );
+  });
+});

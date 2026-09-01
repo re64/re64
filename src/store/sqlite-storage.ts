@@ -17,6 +17,7 @@ import {
   ProjectStorage,
   StoredChange,
   StoredSnapshot,
+  StoredTag,
   StoredUpdate,
   revOf,
 } from "./storage.js";
@@ -138,6 +139,69 @@ export class SqliteStorage implements ProjectStorage {
       at: r.at,
       authors: JSON.parse(r.authors) as string[],
       summary: JSON.parse(r.summary) as string[],
+    }));
+  }
+
+  /**
+   * The highest operation sequence recorded for this project.
+   *
+   * What a tag points at: `changes_since` takes exactly this number, so a tag
+   * is a name for a position in a log that already exists rather than a copy of
+   * anything.
+   */
+  opsCursor(): number {
+    const row = this.db
+      .prepare("SELECT MAX(seq) AS seq FROM ops WHERE project_id = ?")
+      .get(this.projectId) as { seq: number | null } | undefined;
+    return row?.seq ?? 0;
+  }
+
+  addTag(tag: StoredTag): void {
+    this.db
+      .prepare(
+        "INSERT INTO tags (project_id, name, cursor, version, at, author, note) " +
+          "VALUES (?, ?, ?, ?, ?, ?, ?)"
+      )
+      .run(
+        this.projectId,
+        tag.name,
+        tag.cursor,
+        tag.version,
+        tag.at,
+        tag.author ?? null,
+        tag.note ?? null
+      );
+  }
+
+  removeTag(name: string): boolean {
+    const result = this.db
+      .prepare("DELETE FROM tags WHERE project_id = ? AND name = ?")
+      .run(this.projectId, name);
+    return Number(result.changes) > 0;
+  }
+
+  tags(): StoredTag[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT name, cursor, version, at, author, note FROM tags " +
+            "WHERE project_id = ? ORDER BY at"
+        )
+        .all(this.projectId) as {
+        name: string;
+        cursor: number;
+        version: string;
+        at: number;
+        author: string | null;
+        note: string | null;
+      }[]
+    ).map((row) => ({
+      name: row.name,
+      cursor: row.cursor,
+      version: row.version,
+      at: row.at,
+      ...(row.author === null ? {} : { author: row.author }),
+      ...(row.note === null ? {} : { note: row.note }),
     }));
   }
 
