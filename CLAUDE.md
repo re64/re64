@@ -1349,12 +1349,26 @@ behind one may be arbitrarily expensive — `routine_effects` walks a call graph
 a fixpoint — and that is fine. What disqualifies a tool is answering *one
 project's question*: `do_the_work_for_me()` wearing a specific name.
 
-The test that keeps catching this is: **would a second program want it?**
-`find_table_users` fails — it is `find_instructions` with a range, once the
-addressing modes are handled. `find_hardware_access` failed the same way and was
-folded in. The pull towards them is real, because a narrow tool is easier to
-write and reads well in a transcript, and each one is a small mechanism that then
-has to be maintained beside the general one that already covered it.
+The test that decides it fastest is: **would you put this in a human's UI?**
+
+A capability a person would reach for is a capability. `find_bytes` is a
+hex-editor staple and belongs in a search box as much as in a tool call.
+`find_table_users` is not something anyone would put in a menu — it is
+`find_instructions` with a range, once the addressing modes are handled, and
+`find_hardware_access` failed the same way and was folded in.
+
+The abstract version — "would a second program want it?" — decides the same
+cases, but the UI question is quicker to answer honestly, because imagining the
+menu item makes the narrowness obvious.
+
+The pull towards narrow tools is real: each is easier to write than the general
+one and reads well in a transcript, and each then has to be maintained beside the
+general one that already covered it.
+
+Audited against that test, the vocabulary holds up: the read tools are panels,
+the search tools are a search box, `changes_since` is a history view, `whoami` is
+the "editing as" indicator that already exists, and `run_block`/`run_decoder` are
+the explorer. Nothing in it is agent-only by design.
 
 Corollary worth stating: when an agent invents a narrow tool, the finding is
 usually that the *general* one is missing something — not that the narrow one
