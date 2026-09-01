@@ -26,6 +26,7 @@ import {
   analyzeProgram,
   analyzeRoutines,
   routineAt,
+  targetsOf,
   Effects,
   RoutineEffects,
   blockAt,
@@ -464,7 +465,7 @@ export class Workspace {
       // This used to need a *declared* extent and fell back, without one, to the
       // nearest preceding flow label — which on a real routine is a local branch
       // target, so "who calls this" answered `b81BC` for two call sites both
-      // inside DrawGrid, and 20 of 35 callers of one routine came back named
+      // inside one routine, and 20 of 35 callers of one routine came back named
       // `loc_XXXX`. Deriving it needs nobody to have declared anything, and
       // handles the 20 of 50 routines here whose code is not one contiguous
       // span and which no declared extent could have described.
@@ -720,30 +721,62 @@ export class Workspace {
     const wanted = criteria.mnemonic?.toUpperCase();
     const limit = criteria.limit ?? 100;
 
+    let unresolvedIndirect = 0;
+
     const matches = [...program.instructions.all()].filter((instruction) => {
       if (wanted && instruction.mnemonic.toUpperCase() !== wanted) return false;
       if (criteria.from === undefined && criteria.to === undefined) return true;
 
-      // Whatever address the operand names, in whatever mode. An immediate
-      // names no address and cannot be in a range — `find_immediates` is the
-      // question about those.
-      const operand = instruction.operand as { address?: number };
-      if (operand.address === undefined) return false;
+      // Whatever address it touches — including through a pointer, where that
+      // pointer was built from immediate loads this can follow back. Gridrunner
+      // writes the VIC *only* through `STA ($02),Y`, so without this a search of
+      // $D000-$D02E returned one dead instruction and missed everything real.
+      const target = targetsOf(instruction, program.blocks);
+      if (!target) {
+        // An indirect access whose pointer is computed at runtime — a table
+        // read, arithmetic — is genuinely unknowable here, and counted so the
+        // answer can say how much it could not see.
+        const operand = instruction.operand.type;
+        if (operand === "indirectIndexed" || operand === "indexedIndirect") unresolvedIndirect++;
+        return false;
+      }
       return (
-        operand.address >= (criteria.from ?? 0) && operand.address <= (criteria.to ?? 0xffff)
+        target.address >= (criteria.from ?? 0) && target.address <= (criteria.to ?? 0xffff)
       );
     });
 
     return {
       total: matches.length,
       truncated: matches.length > limit,
-      sites: matches.slice(0, limit).map((instruction) => ({
-        address: hex4(instruction.address),
-        text: contentRowAt(rows, lineForAddress, instruction.address)?.text ?? "",
-        ...(this.routineNameAt(instruction.address)
-          ? { inRoutine: this.routineNameAt(instruction.address)! }
-          : {}),
-      })),
+      sites: matches.slice(0, limit).map((instruction) => {
+        const target = targetsOf(instruction, program.blocks);
+        return {
+          address: hex4(instruction.address),
+          text: contentRowAt(rows, lineForAddress, instruction.address)?.text ?? "",
+          ...(this.routineNameAt(instruction.address)
+            ? { inRoutine: this.routineNameAt(instruction.address)! }
+            : {}),
+          // Said explicitly, because `STA ($02),Y` does not look like a write to
+          // $D000 and a reader is entitled to check the claim.
+          ...(target?.indirect
+            ? {
+                reaches: hex4(target.address),
+                pointerSetAt: target.setAt?.map(hex4),
+              }
+            : {}),
+        };
+      }),
+      // The blind spot, on the answer rather than in the documentation — the
+      // same rule `find_references` follows.
+      ...(unresolvedIndirect > 0
+        ? {
+            incomplete:
+              `${unresolvedIndirect} indirect access${unresolvedIndirect === 1 ? "" : "es"} ` +
+              `could not be resolved: the pointer is built at runtime, from a table or ` +
+              `arithmetic, so nothing here can say where it goes. Those are not in this ` +
+              `answer whether or not they touch the range.`,
+          }
+        : {}),
     };
   }
 
@@ -1062,7 +1095,7 @@ export class Workspace {
       image: (at) => program.loaded.map.readByte(at),
     });
 
-    // Exact matches, or inside a declared extent — `explosionXPosArray+2` is
+    // Exact matches, or inside a declared extent — `an array label+2` is
     // the useful answer for an indexed read and is not a guess, because the
     // extent was declared. A merely *nearby* label is dropped: attaching
     // "SpriteTable" to an address six bytes past it reads as a fact.
@@ -1358,7 +1391,7 @@ export class Workspace {
    *
    * `set_label` renames, which is right for a correction. This is for an
    * address that genuinely has two names — the reference calls `$08`
-   * `randomValue` throughout and `gridXPos` inside one routine, which is a
+   * `a scratch byte` throughout and `something specific` inside one routine, which is a
    * finding about the program, not a nickname. Which one a given operand shows
    * is then `bind_label`; without one, the primary wins.
    */
@@ -1523,7 +1556,7 @@ export class Workspace {
    *
    * Declaring is not using. Nothing renders differently until a site is bound,
    * because the same value means different things in different places — the
-   * reference disassembly names $01 both LEFT_ZAPPER and WHITE — and guessing
+   * reference disassembly names $01 both A_DIRECTION and WHITE — and guessing
    * which was meant is exactly what this design refuses to do.
    */
   setConstant(caller: Caller, name: string, value: number): EditResult {
@@ -1674,7 +1707,7 @@ export class Workspace {
    * Every instruction loading an immediate, optionally of one value.
    *
    * The other half of naming a constant: having decided that $01 here means
-   * LEFT_ZAPPER, the next question is where else $01 is loaded — and whether
+   * A_DIRECTION, the next question is where else $01 is loaded — and whether
    * those sites mean the same thing, which only a reader can say.
    */
   immediates(

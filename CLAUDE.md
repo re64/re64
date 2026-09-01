@@ -1342,6 +1342,47 @@ this class of bug exists. The rule that follows: **if a tool grows an argument,
 it grows a transport test**, because "the logic is tested" is exactly the belief
 that let these ship.
 
+### What belongs in the vocabulary, and what does not
+
+A tool earns its place by being **reusable**, not by being cheap. The analysis
+behind one may be arbitrarily expensive — `routine_effects` walks a call graph to
+a fixpoint — and that is fine. What disqualifies a tool is answering *one
+project's question*: `do_the_work_for_me()` wearing a specific name.
+
+The test that keeps catching this is: **would a second program want it?**
+`find_table_users` fails — it is `find_instructions` with a range, once the
+addressing modes are handled. `find_hardware_access` failed the same way and was
+folded in. The pull towards them is real, because a narrow tool is easier to
+write and reads well in a transcript, and each one is a small mechanism that then
+has to be maintained beside the general one that already covered it.
+
+Corollary worth stating: when an agent invents a narrow tool, the finding is
+usually that the *general* one is missing something — not that the narrow one
+should exist. `find_hardware_access` was invented because `find_instructions`
+could not see indirect writes, which is a gap in the general tool.
+
+### Indirect writes, and how far constant folding gets
+
+`STA ($02),Y` names no address, so a range search cannot see it — and that is not
+a corner case: Gridrunner writes the VIC-II *only* through a pointer, so
+searching `$D000-$D02E` returned one dead instruction and missed every write that
+mattered. Both readers in the second run hit it.
+
+The pointer is usually built from immediate loads a few instructions earlier, so
+folding those recovers it: `LDA #$D0 / STA $03` with `LDA #$00 / STA $02` makes
+`($02),Y` mean `$D000,Y`. That is constant folding, not symbolic execution — no
+path exploration, no solver.
+
+**It stops rather than guessing**, in two places that matter. At a **join**,
+because walking back through single predecessors is path-insensitive *and sound*
+only while there is one way in. And at a **computed store** — Gridrunner's screen
+pointer comes from a table, so it genuinely depends on runtime state.
+
+On the reference project that resolves 3 of 18 indirect accesses, and the three
+are exactly the writes that were invisible. The other 15 are reported as
+unresolved on the answer itself, so a caller knows the search had a blind spot
+rather than reading an empty result as an absence.
+
 ### The tools agents invented
 
 Experiment 2's transcript records seven tools readers reached for that did not

@@ -704,7 +704,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     "add_label",
     "Add a SECOND name at an address, rather than renaming the one there. For " +
       "an address that genuinely has two — the reference calls $08 " +
-      "randomValue throughout and gridXPos inside one routine, which is a " +
+      "a general-purpose scratch byte in most of a program and something specific in one routine, which is a " +
       "finding about the program. Which name an operand shows is bind_label; " +
       "without one, the primary wins.",
     {
@@ -814,9 +814,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
 
   tool(
     "set_constant",
-    "Declare a name for a byte value: GRID = $00, ORANGE = $08. Declaring " +
+    "Declare a name for a byte value: EMPTY_CELL = $00, ORANGE = $08. Declaring " +
       "changes no listing — a value has no single meaning, and the reference " +
-      "disassembly names $01 both LEFT_ZAPPER and WHITE. Use bind_constant to " +
+      "same byte is both a colour and a direction in different routines. Use bind_constant to " +
       "say that a particular operand means this one.",
     {
       project,
