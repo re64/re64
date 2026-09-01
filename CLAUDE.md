@@ -1349,26 +1349,31 @@ behind one may be arbitrarily expensive — `routine_effects` walks a call graph
 a fixpoint — and that is fine. What disqualifies a tool is answering *one
 project's question*: `do_the_work_for_me()` wearing a specific name.
 
-The test that decides it fastest is: **would you put this in a human's UI?**
+One useful signal, not a rule: **would you put this in a human's UI?** It is
+quick to answer and it fires reliably in one direction — a capability a person
+would reach for is a capability. `find_bytes` is a hex-editor staple and belongs
+in a search box as much as in a tool call. `find_table_users` is not something
+anyone would put in a menu; it is `find_instructions` with a range, once the
+addressing modes are handled, and `find_hardware_access` failed the same way and
+was folded in.
 
-A capability a person would reach for is a capability. `find_bytes` is a
-hex-editor staple and belongs in a search box as much as in a tool call.
-`find_table_users` is not something anyone would put in a menu — it is
-`find_instructions` with a range, once the addressing modes are handled, and
-`find_hardware_access` failed the same way and was folded in.
+**A negative answer proves nothing**, and treating it as a test would delete
+several tools that exist for good reasons. Agents genuinely differ from people:
 
-The abstract version — "would a second program want it?" — decides the same
-cases, but the UI question is quicker to answer honestly, because imagining the
-menu item makes the narrowness obvious.
+- **They cannot see.** `read_disassembly` returns fields rather than rendered
+  text because character offsets into a column are useless to a caller — that is
+  the finding the whole MCP surface was built on. `whoami` exists because a
+  person sees the identity picker and an agent sees nothing.
+- **They are not pushed to.** `changes_since` is a poll standing in for the
+  socket a browser has.
+- **They work in bulk.** `set_labels` and `bind_constants` are batch because a
+  person names one thing at a time and an agent names forty.
+- **They need to state assumptions.** `expectVersion` is a conflict dialog that
+  cannot be shown.
 
-The pull towards narrow tools is real: each is easier to write than the general
-one and reads well in a transcript, and each then has to be maintained beside the
-general one that already covered it.
-
-Audited against that test, the vocabulary holds up: the read tools are panels,
-the search tools are a search box, `changes_since` is a history view, `whoami` is
-the "editing as" indicator that already exists, and `run_block`/`run_decoder` are
-the explorer. Nothing in it is agent-only by design.
+So the criterion that actually decides is **reusability** — does this answer a
+question about programs, or about *this* program. The UI question is a fast way
+to notice narrowness, and the rest of the time it is quiet rather than negative.
 
 Corollary worth stating: when an agent invents a narrow tool, the finding is
 usually that the *general* one is missing something — not that the narrow one
