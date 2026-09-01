@@ -1703,3 +1703,38 @@ describe("finding things across the whole program", () => {
     expect(listed.comments.some((c) => c.text === "the entry point")).toBe(true);
   });
 });
+
+describe("rendering text with a project decoder", () => {
+  const font = `
+    const A = {}; for (let i = 0; i < 26; i++) A[0x41 + i] = String.fromCharCode(0x61 + i);
+    return { kind: "text", lines: [bytes.map((b) => A[b] ?? ".").join("")] };
+  `;
+
+  it("puts the decoder's characters in the listing", () => {
+    // End to end: SES compiles it in this realm, synchronously, because a
+    // listing is built in one pass and a row cannot await.
+    workspace.setDecoder(agent, "lowercase", font);
+    const id = workspace.decoders().decoders[0].id;
+    workspace.setRegion(agent, 0x8080, 0x8090, "text", "msg", undefined, undefined, `snippet:${id}`);
+
+    const listing = workspace.listing(0x8080, 4).text;
+    expect(listing).toContain(".TEXT");
+  });
+
+  it("refuses a view naming a decoder that is not there", () => {
+    // Checked when the region is declared, because a listing that quietly
+    // ignores an unknown decoder looks exactly like one whose decoder is wrong.
+    expect(() =>
+      workspace.setRegion(agent, 0x8080, 0x8090, "text", "msg", undefined, undefined, "snippet:dec_nope")
+    ).toThrow(/No decoder dec_nope/);
+  });
+
+  it("keeps rendering when a decoder throws", () => {
+    workspace.setDecoder(agent, "broken", "throw new Error('nope');");
+    const id = workspace.decoders().decoders[0].id;
+    workspace.setRegion(agent, 0x8080, 0x8090, "text", "msg", undefined, "screen", `snippet:${id}`);
+
+    // Falls back to the declared encoding rather than losing the row.
+    expect(workspace.listing(0x8080, 4).text).toContain(".TEXT");
+  });
+});

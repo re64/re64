@@ -59,6 +59,7 @@ import {
 } from "../core/index.js";
 import { chatMessages, postChatMessage, projectFromDoc } from "../core/crdt/index.js";
 import { runDecoder } from "../sandbox/run.js";
+import { renderTextWith } from "../sandbox/sync.js";
 import { databaseFileBytes } from "../store/load.js";
 import { CommentPlacement, TextEncoding, describeWarning } from "../core/index.js";
 import { FileStorage, ProjectStore, SqliteStorage } from "../store/index.js";
@@ -271,7 +272,16 @@ export class Workspace {
     const key = this.key();
     if (this.cachedRows?.key === key) return this.cachedRows.rows;
 
-    const rows = analyze(this.program().loaded);
+    const loaded = this.program().loaded;
+    const rows = analyze(loaded, {
+      // A text region may name a decoder, and this is where it gets to run.
+      // Synchronous, because a listing is built in one pass — see
+      // `src/sandbox/sync.ts` for what that costs and what it keeps.
+      renderText: (id, bytes) => {
+        const decoder = loaded.project.decoders?.find((d) => d.id === id);
+        return decoder ? renderTextWith(decoder.source, bytes) : undefined;
+      },
+    });
     this.cachedRows = { key, rows };
     return rows;
   }
@@ -1989,12 +1999,26 @@ export class Workspace {
       );
     }
 
-    if (view !== undefined && !isBitmapView(view)) {
+    // `snippet:<id>` hands the span to a decoder: as a picture for a bitmap
+    // region, as characters for a text one. Checked here rather than at render
+    // time, because a listing that quietly ignores an unknown decoder looks
+    // exactly like one whose decoder is wrong.
+    const snippet = view?.startsWith("snippet:") ? view.slice("snippet:".length) : undefined;
+    if (snippet !== undefined) {
+      const known = this.program().loaded.project.decoders ?? [];
+      if (!known.some((d) => d.id === snippet)) {
+        throw new Error(
+          `No decoder ${snippet} in this project. list_decoders shows what it has, ` +
+            `and set_decoder adds one.`
+        );
+      }
+    } else if (view !== undefined && !isBitmapView(view)) {
       throw new Error(
         `"${view}" is not a view this can draw. Use bits:<bytes per row>, ` +
-          `char:<columns>, sprite:<columns> or sprite-multi:<columns> — for ` +
-          `example "char:8" for a character set eight glyphs wide, or "bits:3" ` +
-          `to slide a raw bit run at a sprite's width until a picture appears.`
+          `char:<columns>, sprite:<columns> or sprite-multi:<columns>, or ` +
+          `snippet:<decoder id> to hand the bytes to a decoder — for example ` +
+          `"char:8" for a character set eight glyphs wide, or "bits:3" to slide ` +
+          `a raw bit run at a sprite's width until a picture appears.`
       );
     }
     if (kind === "bitmap" && view === undefined) {

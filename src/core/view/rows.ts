@@ -185,6 +185,19 @@ export interface AnalyzeOptions {
    */
   annotations?: boolean;
   /**
+   * Render the bytes of a text region using a project decoder.
+   *
+   * Injected rather than imported, because running one means SES and a
+   * compartment, and `core` stays free of both — the same reason the file loader
+   * is a callback. Given `undefined`, or when the decoder fails, a text region
+   * falls back to its declared encoding, so a broken decoder makes a listing
+   * plainer rather than absent.
+   *
+   * Synchronous on purpose, and that is the constraint everything here bends
+   * around: rows are built in one pass and a listing cannot await.
+   */
+  renderText?: (decoderId: string, bytes: readonly number[]) => string[] | undefined;
+  /**
    * Column at which comment text is wrapped onto another row.
    *
    * Fixed rather than viewport-derived — see `COMMENT_ROW_WIDTH`. Exposed here
@@ -207,6 +220,7 @@ export function analyze(
     labelTolerance = 1,
     annotations = true,
     commentWidth = COMMENT_ROW_WIDTH,
+    renderText,
     entryPoints: entryPointOverride,
   } = typeof options === "number" ? { labelTolerance: options } : options;
 
@@ -592,6 +606,31 @@ export function analyze(
     const bytes: number[] = [];
     let lineStart = addr;
 
+    /**
+     * The characters a row of a text region shows.
+     *
+     * A program with its own font is the ordinary case rather than an exotic
+     * one, and none of the three built-in encodings can read one — declaring
+     * such a span `text` produced confident nonsense, which is the failure this
+     * project rules out everywhere else. A decoder can say what the bytes mean,
+     * and this is where it gets to.
+     */
+    const decodedString = (at: number, run: readonly number[]): string => {
+      const region = map.getRegionAt(at);
+      const snippet = region?.view?.startsWith("snippet:")
+        ? region.view.slice("snippet:".length)
+        : undefined;
+
+      if (snippet && renderText) {
+        const lines = renderText(snippet, run);
+        // One row of bytes is one piece of text; a decoder returning several
+        // lines for it has misunderstood the call, and joining is kinder than
+        // dropping all but the first.
+        if (lines) return lines.join("");
+      }
+      return decodeText(run, region?.encoding ?? "ascii");
+    };
+
     const flush = () => {
       if (bytes.length === 0) return;
       emitLabels(lineStart);
@@ -601,10 +640,7 @@ export function analyze(
       // which at least printed an ASCII column. It now shows the decoded
       // string, in whatever encoding the region declares.
       const text = isText
-        ? `${hex4(lineStart)}  ${cols}  .TEXT "${decodeText(
-            bytes,
-            map.getRegionAt(lineStart)?.encoding ?? "ascii"
-          )}"`
+        ? `${hex4(lineStart)}  ${cols}  .TEXT "${decodedString(lineStart, bytes)}"`
         : `${hex4(lineStart)}  ${cols}  |${bytes
             .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : "."))
             .join("")}|`;

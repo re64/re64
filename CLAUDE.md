@@ -2012,11 +2012,38 @@ resolves differently from source and from `dist`, and the failure mode of
 getting that wrong is running a *stale* sandbox — not a class of bug to accept in
 the one file whose job is to contain somebody else's code.
 
-**Not used for listing rows, and that is a real limit.** `analyze()` is
-synchronous and this is not. The built-in formats draw the listing; decoders
-drive the explorer and the tools. Rendering a decoder inline means caching
-results out of band and repainting when they arrive, which is a separate and
-larger decision.
+**A text region can be rendered by a decoder**, and getting there meant giving
+something up deliberately. A program with its own character set is the ordinary
+case on this machine, and none of the three built-in encodings can read one — so
+declaring such a span `text` produced confident nonsense, exactly the failure
+ruled out everywhere else here.
+
+A listing is built in **one synchronous pass** and a row cannot await, so this
+decoder runs in the calling realm rather than in a worker: `src/sandbox/sync.ts`.
+The trade, stated rather than buried:
+
+- **Given up: termination.** A decoder that loops forever hangs whatever called
+  it — a tab, a `re64 disasm`, or the server's event loop and with it every
+  connected client. Synchronous JavaScript cannot be interrupted from inside its
+  own realm.
+- **Kept: authority.** SES still denies the network, the filesystem, the clock
+  and randomness. A decoder can waste time; it cannot reach anything. That is the
+  half that matters for code arriving inside a project file, and it is not
+  weakened.
+
+`lockdown()` hardening this realm's intrinsics was the other reason to prefer a
+worker, and it was **measured before being relied on**: the analysis, the Yjs
+document and the SQLite store all work unchanged under it.
+
+If the loop risk ever bites, the fix is not to re-isolate this one call — it is
+to move the *whole* analysis into a worker and make it asynchronous, which
+removes the constraint that created the file. That is a real option, not a
+consolation: the browser already analyses locally, and a worker is still local.
+
+A decoder is reached by `view: "snippet:<id>"`, the same slot a bitmap region
+uses, so one mechanism covers "draw these bytes" and "read these bytes". A
+decoder that fails, throws, or returns the wrong shape falls back to the declared
+encoding: a broken one makes a listing plainer, never absent.
 
 **Running it here is a convenience, not the only way, and the tools say so.**
 An agent may prefer its own tooling, and nothing should push it towards a

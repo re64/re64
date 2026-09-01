@@ -337,3 +337,42 @@ describe("a region that holds a picture", () => {
       .toBeGreaterThan(0);
   });
 });
+
+describe("a text region rendered by a decoder", () => {
+  const bytes = [0x01, 0x02, 0x03, 0x04];
+  const region = (view?: string) =>
+    project(bytes, {
+      regions: [{ start: ORG, end: ORG + 4, kind: "text", name: "Message", view }],
+    });
+
+  it("shows what the decoder returned", () => {
+    // A program with its own font is the ordinary case here, and none of the
+    // three built-in encodings can read one — declaring such a span `text`
+    // produced confident nonsense, which is the failure ruled out everywhere
+    // else in this project.
+    const rows = analyze(region("snippet:dec_a"), {
+      renderText: (id, run) =>
+        id === "dec_a" ? [run.map((b) => "ABCD"[b - 1] ?? "?").join("")] : undefined,
+    }).rows;
+    expect(rows.find((r) => r.kind === "text")?.text).toContain('.TEXT "ABCD"');
+  });
+
+  it("falls back to the declared encoding when the decoder produces nothing", () => {
+    // A broken decoder should make a listing plainer, never absent.
+    const rows = analyze(region("snippet:dec_a"), { renderText: () => undefined }).rows;
+    expect(rows.find((r) => r.kind === "text")?.text).toContain(".TEXT");
+  });
+
+  it("falls back when no renderer was supplied at all", () => {
+    // The CLI and the browser both build rows; neither should have to know
+    // about decoders to render a listing.
+    const rows = analyze(region("snippet:dec_a")).rows;
+    expect(rows.find((r) => r.kind === "text")?.text).toContain(".TEXT");
+  });
+
+  it("does not consult a decoder for a region that does not name one", () => {
+    let asked = false;
+    analyze(region(), { renderText: () => ((asked = true), ["x"]) });
+    expect(asked).toBe(false);
+  });
+});
