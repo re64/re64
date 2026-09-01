@@ -152,6 +152,50 @@
       }
       #map { flex: 1; min-height: 0; overflow: auto; }
 
+      #who-is-here {
+        border-top: 1px solid var(--border);
+        flex: 0 0 auto;
+        max-height: 22vh;
+        overflow-y: auto;
+      }
+
+      #members {
+        list-style: none;
+        margin: 0;
+        padding: 2px 10px 8px;
+        font-size: 12px;
+      }
+
+      #members li {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        padding: 1px 0;
+      }
+
+      /* Offline is dimmed rather than removed: leaving is a state change here, and
+        the record of who has been in a project outlives them going away. */
+      #members li.offline {
+        opacity: 0.45;
+      }
+
+      #members .kind {
+        color: var(--dim);
+        font-size: 11px;
+      }
+
+      #members .live {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--dim);
+        flex: 0 0 auto;
+      }
+
+      #members li:not(.offline) .live {
+        background: #4caf50;
+      }
+
       #chat {
         display: flex;
         flex-direction: column;
@@ -497,6 +541,10 @@
         <sl-split-panel id="split" position="24" snap="0% 24%" snap-threshold="24">
           <aside id="side" slot="start">
             <div id="map"></div>
+            <section id="who-is-here">
+              <div class="map-title" style="padding: 8px 10px 2px">Here</div>
+              <ul id="members"></ul>
+            </section>
             <section id="chat">
               <div class="map-title" style="padding: 8px 10px 2px">Chat</div>
               <div id="chat-log"></div>

@@ -20,6 +20,9 @@ import {
   chatMessages,
   emptyDoc,
   onChatChange,
+  onParticipantsChange,
+  participants as participantsOf,
+  Participant,
   postChatMessage,
   undoManagerFor,
 } from "../core/crdt/index.js";
@@ -173,6 +176,21 @@ export class DocClient {
 
   onChat(listener: () => void): () => void {
     return onChatChange(this.doc, listener);
+  }
+
+  /**
+   * Membership, from the document rather than from awareness.
+   *
+   * Awareness says where a caret is and dies with the socket; this says who is
+   * in the project, survives them leaving, and is the same list an agent reads —
+   * which is the point, since an agent has no socket to hold awareness on.
+   */
+  members(): Participant[] {
+    return participantsOf(this.doc);
+  }
+
+  onMembers(listener: () => void): () => void {
+    return onParticipantsChange(this.doc, listener);
   }
 
   onStatus(listener: (status: ConnectionStatus) => void): void {

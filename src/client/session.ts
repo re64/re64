@@ -30,7 +30,7 @@ import {
   regionSetOp,
   resolveOwningLayer,
 } from "../core/index.js";
-import { ChatMessage, projectFromDoc } from "../core/crdt/index.js";
+import { ChatMessage, Participant, projectFromDoc } from "../core/crdt/index.js";
 import { ConnectionStatus, DocClient, OpenOptions } from "./doc-client.js";
 
 /** What the debug view reports. Read-only; nothing acts on it. */
@@ -199,6 +199,15 @@ export class ProjectSession {
    */
   onChat(listener: () => void): () => void {
     return this.client.onChat(listener);
+  }
+
+  /** Who is in this project, from the document — the same list an agent reads. */
+  members(): Participant[] {
+    return this.client.members();
+  }
+
+  onMembers(listener: () => void): () => void {
+    return this.client.onMembers(listener);
   }
 
   private async fetchMissingBlobs(project: Project): Promise<void> {

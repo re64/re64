@@ -439,6 +439,20 @@ describe("editing as an agent", () => {
     expect((page.value as { text: string }).text.length).toBeGreaterThan(0);
   });
 
+  it("lists who is in the project, including itself", async () => {
+    // An agent has no socket and so no awareness; membership is in the document
+    // precisely so both consumers can read the same list.
+    const here = await callTool("list_participants");
+    expect(here.isError).toBe(false);
+    const { participants, online } = here.value as {
+      online: number;
+      participants: { kind: string; online: boolean; codename?: string }[];
+    };
+    expect(participants.length).toBeGreaterThan(0);
+    expect(online).toBeGreaterThan(0);
+    expect(participants.some((p) => p.kind === "agent" && p.online)).toBe(true);
+  });
+
   it("tags a point over the wire, and takes the tag back as a cursor", async () => {
     const tagged = await callTool("tag_project", { name: "wire-test", note: "over MCP" });
     expect(tagged.isError).toBe(false);

@@ -1231,6 +1231,42 @@ function renderPresence(): void {
   }
 }
 
+/**
+ * Who is in this project, from the document.
+ *
+ * Distinct from the dots in the header, which come from awareness and say who
+ * is connected *right now*. This is membership: it includes whoever has left,
+ * dimmed, because leaving is a state change rather than a deletion — and it is
+ * the same list an agent gets from `list_participants`, which is the reason it
+ * is in the document at all.
+ */
+function renderMembers(): void {
+  const list = $("#members");
+  list.innerHTML = "";
+  if (!session) return;
+
+  for (const member of session.members()) {
+    const row = document.createElement("li");
+    if (!member.online) row.className = "offline";
+
+    const live = document.createElement("span");
+    live.className = "live";
+    row.appendChild(live);
+
+    const name = document.createElement("span");
+    name.textContent = member.codename ?? member.name;
+    row.appendChild(name);
+
+    const kind = document.createElement("span");
+    kind.className = "kind";
+    kind.textContent = member.online ? member.kind : `${member.kind}, left`;
+    row.appendChild(kind);
+
+    row.title = `${member.name} — last seen ${new Date(member.lastSeen).toLocaleTimeString()}`;
+    list.appendChild(row);
+  }
+}
+
 /** Fetch the project and its bytes, then analyse in the browser. */
 async function loadDisassembly(restoreAddress?: number): Promise<void> {
   try {
@@ -1252,6 +1288,8 @@ async function loadDisassembly(restoreAddress?: number): Promise<void> {
   });
   session.onChat(() => renderChat());
   renderChat();
+  session.onMembers(() => renderMembers());
+  renderMembers();
   if (me) session.announce({ name: me.name, colour: me.colour });
   renderPresence();
   render(restoreAddress);

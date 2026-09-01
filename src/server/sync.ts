@@ -24,7 +24,13 @@ import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";
-import { clientsInUpdate, presenceUpdateFor } from "../core/crdt/index.js";
+import {
+  clientsInUpdate,
+  joinProject,
+  leaveProject,
+  markAllOffline,
+  presenceUpdateFor,
+} from "../core/crdt/index.js";
 import { ProjectStore } from "../store/index.js";
 
 /**
@@ -85,10 +91,17 @@ export class SyncServer {
     return this.options.store;
   }
 
+  /** Set while shutting down, so a closing socket is not recorded as a departure. */
+  private closing = false;
+
   constructor(private readonly options: SyncOptions) {
     this.awareness = new awarenessProtocol.Awareness(options.store.document());
     // The server holds no presence of its own; it only relays.
     this.awareness.setLocalState(null);
+
+    // Nobody is connected to a server that has just started, so anything the
+    // document still calls online is left over from a process that is gone.
+    markAllOffline(options.store.document(), Date.now());
 
     this.wss.on("connection", (socket, request) => this.join(socket, request));
 
@@ -180,6 +193,20 @@ export class SyncServer {
     this.options.store.addAuthor(author);
     this.cancelIdleFlatten();
 
+    // Membership goes in the document, so an agent — which has no socket and
+    // therefore no awareness — learns it the same way a browser does. Awareness
+    // still carries where a caret is; this carries that somebody is here.
+    joinProject(
+      this.options.store.document(),
+      {
+        session: sessionId ?? `sock_${author}`,
+        user: author,
+        name: author,
+        kind: "browser",
+      },
+      Date.now()
+    );
+
     // The server's own SyncStep1. It is a question, not an answer: "here is
     // what I have, send me what I lack." The client's SyncStep1 arrives
     // independently and is answered when it does.
@@ -238,9 +265,19 @@ export class SyncServer {
   }
 
   private leave(socket: WebSocket): void {
+    const session = this.sessionOf.get(socket) ?? `sock_${this.userOf.get(socket) ?? "anonymous"}`;
     this.clients.delete(socket);
     this.sessionOf.delete(socket);
     this.userOf.delete(socket);
+
+    // Offline rather than gone: leaving is a state change, so a client
+    // rendering the list has nothing special to do when somebody goes.
+    //
+    // Skipped while shutting down. Every socket closes at once there, and
+    // writing a departure per socket into a document whose storage is already
+    // going away is both pointless and a way to fail on the way out — the
+    // restart marks them offline anyway, which also covers a crash.
+    if (!this.closing) leaveProject(this.options.store.document(), session, Date.now());
     // Presence outlives the socket by 30s otherwise, so a closed tab lingers in
     // the participant list.
     awarenessProtocol.removeAwarenessStates(
@@ -343,6 +380,7 @@ export class SyncServer {
   }
 
   close(): void {
+    this.closing = true;
     this.awareness.destroy();
     this.options.store.stopWatching();
     if (this.writeTimer) clearTimeout(this.writeTimer);

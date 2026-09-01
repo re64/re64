@@ -369,7 +369,48 @@ is faked outright — picking a name is all it takes — and real accounts will
 change how a session is issued, not what one is.
 
 Presence is `y-protocols/awareness`, relayed but never persisted: who is looking
-at what is not part of the project.
+at what is not part of the project. **Membership is, and that is a reversal.**
+
+The distinction the original decision missed is between a *cursor* and *being
+here*. Where somebody's caret is right now is momentary and worthless a second
+later, and awareness is right for it. Whether somebody is in this project is
+neither, and the practical consequence of treating them alike was that awareness
+rides on a socket — so a browser could see every participant and an agent, which
+has no socket, could see none. For a project whose premise is four consumers and
+none of them primary, that is the wrong asymmetry, and the fix is not a query
+tool bolted onto the side: it is to make membership a data structure that both
+consumers read the same way.
+
+So `participants` is a **sixth root**, and joining or leaving is a **state
+change** rather than an insertion or a deletion. An entry is created once and
+thereafter toggles `online`. Three things fall out of that, and the second is
+why it is worth doing at all:
+
+- Arrival and departure become the same kind of event, so a client rendering the
+  list has no special case for somebody going away.
+- The list survives them. Who has *ever* been in a project is the more
+  interesting question once several people have worked it, and a deletion throws
+  that away.
+- A browser observes the root; an agent calls `list_participants`. Neither needs
+  a mechanism the other lacks.
+
+**Stale membership is cleared on the way up, not on the way down.** Recording
+departures at shutdown cannot be the whole answer, because a process that
+crashes never runs its close handler and every session it held would stay
+`online` for ever. `markAllOffline` runs when a `SyncServer` is constructed —
+correct after a clean stop and after a crash alike — and the per-socket departure
+is skipped while closing, since writing one update per socket into storage that
+is being torn down is both pointless and a way to fail on the way out.
+
+Like `chat`, it is outside `projectFromDoc`'s whitelist, so it never reaches a
+`Project`, never reaches the export, never moves `version()`, and re-analyses
+nothing. Asserted by a test, for the same reason chat's exclusion is: a property
+that holds by omission is one a later edit can quietly take away.
+
+The cost, stated rather than buried: `gc: false` means an entry is never really
+gone, so this grows by one map per session that has ever joined. That is bounded
+by sessions rather than by edits, which is a far slower thing to grow by, but it
+is not nothing on a project worked for years.
 
 **An identity that matches nothing is kept, not swapped.** `resolveCaller` used
 to end in `?? known[0]`, so an unrecognised claim silently became *the first row
@@ -1782,8 +1823,14 @@ there is a gold standard to compare against.
    the last moment it can be measured uncontaminated.
 3. **Collaboration.** Shared document, a chat, a person watching live. Chat
    only — post, read, see who is here. **No claims, no leases, no work
-   assignment**, because whether agents invent claim-and-release is the finding;
-   pre-building it replaces the finding with an assumption.
+   assignment**, because building coordination machinery in advance decides what
+   coordination looks like before anyone has seen any.
+
+   Deliberately **open-ended**: there is no hypothesis being tested here, and an
+   earlier draft of this line named one — whether agents invent claim-and-release
+   — which was this file's author guessing, written down where it then read as a
+   shared premise. Naming an expected finding in advance is how you stop seeing
+   the others. Run it, watch, and report what happened.
 
 Two rules that make these produce measurements rather than anecdotes:
 

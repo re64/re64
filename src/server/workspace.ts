@@ -57,7 +57,12 @@ import {
   regionSetOp,
   unmarkFunctionOps,
 } from "../core/index.js";
-import { chatMessages, postChatMessage, projectFromDoc } from "../core/crdt/index.js";
+import {
+  chatMessages,
+  participants as participantsOf,
+  postChatMessage,
+  projectFromDoc,
+} from "../core/crdt/index.js";
 import { runDecoder } from "../sandbox/run.js";
 import { renderTextWith } from "../sandbox/sync.js";
 import { databaseFileBytes } from "../store/load.js";
@@ -531,6 +536,43 @@ export class Workspace {
       storage instanceof SqliteStorage ? storage.tags().find((t) => t.name === name) : undefined;
     if (!tag) throw new Error(`No tag called "${name}". list_tags shows what there is.`);
     return tag.cursor;
+  }
+
+  /**
+   * Who is in this project, online first.
+   *
+   * Read from the document rather than from awareness, so this is the same list
+   * a browser renders. An agent has no socket and therefore no awareness; making
+   * membership part of the document is what lets both consumers learn it the
+   * same way instead of one of them having a mechanism the other lacks.
+   */
+  participants(): {
+    total: number;
+    online: number;
+    participants: {
+      session: string;
+      name: string;
+      codename?: string;
+      kind: string;
+      online: boolean;
+      joinedAt: string;
+      lastSeen: string;
+    }[];
+  } {
+    const found = participantsOf(this.room.store.document());
+    return {
+      total: found.length,
+      online: found.filter((p) => p.online).length,
+      participants: found.map((p) => ({
+        session: p.session,
+        name: p.name,
+        ...(p.codename ? { codename: p.codename } : {}),
+        kind: p.kind,
+        online: p.online,
+        joinedAt: new Date(p.joinedAt).toISOString(),
+        lastSeen: new Date(p.lastSeen).toISOString(),
+      })),
+    };
   }
 
   /** Disassembly as lines, capped, with a cursor when there is more. */

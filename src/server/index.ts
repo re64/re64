@@ -29,7 +29,7 @@ import { Caller, resolveCaller } from "./mcp/identity.js";
 import { registerTools } from "./mcp/tools.js";
 import { McpLog, defaultMcpLogPath, openMcpLog } from "./mcp/log.js";
 import { SessionLeases, sessionKeyOf } from "./sessions.js";
-import { applyOpToDoc, projectFromDoc } from "../core/crdt/index.js";
+import { applyOpToDoc, joinProject, leaveProject, projectFromDoc } from "../core/crdt/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(__dirname, "../../public");
@@ -216,7 +216,10 @@ export function startServer(options: ServerOptions): RunningServer {
   const showing = new Map<string, { projectId: string; clientId: number; lastSeen: number }>();
   const PRESENCE_MS = 90_000;
 
-  function showPresence(projectId: string, lease: { id: string; clientId: number; codename: string }): void {
+  function showPresence(
+    projectId: string,
+    lease: { id: string; clientId: number; codename: string; userId: string; label: string }
+  ): void {
     const already = showing.get(lease.id);
     if (already && already.projectId !== projectId) {
       room(already.projectId).sync.setAgentPresence(lease.clientId, null);
@@ -225,6 +228,21 @@ export function startServer(options: ServerOptions): RunningServer {
     room(projectId).sync.setAgentPresence(lease.clientId, {
       user: { name: lease.codename, colour: AGENT_COLOUR, agent: true },
     });
+
+    // The same fact, in the document rather than in awareness, because an agent
+    // has no socket to read awareness from. Idempotent, which matters: this runs
+    // on every request rather than once at a connection.
+    joinProject(
+      room(projectId).sync.store.document(),
+      {
+        session: lease.id,
+        user: lease.userId,
+        name: lease.label,
+        codename: lease.codename,
+        kind: "agent",
+      },
+      Date.now()
+    );
   }
 
   function dropPresence(leaseId: string): void {
@@ -232,6 +250,7 @@ export function startServer(options: ServerOptions): RunningServer {
     if (!shown) return;
     showing.delete(leaseId);
     room(shown.projectId).sync.setAgentPresence(shown.clientId, null);
+    leaveProject(room(shown.projectId).sync.store.document(), leaseId, Date.now());
   }
 
   // Swept on a timer rather than on the next request, because the interesting

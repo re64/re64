@@ -23,3 +23,13 @@ export {
   onChatChange,
   chatLength,
 } from "./chat.js";
+export {
+  Participant,
+  ParticipantKind,
+  JoiningParticipant,
+  joinProject,
+  leaveProject,
+  markAllOffline,
+  participants,
+  onParticipantsChange,
+} from "./participants.js";

@@ -174,6 +174,17 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "list_participants",
+    "Who is in this project: people in a browser and other agents, online " +
+      "first, with when each was last seen. Membership lives in the document " +
+      "rather than in the socket's presence, so this is the same list a browser " +
+      "shows — and somebody who has left is still listed, marked offline, " +
+      "rather than vanishing.",
+    { project },
+    ({ project: id }: { project?: string }) => context().workspace(id).participants()
+  );
+
+  tool(
     "post_message",
     "Say something to whoever else is in this project — people in a browser see " +
       "it live. Use it to say what you are about to work on, ask about something " +
