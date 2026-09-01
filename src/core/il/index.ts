@@ -25,8 +25,11 @@ export {
   BlockInputs,
   BlockExit,
   BlockRun,
+  InstructionTrace,
   RegisterName,
   REGISTER_NAMES,
+  TraceSource,
+  ValueSource,
   runBlock,
   stepMachine,
 } from "./run.js";

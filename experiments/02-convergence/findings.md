@@ -241,7 +241,7 @@ server no matter where a reader runs. Now generic.
 | finding | |
 |---|---|
 | routine attribution confidently wrong — one routine absorbed 26% of the program, every SID write reported "in ColdStart" | a `JMP` ends a routine; largest fell to 5%, ambiguous addresses 764 → 4 |
-| `find_instructions $D000-$D02E` returned one dead instruction | constant-folds a pointer, so `STA ($02),Y` resolves to `$D000`; unresolved ones reported |
+| `find_instructions $D000-$D02E` returned one dead instruction | runs the path on the lifted code, so `STA ($02),Y` resolves to `$D018` **and** the byte it stored; unresolved ones reported |
 | no custom text encoding, so every string was unreadable | a text region renders through a decoder |
 | `$(0xD)` in effects, a notation used nowhere else | names the slot: `frameCounter ($000D)` |
 | `find_references` empty for zero page, reading as unanswerable | points at `find_instructions`, which answers it |
@@ -265,3 +265,64 @@ instructions that take no immediate.
 - the auto entry point at `$8000` leaves a permanent warning as the reward for
   correctly declaring the cartridge header data
 - `set_label indexBase:` for the twelve 1-indexed tables
+
+## Run 1 against run 2
+
+The same brief, the same three readers, against the tools built in between. The
+headline is that they did **less**, for the same money:
+
+| | run 1 | run 2 |
+|---|---|---|
+| MCP requests | 712 | 472 (−34%) |
+| comments written | 661 | 288 (−56%) |
+| names per reader | 206 / 197 / 198 | 116 / 179 / 175 |
+| output tokens | 772k | 736k |
+| harness tool-uses | 195 | 195 |
+
+Near-identical budgets with a third fewer requests is the finding. Run 1's
+CLAUDE.md was contaminated — it named Gridrunner's charset address, its
+copyright string, its cartridge header — so run 1 was partly *transcribing*. Run
+2 had to derive the same things, and the effort moved out of the API and into
+thinking. That is the right direction and it makes the two runs not directly
+comparable on volume, which is worth saying plainly rather than reading the drop
+as a regression.
+
+The tool descriptions were generalised between runs for exactly this reason.
+
+## What actually cost the time: interpreting, not locating
+
+Measured from `run2/convergence.mcp.jsonl`, per reader, by call number:
+
+| reader | calls | `find_undecoded` | reached `$8E00` | first decoder |
+|---|---|---|---|---|
+| agate | 105 | 10 | 26 | 27 |
+| amber | 248 | 17 | 24 | 25 |
+| basalt | 119 | 14 | 28 | 47 |
+
+All three asked what was unexplained within seventeen calls and were looking at
+the character set by call 28; two ran a decoder on the very next call. **Finding
+the interesting span was easy.** Working out what was in it was not, and one
+reader spent nineteen calls on it.
+
+So a statistical "this looks like graphics" hint would have solved a problem
+nobody had. It was tested anyway — bit-pattern symmetry does separate the charset
+from every code window on this binary, where entropy does not — and rejected: it
+holds for simple glyphs, fails for complex ones and for most bitmaps and sprites,
+and calls flat `$00`/`$FF` filler graphics.
+
+What answers it instead is already the API's own shape — **ask what uses a span,
+not what it looks like**:
+
+```
+find_instructions from:$D018 to:$D018
+  $810B  STA ($02),Y  →  $D018 = $18      in InitializeGame
+$18 puts the VIC character base at $2000
+find_instructions from:$2000
+  $82F1  STA charSetLocation,X            in LoadCharacterSetData
+  $82EE  LDA characterSetData,X    ← $8E00
+```
+
+Every link is evidence in the program. That chain only became followable with
+the interpreter-based pointer resolution above: folding the pointer but not the
+index returned three indistinguishable sites all claiming `$D000`, and the trail
+stopped at step one. It is pinned by a test.

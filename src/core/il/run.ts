@@ -29,7 +29,7 @@ import { decode } from "../arch/mos6502/decoder.js";
 import { BasicBlock } from "../analysis/blocks.js";
 import { Flow, Machine, execute } from "./interpret.js";
 import { lift } from "./lift.js";
-import { REG } from "./pcode.js";
+import { REG, writes as outputsOf } from "./pcode.js";
 
 /** The machine's own state, by the names a 6502 programmer uses. */
 export const REGISTER_NAMES = ["A", "X", "Y", "SP", "C", "Z", "I", "D", "B", "V", "N"] as const;
@@ -67,6 +67,35 @@ export type ValueSource =
   /** Nothing knew. It read as zero, and zero is a real value. */
   | "unknown";
 
+/**
+ * Where a value came from, as one instruction saw it.
+ *
+ * `computed` is the distinction the block-level summary makes silently by
+ * skipping cells the block wrote: a pointer this block built out of literals is
+ * not an assumption, and counting it as one would refuse every answer worth
+ * having. The block summary has no use for it because such a cell is not an
+ * input; an instruction-level reading does, because "was this address known"
+ * is exactly the question.
+ */
+export type TraceSource = ValueSource | "computed";
+
+/**
+ * What one instruction actually touched.
+ *
+ * Raw, unlike `memoryRead`/`memoryWritten`, which report the *block's* inputs
+ * and outputs and therefore deduplicate. Attribution is the point here: a block
+ * with three `STA ($02),Y` in it writes three different addresses, and the
+ * summary cannot say which instruction reached which.
+ */
+export interface InstructionTrace {
+  /** The instruction, by address. */
+  address: number;
+  reads: { address: number; value: number; source: TraceSource }[];
+  writes: { address: number; value: number }[];
+  /** Register offsets this instruction assigned, so definedness can be tracked. */
+  registersWritten: number[];
+}
+
 /** Where control went when the block finished. */
 export type BlockExit =
   /** Ran off the end into the next block. */
@@ -96,6 +125,15 @@ export interface BlockRun {
    */
   memoryRead: { address: number; value: number; source: ValueSource }[];
   exit: BlockExit;
+  /**
+   * Every access, attributed to the instruction that made it.
+   *
+   * Additive to the summary above rather than a replacement: the summary
+   * answers "what does this block take and leave", this answers "what did
+   * *that* instruction reach", which is what resolving an indirect operand
+   * needs and what no static reading can supply.
+   */
+  trace: InstructionTrace[];
   /** Anything that makes the result less trustworthy than it looks. */
   warnings: string[];
 }
@@ -182,17 +220,31 @@ export function runBlock(block: BasicBlock, inputs: BlockInputs = {}): BlockRun 
   // last value, which is what "the block's output" means.
   const reads = new Map<number, { value: number; source: ValueSource }>();
   const writes = new Map<number, number>();
+  const trace: InstructionTrace[] = [];
+  let current: InstructionTrace | undefined;
+
   machine.watch = {
     read(address, size, value) {
       for (let i = 0; i < size; i++) {
         const at = (address + i) & 0xffff;
+        const byte = (value >>> (8 * i)) & 0xff;
+        // A cell this run already wrote is not an input, and not an assumption
+        // either — it holds whatever the block put there.
+        current?.reads.push({
+          address: at,
+          value: byte,
+          source: writes.has(at) ? "computed" : sourceOf(at),
+        });
         if (reads.has(at) || writes.has(at)) continue;
-        reads.set(at, { value: (value >>> (8 * i)) & 0xff, source: sourceOf(at) });
+        reads.set(at, { value: byte, source: sourceOf(at) });
       }
     },
     write(address, size, value) {
       for (let i = 0; i < size; i++) {
-        writes.set((address + i) & 0xffff, (value >>> (8 * i)) & 0xff);
+        const at = (address + i) & 0xffff;
+        const byte = (value >>> (8 * i)) & 0xff;
+        current?.writes.push({ address: at, value: byte });
+        writes.set(at, byte);
       }
     },
   };
@@ -209,7 +261,14 @@ export function runBlock(block: BasicBlock, inputs: BlockInputs = {}): BlockRun 
       );
     }
 
-    const flow = execute(lift(instruction), machine);
+    const ops = lift(instruction);
+    current = { address: instruction.address, reads: [], writes: [], registersWritten: [] };
+    const flow = execute(ops, machine);
+    for (const output of outputsOf(ops)) {
+      if (output.space === "register") current.registersWritten.push(output.offset);
+    }
+    trace.push(current);
+    current = undefined;
     executed.push({ address: instruction.address, text: formatInstruction(instruction).trim() });
 
     if (flow.kind === "unmodelled") {
@@ -289,6 +348,7 @@ export function runBlock(block: BasicBlock, inputs: BlockInputs = {}): BlockRun 
       .sort((a, b) => a[0] - b[0])
       .map(([address, r]) => ({ address, value: r.value, source: r.source })),
     exit,
+    trace,
     warnings,
   };
 }
