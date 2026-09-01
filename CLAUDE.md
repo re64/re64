@@ -2045,6 +2045,18 @@ uses, so one mechanism covers "draw these bytes" and "read these bytes". A
 decoder that fails, throws, or returns the wrong shape falls back to the declared
 encoding: a broken one makes a listing plainer, never absent.
 
+**All four consumers render it the same way.** `src/sandbox/sync.ts` has no
+`node:` imports, so the browser uses the identical module the CLI and the server
+do — a listing looks the same whoever is reading it, which is the property the
+row model exists to have. It costs SES in the page: the bundle goes from 1.1MB
+to 1.3MB unminified, which is 84KB minified and well inside the 2MB tripwire.
+Note the bundle is not minified at all, so that number overstates what a built
+page would carry.
+
+Deliberately *not* deferred behind a dynamic import. esbuild inlines those
+without `--splitting`, so it would have cost the same bytes while looking like it
+did not — the sort of thing that reads as an optimisation and is a comment.
+
 **Running it here is a convenience, not the only way, and the tools say so.**
 An agent may prefer its own tooling, and nothing should push it towards a
 sandbox it did not ask for — so `read_bytes` hands over the same bytes and

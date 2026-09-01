@@ -38,6 +38,9 @@ import {
   decodeBitmap,
 } from "../core/index.js";
 import { runDecoder } from "./decoders.js";
+// Directly, not through the barrel: its neighbour `run.ts` imports
+// `node:worker_threads` and would follow it into the browser bundle.
+import { renderTextWith } from "../sandbox/sync.js";
 import { ProjectSession } from "../client/index.js";
 import type SlSplitPanel from "@shoelace-style/shoelace/dist/components/split-panel/split-panel.js";
 // Registers <sl-split-panel>. Components are imported individually so the
@@ -1311,7 +1314,15 @@ function render(restoreAddress?: number): void {
   const startedRender = performance.now();
   const loadedProject = session!.loaded;
   const startedAnalyze = performance.now();
-  const result = analyze(loadedProject);
+  const result = analyze(loadedProject, {
+    // A text region may name a decoder. Synchronous, because rows are built in
+    // one pass — the same call the CLI and the server make, so a listing looks
+    // the same wherever it is read.
+    renderText: (id, bytes) => {
+      const decoder = loadedProject.project.decoders?.find((d) => d.id === id);
+      return decoder ? renderTextWith(decoder.source, bytes) : undefined;
+    },
+  });
   timings.analyzeMs = performance.now() - startedAnalyze;
   analysis = {
     name: loadedProject.project.name ?? "untitled",
