@@ -214,3 +214,54 @@ Also unanimous: no sprites (only `$D016`/`$D018`/`$D020`/`$D021` are written), n
 raster interrupt (a free-running loop with counted timing), and **the screen
 matrix is the world model** — no object table, collisions read back out of screen
 RAM, the score living as characters at `$040F`.
+
+---
+
+# Second run — what it produced
+
+Same brief, same three-reader shape, against 49 tools instead of 37. `CLAUDE.md`
+was parked for the duration, which run 1 had not done.
+
+**Not saturated, but the frontier moved.** None of run 1's seven invented tools
+was invented again. The new ones — `find_memory_access`, `remove_entry_point`,
+`find_table_users`, `find_bytes`, `find_stores`, `trace`, `set_charset`,
+`decode_text`, `annotate_table` — are a narrower list, and several are the same
+question twice.
+
+## The finding about the experiment, which is the most valuable one
+
+**The answer key ships inside the tool descriptions.** `add_label` cited
+`randomValue`/`gridXPos`; `set_constant` cited `LEFT_ZAPPER`/`ORANGE`. Two
+readers found it independently, and one made the point that matters: sanitising
+the filesystem does not close it, because those descriptions arrive from the
+server no matter where a reader runs. Now generic.
+
+## Fixed from this run
+
+| finding | |
+|---|---|
+| routine attribution confidently wrong — one routine absorbed 26% of the program, every SID write reported "in ColdStart" | a `JMP` ends a routine; largest fell to 5%, ambiguous addresses 764 → 4 |
+| `find_instructions $D000-$D02E` returned one dead instruction | constant-folds a pointer, so `STA ($02),Y` resolves to `$D000`; unresolved ones reported |
+| no custom text encoding, so every string was unreadable | a text region renders through a decoder |
+| `$(0xD)` in effects, a notation used nowhere else | names the slot: `frameCounter ($000D)` |
+| `find_references` empty for zero page, reading as unanswerable | points at `find_instructions`, which answers it |
+| `block_effects` returning one instruction at a routine head | says so, and names `routine_effects` |
+| no `find_bytes` | added, with `??` wildcards |
+
+## Did not reproduce
+
+`export_listing` emitting invalid JSON. Checked across the whole program and
+across all three readers' own final projects, every page: no control characters
+and no parse failures. Recorded rather than fixed — the same call the transcript
+forced in run 1, where a reported `LDY #` refusal turned out to be four
+instructions that take no immediate.
+
+## Still open
+
+- `kind:"code"` creates entry points nothing can remove, and `remove_entry_point`
+  was invented for exactly that
+- `bind_constants` is all-or-nothing with no partial report — reported in both runs
+- the ±1 label tolerance overrode an exact auto label on a branch target
+- the auto entry point at `$8000` leaves a permanent warning as the reward for
+  correctly declaring the cartridge header data
+- `set_label indexBase:` for the twelve 1-indexed tables

@@ -370,6 +370,23 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "find_bytes",
+    "Every place a sequence of bytes occurs. The search that does not care what " +
+      "anything means: the other copies of a table, where a magic value is " +
+      "written, whether a pattern recurs before there is any theory about why. " +
+      "Use ?? for any byte — the useful searches are nearly always partial, like " +
+      "\"A9 ?? 8D 20 D0\" for any store of a literal to the border colour. " +
+      "Each hit says which region and routine it lands in.",
+    {
+      project,
+      pattern: z.string().min(1).describe('Hex bytes, spaces between, ?? for any: "A9 ?? 8D"'),
+      limit: z.number().int().min(1).max(500).optional().describe("Default 100"),
+    },
+    ({ project: id, pattern, limit }: { project?: string; pattern: string; limit?: number }) =>
+      context().workspace(id).bytesLike(pattern, limit ?? 100)
+  );
+
+  tool(
     "call_graph",
     "Who calls a routine, and what it calls, to a depth. The shape of a program " +
       "rather than one address at a time — where to start reading, and what a " +
@@ -445,9 +462,12 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
 
   tool(
     "block_effects",
-    "What the straight-line block at an address reads and writes, without " +
-      "running it. The first question about a routine nobody has named: not " +
-      "what it is called but what it depends on and what it leaves behind. " +
+    "What one straight-line block reads and writes, without running it. " +
+      "A block ends at the first branch, jump or call, so at a routine head " +
+      "that begins `JSR` this answers about a single instruction — correct, and " +
+      "almost never what you wanted. **For what a whole routine touches, use " +
+      "routine_effects.** This is for reasoning about one step at a time, " +
+      "usually beside run_block. " +
       "Holds for every input. Says so where it cannot answer — an address that " +
       "depends on a register cannot be named, and an instruction with no " +
       "modelled semantics makes both lists incomplete.",

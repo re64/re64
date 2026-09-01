@@ -524,7 +524,14 @@ export class Workspace {
         "Inbound references cover absolute addressing only. Zero-page targets, " +
         "indirect jumps, and addresses stored in data — a pointer read by " +
         "JMP ($8000), or a split lo/hi table — are not recorded, so something " +
-        "reached that way appears to have no callers at all.",
+        "reached that way appears to have no callers at all. " +
+        // Naming the tool that works, because reading "not recorded" as
+        // "unanswerable" is the mistake this sentence exists to prevent, and a
+        // reader who has just been told a zero-page variable has no users will
+        // otherwise believe it.
+        "For a zero-page address, find_instructions with from and to set to it " +
+        "gives the complete answer, including through a pointer where the " +
+        "pointer can be resolved.",
     };
   }
 
@@ -791,6 +798,73 @@ export class Workspace {
   }
 
   /**
+   * Every place a sequence of bytes occurs.
+   *
+   * Two readers invented this independently, which is usually the sign that a
+   * general tool is missing rather than a special one wanted. It is the search
+   * that does not care what anything *means*: find the other copies of a table,
+   * find where a magic value is written, find whether a pattern recurs before
+   * there is any theory about why.
+   *
+   * `??` matches any byte, because the useful searches are nearly always
+   * partial — an instruction with an operand you do not know yet, or a table
+   * row with a varying field.
+   */
+  bytesLike(pattern: string, limit = 100): {
+    pattern: string;
+    total: number;
+    truncated: boolean;
+    at: { address: string; inRegion?: string; inRoutine?: string }[];
+  } {
+    const wanted = pattern
+      .trim()
+      .split(/[\s,]+/)
+      .filter((t) => t.length > 0)
+      .map((token) => {
+        if (/^(\?\?|\?)$/.test(token)) return undefined;
+        const value = Number.parseInt(token.replace(/^\$|^0x/i, ""), 16);
+        if (!Number.isInteger(value) || value < 0 || value > 0xff) {
+          throw new Error(
+            `"${token}" is not a byte. Give hex bytes separated by spaces, with ?? ` +
+              `for any byte — for example "A9 ?? 8D 20 D0".`
+          );
+        }
+        return value;
+      });
+
+    if (wanted.length === 0) throw new Error("Give at least one byte to look for.");
+    if (wanted.every((b) => b === undefined)) {
+      throw new Error("A pattern of nothing but wildcards matches every address.");
+    }
+
+    const { map } = this.program().loaded;
+    const found: { address: string; inRegion?: string; inRoutine?: string }[] = [];
+    let total = 0;
+
+    for (const layer of map.getLayers().filter((l) => l.hasBytes)) {
+      for (let at = layer.start; at + wanted.length <= layer.end + 1; at++) {
+        let hit = true;
+        for (let i = 0; i < wanted.length && hit; i++) {
+          if (wanted[i] === undefined) continue;
+          hit = map.readByte(at + i) === wanted[i];
+        }
+        if (!hit) continue;
+
+        total++;
+        if (found.length >= limit) continue;
+        const region = map.getRegionAt(at);
+        found.push({
+          address: hex4(at),
+          ...(region?.name ? { inRegion: region.name } : {}),
+          ...(this.routineNameAt(at) ? { inRoutine: this.routineNameAt(at)! } : {}),
+        });
+      }
+    }
+
+    return { pattern, total, truncated: total > limit, at: found };
+  }
+
+  /**
    * Who calls a routine, and what it calls, to a depth.
    *
    * Invented by an agent in experiment 2 and refused. It needed the routine
@@ -973,13 +1047,24 @@ export class Workspace {
       const label = program.labels.resolve(at);
       return label && label.offset === 0 ? `${hex4(at)} (${label.label.name})` : hex4(at);
     };
+    // `$(0xD)` is the IL's own notation and appears nowhere else a reader looks.
+    // A memory slot is an address, and an address in this project usually has a
+    // name — saying `frameCounter` costs a lookup and saves a translation.
+    const slot = (node: Parameters<typeof formatVarnode>[0]) => {
+      if (node.space !== "ram") return formatVarnode(node);
+      const label = program.labels.resolve(node.offset);
+      return label && label.offset === 0
+        ? `${label.label.name} (${hex4(node.offset)})`
+        : hex4(node.offset);
+    };
+
     const show = (effects: Effects) => ({
       reads: [
-        ...effects.reads.map(formatVarnode),
+        ...effects.reads.map(slot),
         ...(effects.readsComputedMemory ? ["memory at a computed address"] : []),
       ],
       writes: [
-        ...effects.writes.map(formatVarnode),
+        ...effects.writes.map(slot),
         ...(effects.writesComputedMemory ? ["memory at a computed address"] : []),
       ],
     });
@@ -1045,6 +1130,17 @@ export class Workspace {
       writes: described.writes,
       flags: effects.flags.map((offset) => REGISTER_NAMES[offset] ?? String(offset)),
       unmodelled: effects.unmodelled.map((u) => ({ at: hex4(u.address), mnemonic: u.mnemonic })),
+      // A block ends at the first call, so asking about a routine that opens
+      // with `JSR` returns one instruction. That is right and unhelpful, and
+      // saying which tool answers the question costs a line.
+      ...(block.instructions.length <= 2 && block.exit === "call"
+        ? {
+            note:
+              "This block is the instructions up to its first JSR, which is all " +
+              "a block is. For what the whole routine touches, including what it " +
+              "calls, ask routine_effects about the same address.",
+          }
+        : {}),
       ...(effects.unmodelled.length
         ? {
             note:

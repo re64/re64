@@ -472,8 +472,8 @@ export function analyze(
       const constant =
         instr.operand.type === "immediate" ? loaded.constants.nameAt(addr) : undefined;
       // A site may say which of several labels at an address it means — the
-      // same zero-page byte is `randomValue` in one routine and `gridXPos` in
-      // another, and on a machine that switches banks under a fixed address
+      // same zero-page byte is a scratch value in one routine and a coordinate
+      // in another, and on a machine that switches banks under a fixed address
       // that is the difference between two unrelated things.
       const bound = allLabels.labelForSite(addr);
       const resolveHere = bound

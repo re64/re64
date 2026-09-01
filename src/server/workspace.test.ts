@@ -1738,3 +1738,58 @@ describe("rendering text with a project decoder", () => {
     expect(workspace.listing(0x8080, 4).text).toContain(".TEXT");
   });
 });
+
+describe("searching for bytes", () => {
+  it("finds an exact sequence", () => {
+    // The cartridge signature, which is a byte pattern rather than anything
+    // the analysis understands.
+    const found = workspace.bytesLike("C3 C2 CD 38 30");
+    expect(found.total).toBe(1);
+    expect(found.at[0].address).toBe("$8004");
+  });
+
+  it("treats ?? as any byte", () => {
+    // The useful searches are nearly always partial: an instruction whose
+    // operand is the unknown part.
+    const exact = workspace.bytesLike("A9 00 8D 18 D4").total;
+    const loose = workspace.bytesLike("A9 ?? 8D ?? D4").total;
+    expect(loose).toBeGreaterThan(exact);
+  });
+
+  it("says which routine each hit is in", () => {
+    const found = workspace.bytesLike("A9 ?? 8D ?? D4", 500);
+    expect(found.at.some((a) => a.inRoutine !== undefined)).toBe(true);
+  });
+
+  it("refuses a pattern of nothing but wildcards", () => {
+    expect(() => workspace.bytesLike("?? ??")).toThrow(/matches every address/);
+  });
+
+  it("says what a bad token should have looked like", () => {
+    expect(() => workspace.bytesLike("A9 ZZ")).toThrow(/is not a byte/);
+  });
+});
+
+describe("saying which tool answers", () => {
+  it("points a zero-page reference question at the one that works", () => {
+    // find_references sees absolute addressing only, so a zero-page variable
+    // looks unused. Reading "not recorded" as "unanswerable" is the mistake the
+    // sentence exists to prevent.
+    expect(workspace.references(0x0c, "in").incomplete).toContain("find_instructions");
+  });
+
+  it("says when a block is just the run up to its first call", () => {
+    // A routine that opens with JSR gives a one-instruction block: correct, and
+    // almost never the question being asked.
+    const at = workspace.program().blocks.find((b) => b.exit === "call" && b.instructions.length <= 2);
+    if (!at) return;
+    expect((workspace.blockEffects(at.start) as { note?: string }).note).toContain("routine_effects");
+  });
+
+  it("names a memory slot rather than printing IL notation", () => {
+    // `$(0xD)` is the IL's own spelling and appears nowhere else a reader looks.
+    const effects = workspace.routineEffects(0x8172) as { itself: { reads: string[] } };
+    expect(effects.itself.reads.some((r) => /^\w+ \(\$[0-9A-F]{4}\)$/.test(r))).toBe(true);
+    expect(effects.itself.reads.some((r) => r.startsWith("$(0x"))).toBe(false);
+  });
+});
