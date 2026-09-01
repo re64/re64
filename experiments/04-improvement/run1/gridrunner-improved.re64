@@ -1,0 +1,4676 @@
+{
+  "name": "gridrunner-improved",
+  "description": "GRIDRUNNER (Jeff Minter / Llamasoft, published by HES, 1982) - the original 8K C64 CARTRIDGE image, $8000-$8FFF. The cartridge header is intact: cold-start vector at $8000, NMI vector at $8002, CBM80 signature at $8004. The seeded reading came from mwenge/matrix, whose file header describes the game as Matrix (1983) and whose binary is a converted PRG with those five signature bytes zeroed and a SYS 2061 BASIC stub added at $0800. The banner this program writes to screen row 0 reads GRIDRUNNER, in the game's own 64-glyph character set at $8E00; run the gridrunnerCharset decoder over any text region to read it. Everything is drawn with characters: no sprites, no raster interrupt, no wait on $D012; the whole game is timed by one counter at $0D and a DEX loop at $83E8. [Description restored by hand into this export: diffProjects emits no meta.set op, so set_project_description reaches the document but never the file.]",
+  "layers": [
+    {
+      "id": "lay_3al91f",
+      "type": "symbols",
+      "name": "gridrunner-notes",
+      "labels": [
+        {
+          "id": "lbl_xmaeg4",
+          "address": "$0002",
+          "name": "vicRegisterPtrLo"
+        },
+        {
+          "id": "lbl_hq8g0z",
+          "address": "$0002",
+          "name": "podPtrLo"
+        },
+        {
+          "id": "lbl_pc6ns9",
+          "address": "$0003",
+          "name": "vicRegisterPtrHi"
+        },
+        {
+          "id": "lbl_8j1ka3",
+          "address": "$0003",
+          "name": "podPtrHi"
+        },
+        {
+          "id": "lbl_1hnvs2",
+          "address": "$0007",
+          "name": "clearScreenLoPtr"
+        },
+        {
+          "id": "lbl_g37rsw",
+          "address": "$0008",
+          "name": "clearScreenHiPtr"
+        },
+        {
+          "id": "lbl_7ukqgf",
+          "address": "$0009",
+          "name": "currentExplosionCharacter"
+        },
+        {
+          "id": "lbl_2i4x9l",
+          "address": "$000A",
+          "name": "soundStepCounter"
+        },
+        {
+          "id": "lbl_z9a1ee",
+          "address": "$002C",
+          "name": "unusedZeroPage2C"
+        },
+        {
+          "id": "lbl_9wvfa4",
+          "address": "$0340",
+          "name": "screenLinesLoPtrArray",
+          "extent": 24
+        },
+        {
+          "id": "lbl_g7uld6",
+          "address": "$0360",
+          "name": "screenLinesHiPtrArray",
+          "extent": 24
+        },
+        {
+          "id": "lbl_l6bdqr",
+          "address": "$0400",
+          "name": "SCREEN_RAM",
+          "extent": 1000
+        },
+        {
+          "id": "lbl_dgbr6w",
+          "address": "$040F",
+          "name": "scoreDigits",
+          "extent": 7
+        },
+        {
+          "id": "lbl_b38326",
+          "address": "$041B",
+          "name": "highScoreDigits",
+          "extent": 7
+        },
+        {
+          "id": "lbl_ru9k67",
+          "address": "$0427",
+          "name": "livesDigit",
+          "extent": 1
+        },
+        {
+          "id": "lbl_uuk4vc",
+          "address": "$0450",
+          "name": "playAreaStart",
+          "extent": 1
+        },
+        {
+          "id": "lbl_r8otme",
+          "address": "$0557",
+          "name": "selectedLevelDigits",
+          "extent": 2
+        },
+        {
+          "id": "lbl_ounid2",
+          "address": "$055E",
+          "name": "levelNumberDigits",
+          "extent": 2
+        },
+        {
+          "id": "lbl_o2qes4",
+          "address": "$0FFF",
+          "name": "podLoPtrArray",
+          "extent": 33
+        },
+        {
+          "id": "lbl_e0azg6",
+          "address": "$101F",
+          "name": "podHiPtrArray",
+          "extent": 33
+        },
+        {
+          "id": "lbl_2qsi5j",
+          "address": "$10FF",
+          "name": "droidXPositionArray",
+          "extent": 256
+        },
+        {
+          "id": "lbl_eurlxa",
+          "address": "$11FF",
+          "name": "droidYPositionArray",
+          "extent": 256
+        },
+        {
+          "id": "lbl_m8ywmb",
+          "address": "$12FF",
+          "name": "droidStatusArray",
+          "extent": 256
+        },
+        {
+          "id": "lbl_5vxq8u",
+          "address": "$1500",
+          "name": "explosionXPosArray",
+          "extent": 9
+        },
+        {
+          "id": "lbl_2v753g",
+          "address": "$1600",
+          "name": "explosionYPosArray",
+          "extent": 9
+        },
+        {
+          "id": "lbl_4n6ees",
+          "address": "$2000",
+          "name": "charSetLocation",
+          "extent": 512
+        },
+        {
+          "id": "lbl_t6hkpm",
+          "address": "$D800",
+          "name": "COLOR_RAM",
+          "extent": 1000
+        },
+        {
+          "id": "lbl_z6574o",
+          "address": "$DC11",
+          "name": "CIA1_PORTB_MIRROR",
+          "extent": 1
+        },
+        {
+          "id": "lbl_c3jjti",
+          "address": "$E518",
+          "name": "ROM_CINT"
+        }
+      ],
+      "comments": [
+        {
+          "id": "cmt_kpyfyd",
+          "address": "$0002",
+          "text": "Scratch column for whatever is being drawn (0-39). Also the low byte of the VIC register pointer in InitializeGame and of the pod screen pointer in MovePodDownOneRow - both bound to their own names at those sites."
+        },
+        {
+          "id": "cmt_438m7h",
+          "address": "$0003",
+          "text": "Scratch row for whatever is being drawn (0-24). GetLinePtrForCurrentYPosition indexes the line tables with it."
+        },
+        {
+          "id": "cmt_r8kjc3",
+          "address": "$0008",
+          "text": "The grid column while DrawGrid sweeps, and the high byte of the clear-screen pointer in ClearPlayArea. The seeded project and the reference both call this byte randomValue, on the strength of PlayAnotherSound doing LDA $08 / STA $D401. But PlayAnotherSound is only ever called from inside DrawGrid's two sweeps, where $08 holds the column being drawn - so what goes into the SID is the column, which is why the tone rises across the screen. find_instructions over $0008 shows thirteen sites in three routines and not one of them puts a random number here."
+        },
+        {
+          "id": "cmt_nk4shb",
+          "address": "$0009",
+          "text": "The grid row while DrawGrid sweeps; the explosion character during the ship materialise sequence. Two unrelated uses of one byte, bound separately."
+        },
+        {
+          "id": "cmt_vje2p3",
+          "address": "$000B",
+          "text": "The ship's column. The reference calls this previousXPosition, but it is not a previous anything: it is where the ship IS between frames. UpdateShipPosition copies it into the scratch cell, moves, and copies it back; DrawBullet launches from it; the explosion is centred on it."
+        },
+        {
+          "id": "cmt_5esalm",
+          "address": "$000C",
+          "text": "The ship's row, for the same reason as $0B."
+        },
+        {
+          "id": "cmt_55o4yf",
+          "address": "$000D",
+          "text": "The master frame counter, and the only clock in the game. UpdateShipPosition decrements it every pass of the main loop; ResetMasterFrameCounter catches the wrap past $FF and reloads $80. The zapper runs when it equals 1 and the background sound on odd values, so every subsystem is phased off this one byte. The reference calls it shipAnimationFrameRate, which describes one of its four readers."
+        },
+        {
+          "id": "cmt_598fzl",
+          "address": "$000F",
+          "text": "Countdown to the next bullet frame, reloaded with $18. DrawLaser also tests it for the value 5 and UpdateLaserCharacter decrements it a second time, so bullet and laser share the timer. The seeded project had gridYPos here."
+        },
+        {
+          "id": "cmt_aoofo7",
+          "address": "$0010",
+          "text": "Bullet column. The seeded project had $10 and $11 the wrong way round: DrawBullet stores shipXPosition here and shipYPosition in $11, and it is $11 that carries the $FF no-bullet sentinel."
+        },
+        {
+          "id": "cmt_qc64yv",
+          "address": "$0011",
+          "text": "Bullet row, or $FF for \"no bullet in flight\"."
+        },
+        {
+          "id": "cmt_h41k0x",
+          "address": "$0017",
+          "text": "Counts down to the next zapper firing; reloaded from laserFrameRate, the per-level value. UpdatePods also only runs when it happens to equal 5. The seeded project called this laserShootInterval, which is $18."
+        },
+        {
+          "id": "cmt_upncku",
+          "address": "$0018",
+          "text": "$FF means the lasers are live and DrawLaser should draw them; DrawLaser clears it when the two beams meet."
+        },
+        {
+          "id": "cmt_81hz7s",
+          "address": "$0019",
+          "text": "The laser animation character, cycling $05/$06. The seeded project called this laserAndPodInterval, which is $17."
+        },
+        {
+          "id": "cmt_ux9z0x",
+          "address": "$0021",
+          "text": "Counts down to the next pod movement, reloaded with $40. The seeded project called this cyclesToWasteCounter, which is $30."
+        },
+        {
+          "id": "cmt_7x3v5s",
+          "address": "$0022",
+          "text": "Pitch of the hit sound, swept down from $F0 into voice 3 while its top two bits are set. The seeded project called this soundEffectControl, which is $36."
+        },
+        {
+          "id": "cmt_6th5nl",
+          "address": "$0023",
+          "text": "How many more times to restart the $22 sweep. Set to 3 by every scoring hit."
+        },
+        {
+          "id": "cmt_xkezr1",
+          "address": "$0025",
+          "text": "Countdown to the next droid frame, reloaded with $80. The seeded project called this droidsLeftToKill, which is $2A."
+        },
+        {
+          "id": "cmt_h4kxzl",
+          "address": "$0026",
+          "text": "Current droid animation character, cycling $13/$14/$15. The seeded project called this sizeOfDroidSquadForLevel, which is $2B."
+        },
+        {
+          "id": "cmt_ceewix",
+          "address": "$0028",
+          "text": "Frames of quiet left before the next droid squad starts, reloaded with $20. The reference has no name for this byte at all - it calls it a28."
+        },
+        {
+          "id": "cmt_kcy5q6",
+          "address": "$0029",
+          "text": "Segments still to be emitted for the squad currently being built. SpawnDroidSegments appends one per call while this is non-zero and gives the last one the visible bit; the reference calls it a29."
+        },
+        {
+          "id": "cmt_jwu6dg",
+          "address": "$002B",
+          "text": "Segments per squad for this level, read out of the table at $8CD4 by PrepareNextLevel. The seeded project called this clearScreenLineLoPtr; the clear-screen pointer is $07/$08."
+        },
+        {
+          "id": "cmt_mtb7wr",
+          "address": "$0036",
+          "text": "Outer counter for the level fanfare, counting down from $30 and doubling as the colour of the level digits. Only reachable at all once the laserFrameRateForLevel region stops swallowing $8D16."
+        },
+        {
+          "id": "cmt_jty4ah",
+          "address": "$00C5",
+          "text": "KERNAL: matrix code of the key currently pressed, $40 when none. Still maintained because ColdStart re-enables interrupts and leaves the KERNAL IRQ in place. The only code this game looks for is $29 = 41 = P."
+        },
+        {
+          "id": "cmt_xq6y9l",
+          "address": "$0340",
+          "text": "Low bytes of the 24 screen row addresses, built by InitializeGame. Indexed by row, so every draw in the game is one indexed load from here plus one from $0360."
+        },
+        {
+          "id": "cmt_edgs3r",
+          "address": "$040F",
+          "text": "The player's score - seven characters of screen RAM on row 0, columns 15-21. There is no score anywhere else in memory: IncrementPlayerScore counts these characters up as text and UpdateHighScore compares them as text."
+        },
+        {
+          "id": "cmt_hopy1g",
+          "address": "$041B",
+          "text": "The high score, row 0 columns 27-33. Only ever written by UpdateHighScore, digit for digit out of $040F."
+        },
+        {
+          "id": "cmt_vlhgss",
+          "address": "$0427",
+          "text": "Lives, as a single screen character at row 0 column 39. Set to '4' by StartLevel and by the initial banner byte at $8847, incremented by PrepareNextLevel (capped at '9') and decremented on each death; reaching '0' is game over."
+        },
+        {
+          "id": "cmt_es7vvf",
+          "address": "$0557",
+          "text": "The two digits of \"ENTER LEVEL nn\" on the title screen, counted up by IncrementSelectedLevel."
+        },
+        {
+          "id": "cmt_3mxci8",
+          "address": "$055E",
+          "text": "The two digits of \"ENTER GRID AREA nn\" on the interstitial, counted up by IncrementLevelDigits."
+        },
+        {
+          "id": "cmt_h6dbvp",
+          "address": "$0FFF",
+          "text": "Base-1 of the 32 pod screen-pointer low bytes at $1000-$101F. Only slots 1-24 are ever used."
+        },
+        {
+          "id": "cmt_bsrclm",
+          "address": "$101F",
+          "text": "Base-1 of the 32 pod screen-pointer high bytes at $1020-$103F. $FF marks a free slot."
+        },
+        {
+          "id": "cmt_jpgngf",
+          "address": "$10FF",
+          "text": "Base-1 of the droid column array. Entry 1 is the head of the chain; each higher entry follows the one below it."
+        },
+        {
+          "id": "cmt_eibmz1",
+          "address": "$12FF",
+          "text": "Base-1 of the droid status array. Bit $80 = visible/alive, bit $40 = this segment steers for itself (the head), bits $01/$02 = which way it is going."
+        },
+        {
+          "id": "cmt_qtkkn1",
+          "address": "$1500",
+          "text": "Explosion fragment columns, entries 1-8."
+        },
+        {
+          "id": "cmt_74eydj",
+          "address": "$1600",
+          "text": "Explosion fragment rows, entries 1-8."
+        },
+        {
+          "id": "cmt_7027kw",
+          "address": "$DC11",
+          "text": "CIA 1 port B, reached through the chip's 16-byte register mirror ($DC01 + $10). This is JOYSTICK PORT 1; port 2 is port A at $DC00. The reference's comment on the title-screen read at $8DB0 says port 2."
+        },
+        {
+          "id": "cmt_ou53mk",
+          "address": "$002C",
+          "text": "No instruction in the program touches $2C. The seeded project named it clearScreenLineHiPtr; the clear-screen pointer is $07/$08. remove_label refuses to delete it (\"comes from user rather than from this project\"), so it is renamed instead."
+        }
+      ]
+    },
+    {
+      "id": "lay_vgc9e2",
+      "type": "symbols",
+      "name": "gridrunner-symbols",
+      "labels": [
+        {
+          "id": "lbl_ab2x56",
+          "address": "$02",
+          "name": "currentXPosition"
+        },
+        {
+          "id": "lbl_c4avum",
+          "address": "$03",
+          "name": "currentYPosition"
+        },
+        {
+          "id": "lbl_2fbr1f",
+          "address": "$04",
+          "name": "currentCharacter"
+        },
+        {
+          "id": "lbl_dg1ymj",
+          "address": "$05",
+          "name": "colorForCurrentCharacter"
+        },
+        {
+          "id": "lbl_8sn7du",
+          "address": "$06",
+          "name": "screenLineLoPtr"
+        },
+        {
+          "id": "lbl_yo7d6q",
+          "address": "$07",
+          "name": "screenLineHiPtr"
+        },
+        {
+          "id": "lbl_ljtgdm",
+          "address": "$08",
+          "name": "gridXPos"
+        },
+        {
+          "id": "lbl_zmkcql",
+          "address": "$09",
+          "name": "gridYPos"
+        },
+        {
+          "id": "lbl_pvzwfe",
+          "address": "$0A",
+          "name": "materializeShipOffset"
+        },
+        {
+          "id": "lbl_tog3im",
+          "address": "$0B",
+          "name": "shipXPosition"
+        },
+        {
+          "id": "lbl_m3pl0g",
+          "address": "$0C",
+          "name": "shipYPosition"
+        },
+        {
+          "id": "lbl_yvbhd2",
+          "address": "$0D",
+          "name": "masterFrameCounter"
+        },
+        {
+          "id": "lbl_5br7nv",
+          "address": "$0E",
+          "name": "joystickInput"
+        },
+        {
+          "id": "lbl_jici7s",
+          "address": "$0F",
+          "name": "bulletAndLaserFrameRate"
+        },
+        {
+          "id": "lbl_wg4i6x",
+          "address": "$10",
+          "name": "currentBulletXPosition"
+        },
+        {
+          "id": "lbl_o8ln2h",
+          "address": "$11",
+          "name": "currentBulletYPosition"
+        },
+        {
+          "id": "lbl_w9zkeg",
+          "address": "$12",
+          "name": "currentBulletCharacter"
+        },
+        {
+          "id": "lbl_gqcr3g",
+          "address": "$13",
+          "name": "bulletSoundControl"
+        },
+        {
+          "id": "lbl_94mmbg",
+          "address": "$14",
+          "name": "zapperFrameRate"
+        },
+        {
+          "id": "lbl_5pcmj7",
+          "address": "$15",
+          "name": "leftZapperYPosition"
+        },
+        {
+          "id": "lbl_4x0ovr",
+          "address": "$16",
+          "name": "bottomZapperXPosition"
+        },
+        {
+          "id": "lbl_uabln7",
+          "address": "$17",
+          "name": "laserAndPodInterval"
+        },
+        {
+          "id": "lbl_gnamgc",
+          "address": "$18",
+          "name": "laserShootInterval"
+        },
+        {
+          "id": "lbl_3dlnp8",
+          "address": "$19",
+          "name": "laserCurrentCharacter"
+        },
+        {
+          "id": "lbl_7gxbqp",
+          "address": "$001A",
+          "name": "leftLaserYPosition"
+        },
+        {
+          "id": "lbl_y66gj6",
+          "address": "$001B",
+          "name": "leftLaserXPosition"
+        },
+        {
+          "id": "lbl_11i9bb",
+          "address": "$001C",
+          "name": "bottomLaserXPosition"
+        },
+        {
+          "id": "lbl_or5d5e",
+          "address": "$001D",
+          "name": "bottomLaserYPosition"
+        },
+        {
+          "id": "lbl_go6rw6",
+          "address": "$1F",
+          "name": "podScreenLoPtr"
+        },
+        {
+          "id": "lbl_xqyj1v",
+          "address": "$20",
+          "name": "podScreenHiPtr"
+        },
+        {
+          "id": "lbl_zcqkaq",
+          "address": "$21",
+          "name": "podUpdateRate"
+        },
+        {
+          "id": "lbl_0sz6fg",
+          "address": "$22",
+          "name": "hitSoundSweep"
+        },
+        {
+          "id": "lbl_w3dokq",
+          "address": "$23",
+          "name": "hitSoundRepeats"
+        },
+        {
+          "id": "lbl_kvbcvt",
+          "address": "$24",
+          "name": "noOfDroidSquadsCurrentLevel"
+        },
+        {
+          "id": "lbl_6isp74",
+          "address": "$25",
+          "name": "droidFrameRate"
+        },
+        {
+          "id": "lbl_qj7f5t",
+          "address": "$26",
+          "name": "currentDroidCharacter"
+        },
+        {
+          "id": "lbl_w5ge52",
+          "address": "$27",
+          "name": "currentDroidIndex"
+        },
+        {
+          "id": "lbl_96gk0d",
+          "address": "$28",
+          "name": "delayUntilNextSquad"
+        },
+        {
+          "id": "lbl_078gfg",
+          "address": "$29",
+          "name": "droidSegmentsLeftToSpawn"
+        },
+        {
+          "id": "lbl_t9twim",
+          "address": "$002A",
+          "name": "droidsLeftToKill"
+        },
+        {
+          "id": "lbl_66am5y",
+          "address": "$2B",
+          "name": "sizeOfDroidSquadForLevel"
+        },
+        {
+          "id": "lbl_70dfgz",
+          "address": "$2C",
+          "name": "clearScreenLineHiPtr"
+        },
+        {
+          "id": "lbl_m5kmdo",
+          "address": "$002D",
+          "name": "currentShipExplosionCharacter"
+        },
+        {
+          "id": "lbl_i0o5r6",
+          "address": "$0030",
+          "name": "cyclesToWasteCounter"
+        },
+        {
+          "id": "lbl_49plcx",
+          "address": "$0033",
+          "name": "collisionSoundControl"
+        },
+        {
+          "id": "lbl_qrsjns",
+          "address": "$34",
+          "name": "laserFrameRate"
+        },
+        {
+          "id": "lbl_upk5kq",
+          "address": "$35",
+          "name": "selectedLevel"
+        },
+        {
+          "id": "lbl_1bbntb",
+          "address": "$36",
+          "name": "soundEffectControl"
+        },
+        {
+          "id": "lbl_waajrp",
+          "address": "$C5",
+          "name": "lastKeyPressed"
+        },
+        {
+          "id": "lbl_7k1xi4",
+          "address": "$0340",
+          "name": "screenLinesLoPtrArray"
+        },
+        {
+          "id": "lbl_zy1cvd",
+          "address": "$0360",
+          "name": "screenLinesHiPtrArray"
+        },
+        {
+          "id": "lbl_2kj7tx",
+          "address": "$0400",
+          "name": "SCREEN_RAM"
+        },
+        {
+          "id": "lbl_los6kw",
+          "address": "$0FFF",
+          "name": "podLoPtrArray"
+        },
+        {
+          "id": "lbl_m11h9h",
+          "address": "$101F",
+          "name": "podHiPtrArray"
+        },
+        {
+          "id": "lbl_99tz2v",
+          "address": "$10FF",
+          "name": "droidXPositionArray"
+        },
+        {
+          "id": "lbl_0896kc",
+          "address": "$11FF",
+          "name": "droidYPositionArray"
+        },
+        {
+          "id": "lbl_ks1k0f",
+          "address": "$12FF",
+          "name": "droidStatusArray"
+        },
+        {
+          "id": "lbl_ub5gsw",
+          "address": "$1500",
+          "name": "explosionXPosArray"
+        },
+        {
+          "id": "lbl_x58q7a",
+          "address": "$1600",
+          "name": "explosionYPosArray"
+        },
+        {
+          "id": "lbl_dvm6c6",
+          "address": "$2000",
+          "name": "charSetLocation"
+        },
+        {
+          "id": "lbl_c9pf2j",
+          "address": "$D016",
+          "name": "VIC_CTRL2"
+        },
+        {
+          "id": "lbl_03736c",
+          "address": "$D800",
+          "name": "COLOR_RAM"
+        },
+        {
+          "id": "lbl_z9jaei",
+          "address": "$FD15",
+          "name": "ROM_RESTOR"
+        },
+        {
+          "id": "lbl_zp9aso",
+          "address": "$FD50",
+          "name": "ROM_RAMTAS"
+        },
+        {
+          "id": "lbl_qncjzo",
+          "address": "$FDA3",
+          "name": "ROM_IOINIT"
+        },
+        {
+          "id": "lbl_2l1bhs",
+          "address": "$FFD2",
+          "name": "ROM_CHROUT"
+        }
+      ]
+    },
+    {
+      "id": "lay_kdhw6h",
+      "type": "prg",
+      "path": "gridrunner.prg",
+      "noAutoEntry": true,
+      "regions": [
+        {
+          "id": "rgn_1jmk1o",
+          "start": "$8000",
+          "end": "$8004",
+          "kind": "jumptable",
+          "name": "initJumpTable"
+        },
+        {
+          "id": "rgn_49myeh",
+          "start": "$8004",
+          "end": "$8009",
+          "kind": "text",
+          "name": "cartridgeSignature",
+          "comment": "$C3 $C2 $CD $38 $30 = \"CBM80\" in PETSCII, where codes $C1-$DA duplicate the letters at $41-$5A. This is the autostart signature a C64 looks for at $8004 when it finds a cartridge at $8000; together with the cold-start vector at $8000 and the NMI vector at $8002 it is what makes this an 8K cartridge image rather than a loadable program. The binary the reference disassembly was made from has these five bytes zeroed, which is what a cartridge-to-PRG conversion does so the machine will not autostart it.",
+          "view": "snippet:dec_j1k7ti"
+        },
+        {
+          "id": "rgn_ibp594",
+          "start": "$8009",
+          "end": "$8011",
+          "kind": "data",
+          "name": "unusedAfterCartridgeHeader",
+          "comment": "$00 $8F $9D $00 $21 $CA $D0 $F1 - nothing reads these and no control flow reaches them. $CA $D0 $F1 would decode as DEX / BNE -15, which is the shape of a delay loop, so this looks like the tail of something that was overwritten by the cartridge header rather than deliberate padding."
+        },
+        {
+          "id": "rgn_08ymdx",
+          "start": "$8014",
+          "end": "$8015",
+          "kind": "code",
+          "name": "filler8014"
+        },
+        {
+          "id": "rgn_xz7zne",
+          "start": "$801D",
+          "end": "$8020",
+          "kind": "code",
+          "name": "filler801D"
+        },
+        {
+          "id": "rgn_q5wati",
+          "start": "$802B",
+          "end": "$8030",
+          "kind": "code",
+          "name": "filler802B"
+        },
+        {
+          "id": "rgn_adzd4d",
+          "start": "$803F",
+          "end": "$8040",
+          "kind": "code",
+          "name": "filler803F"
+        },
+        {
+          "id": "rgn_k9pgm6",
+          "start": "$805F",
+          "end": "$8060",
+          "kind": "code",
+          "name": "filler805F"
+        },
+        {
+          "id": "rgn_6u63z2",
+          "start": "$8080",
+          "end": "$80A0",
+          "kind": "text",
+          "name": "copyrightLine",
+          "comment": "32 bytes read as copyrightLine-1,X for X=$20..1 at $80D4 and written to screen $0592 (row 10, col 2) in colour 7. Through the game charset: \"(c) 1982 HES  PRESS FIRE TO BEGIN\". HES was the US publisher; Gridrunner is 1982, which is one of the reasons the reference file header calling this game Matrix (1983) is wrong.",
+          "view": "snippet:dec_1znxc3"
+        },
+        {
+          "id": "rgn_dkps9y",
+          "start": "$80FE",
+          "end": "$8100",
+          "kind": "code",
+          "name": "filler80FE"
+        },
+        {
+          "id": "rgn_vklmre",
+          "start": "$8162",
+          "end": "$8163",
+          "kind": "code",
+          "name": "unreachableRts8162",
+          "comment": "An RTS that follows an unconditional JMP: InitializeGame leaves through JMP ShowBannerThenTitle and never returns."
+        },
+        {
+          "id": "rgn_4cqwge",
+          "start": "$837B",
+          "end": "$8380",
+          "kind": "code",
+          "name": "filler837B"
+        },
+        {
+          "id": "rgn_6auofk",
+          "start": "$839C",
+          "end": "$83A0",
+          "kind": "code",
+          "name": "filler839C"
+        },
+        {
+          "id": "rgn_6bd0yt",
+          "start": "$83F0",
+          "end": "$8400",
+          "kind": "code",
+          "name": "unreachableSpareMainLoopEntry",
+          "comment": "Ten NOPs, a JMP EnterMainGameLoop, and three more NOPs. Nothing reaches any of it; it is a second way into the main loop that no longer has a caller."
+        },
+        {
+          "id": "rgn_ou7d3y",
+          "start": "$83FD",
+          "end": "$8400",
+          "kind": "code",
+          "name": "filler83FD"
+        },
+        {
+          "id": "rgn_ft3bpd",
+          "start": "$871F",
+          "end": "$8728",
+          "kind": "data",
+          "name": "podDecaySequence"
+        },
+        {
+          "id": "rgn_4icvat",
+          "start": "$87D8",
+          "end": "$87D9",
+          "kind": "code",
+          "name": "unreachableRts87D8",
+          "comment": "Unreachable: the instruction above is an unconditional JMP to CheckIfBulletCollidedWithDroid."
+        },
+        {
+          "id": "rgn_174tj8",
+          "start": "$881E",
+          "end": "$8820",
+          "kind": "data",
+          "name": "filler881E",
+          "comment": "Two $EA bytes between the code and the banner table. The reference groups the second of them with screenHeaderText as a base-1 dummy entry, which is the same bytes described differently."
+        },
+        {
+          "id": "rgn_ujf3p1",
+          "start": "$8820",
+          "end": "$8848",
+          "kind": "text",
+          "name": "screenHeaderText",
+          "comment": "Screen row 0, copied by DrawGameBanner as $881F,X for X=$28..1. Through the game charset: \"GRIDRUNNER  PL 0000000  HI 0000000  <ship>  4\". $19+$1A are one proportional pair reading PL and $1D+$1E another reading HI; $8847 = $34 is the initial lives digit at column 39, which StartLevel re-writes and ClearScreenAndRestartLevel decrements. The reference groups that byte with the colour table instead, where it is not a colour.",
+          "view": "snippet:dec_1znxc3"
+        },
+        {
+          "id": "rgn_iouxkw",
+          "start": "$8848",
+          "end": "$8870",
+          "kind": "data",
+          "name": "screenHeaderColors"
+        },
+        {
+          "id": "rgn_a3niki",
+          "start": "$8984",
+          "end": "$8990",
+          "kind": "code",
+          "name": "unreachableDroidFragments",
+          "comment": "Twelve bytes nothing references and no control flow reaches: LDX #$01 / INC currentDroidCharacter / RTS, then LDX currentDroidIndex / INX / CPX noOfDroidSquadsCurrentLevel / RTS, then a NOP. Two abandoned routine tails left in place - development leftovers, not data."
+        },
+        {
+          "id": "rgn_c9ofyy",
+          "start": "$8989",
+          "end": "$8990",
+          "kind": "code",
+          "name": "unreachableDroidCountCheck",
+          "comment": "The second of the two abandoned tails here. Needs its own declaration because the RTS at $8988 ends the first one, so no walk continues into it."
+        },
+        {
+          "id": "rgn_eumn6p",
+          "start": "$898F",
+          "end": "$8990",
+          "kind": "data",
+          "name": "filler898F"
+        },
+        {
+          "id": "rgn_bog0w8",
+          "start": "$8AD4",
+          "end": "$8ADE",
+          "kind": "code",
+          "name": "unreachableShipCollisionCheck",
+          "comment": "JSR GetCharacterAtCurrentXYPos / CMP #$07 / BEQ +3 / JMP WriteCurrentCharacterToCurrentXYPos. The reference asks \"Is this reached?\" over these bytes. It is not: find_references reports nothing inbound and no instruction falls into $8AD4, which is preceded by a JMP. It is a superseded copy of the check DrawDroids now makes through CheckForShipCollision."
+        },
+        {
+          "id": "rgn_f1xs08",
+          "start": "$8AE7",
+          "end": "$8AE9",
+          "kind": "code",
+          "name": "unreachableRts8AE7"
+        },
+        {
+          "id": "rgn_4yyuw5",
+          "start": "$8AE8",
+          "end": "$8AE9",
+          "kind": "data",
+          "name": "filler8AE8"
+        },
+        {
+          "id": "rgn_ssy0m2",
+          "start": "$8AF1",
+          "end": "$8AF8",
+          "kind": "code",
+          "name": "unreachableCollisionTail",
+          "comment": "CMP #$20 / BEQ $8AF0 / JMP ResetStackAndKillShip - the rest of a longer CheckForShipCollision that now returns at $8AF0. Unreachable: the RTS above it is unconditional."
+        },
+        {
+          "id": "rgn_tbmtx9",
+          "start": "$8B5D",
+          "end": "$8B60",
+          "kind": "code",
+          "name": "unreachableExplosionDelay",
+          "comment": "DEX / BNE $8B59. $8B58 loads #$14 into A and then JMPs away instead of running this loop, so the count is loaded and never used and these two instructions never execute. The reference lists the same dead pair."
+        },
+        {
+          "id": "rgn_oqeb3f",
+          "start": "$8BC0",
+          "end": "$8BD1",
+          "kind": "data",
+          "name": "explosionControlArrays"
+        },
+        {
+          "id": "rgn_jcifwy",
+          "start": "$8BD1",
+          "end": "$8BD2",
+          "kind": "code",
+          "name": "filler8BD1"
+        },
+        {
+          "id": "rgn_kik0mr",
+          "start": "$8CB5",
+          "end": "$8CD5",
+          "kind": "data",
+          "name": "noOfDroidSquadsForLevel"
+        },
+        {
+          "id": "rgn_h1mmki",
+          "start": "$8CD5",
+          "end": "$8CF5",
+          "kind": "data",
+          "name": "sizeOfDroidSquadsForLevels",
+          "comment": "32 entries, indexed 1..32 by selectedLevel from base $8CD4 (LDA $8CD4,X at $8C93). The seeded region ran one byte long and stole $8CF4, which is entry 32 of THIS table and simultaneously the base-1 of the next one."
+        },
+        {
+          "id": "rgn_ef4ctn",
+          "start": "$8CF5",
+          "end": "$8D16",
+          "kind": "data",
+          "name": "laserFrameRateForLevel",
+          "comment": "32 entries $8CF5-$8D14, indexed 1..32 from base $8CF4 (LDA $8CF4,X at $8C98), plus one $EA filler byte at $8D15. The seeded region started at $8CF6 and ran to $8D18, which swallowed the LDA #$30 at $8D16 that begins PlayNewLevelSounds - that is the $8D16 warning."
+        },
+        {
+          "id": "rgn_lrt6mz",
+          "start": "$8C51",
+          "end": "$8C63",
+          "kind": "text",
+          "name": "txtBattleStations",
+          "view": "snippet:dec_1znxc3"
+        },
+        {
+          "id": "rgn_kxcnyv",
+          "start": "$8C63",
+          "end": "$8C75",
+          "kind": "text",
+          "name": "txtEnterGridArea",
+          "view": "snippet:dec_1znxc3"
+        },
+        {
+          "id": "rgn_r0lmcu",
+          "start": "$8DCB",
+          "end": "$8DD0",
+          "kind": "code",
+          "name": "unreachableBranchIntoInstruction",
+          "comment": "BCS $8D5A, then three NOPs. $8DCB follows an unconditional JMP and nothing branches here, so it never executes - but its target is the OPERAND byte of STA selectedLevel at $8D59, not an instruction start. Declaring it code makes re64 decode $8D5A as a second stream, which is the reading this byte would have if the branch were ever taken."
+        },
+        {
+          "id": "rgn_7bfu6l",
+          "start": "$8DD0",
+          "end": "$8DE1",
+          "kind": "data",
+          "name": "paddingBeforeText"
+        },
+        {
+          "id": "rgn_twxguz",
+          "start": "$8DE1",
+          "end": "$8DEF",
+          "kind": "text",
+          "name": "txtByJeffMinter",
+          "view": "snippet:dec_1znxc3"
+        },
+        {
+          "id": "rgn_n3smyf",
+          "start": "$8DEF",
+          "end": "$8DF1",
+          "kind": "data",
+          "name": "fillerBetweenTitleStrings",
+          "comment": "$20 then $EA: not part of either string. The copy loops read $8DE1-$8DEE and $8DF1-$8DFE."
+        },
+        {
+          "id": "rgn_r0a886",
+          "start": "$8DF1",
+          "end": "$8DFF",
+          "kind": "text",
+          "name": "txtEnterLevel",
+          "view": "snippet:dec_1znxc3"
+        },
+        {
+          "id": "rgn_d4iofu",
+          "start": "$8DFF",
+          "end": "$8E00",
+          "kind": "data",
+          "name": "filler8DFF",
+          "comment": "One $20 byte the title-screen copy loop never reaches; the loop stops at $8DFE."
+        },
+        {
+          "id": "rgn_rxbj2n",
+          "start": "$8E00",
+          "end": "$9000",
+          "kind": "bitmap",
+          "name": "characterSetData",
+          "comment": "The game furnishes its own 64-character set, copied to $2000 by LoadCharacterSetData and selected by the $18 written to $D018 in InitializeGame. $00-$1F are game objects (grid cell, zappers, ship, bullet, bomb, laser frames, pod decay stages, droid frames, explosion debris) and $20-$3F are the text glyphs. Rendering it is the only way to read any string in this program: no built-in encoding applies.",
+          "view": "char:8"
+        }
+      ],
+      "labels": [
+        {
+          "id": "lbl_60gnj0",
+          "address": "$8000",
+          "name": "cartridgeColdStartVector"
+        },
+        {
+          "id": "lbl_p6owci",
+          "address": "$8002",
+          "name": "cartridgeNmiVector"
+        },
+        {
+          "id": "lbl_os1wi4",
+          "address": "$8011",
+          "name": "JumpToInitializeGame",
+          "type": "code"
+        },
+        {
+          "id": "lbl_0s3hc0",
+          "address": "$8015",
+          "name": "HighScoreNextDigit",
+          "type": "code"
+        },
+        {
+          "id": "lbl_dg3lvt",
+          "address": "$8020",
+          "name": "CheckCurrentCharacterForShip",
+          "type": "function"
+        },
+        {
+          "id": "lbl_2r5fpr",
+          "address": "$8028",
+          "name": "LaserHitShip",
+          "type": "code"
+        },
+        {
+          "id": "lbl_o4t814",
+          "address": "$8030",
+          "name": "ClampExplosionRow",
+          "type": "function"
+        },
+        {
+          "id": "lbl_3ttlh5",
+          "address": "$8036",
+          "name": "StoreExplosionRow",
+          "type": "code"
+        },
+        {
+          "id": "lbl_eigwhc",
+          "address": "$803A",
+          "name": "ExplosionRowOffGrid",
+          "type": "code"
+        },
+        {
+          "id": "lbl_ilsfj1",
+          "address": "$8040",
+          "name": "MoveExplosionFragmentLeft",
+          "type": "function"
+        },
+        {
+          "id": "lbl_ferg6q",
+          "address": "$8050",
+          "name": "ExplosionColumnOffGrid",
+          "type": "code"
+        },
+        {
+          "id": "lbl_2waler",
+          "address": "$8056",
+          "name": "MoveExplosionFragmentUp",
+          "type": "function"
+        },
+        {
+          "id": "lbl_qq1578",
+          "address": "$8060",
+          "name": "UpdateHighScore",
+          "type": "code"
+        },
+        {
+          "id": "lbl_insy4e",
+          "address": "$8062",
+          "name": "CompareScoreDigit",
+          "type": "code"
+        },
+        {
+          "id": "lbl_51nor3",
+          "address": "$806D",
+          "name": "NoNewHighScore",
+          "type": "code"
+        },
+        {
+          "id": "lbl_k2mo2o",
+          "address": "$8070",
+          "name": "ScoreLowerThanHighScore",
+          "type": "code"
+        },
+        {
+          "id": "lbl_mkyayv",
+          "address": "$8072",
+          "name": "CopyScoreToHighScore",
+          "type": "code"
+        },
+        {
+          "id": "lbl_a7yze0",
+          "address": "$80A0",
+          "name": "IncrementSelectedLevel",
+          "type": "function"
+        },
+        {
+          "id": "lbl_4pub0t",
+          "address": "$80AA",
+          "name": "WriteSelectedLevelDigits",
+          "type": "code"
+        },
+        {
+          "id": "lbl_7p13k9",
+          "address": "$80B4",
+          "name": "CountUpSelectedLevelDigits",
+          "type": "code"
+        },
+        {
+          "id": "lbl_nc4vbk",
+          "address": "$80C6",
+          "name": "SelectedLevelDigitLoopTail",
+          "type": "code"
+        },
+        {
+          "id": "lbl_knxszw",
+          "address": "$80CB",
+          "name": "PauseAfterLevelChange",
+          "type": "code"
+        },
+        {
+          "id": "lbl_9cjr2i",
+          "address": "$80D2",
+          "name": "WriteCopyrightLine",
+          "type": "code"
+        },
+        {
+          "id": "lbl_8em1le",
+          "address": "$80D4",
+          "name": "CopyCopyrightChar",
+          "type": "code"
+        },
+        {
+          "id": "lbl_1m8xsl",
+          "address": "$80E5",
+          "name": "StartLevel",
+          "type": "code"
+        },
+        {
+          "id": "lbl_7q6uqp",
+          "address": "$80EE",
+          "name": "ClearScoreDigit",
+          "type": "code"
+        },
+        {
+          "id": "lbl_mtcuzz",
+          "address": "$80F7",
+          "name": "WaitForKeyToBeReleased",
+          "type": "function"
+        },
+        {
+          "id": "lbl_k2ul3n",
+          "address": "$8100",
+          "name": "InitializeGame",
+          "type": "entry"
+        },
+        {
+          "id": "lbl_y9dqo7",
+          "address": "$8138",
+          "name": "ClearScreenRowLoop",
+          "type": "code"
+        },
+        {
+          "id": "lbl_2v1dcc",
+          "address": "$8146",
+          "name": "BlankScreenRow",
+          "type": "code"
+        },
+        {
+          "id": "lbl_adkhjf",
+          "address": "$8163",
+          "name": "GetLinePtrForCurrentYPosition",
+          "type": "function"
+        },
+        {
+          "id": "lbl_k5qe22",
+          "address": "$8172",
+          "name": "WriteCurrentCharacterToCurrentXYPos",
+          "type": "function"
+        },
+        {
+          "id": "lbl_pfsiuo",
+          "address": "$818B",
+          "name": "GetCharacterAtCurrentXYPos",
+          "type": "function"
+        },
+        {
+          "id": "lbl_n0y3z6",
+          "address": "$8191",
+          "name": "RetriggerVoices1And2",
+          "type": "function"
+        },
+        {
+          "id": "lbl_w0wd9c",
+          "address": "$81A2",
+          "name": "DrawGrid",
+          "type": "function"
+        },
+        {
+          "id": "lbl_keisgl",
+          "address": "$81AE",
+          "name": "DrawVerticalLinesLoop",
+          "type": "code"
+        },
+        {
+          "id": "lbl_01wgn5",
+          "address": "$81BC",
+          "name": "DrawVerticalLineCell",
+          "type": "code"
+        },
+        {
+          "id": "lbl_0gldhi",
+          "address": "$81D4",
+          "name": "VerticalSweepSound",
+          "type": "code"
+        },
+        {
+          "id": "lbl_rr3mmk",
+          "address": "$81DA",
+          "name": "VerticalSweepSoundTail",
+          "type": "code"
+        },
+        {
+          "id": "lbl_vlrlnf",
+          "address": "$81ED",
+          "name": "DrawGridCellsLoop",
+          "type": "code"
+        },
+        {
+          "id": "lbl_miteym",
+          "address": "$81F1",
+          "name": "DrawGridCell",
+          "type": "code"
+        },
+        {
+          "id": "lbl_2u4m6g",
+          "address": "$8209",
+          "name": "GridSweepSound",
+          "type": "code"
+        },
+        {
+          "id": "lbl_vtk2iu",
+          "address": "$820F",
+          "name": "GridSweepSoundTail",
+          "type": "code"
+        },
+        {
+          "id": "lbl_9rk6d0",
+          "address": "$821A",
+          "name": "NotPausedReturn",
+          "type": "code"
+        },
+        {
+          "id": "lbl_2sg2py",
+          "address": "$821B",
+          "name": "CheckForPausePressed",
+          "type": "function"
+        },
+        {
+          "id": "lbl_a586z9",
+          "address": "$8221",
+          "name": "WaitForPauseKeyRelease",
+          "type": "code"
+        },
+        {
+          "id": "lbl_xgqqks",
+          "address": "$8227",
+          "name": "WaitForPauseKeyAgain",
+          "type": "code"
+        },
+        {
+          "id": "lbl_odyy5f",
+          "address": "$8230",
+          "name": "JumpToPlayAnotherSound",
+          "type": "function"
+        },
+        {
+          "id": "lbl_jzos8n",
+          "address": "$8233",
+          "name": "PlayAnotherSound",
+          "type": "code"
+        },
+        {
+          "id": "lbl_e9kwjh",
+          "address": "$8237",
+          "name": "PlayAnotherSoundLoop",
+          "type": "code"
+        },
+        {
+          "id": "lbl_lew8lx",
+          "address": "$8240",
+          "name": "PlayAnotherSoundStep",
+          "type": "code"
+        },
+        {
+          "id": "lbl_ewlmtc",
+          "address": "$824F",
+          "name": "MaterializeShip",
+          "type": "function"
+        },
+        {
+          "id": "lbl_xbdm1o",
+          "address": "$8264",
+          "name": "MaterializeShipLoop",
+          "type": "code"
+        },
+        {
+          "id": "lbl_d3yxnp",
+          "address": "$82AE",
+          "name": "StoreMaterializeCharacter",
+          "type": "code"
+        },
+        {
+          "id": "lbl_zcndom",
+          "address": "$82B2",
+          "name": "MaterializeDelay",
+          "type": "code"
+        },
+        {
+          "id": "lbl_if5azb",
+          "address": "$82EC",
+          "name": "LoadCharacterSetData",
+          "type": "code"
+        },
+        {
+          "id": "lbl_4846ov",
+          "address": "$82EE",
+          "name": "CopyCharsetPage",
+          "type": "code"
+        },
+        {
+          "id": "lbl_5k8bhr",
+          "address": "$8300",
+          "name": "DrawNewLevelScreen",
+          "type": "function"
+        },
+        {
+          "id": "lbl_2gqac7",
+          "address": "$8373",
+          "name": "GetJoystickInput",
+          "type": "function"
+        },
+        {
+          "id": "lbl_if1nj1",
+          "address": "$8380",
+          "name": "MaybeWasteSomeCycles",
+          "type": "function"
+        },
+        {
+          "id": "lbl_thclew",
+          "address": "$8386",
+          "name": "WasteSomeCycles",
+          "type": "function"
+        },
+        {
+          "id": "lbl_yd1zxe",
+          "address": "$8388",
+          "name": "WasteAFewCycles",
+          "type": "code"
+        },
+        {
+          "id": "lbl_apcf0q",
+          "address": "$838A",
+          "name": "WasteInnerLoop1",
+          "type": "code"
+        },
+        {
+          "id": "lbl_bisjds",
+          "address": "$838E",
+          "name": "WasteInnerLoop2",
+          "type": "code"
+        },
+        {
+          "id": "lbl_pyylkb",
+          "address": "$8392",
+          "name": "WasteCyclesReturn",
+          "type": "code"
+        },
+        {
+          "id": "lbl_lgah7u",
+          "address": "$8393",
+          "name": "MainGameLoop",
+          "type": "code"
+        },
+        {
+          "id": "lbl_rvl3ea",
+          "address": "$83A0",
+          "name": "EnterMainGameLoop",
+          "type": "code"
+        },
+        {
+          "id": "lbl_20c09d",
+          "address": "$83A3",
+          "name": "MainLoop",
+          "type": "code"
+        },
+        {
+          "id": "lbl_07gm3i",
+          "address": "$83C1",
+          "name": "ColdStart",
+          "type": "entry"
+        },
+        {
+          "id": "lbl_xqr4zs",
+          "address": "$83E2",
+          "name": "NmiRestoreAndReturn",
+          "type": "entry"
+        },
+        {
+          "id": "lbl_xhzln3",
+          "address": "$83E8",
+          "name": "ReenterMainGameLoop",
+          "type": "code"
+        },
+        {
+          "id": "lbl_pajxl5",
+          "address": "$83EA",
+          "name": "InterFrameDelayLoop",
+          "type": "code"
+        },
+        {
+          "id": "lbl_fe089c",
+          "address": "$8400",
+          "name": "DrawMaterializeShip",
+          "type": "code"
+        },
+        {
+          "id": "lbl_mkt3ps",
+          "address": "$841A",
+          "name": "ShipHasMaterialized",
+          "type": "code"
+        },
+        {
+          "id": "lbl_bn8aea",
+          "address": "$8450",
+          "name": "PlayMaterializeShipSoundEffects",
+          "type": "function"
+        },
+        {
+          "id": "lbl_b0n7nm",
+          "address": "$8454",
+          "name": "MaterializeSoundStep",
+          "type": "code"
+        },
+        {
+          "id": "lbl_im6ik1",
+          "address": "$8465",
+          "name": "MaterializeSoundDelay",
+          "type": "code"
+        },
+        {
+          "id": "lbl_ojxbb0",
+          "address": "$8470",
+          "name": "UpdateShipPosition",
+          "type": "function"
+        },
+        {
+          "id": "lbl_jaxapy",
+          "address": "$8475",
+          "name": "ShipFrameDue",
+          "type": "code"
+        },
+        {
+          "id": "lbl_cgaei8",
+          "address": "$848A",
+          "name": "EraseShip",
+          "type": "code"
+        },
+        {
+          "id": "lbl_x3l06x",
+          "address": "$84A7",
+          "name": "TestJoystickDown",
+          "type": "code"
+        },
+        {
+          "id": "lbl_pp3uyh",
+          "address": "$84B9",
+          "name": "TestJoystickLeft",
+          "type": "code"
+        },
+        {
+          "id": "lbl_m4iyuo",
+          "address": "$84CB",
+          "name": "TestJoystickRight",
+          "type": "code"
+        },
+        {
+          "id": "lbl_cq730e",
+          "address": "$84DD",
+          "name": "TestWhatShipMovedInto",
+          "type": "code"
+        },
+        {
+          "id": "lbl_mq01xv",
+          "address": "$84E5",
+          "name": "RedrawShip",
+          "type": "code"
+        },
+        {
+          "id": "lbl_6p8h9a",
+          "address": "$84F8",
+          "name": "DrawBullet",
+          "type": "function"
+        },
+        {
+          "id": "lbl_jpeycs",
+          "address": "$84FC",
+          "name": "NoBulletThisFrame",
+          "type": "code"
+        },
+        {
+          "id": "lbl_3hv383",
+          "address": "$84FD",
+          "name": "BulletFrameDue",
+          "type": "code"
+        },
+        {
+          "id": "lbl_zpj733",
+          "address": "$8522",
+          "name": "DrawBulletAtCurrentCell",
+          "type": "code"
+        },
+        {
+          "id": "lbl_9migd3",
+          "address": "$8538",
+          "name": "EraseBulletCell",
+          "type": "code"
+        },
+        {
+          "id": "lbl_6oo117",
+          "address": "$8558",
+          "name": "ResetBulletAnimation",
+          "type": "code"
+        },
+        {
+          "id": "lbl_4q6a0g",
+          "address": "$855C",
+          "name": "DrawBulletNewRow",
+          "type": "code"
+        },
+        {
+          "id": "lbl_cepzjo",
+          "address": "$8568",
+          "name": "PaintBullet",
+          "type": "code"
+        },
+        {
+          "id": "lbl_8ybzrs",
+          "address": "$8573",
+          "name": "MaybePlayBulletSound",
+          "type": "function"
+        },
+        {
+          "id": "lbl_33b41p",
+          "address": "$8578",
+          "name": "BulletSoundStep",
+          "type": "code"
+        },
+        {
+          "id": "lbl_4hl6lc",
+          "address": "$859B",
+          "name": "UpdateZappersPosition",
+          "type": "function"
+        },
+        {
+          "id": "lbl_ypecde",
+          "address": "$85A1",
+          "name": "NoZapperThisFrame",
+          "type": "code"
+        },
+        {
+          "id": "lbl_c40jn3",
+          "address": "$85A2",
+          "name": "ZapperFrameDue",
+          "type": "code"
+        },
+        {
+          "id": "lbl_xdysdq",
+          "address": "$85C5",
+          "name": "DrawLeftZapper",
+          "type": "code"
+        },
+        {
+          "id": "lbl_zz26li",
+          "address": "$85ED",
+          "name": "DrawBottomZapper",
+          "type": "code"
+        },
+        {
+          "id": "lbl_88enq6",
+          "address": "$85F8",
+          "name": "WriteAccumulatorToXYPos",
+          "type": "function"
+        },
+        {
+          "id": "lbl_iuufok",
+          "address": "$85FD",
+          "name": "DrawBottomZapperAndMaybeFireLaser",
+          "type": "code"
+        },
+        {
+          "id": "lbl_0cguil",
+          "address": "$8605",
+          "name": "FireTheZappers",
+          "type": "code"
+        },
+        {
+          "id": "lbl_75ba58",
+          "address": "$862F",
+          "name": "PlayZapperSound",
+          "type": "function"
+        },
+        {
+          "id": "lbl_g6z899",
+          "address": "$8635",
+          "name": "DrawLaser",
+          "type": "function"
+        },
+        {
+          "id": "lbl_i9s4ow",
+          "address": "$863B",
+          "name": "NoLaserThisFrame",
+          "type": "code"
+        },
+        {
+          "id": "lbl_ihko3r",
+          "address": "$863C",
+          "name": "LaserFrameDue",
+          "type": "code"
+        },
+        {
+          "id": "lbl_m26htb",
+          "address": "$864E",
+          "name": "DrawLaserBeams",
+          "type": "code"
+        },
+        {
+          "id": "lbl_cwxrli",
+          "address": "$865A",
+          "name": "DrawBottomLaserLoop",
+          "type": "code"
+        },
+        {
+          "id": "lbl_4vfo2p",
+          "address": "$86A2",
+          "name": "EraseLaserAndDropPod",
+          "type": "code"
+        },
+        {
+          "id": "lbl_ksv2pj",
+          "address": "$86B2",
+          "name": "EraseBottomLaserCell",
+          "type": "code"
+        },
+        {
+          "id": "lbl_rifihh",
+          "address": "$86D0",
+          "name": "UpdateLaserCharacter",
+          "type": "function"
+        },
+        {
+          "id": "lbl_ku6efg",
+          "address": "$86D7",
+          "name": "UpdatePods",
+          "type": "function"
+        },
+        {
+          "id": "lbl_wlhd5p",
+          "address": "$86DE",
+          "name": "ScanPodsNow",
+          "type": "code"
+        },
+        {
+          "id": "lbl_vnfu53",
+          "address": "$86EA",
+          "name": "ScanScreenForPod",
+          "type": "code"
+        },
+        {
+          "id": "lbl_ooipea",
+          "address": "$86EE",
+          "name": "NextScreenCell",
+          "type": "code"
+        },
+        {
+          "id": "lbl_pl3xo2",
+          "address": "$86FB",
+          "name": "PodCandidateFound",
+          "type": "code"
+        },
+        {
+          "id": "lbl_nxm4vf",
+          "address": "$8701",
+          "name": "MatchPodStage",
+          "type": "code"
+        },
+        {
+          "id": "lbl_th1azs",
+          "address": "$870C",
+          "name": "RipenPodOneStage",
+          "type": "code"
+        },
+        {
+          "id": "lbl_u4hwdb",
+          "address": "$8719",
+          "name": "PodFullyRipened",
+          "type": "code"
+        },
+        {
+          "id": "lbl_orisiv",
+          "address": "$8728",
+          "name": "DrawBomb",
+          "type": "function"
+        },
+        {
+          "id": "lbl_htbs5y",
+          "address": "$872E",
+          "name": "FindFreePodSlot",
+          "type": "code"
+        },
+        {
+          "id": "lbl_lyy9ad",
+          "address": "$873D",
+          "name": "ClaimPodSlot",
+          "type": "code"
+        },
+        {
+          "id": "lbl_5z58xn",
+          "address": "$8748",
+          "name": "ClearPodArray",
+          "type": "function"
+        },
+        {
+          "id": "lbl_xb8lpt",
+          "address": "$874C",
+          "name": "ClearPodSlot",
+          "type": "code"
+        },
+        {
+          "id": "lbl_cxxnos",
+          "address": "$8753",
+          "name": "DrawUpdatedPods",
+          "type": "function"
+        },
+        {
+          "id": "lbl_cicoac",
+          "address": "$8758",
+          "name": "PodMoveDue",
+          "type": "code"
+        },
+        {
+          "id": "lbl_0q2o6f",
+          "address": "$875E",
+          "name": "MoveEachPod",
+          "type": "code"
+        },
+        {
+          "id": "lbl_lle836",
+          "address": "$8768",
+          "name": "NextPodSlot",
+          "type": "code"
+        },
+        {
+          "id": "lbl_5e6ejh",
+          "address": "$876C",
+          "name": "MovePodDownOneRow",
+          "type": "function"
+        },
+        {
+          "id": "lbl_r3qxc4",
+          "address": "$8781",
+          "name": "StepPodDown",
+          "type": "code"
+        },
+        {
+          "id": "lbl_9qvxj1",
+          "address": "$87B4",
+          "name": "PodHitSomething",
+          "type": "code"
+        },
+        {
+          "id": "lbl_wsyzuo",
+          "address": "$87BB",
+          "name": "DrawBombInNewCell",
+          "type": "code"
+        },
+        {
+          "id": "lbl_iv2fmt",
+          "address": "$87CB",
+          "name": "BulletCollidedWithPod",
+          "type": "function"
+        },
+        {
+          "id": "lbl_byocaw",
+          "address": "$87CD",
+          "name": "MatchPodStageForBullet",
+          "type": "code"
+        },
+        {
+          "id": "lbl_0tmlu4",
+          "address": "$87D9",
+          "name": "PodStageMatched",
+          "type": "code"
+        },
+        {
+          "id": "lbl_gs0vd1",
+          "address": "$87EC",
+          "name": "BulletDestroyedPod",
+          "type": "code"
+        },
+        {
+          "id": "lbl_zc79xd",
+          "address": "$8801",
+          "name": "PopReturnAndDrawCharacter",
+          "type": "code"
+        },
+        {
+          "id": "lbl_7a6p40",
+          "address": "$871F",
+          "name": "PodDecaySequence"
+        },
+        {
+          "id": "lbl_q1de7p",
+          "address": "$8806",
+          "name": "DisplayGameBanner",
+          "type": "function"
+        },
+        {
+          "id": "lbl_m1ky5k",
+          "address": "$8808",
+          "name": "CopyBannerChar",
+          "type": "code"
+        },
+        {
+          "id": "lbl_m8jzqf",
+          "address": "$8818",
+          "name": "ShowBannerThenTitle",
+          "type": "code"
+        },
+        {
+          "id": "lbl_mfyq60",
+          "address": "$8820",
+          "name": "screenHeaderText"
+        },
+        {
+          "id": "lbl_ca4y3g",
+          "address": "$8848",
+          "name": "screenHeaderColors"
+        },
+        {
+          "id": "lbl_zj8qqq",
+          "address": "$8870",
+          "name": "IncrementPlayerScore",
+          "type": "function"
+        },
+        {
+          "id": "lbl_i2zfcy",
+          "address": "$8872",
+          "name": "IncrementScoreDigit",
+          "type": "code"
+        },
+        {
+          "id": "lbl_i5fg34",
+          "address": "$8884",
+          "name": "RestoreScoreIndex",
+          "type": "code"
+        },
+        {
+          "id": "lbl_pfc0l0",
+          "address": "$888A",
+          "name": "IncreaseScoreBy10Points",
+          "type": "function"
+        },
+        {
+          "id": "lbl_utj38j",
+          "address": "$8899",
+          "name": "NoBackgroundSoundReturn",
+          "type": "code"
+        },
+        {
+          "id": "lbl_99yh6k",
+          "address": "$889A",
+          "name": "PlayBackgroundSounds",
+          "type": "function"
+        },
+        {
+          "id": "lbl_sjd6lq",
+          "address": "$88B8",
+          "name": "HitSoundSweepFinished",
+          "type": "code"
+        },
+        {
+          "id": "lbl_v1jmmv",
+          "address": "$88C3",
+          "name": "IdleBackgroundTone",
+          "type": "code"
+        },
+        {
+          "id": "lbl_tyddbv",
+          "address": "$88C9",
+          "name": "DrawDroids",
+          "type": "function"
+        },
+        {
+          "id": "lbl_o43e3b",
+          "address": "$88CD",
+          "name": "NoDroidFrameThisTime",
+          "type": "code"
+        },
+        {
+          "id": "lbl_0sxcem",
+          "address": "$88CE",
+          "name": "DroidFrameDue",
+          "type": "code"
+        },
+        {
+          "id": "lbl_wvspj6",
+          "address": "$88E6",
+          "name": "DrawDroidsLoop",
+          "type": "code"
+        },
+        {
+          "id": "lbl_pdelt5",
+          "address": "$8924",
+          "name": "ResumeDrawingDroids",
+          "type": "code"
+        },
+        {
+          "id": "lbl_2iv79x",
+          "address": "$892A",
+          "name": "MoveDroidHead",
+          "type": "code"
+        },
+        {
+          "id": "lbl_nhl4wp",
+          "address": "$8935",
+          "name": "StepDroidHeadSideways",
+          "type": "code"
+        },
+        {
+          "id": "lbl_dkaaz6",
+          "address": "$8962",
+          "name": "FlipDroidDirection",
+          "type": "code"
+        },
+        {
+          "id": "lbl_exto5a",
+          "address": "$896A",
+          "name": "StoreDroidPositionAndDraw",
+          "type": "code"
+        },
+        {
+          "id": "lbl_4qv33o",
+          "address": "$8990",
+          "name": "DroidMovedIntoEmptyCell",
+          "type": "code"
+        },
+        {
+          "id": "lbl_vqpe8q",
+          "address": "$8995",
+          "name": "DrawDroidSegmentIfVisible",
+          "type": "function"
+        },
+        {
+          "id": "lbl_q4lbyl",
+          "address": "$899F",
+          "name": "DroidNotVisibleReturn",
+          "type": "code"
+        },
+        {
+          "id": "lbl_jr1a8j",
+          "address": "$89A0",
+          "name": "ResetMasterFrameCounter",
+          "type": "function"
+        },
+        {
+          "id": "lbl_ih5630",
+          "address": "$89AB",
+          "name": "CheckIfBlockedByPod",
+          "type": "function"
+        },
+        {
+          "id": "lbl_ge8iwz",
+          "address": "$89AD",
+          "name": "MatchPodStageForShip",
+          "type": "code"
+        },
+        {
+          "id": "lbl_y51297",
+          "address": "$89B8",
+          "name": "PutShipBackWhereItWas",
+          "type": "code"
+        },
+        {
+          "id": "lbl_3ujazh",
+          "address": "$89C1",
+          "name": "SpawnDroidSegments",
+          "type": "function"
+        },
+        {
+          "id": "lbl_vdamf9",
+          "address": "$89CA",
+          "name": "StartNewDroidSquad",
+          "type": "code"
+        },
+        {
+          "id": "lbl_cli1cl",
+          "address": "$89E6",
+          "name": "SpawnNextSegmentOfSquad",
+          "type": "code"
+        },
+        {
+          "id": "lbl_52ypra",
+          "address": "$8A02",
+          "name": "SquadTailSpawned",
+          "type": "code"
+        },
+        {
+          "id": "lbl_bdhcgo",
+          "address": "$8A0C",
+          "name": "MaybeStartNewSquad",
+          "type": "code"
+        },
+        {
+          "id": "lbl_rg6o4l",
+          "address": "$8A11",
+          "name": "CheckIfBulletCollidedWithDroid",
+          "type": "code"
+        },
+        {
+          "id": "lbl_c15qyd",
+          "address": "$8A21",
+          "name": "BulletCollidedWithLeadDroid",
+          "type": "code"
+        },
+        {
+          "id": "lbl_238wlb",
+          "address": "$8A28",
+          "name": "BulletCollidedWithDroneDroid",
+          "type": "code"
+        },
+        {
+          "id": "lbl_1axqri",
+          "address": "$8A37",
+          "name": "FindDroidAtBulletPosition",
+          "type": "code"
+        },
+        {
+          "id": "lbl_88n42p",
+          "address": "$8A3E",
+          "name": "NextDroidEntry",
+          "type": "code"
+        },
+        {
+          "id": "lbl_li3qxd",
+          "address": "$8A42",
+          "name": "CompareDroidRow",
+          "type": "code"
+        },
+        {
+          "id": "lbl_qthiwk",
+          "address": "$8A53",
+          "name": "ShuffleDroidArraysDown",
+          "type": "code"
+        },
+        {
+          "id": "lbl_u67kvp",
+          "address": "$8A6D",
+          "name": "LeavePodWhereDroidDied",
+          "type": "code"
+        },
+        {
+          "id": "lbl_5aayrm",
+          "address": "$8A7A",
+          "name": "DroidWasAHead",
+          "type": "code"
+        },
+        {
+          "id": "lbl_1l73hu",
+          "address": "$8A8D",
+          "name": "PassHeadBitForward",
+          "type": "code"
+        },
+        {
+          "id": "lbl_zjo87n",
+          "address": "$8A99",
+          "name": "RegisterHit",
+          "type": "function"
+        },
+        {
+          "id": "lbl_fuvtnk",
+          "address": "$8AA4",
+          "name": "UpdateDroidStatus",
+          "type": "function"
+        },
+        {
+          "id": "lbl_q4d1c5",
+          "address": "$8AA6",
+          "name": "FindHeadSegment",
+          "type": "code"
+        },
+        {
+          "id": "lbl_gayhsf",
+          "address": "$8AC1",
+          "name": "SetStatusBitOnNextSegment",
+          "type": "function"
+        },
+        {
+          "id": "lbl_svv9nd",
+          "address": "$8AC8",
+          "name": "CheckLevelComplete",
+          "type": "function"
+        },
+        {
+          "id": "lbl_ktey2y",
+          "address": "$8ACC",
+          "name": "LevelNotComplete",
+          "type": "code"
+        },
+        {
+          "id": "lbl_967dd1",
+          "address": "$8ACD",
+          "name": "NoDroidsOwed",
+          "type": "code"
+        },
+        {
+          "id": "lbl_esi9wm",
+          "address": "$8ADE",
+          "name": "ResetStackAndKillShip",
+          "type": "code"
+        },
+        {
+          "id": "lbl_jl2745",
+          "address": "$8AE9",
+          "name": "CheckForShipCollision",
+          "type": "function"
+        },
+        {
+          "id": "lbl_f6a60e",
+          "address": "$8AF0",
+          "name": "DroidBlockedReturn",
+          "type": "code"
+        },
+        {
+          "id": "lbl_7okow4",
+          "address": "$8AF8",
+          "name": "StartShipExplosion",
+          "type": "code"
+        },
+        {
+          "id": "lbl_dmzq21",
+          "address": "$8B00",
+          "name": "FillFragmentColumns",
+          "type": "code"
+        },
+        {
+          "id": "lbl_yfepco",
+          "address": "$8B0A",
+          "name": "FillFragmentRows",
+          "type": "code"
+        },
+        {
+          "id": "lbl_bbx45z",
+          "address": "$8B24",
+          "name": "PlayExplosion",
+          "type": "code"
+        },
+        {
+          "id": "lbl_d2z6p5",
+          "address": "$8B3D",
+          "name": "EraseExplosionFragments",
+          "type": "code"
+        },
+        {
+          "id": "lbl_3cccld",
+          "address": "$8B53",
+          "name": "NextFragmentToErase",
+          "type": "code"
+        },
+        {
+          "id": "lbl_7y90mh",
+          "address": "$8B5A",
+          "name": "JumpIntoExplosionStep",
+          "type": "code"
+        },
+        {
+          "id": "lbl_wuqb0c",
+          "address": "$8B60",
+          "name": "AnimateShipExplosion",
+          "type": "code"
+        },
+        {
+          "id": "lbl_fuhv5n",
+          "address": "$8B6C",
+          "name": "MoveAllFragments",
+          "type": "code"
+        },
+        {
+          "id": "lbl_hhl5ej",
+          "address": "$8B6E",
+          "name": "MoveExplosionFragment",
+          "type": "code"
+        },
+        {
+          "id": "lbl_u7wpcd",
+          "address": "$8B7C",
+          "name": "FragmentColumnPlusOne",
+          "type": "code"
+        },
+        {
+          "id": "lbl_jqzm4h",
+          "address": "$8B7F",
+          "name": "ApplyFragmentColumn",
+          "type": "code"
+        },
+        {
+          "id": "lbl_6d6gq2",
+          "address": "$8B8E",
+          "name": "FragmentRowPlusOne",
+          "type": "code"
+        },
+        {
+          "id": "lbl_ubfaxx",
+          "address": "$8B91",
+          "name": "ApplyFragmentRow",
+          "type": "code"
+        },
+        {
+          "id": "lbl_skya0m",
+          "address": "$8BAE",
+          "name": "FragmentDrawn",
+          "type": "code"
+        },
+        {
+          "id": "lbl_be083i",
+          "address": "$8BB1",
+          "name": "PlayExplosionAndRestartLevel",
+          "type": "code"
+        },
+        {
+          "id": "lbl_wivbkv",
+          "address": "$8BB8",
+          "name": "ExplosionFinished",
+          "type": "code"
+        },
+        {
+          "id": "lbl_z1hg4s",
+          "address": "$8BC0",
+          "name": "explosionDeltaXTable",
+          "extent": 9
+        },
+        {
+          "id": "lbl_36j74k",
+          "address": "$8BC8",
+          "name": "explosionDeltaYTable",
+          "extent": 9
+        },
+        {
+          "id": "lbl_gexh3q",
+          "address": "$8BBB",
+          "name": "GetCharAtCurrentPosition",
+          "type": "function"
+        },
+        {
+          "id": "lbl_njwpzu",
+          "address": "$8BD2",
+          "name": "MaybeRestartLevel",
+          "type": "code"
+        },
+        {
+          "id": "lbl_657vvs",
+          "address": "$8BD9",
+          "name": "ExplosionFrameDelay",
+          "type": "code"
+        },
+        {
+          "id": "lbl_6i7gil",
+          "address": "$8BEC",
+          "name": "CheckOverlapWithBulletOrGrid",
+          "type": "function"
+        },
+        {
+          "id": "lbl_itmdvv",
+          "address": "$8BFB",
+          "name": "ShipSurvivesReturn",
+          "type": "code"
+        },
+        {
+          "id": "lbl_w1ojri",
+          "address": "$8BFC",
+          "name": "ClearPlayArea",
+          "type": "function"
+        },
+        {
+          "id": "lbl_93axwv",
+          "address": "$8C06",
+          "name": "ClearNextPage",
+          "type": "code"
+        },
+        {
+          "id": "lbl_9i6znh",
+          "address": "$8C08",
+          "name": "ClearNextCell",
+          "type": "code"
+        },
+        {
+          "id": "lbl_wt9g67",
+          "address": "$8C17",
+          "name": "ClearScreenAndRestartLevel",
+          "type": "code"
+        },
+        {
+          "id": "lbl_l8summ",
+          "address": "$8C2A",
+          "name": "GameOver",
+          "type": "code"
+        },
+        {
+          "id": "lbl_gr4b58",
+          "address": "$8C2D",
+          "name": "DisplayNewLevelInterstitial",
+          "type": "code"
+        },
+        {
+          "id": "lbl_ogimdr",
+          "address": "$8C35",
+          "name": "CopyInterstitialText",
+          "type": "code"
+        },
+        {
+          "id": "lbl_07qbh7",
+          "address": "$8C75",
+          "name": "PrepareNextLevel",
+          "type": "code"
+        },
+        {
+          "id": "lbl_y6yv4j",
+          "address": "$8C82",
+          "name": "StepSelectedLevel",
+          "type": "code"
+        },
+        {
+          "id": "lbl_wqwvrz",
+          "address": "$8C8C",
+          "name": "ReadPerLevelTables",
+          "type": "code"
+        },
+        {
+          "id": "lbl_scfp7t",
+          "address": "$8C9D",
+          "name": "IncrementLevelDigits",
+          "type": "code"
+        },
+        {
+          "id": "lbl_msd41n",
+          "address": "$8CAF",
+          "name": "LevelDigitLoopTail",
+          "type": "code"
+        },
+        {
+          "id": "lbl_6y76gc",
+          "address": "$8CB5",
+          "name": "noOfDroidSquadsForLevel"
+        },
+        {
+          "id": "lbl_m5lqcf",
+          "address": "$8CD5",
+          "name": "sizeOfDroidSquadsForLevels"
+        },
+        {
+          "id": "lbl_lb8kig",
+          "address": "$8D16",
+          "name": "PlayNewLevelSounds",
+          "type": "code"
+        },
+        {
+          "id": "lbl_k5g9tc",
+          "address": "$8D1A",
+          "name": "LevelFanfareStep",
+          "type": "code"
+        },
+        {
+          "id": "lbl_efehn3",
+          "address": "$8D24",
+          "name": "LevelFanfarePulse",
+          "type": "code"
+        },
+        {
+          "id": "lbl_v7xdvo",
+          "address": "$8D52",
+          "name": "ShortDelay",
+          "type": "function"
+        },
+        {
+          "id": "lbl_f2cc7v",
+          "address": "$8D57",
+          "name": "SaveSelectedLevelAndShowTitle",
+          "type": "code"
+        },
+        {
+          "id": "lbl_iu2oai",
+          "address": "$8D5A",
+          "name": "AlternateReadingOfStoreSelectedLevel"
+        },
+        {
+          "id": "lbl_raltlw",
+          "address": "$8D5E",
+          "name": "UpdateLivesAndRestartLevel",
+          "type": "code"
+        },
+        {
+          "id": "lbl_s7xm91",
+          "address": "$8D66",
+          "name": "SoundEffect",
+          "type": "function"
+        },
+        {
+          "id": "lbl_5021ib",
+          "address": "$8D70",
+          "name": "SetVolumeAndPlaySounds",
+          "type": "code"
+        },
+        {
+          "id": "lbl_hjdqbx",
+          "address": "$8D78",
+          "name": "DrawGridCharAtShipPosAndExplode",
+          "type": "code"
+        },
+        {
+          "id": "lbl_2zj2h6",
+          "address": "$8D8E",
+          "name": "DisplayTitleScreen",
+          "type": "code"
+        },
+        {
+          "id": "lbl_eew1m1",
+          "address": "$8D94",
+          "name": "CopyTitleText",
+          "type": "code"
+        },
+        {
+          "id": "lbl_469zi8",
+          "address": "$8DB0",
+          "name": "JoystickInputLoop",
+          "type": "code"
+        },
+        {
+          "id": "lbl_z7893e",
+          "address": "$8DBA",
+          "name": "TestJoystickUpOnTitle",
+          "type": "code"
+        },
+        {
+          "id": "lbl_xbbovw",
+          "address": "$8DC0",
+          "name": "ShowSelectedLevel",
+          "type": "code"
+        },
+        {
+          "id": "lbl_2qmuxz",
+          "address": "$8DC6",
+          "name": "FirePressed",
+          "type": "code"
+        },
+        {
+          "id": "lbl_7ia01p",
+          "address": "$8F00",
+          "name": "characterSetDataPage2",
+          "type": "code"
+        }
+      ],
+      "comments": [
+        {
+          "id": "cmt_l5zmni",
+          "address": "$8172",
+          "text": "Write currentCharacter and its colour at (currentXPosition, currentYPosition). The colour address is made by adding $D4 to the high byte of the screen address: $0400+n becomes $D800+n. Three instructions in the middle do nothing at all."
+        },
+        {
+          "id": "cmt_zn86w7",
+          "address": "$8000",
+          "text": "This is an 8K autostart cartridge image, not a loadable program. $8000/$8001 is the cold-start vector the KERNAL JMPs through at reset, $8002/$8003 is the NMI vector, and $8004-$8008 is the \"CBM80\" signature it looks for. The reference disassembly was made from a converted PRG in which those five signature bytes had been zeroed and a BASIC \"SYS 2061\" stub added at $0800; this image is the original, so the reference's .BYTE $00,$00,$00,$00,$00 at $8004 is a fact about that conversion rather than about the game."
+        },
+        {
+          "id": "cmt_7u64qn",
+          "address": "$8011",
+          "text": "Dead. Nothing in the program reaches $8011 - find_references reports no inbound reference, and the bytes above it are data. Both live entries go through the vectors at $8000/$8002."
+        },
+        {
+          "id": "cmt_on6ylw",
+          "address": "$8015",
+          "text": "Continuation of UpdateHighScore below: step to the next of the seven digits and compare again."
+        },
+        {
+          "id": "cmt_8zy8io",
+          "address": "$8020",
+          "text": "Called by DrawLaser after it advances the left laser one column. Returns the character the laser is about to overwrite; if it is $07 (the ship) control never comes back - it jumps to ResetStackAndKillShip, which throws the return address away."
+        },
+        {
+          "id": "cmt_1xmxi2",
+          "address": "$8030",
+          "text": "Wrap a fragment's row into the play area. AND #$1F keeps it under 32, and a result of 24 ($18) or more is out of the grid, in which case the ship's own row is used instead. Called only from MoveExplosionFragmentUp."
+        },
+        {
+          "id": "cmt_7jnec7",
+          "address": "$8040",
+          "text": "Move one explosion fragment left. AND #$3F, then a column of 39 ($27) or more is off the grid and the ship's own column is substituted. Reached from MoveExplosionFragment, which INCs the entry 0, 1 or 2 times first, so the net movement is -1, 0 or +1."
+        },
+        {
+          "id": "cmt_lngkbk",
+          "address": "$8056",
+          "text": "Move one explosion fragment up, then clamp through ClampExplosionRow. Same -1/0/+1 arrangement as the column."
+        },
+        {
+          "id": "cmt_4565et",
+          "address": "$8060",
+          "text": "THE HIGH SCORE CHECK, not a wait. The reference calls this WaitForScreen/CheckScreen; nothing here waits for anything. $040F-$0415 and $041B-$0421 are the seven-digit player score and high score sitting directly in screen RAM (see the row-0 banner at $8820, which reads \"GRIDRUNNER  PL 0000000  HI 0000000\"). This walks the digits most-significant first: equal, keep looking; player digit lower, give up and show the title screen; player digit higher, copy all seven over the high score. Its only caller is ClearScreenAndRestartLevel, when the lives digit has just reached '0' - i.e. game over."
+        },
+        {
+          "id": "cmt_u6nm1w",
+          "address": "$8070",
+          "placement": "inline",
+          "text": "BMI: after CMP, the score digit is lower than the high score digit."
+        },
+        {
+          "id": "cmt_68mk5j",
+          "address": "$8072",
+          "placement": "inline",
+          "text": "Player beat the high score - copy all seven digits over."
+        },
+        {
+          "id": "cmt_k89d6n",
+          "address": "$80A0",
+          "text": "Show the level the player has dialled up on the title screen. selectedLevel wraps from 32 ($20) back to 1, then the two digits at screen $0557/$0558 - the \"00\" at the end of \"ENTER LEVEL 00\" - are counted up from '0','0' one at a time, selectedLevel times. Counting instead of dividing is why this needs the delay loop below."
+        },
+        {
+          "id": "cmt_yystkm",
+          "address": "$80CB",
+          "text": "Roughly 48 * 2 * 256 wasted DEC cycles: the key-repeat delay so one push of the joystick does not run the level number away."
+        },
+        {
+          "id": "cmt_tadq73",
+          "address": "$80D2",
+          "text": "Copy the 32-byte copyright line to screen row 10 column 2, all in colour 7 (yellow). X runs $20..1 and the table is addressed from $807F, so index 1 is the first byte."
+        },
+        {
+          "id": "cmt_mc7j5e",
+          "address": "$80E5",
+          "text": "Start a game: reset the lives digit at screen column 39 to '4' and the seven score digits at $040F-$0415 to '0'. X runs 7..1 over a base of $040E, so it covers exactly the score field and stops before the high score."
+        },
+        {
+          "id": "cmt_he9bsi",
+          "address": "$80F7",
+          "text": "Spin until the P key is released. $C5 is the KERNAL's \"key currently pressed\" byte, which is still being maintained because ColdStart re-enabled interrupts; $29 is matrix code 41, which is the P key."
+        },
+        {
+          "id": "cmt_xaculc",
+          "address": "$8100",
+          "text": "Set up the VIC and the SID, build the screen line-pointer tables, and blank the screen. The three VIC writes go through a pointer at $02/$03 rather than as absolute stores, which is why a plain search of $D000-$D02E finds nothing here; re64 folds the constants and resolves them."
+        },
+        {
+          "id": "cmt_tk9bw2",
+          "address": "$810B",
+          "placement": "inline",
+          "text": "$D018 = $18: screen at $0400, character set at $2000."
+        },
+        {
+          "id": "cmt_oc23n3",
+          "address": "$8111",
+          "placement": "inline",
+          "text": "$D020 = 0: black border."
+        },
+        {
+          "id": "cmt_xxnral",
+          "address": "$8114",
+          "placement": "inline",
+          "text": "$D021 = 0: black background."
+        },
+        {
+          "id": "cmt_fq3e10",
+          "address": "$8138",
+          "text": "For each of the 24 rows, record the row's address in the two tables at $0340/$0360 and fill it with spaces. The running address is kept in $02/$03 and advanced by 40 a row at a time, so these tables are the whole of this game's screen arithmetic - every draw is one indexed load from them."
+        },
+        {
+          "id": "cmt_4l3at5",
+          "address": "$8163",
+          "text": "currentYPosition selects the row, currentXPosition becomes Y. Everything drawn in this game goes through here."
+        },
+        {
+          "id": "cmt_lasbyv",
+          "address": "$8180",
+          "placement": "inline",
+          "text": "Dead: loads $07 twice and stores it straight back. No flag it sets is read."
+        },
+        {
+          "id": "cmt_wogh5i",
+          "address": "$8191",
+          "text": "Retrigger voices 1 and 2: clear the control registers, then set them to $81 (noise + gate). Gating off and on again is what restarts the envelope."
+        },
+        {
+          "id": "cmt_eocvmw",
+          "address": "$81A2",
+          "text": "Draw the playfield, in two passes, each accompanied by a rising tone. FIRST pass ($81AE): for each column 2..38 draw character $3F down rows 2..21 - $3F is a solid full-height vertical bar in this game's charset, so this sweeps vertical lines across the screen left to right. The reference calls this loop DrawHorizontalLineLoop, which is the wrong axis: currentXPosition is held at gridXPos and currentYPosition runs. SECOND pass ($81ED): for each row 2..21 draw character $00, the grid intersection glyph, along columns 1..38, overwriting the bars top to bottom. The result is the finished grid, drawn as an animation."
+        },
+        {
+          "id": "cmt_b7oxko",
+          "address": "$81A4",
+          "placement": "inline",
+          "text": "$08 is the grid column here. The reference names this byte randomValue on the strength of PlayAnotherSound reading it; nothing ever puts a random number in it."
+        },
+        {
+          "id": "cmt_oleedc",
+          "address": "$81D8",
+          "placement": "inline",
+          "text": "Branches to the very next instruction: a no-op. Y is whatever WriteCurrentCharacterToCurrentXYPos left in it."
+        },
+        {
+          "id": "cmt_b21rym",
+          "address": "$821B",
+          "text": "Pause on the P key: return at once unless P is down, then wait for it to be released, wait for it to be pressed again, and fall into WaitForKeyToBeReleased. $C5 is the KERNAL key-pressed byte and $29 is matrix code 41 = P."
+        },
+        {
+          "id": "cmt_z4eitg",
+          "address": "$8233",
+          "text": "Sound for the grid-drawing sweep. The counter at $0A is set to 4 and then INCed BEFORE the test, so it goes 5,6,...,255,0,...,4 - 255 iterations, not none. Each iteration writes the current grid column ($08) into voice 1's frequency high byte, so the pitch rises as the sweep crosses the screen. This is the only reader of $08 outside DrawGrid and ClearPlayArea, and it is why the reference named $08 randomValue."
+        },
+        {
+          "id": "cmt_gl19t1",
+          "address": "$8247",
+          "placement": "inline",
+          "text": "ADC with no CLC: carry is whatever the CMP above left. Voice 2 gets the column, or the column plus one."
+        },
+        {
+          "id": "cmt_2qlrxq",
+          "address": "$824F",
+          "text": "Materialise the ship: five explosion characters ($16-$18, cycling) drawn at a shrinking offset around (20,21), with the SID volume ramped up as the offset closes. Falls out through DrawMaterializeShip at $8400, which decrements the offset and jumps back."
+        },
+        {
+          "id": "cmt_fxw7yi",
+          "address": "$8278",
+          "placement": "inline",
+          "text": "CLC before SBC is wrong: SBC also subtracts the complement of carry, so this is $14 - offset - 1. run_block here with materializeShipOffset = $0F writes $04 into currentXPosition, where $14 - $0F is $05. The matching ADC arm at $8282 gives $14 + $0F = $23 exactly, so the explosion is 16 cells wide on the left and 15 on the right. Same CLC/SBC pair at $828C, $82C9, $82E4, $8411 and $869A; $829D and $8D6A do it with no CLC at all, so those depend on carry left by an unrelated instruction."
+        },
+        {
+          "id": "cmt_w1zcw9",
+          "address": "$829D",
+          "placement": "inline",
+          "text": "And here without even the CLC, so the result depends on the carry left by the JSR above."
+        },
+        {
+          "id": "cmt_ez7v0a",
+          "address": "$82EC",
+          "text": "Copy the 512-byte character set from $8E00 to $2000, where the $18 written to $D018 tells the VIC to look for it. X starts at 0 and wraps, so all 256 offsets of both pages are copied."
+        },
+        {
+          "id": "cmt_xdd0p3",
+          "address": "$8300",
+          "text": "Set up one level: draw the grid, materialise the ship, then reset every piece of per-level state - ship position, bullet, both zappers, laser timers, pod table, droid counters and the background sound. Its only caller is the JMP at the end of PlayNewLevelSounds, so the fanfare and this run as one sequence."
+        },
+        {
+          "id": "cmt_emkys9",
+          "address": "$834E",
+          "text": "Five instructions that do nothing: load $2B and store it back to itself twice, then the same for $2A. Both values were already put there by PrepareNextLevel out of the per-level tables. Leftover code - the only effect is on the N and Z flags, which nothing reads."
+        },
+        {
+          "id": "cmt_eaamkx",
+          "address": "$8361",
+          "placement": "inline",
+          "text": "Fifteen NOPs. Space left for code that is not here."
+        },
+        {
+          "id": "cmt_wt5urh",
+          "address": "$8373",
+          "text": "Read the joystick. $DC11 is CIA 1 port B ($DC01) seen through the chip's 16-byte mirror, which is JOYSTICK PORT 1 - port 2 is port A at $DC00. The reference's comment on the title-screen copy of this read calls it port 2. EOR #$FF turns the active-low switches into set bits: 1=up, 2=down, 4=left, 8=right, $10=fire."
+        },
+        {
+          "id": "cmt_g7wbmk",
+          "address": "$8380",
+          "text": "Waste time, but only while the ship is still materialising: if the offset at $0A is zero, return immediately. Called from the materialise loops so the animation slows as it converges."
+        },
+        {
+          "id": "cmt_5v8xyz",
+          "address": "$8386",
+          "text": "Waste about 2 x 256 DEC cycles. Entering at $8388 instead uses the value already in A as the count."
+        },
+        {
+          "id": "cmt_b952gb",
+          "address": "$8393",
+          "text": "The top of the frame. Move the ship, check for pause, then fall through the whole update chain and come back. Note that this is not a JSR/RTS structure at all: the main loop is a ring of JMPs, which is why a control-flow-derived routine extent has to stop at a jump."
+        },
+        {
+          "id": "cmt_5vgjp2",
+          "address": "$83A3",
+          "text": "One frame of the game, in order: bullet, zappers, laser, pod decay, pod movement, background sound, droids, frame-counter reset, level-complete test."
+        },
+        {
+          "id": "cmt_6xwlue",
+          "address": "$83C1",
+          "text": "Cold start, reached through the cartridge vector at $8000. Sets up the VIC control register, runs three KERNAL init routines and the screen editor init at $E518, then sends CHR$(8) - which is the code that LOCKS OUT the SHIFT + Commodore character-set switch, so the player cannot flip the game's custom font into lower case. Then it goes off to load the character set."
+        },
+        {
+          "id": "cmt_lmdzj0",
+          "address": "$83C5",
+          "placement": "inline",
+          "text": "$D016 = $05: bit 3 clear selects 38-column mode and bits 0-2 set a horizontal scroll of 5. Columns 0 and 39 both carry game content - the left zapper and the lives digit - so the two are in tension; I have not run the machine to see what actually shows."
+        },
+        {
+          "id": "cmt_dwahpw",
+          "address": "$83D5",
+          "placement": "inline",
+          "text": "CHR$(8) = disable SHIFT+C= case switching."
+        },
+        {
+          "id": "cmt_doo5om",
+          "address": "$83E2",
+          "text": "The cartridge's NMI vector points here. The KERNAL's NMI entry has already pushed A, X and Y; this pops them back and RTIs, so pressing RESTORE does nothing. That is the whole handler - and it is why this routine's stack delta is -3 rather than the -2 of an ordinary RTS."
+        },
+        {
+          "id": "cmt_ag9ezl",
+          "address": "$83E8",
+          "text": "Inter-frame delay: 21 DEX iterations. This is the game's entire speed control - there is no raster interrupt and no wait for $D012 anywhere in the program."
+        },
+        {
+          "id": "cmt_03njaa",
+          "address": "$8400",
+          "text": "Tail of the materialise animation: redraw, step the offset in, set the SID volume from it, and jump back into MaterializeShipLoop until the offset underflows past zero."
+        },
+        {
+          "id": "cmt_v1qmy6",
+          "address": "$841A",
+          "text": "The ship has arrived: draw it at (20,21) in light green, then three descending volume levels with a sound effect at each."
+        },
+        {
+          "id": "cmt_bi4nye",
+          "address": "$8470",
+          "text": "Move the ship. Runs only when the master frame counter hits zero. Reads the joystick, erases the ship by drawing a grid character over its old cell, applies the four direction bits with a limit on each edge, checks what it is moving into, then redraws it. If the cell it is moving into is not empty the check routines below decide whether that is fatal."
+        },
+        {
+          "id": "cmt_1k201z",
+          "address": "$8480",
+          "placement": "inline",
+          "text": "If the ship's own cell already holds the ship character, skip the collision test - nothing moved into it."
+        },
+        {
+          "id": "cmt_mwodtv",
+          "address": "$84DD",
+          "placement": "inline",
+          "text": "Zero here means an empty grid cell; anything else is tested against the pod stages."
+        },
+        {
+          "id": "cmt_rc14nb",
+          "address": "$84F8",
+          "text": "The player's bullet. Runs when $0F reaches zero, then reloads it with $18. If there is no bullet in flight ($11 = $FF) and fire is held, launch one from the ship's cell. The bullet is animated as two characters ($08, $09): each tick it advances one frame, and only when it wraps back does it actually move up a row. So it climbs the screen at half its animation rate, which is what makes the trail look continuous."
+        },
+        {
+          "id": "cmt_zcuwz4",
+          "address": "$8506",
+          "placement": "inline",
+          "text": "$FF in the bullet row means \"no bullet in flight\"."
+        },
+        {
+          "id": "cmt_kc106d",
+          "address": "$8531",
+          "placement": "inline",
+          "text": "Zero is an empty grid cell; anything else the bullet has run into goes to BulletCollidedWithPod, which also handles droids."
+        },
+        {
+          "id": "cmt_3ea07x",
+          "address": "$854F",
+          "placement": "inline",
+          "text": "Row 2 is the top of the play area: the bullet expires there."
+        },
+        {
+          "id": "cmt_zqegib",
+          "address": "$8573",
+          "text": "Bullet sound. $13 counts down from $40 and doubles as the pitch: it is written to voice 1 and voice 2's frequency high bytes and both are retriggered, so the shot is a falling tone that stops when the counter reaches zero."
+        },
+        {
+          "id": "cmt_wxt8ov",
+          "address": "$857C",
+          "placement": "inline",
+          "text": "ADC #$00 with no CLC - adds the carry left by the DEC above's flags, i.e. nothing predictable. Harmless here because it only shifts the pitch by one."
+        },
+        {
+          "id": "cmt_i4a1cm",
+          "address": "$859B",
+          "text": "The two zappers that patrol the edges. Runs on every other master frame ($0D = 1) and then only every second call ($14). The left zapper walks down column 0 through rows 3..21, the bottom zapper walks along row 22 through columns 1..38; each is erased with a space before it moves. Falls into DrawBottomZapperAndMaybeFireLaser."
+        },
+        {
+          "id": "cmt_91nvgc",
+          "address": "$85FD",
+          "text": "Draw the bottom zapper, then count down $17. When it reaches zero the two zappers fire: the left laser starts at column 1 on the left zapper's row, the bottom laser is a full column at the bottom zapper's column, and $18 is set to $FF to tell DrawLaser to run. $17 is reloaded from laserFrameRate, which is the per-level table value - that is how later levels shoot more often."
+        },
+        {
+          "id": "cmt_axpv88",
+          "address": "$862F",
+          "text": "One byte into voice 3's frequency high byte. This is the whole zapper sound."
+        },
+        {
+          "id": "cmt_e8lobt",
+          "address": "$8635",
+          "text": "Draw the laser cross. Runs when $0F hits 5 and $18 is $FF. The bottom laser is drawn as a solid column from row 21 up to row 3 in the current laser character; the left laser is a single cell that advances one column per call until it meets something. Laser characters cycle $05,$06 (UpdateLaserCharacter INCs and wraps at $07 because $07 is the ship glyph)."
+        },
+        {
+          "id": "cmt_u5hbkj",
+          "address": "$8675",
+          "placement": "inline",
+          "text": "If the cell already holds the laser character the beam has met the other beam: go and erase."
+        },
+        {
+          "id": "cmt_87tzn7",
+          "address": "$868D",
+          "placement": "inline",
+          "text": "This call never returns if the ship is standing in the way."
+        },
+        {
+          "id": "cmt_4t7qt2",
+          "address": "$869A",
+          "placement": "inline",
+          "text": "CLC before SBC again: laser character minus two, so the cell behind the beam gets the frame before last and the beam appears to have a tail."
+        },
+        {
+          "id": "cmt_vbm9ew",
+          "address": "$86A2",
+          "text": "The beams have met: erase the bottom laser column back to grid characters, drop a pod ($0F, yellow) where the left laser stopped, and clear $18 so DrawLaser stops until the zappers fire again. This is where every pod in the game comes from."
+        },
+        {
+          "id": "cmt_65721d",
+          "address": "$86D0",
+          "text": "Advance the laser animation and steal one from $0F at the same time, so calling this also shortens the bullet/laser frame interval."
+        },
+        {
+          "id": "cmt_u5gxjd",
+          "address": "$86D7",
+          "text": "Age every pod on the screen. Walks all of screen RAM from $0450 to $07FF looking at each character; anything found in podDecaySequence is replaced by the NEXT entry, so a pod ripens one stage per call. Reaching the last stage drops a bomb instead. This is a full 1KB screen scan every time $17 happens to be 5."
+        },
+        {
+          "id": "cmt_0ggwbo",
+          "address": "$86FB",
+          "placement": "inline",
+          "text": "$20 is a space - the commonest character on screen, tested first as a shortcut."
+        },
+        {
+          "id": "cmt_6gwwr6",
+          "address": "$871F",
+          "text": "The pod ripening chain, indexed 1..7 (index 0 is an $EA filler byte the loops never reach). A pod found at index n is rewritten as the character at index n+1: $18 -> $0D -> $0E -> $0F -> $10 -> $11 -> $12, and a pod already at $12 drops a bomb. Shooting a pod runs the chain backwards instead (see BulletCollidedWithPod). The ninth byte $13 at $8727 is DROID1 and is never read through this table: every loop over it starts at X=7."
+        },
+        {
+          "id": "cmt_7fqhql",
+          "address": "$8728",
+          "text": "A pod has ripened all the way: turn it into a falling bomb ($0A) and claim a slot in the pod pointer tables so DrawUpdatedPods will move it down the screen. Slots run 24..1 and a free one holds $FF in the high byte; if none is free the character is set to $12 instead, which leaves the pod at its last stage and it tries again next scan."
+        },
+        {
+          "id": "cmt_91z3ym",
+          "address": "$8748",
+          "text": "Mark all 32 pod slots free. Only 24 are ever searched or drawn, so eight of them are cleared and never used."
+        },
+        {
+          "id": "cmt_o1v4u9",
+          "address": "$8753",
+          "text": "Every $40 calls, move each live pod down one row."
+        },
+        {
+          "id": "cmt_kkaalz",
+          "address": "$876C",
+          "text": "Move one bomb down a row. Erase the old cell (character 0, then colour 8 through the same +$D4 high-byte trick), add 40 to the stored screen pointer, and draw the bomb in its new cell. A space below means the bomb has run off the bottom of the play area and the slot is freed; the ship's character below means the ship is hit, and the jump to ResetStackAndKillShip never returns."
+        },
+        {
+          "id": "cmt_o1dr06",
+          "address": "$87CB",
+          "text": "Something the bullet hit. If it is a pod stage, step the pod BACK one stage in the ripening chain - shooting a pod makes it younger. Stepping back past the first stage destroys it and scores 10. If it is not a pod, fall through to the droid tests. Note this routine reaches its callers' callers: both exits pop two bytes off the stack first."
+        },
+        {
+          "id": "cmt_ac604o",
+          "address": "$87D9",
+          "placement": "inline",
+          "text": "DEX past index 1 means the pod was at its youngest stage: destroy it."
+        },
+        {
+          "id": "cmt_w0u7th",
+          "address": "$87FE",
+          "text": "Pops the return address of its own caller before returning, so control resumes in the caller's caller. DrawBullet calls BulletCollidedWithPod as a subroutine and never gets the return."
+        },
+        {
+          "id": "cmt_gfx2g5",
+          "address": "$8801",
+          "text": "Same trick as $87FE but ending in a JMP: discard the caller's return address, then draw the character and return past it. The seeded project put the name DisplayGameBanner on this address; the banner routine is at $8806."
+        },
+        {
+          "id": "cmt_grb5du",
+          "address": "$8806",
+          "text": "Paint screen row 0: 40 characters from $881F and 40 colours from $8847, both indexed 1..40. Called once, from ShowBannerThenTitle."
+        },
+        {
+          "id": "cmt_5dtg8i",
+          "address": "$8818",
+          "text": "First thing after the screen is cleared: draw the banner, then go to the title screen."
+        },
+        {
+          "id": "cmt_0333oi",
+          "address": "$8870",
+          "text": "Add to the score. The score is not a number anywhere in memory - it is the seven screen characters at $040F-$0415, and this counts them up as text. X selects the digit to bump and Y how many times. A digit passing '9' ($3A) is reset to '0' and the carry is propagated left by DEX. X is saved and restored around each pass, which is why the loop re-enters at the TXA rather than after it."
+        },
+        {
+          "id": "cmt_5czlhm",
+          "address": "$888A",
+          "text": "Ten increments of the last digit = 10 points, plus the hit sound. Awarded for destroying a pod."
+        },
+        {
+          "id": "cmt_sgficw",
+          "address": "$889A",
+          "text": "The background/hit sound, run on odd master frames. $22 is a pitch that falls from $F0 while its top two bits are set, driving voice 3 and retriggering it each step. When it runs out, $23 says how many more sweeps to do; when that runs out too, voice 3 is parked on frequency 4, which is the low idle hum."
+        },
+        {
+          "id": "cmt_lgde30",
+          "address": "$88C9",
+          "text": "Move and draw the droids. Every $80 frames: first give SpawnDroidSegments a turn, then walk the droid array from the highest index down. Index 1 is the head of the chain. Each segment normally just copies the position of the segment in front of it - that is the whole snake movement - and only a segment whose status bit $40 is set steers for itself."
+        },
+        {
+          "id": "cmt_jrxk9o",
+          "address": "$88DA",
+          "placement": "inline",
+          "text": "Droid animation cycles $13,$14,$15 and wraps at $16."
+        },
+        {
+          "id": "cmt_83mq3k",
+          "address": "$8906",
+          "placement": "inline",
+          "text": "This one instruction is the snake: each segment takes the position the segment ahead of it had."
+        },
+        {
+          "id": "cmt_bccevs",
+          "address": "$892A",
+          "text": "The head segment steers. Status bit $02 selects the direction: clear moves it one column right, set moves it one column left. If the cell it wants is occupied it drops a row instead and flips bit 0 and bit 1, which is the zigzag; reaching row 22 clears bit 1 and parks it at (2,14)."
+        },
+        {
+          "id": "cmt_l7s104",
+          "address": "$8955",
+          "placement": "inline",
+          "text": "Written with 3-byte absolute addressing to a zero-page address - two bytes and two cycles more than needed, twice over."
+        },
+        {
+          "id": "cmt_zi8fi6",
+          "address": "$8995",
+          "text": "Draw a segment only if its status bit $80 is set. Bit $80 is what marks a segment as visible/alive."
+        },
+        {
+          "id": "cmt_5krfpo",
+          "address": "$89A0",
+          "text": "The master frame counter runs down from $80 to 0 and then wraps to $FF; this catches the wrap and reloads it. Every subsystem in the game is phased off this one byte."
+        },
+        {
+          "id": "cmt_hh2ijc",
+          "address": "$89AB",
+          "text": "The ship has walked into something. If it is any pod stage, put the ship back where it was and carry on; otherwise fall through to the test that decides whether it dies."
+        },
+        {
+          "id": "cmt_985p8u",
+          "address": "$89C1",
+          "text": "Feed droids onto the grid. $29 counts the segments still to emit for the squad being built: while it is non-zero one segment is appended per call, all starting at (10,2), and the LAST one gets status $80 and decrements droidsLeftToKill - so the squad is only counted once, at its tail. When $29 reaches zero, $28 counts down $20 calls of quiet before the next squad starts, and a new squad only starts while droidsLeftToKill is non-zero. The reference calls these two bytes a28 and a29."
+        },
+        {
+          "id": "cmt_8p7mj0",
+          "address": "$8A11",
+          "text": "The bullet hit a droid. $13 is a drone segment and scores 100; $14 and $15 are lead-droid frames and score 300 first, then fall into the 100 as well - so hitting a lead droid is worth 400, not 300."
+        },
+        {
+          "id": "cmt_8tmcgq",
+          "address": "$8A33",
+          "placement": "inline",
+          "text": "Discards the return address: control resumes in DrawBullet's caller, not in DrawBullet."
+        },
+        {
+          "id": "cmt_j5v0y2",
+          "address": "$8A37",
+          "text": "Find which array entry is at the bullet's position, then unlink it: everything above it is shuffled down one, the squad count drops, and a fresh pod ($0F, yellow) is left in the cell. The status bits decide what happens to the neighbours - $C0 or $40 means the segment was a head, and then the segment before or after inherits the $80 visible bit so the chain does not vanish."
+        },
+        {
+          "id": "cmt_o6662m",
+          "address": "$8A99",
+          "text": "Hit sound plus score, in one call: set the sweep going and fall into IncrementPlayerScore."
+        },
+        {
+          "id": "cmt_9cbhpq",
+          "address": "$8AA4",
+          "text": "Walk backwards from the killed segment to the nearest one with the head bit $40 set, then set the $80 bit on the segments either side of the gap."
+        },
+        {
+          "id": "cmt_u96dsj",
+          "address": "$8AC8",
+          "text": "Level is over when both the number of droids still owed and the number on screen are zero."
+        },
+        {
+          "id": "cmt_jw6c9r",
+          "address": "$8ADE",
+          "text": "The ship has been hit. LDX #$F6 / TXS throws the whole call stack away - this is reached by JMP from five places, several of them several calls deep, and there is no unwinding to do because the level is about to restart. Anything expecting an RTS from a routine that jumped here will not get one."
+        },
+        {
+          "id": "cmt_2rtef9",
+          "address": "$8AE9",
+          "text": "Called with the character a droid is about to move into. $07 is the ship and never returns. Otherwise the droid's own stored column comes back in A, which the caller stores as the new column - so a droid blocked by anything that is not the ship simply does not move sideways."
+        },
+        {
+          "id": "cmt_3hg3c8",
+          "address": "$8AF8",
+          "text": "Blow the ship up. The ship position is written into entries 1..8 of both fragment arrays (X counts 8 down to 1), the volume ramp $33 is set to $0F, all three voices are silenced and voice 1 is set to a low frequency for the bang."
+        },
+        {
+          "id": "cmt_hp95k6",
+          "address": "$8B24",
+          "text": "One frame of the explosion: retrigger the noise voice, set the volume from the ramp, erase the eight fragments where they still show the explosion character, then move and redraw them."
+        },
+        {
+          "id": "cmt_s46ctl",
+          "address": "$8B60",
+          "text": "Advance the explosion character ($16,$17,$18 cycling) and then move each of the eight fragments by the deltas in the two tables below."
+        },
+        {
+          "id": "cmt_t9948w",
+          "address": "$8B6E",
+          "text": "Move fragment X. The table entry decides how many times the position is INCed before MoveExplosionFragment* DECs it once: $80 means no INC at all (net -1), $00 means one INC (net 0), $01 means two (net +1). So the tables hold -1, 0 and +1 in disguise."
+        },
+        {
+          "id": "cmt_pxi1nj",
+          "address": "$8BB1",
+          "text": "Count the volume ramp down; when it goes negative the explosion is over and the level restarts."
+        },
+        {
+          "id": "cmt_i2qxfb",
+          "address": "$8BC0",
+          "text": "The eight explosion directions, as two parallel signed tables indexed 1..8, with $80 = -1, $00 = 0 and $01 = +1. The pairs are (0,-1) (+1,-1) (+1,0) (+1,+1) (0,+1) (-1,+1) (-1,0) (-1,-1): the eight compass directions in order, so the fragments fly outwards evenly. Note that the table at $8BC0 is the one that moves the COLUMN and the table at $8BC8 moves the ROW - the reference names them explosionYPosArrayControl and explosionXPosArrayControl, which is the other way round. $8BC8 is shared: it is entry 8 of the first table and the base-1 of the second."
+        },
+        {
+          "id": "cmt_wwhvbq",
+          "address": "$8BEC",
+          "text": "Deciding whether the ship survives what it walked into. $08 and $09 are the two bullet frames and $00 is an empty grid cell - all harmless. Anything else is fatal and the jump never returns."
+        },
+        {
+          "id": "cmt_4gzuzh",
+          "address": "$8BFC",
+          "text": "Clear the play area: fill $0450-$07FF with spaces. It starts at $0450, which is row 2 - the two header rows are left alone. The pointer lives at $07/$08, so this routine and DrawGrid are using the same two zero-page bytes for entirely different things."
+        },
+        {
+          "id": "cmt_nzdkfe",
+          "address": "$8C17",
+          "text": "The ship is gone: clear the screen, take one off the lives digit at screen column 39, and either restart the level or - when the digit reaches '0' - go and check the high score."
+        },
+        {
+          "id": "cmt_g2biv9",
+          "address": "$8C2D",
+          "text": "The between-levels screen. Resets the stack outright (LDX #$F6 / TXS) because it is reached by JMP from inside nested calls, clears the play area, then writes \" BATTLE  STATIONS \" on row 6 and \"ENTER GRID AREA nn\" on row 8."
+        },
+        {
+          "id": "cmt_2qnyaq",
+          "address": "$8C75",
+          "text": "Advance to the next level: add a life (capped at '9'), step selectedLevel on (capped at 32), then read the three per-level tables and count the two-digit level number on screen up to match."
+        },
+        {
+          "id": "cmt_1ovv7p",
+          "address": "$8CB5",
+          "text": "How many droid squads must be destroyed on each level, indexed 1..32 from a base of $8CB4 because levels are numbered from one. Entry 13 is $10 (16) where its neighbours are 5 and 6 - the only value out of sequence in the table."
+        },
+        {
+          "id": "cmt_6szurn",
+          "address": "$8CD5",
+          "text": "How many segments each squad has, indexed 1..32 from $8CD4. The sequence climbs steadily from 6 to 25 except at entries 13 and 29, which are both 3. Combined with the table above, level 13 is 16 squads of 3 and level 29 is 7 squads of 3 - 48 and 21 droids against 50 for level 12 and 161 for level 28. I cannot tell from the code whether those two are designed breather waves or transcription slips; playing levels 13 and 29, or comparing another release of the binary, would settle it."
+        },
+        {
+          "id": "cmt_crifk3",
+          "address": "$8CF5",
+          "text": "How many frames between laser shots, indexed 1..32 from $8CF4. Falls from $10 to $05 across the game, so the zappers fire more than three times as often on level 32 as on level 1. No anomalies in this one."
+        },
+        {
+          "id": "cmt_284w95",
+          "address": "$8D16",
+          "text": "The level fanfare. Counts $36 down from $30; each step recolours the two level digits with the counter itself and plays that many pulses of a falling three-voice tone, so the effect slows and darkens as it ends. Falls into DrawNewLevelScreen when finished. The seeded project had this routine buried inside the laserFrameRateForLevel data region, so none of it decoded."
+        },
+        {
+          "id": "cmt_dlin0i",
+          "address": "$8D5A",
+          "text": "A SECOND READING of bytes that already belong to STA selectedLevel at $8D59. The BCS at $8DCB targets this address, one byte into that instruction, where the bytes read $35 $4C = AND $4C,X. The branch is in dead code and never executes, so the reading below is what WOULD happen, not what does. re64 shows both; a flat listing has to choose, and the reference expresses it as a label equate that its own assembler cannot place."
+        },
+        {
+          "id": "cmt_i44jk1",
+          "address": "$8D66",
+          "text": "Frequency for the level fanfare: $40 minus the pulse counter, so each pulse is lower than the last. SBC with no SEC, so it is really $3F minus the counter minus the borrow."
+        },
+        {
+          "id": "cmt_rz9gsy",
+          "address": "$8D78",
+          "text": "Draw a grid character over the ship's cell and fall into the explosion. This is where every death converges."
+        },
+        {
+          "id": "cmt_n8ymhz",
+          "address": "$8D8E",
+          "text": "The title screen: \"BY JEFF MINTER\" on row 6 and \"ENTER LEVEL 00\" on row 8, then the copyright line on row 10, then wait for the joystick."
+        },
+        {
+          "id": "cmt_i6nely",
+          "address": "$8DB0",
+          "text": "Title-screen input. Reads CIA 1 port B raw - no EOR here, so the tests are against active-low values: $EF is fire alone, $FE is up alone. Any other value, including two switches at once, is ignored."
+        },
+        {
+          "id": "cmt_0ghsdk",
+          "address": "$8DC6",
+          "text": "Fire was pressed. selectedLevel is decremented here because PrepareNextLevel increments it again before it is used."
+        },
+        {
+          "id": "cmt_ltcsr6",
+          "address": "$8D57",
+          "placement": "after",
+          "text": "A SECOND READING follows. The BCS at $8DCB targets $8D5A - one byte into the STA above, where the bytes read $35 $4C = AND $4C,X. That branch sits in dead code and never executes, so the alternate stream below is what WOULD run, not what does. re64 shows both readings of the same bytes; a flat listing must pick one, and the reference can only gesture at it with a label equate ($8D5A = *+$01) that no assembler will place."
+        },
+        {
+          "id": "cmt_g7rmnc",
+          "address": "$8188",
+          "placement": "inline",
+          "text": "Second store through the same pointer, but the high byte now points into colour RAM."
+        },
+        {
+          "id": "cmt_wwscaa",
+          "address": "$8646",
+          "placement": "inline",
+          "text": "Laser characters run $05, $06 and the test is against $07 - the ship glyph - so the character is reset the moment it would collide with the ship's own code. There is no $07 laser frame; the boundary is the ship."
+        },
+        {
+          "id": "cmt_wmqk48",
+          "address": "$8736",
+          "placement": "inline",
+          "text": "The reference emits a label here ($8737 = *+$01) as though something branched into the operand of this BNE. Nothing does: find_references reports no inbound reference to $8737. Unlike $8D5A, which really is a branch target, this one is an artefact of the reference's own disassembler."
+        },
+        {
+          "id": "cmt_57j8hq",
+          "address": "$8847",
+          "placement": "inline",
+          "text": "This byte is entry $28 of the banner text - the initial lives digit '4' at screen column 39 - and simultaneously the base-1 of the colour table below, which is read as $8847,X for X = 1..$28. The reference lists it as the first byte of screenHeaderColors, where it is not a colour."
+        },
+        {
+          "id": "cmt_gcnlnh",
+          "address": "$88E8",
+          "placement": "inline",
+          "text": "Droid positions are held in three parallel arrays a page apart, indexed by segment number, with segment 1 at the head of the chain."
+        },
+        {
+          "id": "cmt_7al85v",
+          "address": "$8A21",
+          "text": "300 points, and then it FALLS THROUGH into the 100-point case below - a lead droid is worth 400, not 300. The reference comments the two entry points as 300 and 100 separately and does not note that one runs into the other. IncrementPlayerScore adds Y to the digit selected by X, and X = 4 is the hundreds column of the seven-digit score at $040F."
+        },
+        {
+          "id": "cmt_qpw215",
+          "address": "$8A65",
+          "placement": "inline",
+          "text": "Stop shuffling when the index reaches the live squad count."
+        },
+        {
+          "id": "cmt_4i4rr7",
+          "address": "$8AC1",
+          "text": "Three instructions reached by JSR from exactly one place, twenty bytes above it. Nothing else calls it and it could have been inline; it is factored out for no visible reason."
+        },
+        {
+          "id": "cmt_4h6qr7",
+          "address": "$8B58",
+          "placement": "inline",
+          "text": "LDA #$14 loads a count for the DEX/BNE pair at $8B5D - which the JMP on the next line skips over permanently. The count is loaded every explosion frame and never used."
+        },
+        {
+          "id": "cmt_eelxa8",
+          "address": "$8BC8",
+          "placement": "inline",
+          "text": "Shared byte: entry 8 of the column table above and base-1 of the row table below."
+        },
+        {
+          "id": "cmt_1msf61",
+          "address": "$8C98",
+          "placement": "inline",
+          "text": "Third of the three per-level tables. All three are read from base-1 because levels are numbered from 1, which is why the byte before each table belongs to the one above it."
+        },
+        {
+          "id": "cmt_zj5lvw",
+          "address": "$8CC1",
+          "placement": "inline",
+          "text": "Level 13: 16 squads, where level 12 has 5 and level 14 has 6. The only value in this table that is not part of a rising run."
+        },
+        {
+          "id": "cmt_f8ywqg",
+          "address": "$8CE1",
+          "placement": "inline",
+          "text": "Level 13 again: 3 segments per squad, against 10 for level 12 and 15 for level 14."
+        },
+        {
+          "id": "cmt_sjus3r",
+          "address": "$8CF1",
+          "placement": "inline",
+          "text": "Level 29: 3 segments per squad, against 23 for level 28 and 24 for level 30. 7 squads of 3 is 21 droids where level 28 needs 161."
+        },
+        {
+          "id": "cmt_nwyvhh",
+          "address": "$8D2B",
+          "placement": "inline",
+          "text": "A still holds what SoundEffect returned, so voices 2 and 3 get the same frequency voice 1 was just given."
+        },
+        {
+          "id": "cmt_g2bvux",
+          "address": "$8DB7",
+          "placement": "inline",
+          "text": "Fire on the title screen starts the game; there is no other exit from this loop."
+        },
+        {
+          "id": "cmt_2f8fzi",
+          "address": "$8DD0",
+          "text": "Seventeen $EA bytes between the dead branch above and the title strings. list_warnings reports flow arriving here and stopping because this is data - correct and expected: the unreachable code at $8DCB runs off its end into this padding. No arrangement of regions removes that warning, because unreachable code falling into padding is exactly what it describes."
+        },
+        {
+          "id": "cmt_6630rs",
+          "address": "$810B",
+          "text": "The only four VIC writes in the entire program are here and at $83C5, and three of them are indirect through this pointer. A range search of $D000-$D02E over the instruction stream finds one absolute store; re64 recovers the other three by folding the constants that built $02/$03."
+        },
+        {
+          "id": "cmt_wyodf5",
+          "address": "$8116",
+          "text": "The whole of this game s SID setup, and it never grows. Across all 66 SID stores in the program the only registers ever written are the three FREQUENCY HIGH bytes ($D401, $D408, $D40F), the three control registers, voice 1 and 2 attack/decay and sustain/release, voice 3 attack/decay and sustain/release, and the volume at $D418. The frequency LOW bytes at $D400, $D407 and $D40E are never written at all, so every pitch in the game is a multiple of 256 in SID units - which is why nothing here can play a tune, only sweeps and clicks. There is no filter, no pulse width and no ring modulation except one $25 in the level fanfare."
+        },
+        {
+          "id": "cmt_1y4ucd",
+          "address": "$83A3",
+          "placement": "after",
+          "text": "How the frame ends: MainLoop finishes with JMP ReenterMainGameLoop, which delays and JMPs back to EnterMainGameLoop. Nothing in this ring returns, so there is no RTS anywhere on the path - which is also why the routine that kills the ship can simply reset the stack pointer and jump, with nothing to unwind."
+        },
+        {
+          "id": "cmt_098u85",
+          "address": "$86D7",
+          "placement": "after",
+          "text": "routine_effects on this one is meaningful, because nothing it calls can reach ResetStackAndKillShip: it writes laserAndPodInterval and the two pointer bytes, and everything else it does goes through a computed address."
+        },
+        {
+          "id": "cmt_vgyz9q",
+          "address": "$8ADE",
+          "placement": "after",
+          "text": "This routine is why routine_effects is nearly useless on the game loop. It never returns: it resets the stack and jumps into the death path, which runs the explosion, restarts the level, plays the fanfare and re-enters the main loop - so a static may-analysis reachable from here unions the whole program. DrawLaser, DrawDroids and UpdateShipPosition all reach it, and all three come back reporting sixty-odd writes including the level-number digits on screen. UpdatePods, which cannot reach it, reports three."
+        },
+        {
+          "id": "cmt_9cpj74",
+          "address": "$8156",
+          "placement": "inline",
+          "text": "ADC #$00 propagates the carry out of the ADC #$28 above: the pair is the 16-bit add of 40 that walks the screen pointer down a row."
+        },
+        {
+          "id": "cmt_vrgd3o",
+          "address": "$872C",
+          "placement": "inline",
+          "text": "Search the 24 pod slots from the top down and take the first free one. If none is free the pod is left at its last stage and tries again on the next screen scan."
+        },
+        {
+          "id": "cmt_83zz6k",
+          "address": "$8D5A",
+          "placement": "inline",
+          "text": "A comment written here is accepted and stored but renders nowhere, because this address is inside the instruction above. The explanation of the second reading is on $8D57 instead."
+        },
+        {
+          "id": "cmt_06dkb9",
+          "address": "$8000",
+          "placement": "after",
+          "text": "Both words here are read by the machine, not by this program: the KERNAL JMPs through $8000 at reset and through $8002 on NMI. Nothing in the code refers to either address, which is why re64 shows them as a jumptable region rather than as data anything reaches."
+        },
+        {
+          "id": "cmt_9mevlf",
+          "address": "$8848",
+          "text": "Colours for screen row 0, read as $8847,X for X = 1..$28 at $880E - so this table is 40 bytes starting at $8848 and its base-1 dummy is the lives digit above. Left to right: cyan for GRIDRUNNER, purple for the rest of the title, white, yellow for PL, cyan for the seven score digits, yellow for HI, light blue for the high score, light green for the ship glyph."
+        },
+        {
+          "id": "cmt_5wjpdc",
+          "address": "$8E00",
+          "text": "GLYPH INVENTORY, read off the bitmaps below (64 glyphs, 8 bytes each):\n  $00 grid intersection      $01 left zapper           $02 bottom zapper\n  $03-$06 laser frames       $07 the ship              $08-$09 bullet frames\n  $0A falling bomb           $0B-$0C left/right arrows (unused by any code)\n  $0D-$12 pod ripening stages, blank through to a scattering diamond\n  $13-$15 droid animation    $16-$18 explosion debris ($18 is also pod stage 1)\n  $19+$1A one pair reading PL   $1B and $1C two identical Y glyphs\n  $1D+$1E one pair reading HI   $1F an unused arrow\n  $20 space  $21 G  $22 R  $23 U  $24 I  $25 D  $26 N  $27 E  $28 A  $29 B\n  $2A F  $2B H  $2C J  $2D M  $2E P  $2F S  $30 O and also digit 0\n  $31-$39 digits 1-9  $3A T  $3B V  $3C+$3D the two halves of one (c) symbol\n  $3E L  $3F a solid vertical bar\nThe set contains no C, K, Q, W, X or Z - only the twenty letters this game s own\ntext needs. $30 doing duty as both O and zero is why \"PRESS FIRE TO BEGIN\" and a\nseven-digit score are made of the same byte value."
+        },
+        {
+          "id": "cmt_ks7jdt",
+          "address": "$81D7",
+          "placement": "inline",
+          "text": "DEY on whatever Y happens to hold - WriteCurrentCharacterToCurrentXYPos leaves the screen column in it - and the BNE below goes to the next instruction either way. Two instructions with no effect, in the inner loop of the grid animation."
+        },
+        {
+          "id": "cmt_vndhyd",
+          "address": "$8748",
+          "placement": "after",
+          "text": "32 slots are cleared here but only 24 are ever searched (DrawBomb and DrawUpdatedPods both start at LDX #$18), so slots 25-32 exist, are initialised, and can never hold a pod."
+        },
+        {
+          "id": "cmt_do66db",
+          "address": "$8881",
+          "text": "THE CARRY OUT OF DIGIT 1 IS DROPPED. When X reaches 0 the BNE below fails and the loop exits without touching $040F, so the leftmost of the seven score characters can never be incremented by a carry - and nothing else ever writes it except StartLevel, which sets it to 0. The score field is seven digits wide, is zeroed as seven by StartLevel and compared against the high score as seven, but only six of them can ever be non-zero: the score rolls over at 999999. Whether that is a bug or a deliberately decorative leading zero cannot be told from the code; what is certain is that the carry is lost."
+        }
+      ],
+      "labelUses": [
+        {
+          "id": "lbl_cp3g8t",
+          "address": "$8C02",
+          "label": "lbl_g37rsw"
+        },
+        {
+          "id": "lbl_bje32y",
+          "address": "$8C0E",
+          "label": "lbl_g37rsw"
+        },
+        {
+          "id": "lbl_7bd06j",
+          "address": "$8C10",
+          "label": "lbl_g37rsw"
+        },
+        {
+          "id": "lbl_j0pztw",
+          "address": "$8BFE",
+          "label": "lbl_1hnvs2"
+        },
+        {
+          "id": "lbl_0rih55",
+          "address": "$8C08",
+          "label": "lbl_1hnvs2"
+        },
+        {
+          "id": "lbl_e7997f",
+          "address": "$8C0A",
+          "label": "lbl_1hnvs2"
+        },
+        {
+          "id": "lbl_myzoxo",
+          "address": "$82AE",
+          "label": "lbl_7ukqgf"
+        },
+        {
+          "id": "lbl_mv1dto",
+          "address": "$8403",
+          "label": "lbl_7ukqgf"
+        },
+        {
+          "id": "lbl_igf5ff",
+          "address": "$8106",
+          "label": "lbl_xmaeg4"
+        },
+        {
+          "id": "lbl_ajjop3",
+          "address": "$810B",
+          "label": "lbl_xmaeg4"
+        },
+        {
+          "id": "lbl_rhgwbp",
+          "address": "$8111",
+          "label": "lbl_xmaeg4"
+        },
+        {
+          "id": "lbl_1yel7h",
+          "address": "$8114",
+          "label": "lbl_xmaeg4"
+        },
+        {
+          "id": "lbl_hpw8wq",
+          "address": "$8102",
+          "label": "lbl_pc6ns9"
+        },
+        {
+          "id": "lbl_e2ovme",
+          "address": "$876F",
+          "label": "lbl_hq8g0z"
+        },
+        {
+          "id": "lbl_lladuw",
+          "address": "$8778",
+          "label": "lbl_hq8g0z"
+        },
+        {
+          "id": "lbl_chhji4",
+          "address": "$8783",
+          "label": "lbl_hq8g0z"
+        },
+        {
+          "id": "lbl_5kvqgp",
+          "address": "$878E",
+          "label": "lbl_hq8g0z"
+        },
+        {
+          "id": "lbl_px1xwk",
+          "address": "$87A6",
+          "label": "lbl_hq8g0z"
+        },
+        {
+          "id": "lbl_je1awh",
+          "address": "$87A8",
+          "label": "lbl_hq8g0z"
+        },
+        {
+          "id": "lbl_m1ig6e",
+          "address": "$87BD",
+          "label": "lbl_hq8g0z"
+        },
+        {
+          "id": "lbl_rffqd4",
+          "address": "$87C8",
+          "label": "lbl_hq8g0z"
+        },
+        {
+          "id": "lbl_bvelaf",
+          "address": "$8774",
+          "label": "lbl_8j1ka3"
+        },
+        {
+          "id": "lbl_uwfhnd",
+          "address": "$8785",
+          "label": "lbl_8j1ka3"
+        },
+        {
+          "id": "lbl_ezcskv",
+          "address": "$878A",
+          "label": "lbl_8j1ka3"
+        },
+        {
+          "id": "lbl_nizeyv",
+          "address": "$87A1",
+          "label": "lbl_8j1ka3"
+        },
+        {
+          "id": "lbl_9mcxou",
+          "address": "$87BF",
+          "label": "lbl_8j1ka3"
+        },
+        {
+          "id": "lbl_v2g9to",
+          "address": "$87C4",
+          "label": "lbl_8j1ka3"
+        },
+        {
+          "id": "lbl_yjwc8r",
+          "address": "$8235",
+          "label": "lbl_2i4x9l"
+        },
+        {
+          "id": "lbl_3wz5dz",
+          "address": "$8237",
+          "label": "lbl_2i4x9l"
+        },
+        {
+          "id": "lbl_2ai5ay",
+          "address": "$8239",
+          "label": "lbl_2i4x9l"
+        },
+        {
+          "id": "lbl_ibcm16",
+          "address": "$8452",
+          "label": "lbl_2i4x9l"
+        },
+        {
+          "id": "lbl_xwf63o",
+          "address": "$8454",
+          "label": "lbl_2i4x9l"
+        },
+        {
+          "id": "lbl_envl9r",
+          "address": "$846B",
+          "label": "lbl_2i4x9l"
+        }
+      ],
+      "constantUses": [
+        {
+          "id": "cst_q82hlr",
+          "address": "$8023",
+          "constant": "cst_0msx8w"
+        },
+        {
+          "id": "cst_47ielb",
+          "address": "$80A2",
+          "constant": "cst_iaqmt4"
+        },
+        {
+          "id": "cst_xscrfs",
+          "address": "$80AA",
+          "constant": "cst_ba7ykl"
+        },
+        {
+          "id": "cst_z8rj5q",
+          "address": "$80BA",
+          "constant": "cst_mr909c"
+        },
+        {
+          "id": "cst_5ky2y5",
+          "address": "$80BE",
+          "constant": "cst_ba7ykl"
+        },
+        {
+          "id": "cst_4u6ab6",
+          "address": "$80DA",
+          "constant": "cst_pglngt"
+        },
+        {
+          "id": "cst_9qmtju",
+          "address": "$80E5",
+          "constant": "cst_3ib4mh"
+        },
+        {
+          "id": "cst_zj3a2e",
+          "address": "$80EC",
+          "constant": "cst_ba7ykl"
+        },
+        {
+          "id": "cst_4kdzf9",
+          "address": "$80F9",
+          "constant": "cst_s6l3kg"
+        },
+        {
+          "id": "cst_uzzotb",
+          "address": "$810F",
+          "constant": "cst_5ji4io"
+        },
+        {
+          "id": "cst_34l6zf",
+          "address": "$8144",
+          "constant": "cst_e6eeh7"
+        },
+        {
+          "id": "cst_87m10t",
+          "address": "$817C",
+          "constant": "cst_tjsyu2"
+        },
+        {
+          "id": "cst_1p2qj5",
+          "address": "$8191",
+          "constant": "cst_ubaacw"
+        },
+        {
+          "id": "cst_kxq6gs",
+          "address": "$8199",
+          "constant": "cst_myvn33"
+        },
+        {
+          "id": "cst_w1wv54",
+          "address": "$81A6",
+          "constant": "cst_e7duzq"
+        },
+        {
+          "id": "cst_p7odre",
+          "address": "$81AA",
+          "constant": "cst_mhqlem"
+        },
+        {
+          "id": "cst_be3ok6",
+          "address": "$81AE",
+          "constant": "cst_ubaacw"
+        },
+        {
+          "id": "cst_pz5lec",
+          "address": "$81B3",
+          "constant": "cst_ubaacw"
+        },
+        {
+          "id": "cst_ouxuxm",
+          "address": "$81E9",
+          "constant": "cst_9wae7p"
+        },
+        {
+          "id": "cst_0sqlsq",
+          "address": "$821D",
+          "constant": "cst_s6l3kg"
+        },
+        {
+          "id": "cst_00jfnz",
+          "address": "$8223",
+          "constant": "cst_s6l3kg"
+        },
+        {
+          "id": "cst_4xvnyk",
+          "address": "$8229",
+          "constant": "cst_s6l3kg"
+        },
+        {
+          "id": "cst_a9386m",
+          "address": "$8258",
+          "constant": "cst_ubaacw"
+        },
+        {
+          "id": "cst_2q0ih5",
+          "address": "$8260",
+          "constant": "cst_4a5hrz"
+        },
+        {
+          "id": "cst_dl95ye",
+          "address": "$8264",
+          "constant": "cst_elonet"
+        },
+        {
+          "id": "cst_wrlui6",
+          "address": "$8268",
+          "constant": "cst_ubaacw"
+        },
+        {
+          "id": "cst_ofxv40",
+          "address": "$826D",
+          "constant": "cst_myvn33"
+        },
+        {
+          "id": "cst_c4hrm5",
+          "address": "$82A8",
+          "constant": "cst_63lrhx"
+        },
+        {
+          "id": "cst_9qafne",
+          "address": "$82AC",
+          "constant": "cst_4a5hrz"
+        },
+        {
+          "id": "cst_2q5ahb",
+          "address": "$82BC",
+          "constant": "cst_e7duzq"
+        },
+        {
+          "id": "cst_9rkzfe",
+          "address": "$8300",
+          "constant": "cst_h6aaz6"
+        },
+        {
+          "id": "cst_p0k1d3",
+          "address": "$8322",
+          "constant": "cst_28ulmv"
+        },
+        {
+          "id": "cst_89vemu",
+          "address": "$8346",
+          "constant": "cst_2qmej3"
+        },
+        {
+          "id": "cst_oqpd0h",
+          "address": "$835C",
+          "constant": "cst_h6aaz6"
+        },
+        {
+          "id": "cst_wiw96p",
+          "address": "$83D5",
+          "constant": "cst_xjp6c6"
+        },
+        {
+          "id": "cst_m2gh65",
+          "address": "$841A",
+          "constant": "cst_0msx8w"
+        },
+        {
+          "id": "cst_dcx2ho",
+          "address": "$841E",
+          "constant": "cst_eiixiu"
+        },
+        {
+          "id": "cst_9ppwlo",
+          "address": "$842D",
+          "constant": "cst_h6aaz6"
+        },
+        {
+          "id": "cst_6gv254",
+          "address": "$8445",
+          "constant": "cst_ubaacw"
+        },
+        {
+          "id": "cst_rsilsy",
+          "address": "$844A",
+          "constant": "cst_h6aaz6"
+        },
+        {
+          "id": "cst_gtgl7t",
+          "address": "$8459",
+          "constant": "cst_ubaacw"
+        },
+        {
+          "id": "cst_yvhmvz",
+          "address": "$845E",
+          "constant": "cst_gx6dxr"
+        },
+        {
+          "id": "cst_32bq3c",
+          "address": "$8483",
+          "constant": "cst_0msx8w"
+        },
+        {
+          "id": "cst_9mjm3j",
+          "address": "$848A",
+          "constant": "cst_9wae7p"
+        },
+        {
+          "id": "cst_2pobyo",
+          "address": "$848E",
+          "constant": "cst_e7duzq"
+        },
+        {
+          "id": "cst_5z39z4",
+          "address": "$8497",
+          "constant": "cst_ln60sg"
+        },
+        {
+          "id": "cst_4hbkn0",
+          "address": "$84A9",
+          "constant": "cst_22ntlu"
+        },
+        {
+          "id": "cst_zfbubp",
+          "address": "$84BB",
+          "constant": "cst_epzrno"
+        },
+        {
+          "id": "cst_oc2qrm",
+          "address": "$84CD",
+          "constant": "cst_shhvo1"
+        },
+        {
+          "id": "cst_a0lgba",
+          "address": "$84ED",
+          "constant": "cst_eiixiu"
+        },
+        {
+          "id": "cst_0wz66q",
+          "address": "$84F1",
+          "constant": "cst_0msx8w"
+        },
+        {
+          "id": "cst_zbqbru",
+          "address": "$8506",
+          "constant": "cst_28ulmv"
+        },
+        {
+          "id": "cst_7rvjaj",
+          "address": "$850C",
+          "constant": "cst_khipl5"
+        },
+        {
+          "id": "cst_wiyrd0",
+          "address": "$851A",
+          "constant": "cst_yjhkk9"
+        },
+        {
+          "id": "cst_wv6frd",
+          "address": "$8531",
+          "constant": "cst_9wae7p"
+        },
+        {
+          "id": "cst_dsca9t",
+          "address": "$8538",
+          "constant": "cst_e7duzq"
+        },
+        {
+          "id": "cst_2clxwl",
+          "address": "$853C",
+          "constant": "cst_9wae7p"
+        },
+        {
+          "id": "cst_1hr5wl",
+          "address": "$8553",
+          "constant": "cst_28ulmv"
+        },
+        {
+          "id": "cst_p14iuz",
+          "address": "$8558",
+          "constant": "cst_yjhkk9"
+        },
+        {
+          "id": "cst_8duvmp",
+          "address": "$856C",
+          "constant": "cst_elonet"
+        },
+        {
+          "id": "cst_zhnqwa",
+          "address": "$8581",
+          "constant": "cst_ubaacw"
+        },
+        {
+          "id": "cst_zytdsq",
+          "address": "$8586",
+          "constant": "cst_myvn33"
+        },
+        {
+          "id": "cst_msxz39",
+          "address": "$8590",
+          "constant": "cst_ubaacw"
+        },
+        {
+          "id": "cst_anhigf",
+          "address": "$8595",
+          "constant": "cst_myvn33"
+        },
+        {
+          "id": "cst_zog3lk",
+          "address": "$85B2",
+          "constant": "cst_e6eeh7"
+        },
+        {
+          "id": "cst_ac4url",
+          "address": "$85C9",
+          "constant": "cst_elonet"
+        },
+        {
+          "id": "cst_2p75lf",
+          "address": "$85CD",
+          "constant": "cst_gpw93p"
+        },
+        {
+          "id": "cst_qk41wf",
+          "address": "$85DC",
+          "constant": "cst_e6eeh7"
+        },
+        {
+          "id": "cst_bjzgnl",
+          "address": "$85F1",
+          "constant": "cst_61vmwi"
+        },
+        {
+          "id": "cst_byfv4j",
+          "address": "$860C",
+          "constant": "cst_ubaacw"
+        },
+        {
+          "id": "cst_3h7vlf",
+          "address": "$8611",
+          "constant": "cst_ix7is9"
+        },
+        {
+          "id": "cst_zerq0m",
+          "address": "$8616",
+          "constant": "cst_4obw4y"
+        },
+        {
+          "id": "cst_80kjdr",
+          "address": "$861A",
+          "constant": "cst_ltrgeb"
+        },
+        {
+          "id": "cst_97w423",
+          "address": "$863E",
+          "constant": "cst_4obw4y"
+        },
+        {
+          "id": "cst_oytzcl",
+          "address": "$864A",
+          "constant": "cst_ltrgeb"
+        },
+        {
+          "id": "cst_omxwdl",
+          "address": "$864E",
+          "constant": "cst_elonet"
+        },
+        {
+          "id": "cst_91tn0y",
+          "address": "$867C",
+          "constant": "cst_9wae7p"
+        },
+        {
+          "id": "cst_nricj9",
+          "address": "$8680",
+          "constant": "cst_e7duzq"
+        },
+        {
+          "id": "cst_67gnoc",
+          "address": "$8694",
+          "constant": "cst_elonet"
+        },
+        {
+          "id": "cst_eerwsp",
+          "address": "$86AA",
+          "constant": "cst_e7duzq"
+        },
+        {
+          "id": "cst_wbjgi4",
+          "address": "$86AE",
+          "constant": "cst_9wae7p"
+        },
+        {
+          "id": "cst_6q34jz",
+          "address": "$86C1",
+          "constant": "cst_pglngt"
+        },
+        {
+          "id": "cst_e1luts",
+          "address": "$86C5",
+          "constant": "cst_0lwne4"
+        },
+        {
+          "id": "cst_u8awf6",
+          "address": "$86FB",
+          "constant": "cst_e6eeh7"
+        },
+        {
+          "id": "cst_lva4hm",
+          "address": "$8728",
+          "constant": "cst_coov1k"
+        },
+        {
+          "id": "cst_sl7tdl",
+          "address": "$8731",
+          "constant": "cst_p72f6m"
+        },
+        {
+          "id": "cst_eqfraj",
+          "address": "$8738",
+          "constant": "cst_053q1i"
+        },
+        {
+          "id": "cst_hc5jt8",
+          "address": "$874A",
+          "constant": "cst_p72f6m"
+        },
+        {
+          "id": "cst_nzzspu",
+          "address": "$8761",
+          "constant": "cst_p72f6m"
+        },
+        {
+          "id": "cst_dogyi2",
+          "address": "$877A",
+          "constant": "cst_0msx8w"
+        },
+        {
+          "id": "cst_njyhy7",
+          "address": "$8781",
+          "constant": "cst_9wae7p"
+        },
+        {
+          "id": "cst_cpd02g",
+          "address": "$8788",
+          "constant": "cst_tjsyu2"
+        },
+        {
+          "id": "cst_wpbt5w",
+          "address": "$878C",
+          "constant": "cst_e7duzq"
+        },
+        {
+          "id": "cst_o8c7mk",
+          "address": "$87AA",
+          "constant": "cst_e6eeh7"
+        },
+        {
+          "id": "cst_piwcpo",
+          "address": "$87AE",
+          "constant": "cst_p72f6m"
+        },
+        {
+          "id": "cst_lt0erg",
+          "address": "$87B4",
+          "constant": "cst_0msx8w"
+        },
+        {
+          "id": "cst_ztjva0",
+          "address": "$87BB",
+          "constant": "cst_coov1k"
+        },
+        {
+          "id": "cst_f9woji",
+          "address": "$87C2",
+          "constant": "cst_tjsyu2"
+        },
+        {
+          "id": "cst_dnk68n",
+          "address": "$87C6",
+          "constant": "cst_elonet"
+        },
+        {
+          "id": "cst_e7emed",
+          "address": "$87E1",
+          "constant": "cst_pglngt"
+        },
+        {
+          "id": "cst_11yun6",
+          "address": "$87E5",
+          "constant": "cst_28ulmv"
+        },
+        {
+          "id": "cst_r9p9vw",
+          "address": "$87EC",
+          "constant": "cst_9wae7p"
+        },
+        {
+          "id": "cst_8ul0xu",
+          "address": "$87F0",
+          "constant": "cst_e7duzq"
+        },
+        {
+          "id": "cst_kcid7r",
+          "address": "$87F4",
+          "constant": "cst_28ulmv"
+        },
+        {
+          "id": "cst_p7stpc",
+          "address": "$8878",
+          "constant": "cst_mr909c"
+        },
+        {
+          "id": "cst_3d6kht",
+          "address": "$887C",
+          "constant": "cst_ba7ykl"
+        },
+        {
+          "id": "cst_usf9nj",
+          "address": "$88AD",
+          "constant": "cst_ubaacw"
+        },
+        {
+          "id": "cst_g8h53g",
+          "address": "$88B2",
+          "constant": "cst_ix7is9"
+        },
+        {
+          "id": "cst_mv1yk6",
+          "address": "$88E2",
+          "constant": "cst_2qmej3"
+        },
+        {
+          "id": "cst_2hs7ln",
+          "address": "$88F2",
+          "constant": "cst_9wae7p"
+        },
+        {
+          "id": "cst_ripp06",
+          "address": "$88F6",
+          "constant": "cst_e7duzq"
+        },
+        {
+          "id": "cst_lvqqh4",
+          "address": "$8902",
+          "constant": "cst_3wyu4m"
+        },
+        {
+          "id": "cst_pida0y",
+          "address": "$8919",
+          "constant": "cst_x4qqeh"
+        },
+        {
+          "id": "cst_b1sexy",
+          "address": "$891D",
+          "constant": "cst_2qmej3"
+        },
+        {
+          "id": "cst_cpvdqj",
+          "address": "$8974",
+          "constant": "cst_x4qqeh"
+        },
+        {
+          "id": "cst_0p7jpy",
+          "address": "$8998",
+          "constant": "cst_u6yv9w"
+        },
+        {
+          "id": "cst_uwhn0w",
+          "address": "$89E0",
+          "constant": "cst_e5716q"
+        },
+        {
+          "id": "cst_xuto3g",
+          "address": "$8A06",
+          "constant": "cst_u6yv9w"
+        },
+        {
+          "id": "cst_8jwf19",
+          "address": "$8A11",
+          "constant": "cst_2qmej3"
+        },
+        {
+          "id": "cst_yqhb88",
+          "address": "$8A15",
+          "constant": "cst_ser72a"
+        },
+        {
+          "id": "cst_4wxo91",
+          "address": "$8A19",
+          "constant": "cst_98yzi8"
+        },
+        {
+          "id": "cst_5qn33b",
+          "address": "$8A2F",
+          "constant": "cst_28ulmv"
+        },
+        {
+          "id": "cst_qeilwd",
+          "address": "$8A4C",
+          "constant": "cst_qdv64l"
+        },
+        {
+          "id": "cst_lcea4a",
+          "address": "$8A6D",
+          "constant": "cst_pglngt"
+        },
+        {
+          "id": "cst_lodx87",
+          "address": "$8A71",
+          "constant": "cst_0lwne4"
+        },
+        {
+          "id": "cst_3kcg0l",
+          "address": "$8A7A",
+          "constant": "cst_qdv64l"
+        },
+        {
+          "id": "cst_fiuxko",
+          "address": "$8A7E",
+          "constant": "cst_3wyu4m"
+        },
+        {
+          "id": "cst_axvx5o",
+          "address": "$8A85",
+          "constant": "cst_u6yv9w"
+        },
+        {
+          "id": "cst_a7ywin",
+          "address": "$8AAA",
+          "constant": "cst_3wyu4m"
+        },
+        {
+          "id": "cst_4dk9sk",
+          "address": "$8ABB",
+          "constant": "cst_u6yv9w"
+        },
+        {
+          "id": "cst_bt89wp",
+          "address": "$8AD7",
+          "constant": "cst_0msx8w"
+        },
+        {
+          "id": "cst_0tagz9",
+          "address": "$8ADE",
+          "constant": "cst_m6p7aq"
+        },
+        {
+          "id": "cst_wwys6q",
+          "address": "$8AE9",
+          "constant": "cst_0msx8w"
+        },
+        {
+          "id": "cst_o7i9a8",
+          "address": "$8B10",
+          "constant": "cst_ubaacw"
+        },
+        {
+          "id": "cst_dthcof",
+          "address": "$8B20",
+          "constant": "cst_4a5hrz"
+        },
+        {
+          "id": "cst_kwm9h2",
+          "address": "$8B24",
+          "constant": "cst_ubaacw"
+        },
+        {
+          "id": "cst_4o86cd",
+          "address": "$8B29",
+          "constant": "cst_myvn33"
+        },
+        {
+          "id": "cst_5nko0z",
+          "address": "$8B35",
+          "constant": "cst_e7duzq"
+        },
+        {
+          "id": "cst_aqysdq",
+          "address": "$8B39",
+          "constant": "cst_9wae7p"
+        },
+        {
+          "id": "cst_wzga9q",
+          "address": "$8B64",
+          "constant": "cst_63lrhx"
+        },
+        {
+          "id": "cst_ycq1xn",
+          "address": "$8B68",
+          "constant": "cst_4a5hrz"
+        },
+        {
+          "id": "cst_ve7o36",
+          "address": "$8B71",
+          "constant": "cst_xuya73"
+        },
+        {
+          "id": "cst_v5e5y4",
+          "address": "$8B75",
+          "constant": "cst_3nx6cb"
+        },
+        {
+          "id": "cst_1j6ydu",
+          "address": "$8B87",
+          "constant": "cst_xuya73"
+        },
+        {
+          "id": "cst_ofm08f",
+          "address": "$8B9E",
+          "constant": "cst_elonet"
+        },
+        {
+          "id": "cst_cskclt",
+          "address": "$8BDF",
+          "constant": "cst_ubaacw"
+        },
+        {
+          "id": "cst_wa75n1",
+          "address": "$8BE4",
+          "constant": "cst_myvn33"
+        },
+        {
+          "id": "cst_k7mqlv",
+          "address": "$8BEC",
+          "constant": "cst_yjhkk9"
+        },
+        {
+          "id": "cst_4clchv",
+          "address": "$8BF0",
+          "constant": "cst_1otr1u"
+        },
+        {
+          "id": "cst_mftxkc",
+          "address": "$8BF4",
+          "constant": "cst_9wae7p"
+        },
+        {
+          "id": "cst_5dfgns",
+          "address": "$8C06",
+          "constant": "cst_e6eeh7"
+        },
+        {
+          "id": "cst_8ak4vw",
+          "address": "$8C23",
+          "constant": "cst_ba7ykl"
+        },
+        {
+          "id": "cst_q8jshw",
+          "address": "$8C2D",
+          "constant": "cst_m6p7aq"
+        },
+        {
+          "id": "cst_gw3r02",
+          "address": "$8C3B",
+          "constant": "cst_35of89"
+        },
+        {
+          "id": "cst_53f1wk",
+          "address": "$8C46",
+          "constant": "cst_elonet"
+        },
+        {
+          "id": "cst_s0nltt",
+          "address": "$8C7B",
+          "constant": "cst_mr909c"
+        },
+        {
+          "id": "cst_ip4xph",
+          "address": "$8C86",
+          "constant": "cst_iaqmt4"
+        },
+        {
+          "id": "cst_f3bhnc",
+          "address": "$8CA3",
+          "constant": "cst_mr909c"
+        },
+        {
+          "id": "cst_vsglxp",
+          "address": "$8CA7",
+          "constant": "cst_ba7ykl"
+        },
+        {
+          "id": "cst_1vvu7h",
+          "address": "$8D32",
+          "constant": "cst_ubaacw"
+        },
+        {
+          "id": "cst_lfa267",
+          "address": "$8D3D",
+          "constant": "cst_d76xk4"
+        },
+        {
+          "id": "cst_l4ham3",
+          "address": "$8D70",
+          "constant": "cst_h6aaz6"
+        },
+        {
+          "id": "cst_1hpjyt",
+          "address": "$8D78",
+          "constant": "cst_9wae7p"
+        },
+        {
+          "id": "cst_rvxvjd",
+          "address": "$8D7C",
+          "constant": "cst_e7duzq"
+        },
+        {
+          "id": "cst_mlu3zz",
+          "address": "$8D9A",
+          "constant": "cst_x4qqeh"
+        },
+        {
+          "id": "cst_mqjq2s",
+          "address": "$8DA5",
+          "constant": "cst_elonet"
+        },
+        {
+          "id": "cst_b2k8gj",
+          "address": "$8DB3",
+          "constant": "cst_ebomcq"
+        },
+        {
+          "id": "cst_wl77ub",
+          "address": "$8DBA",
+          "constant": "cst_vfrsjw"
+        }
+      ]
+    }
+  ],
+  "entryPoints": [
+    "$8011"
+  ],
+  "constants": [
+    {
+      "id": "cst_3nx6cb",
+      "name": "DELTA_ZERO",
+      "value": "$00"
+    },
+    {
+      "id": "cst_5ji4io",
+      "name": "BLACK",
+      "value": "$00"
+    },
+    {
+      "id": "cst_9wae7p",
+      "name": "GRID",
+      "value": "$00"
+    },
+    {
+      "id": "cst_ubaacw",
+      "name": "GATE_OFF",
+      "value": "$00"
+    },
+    {
+      "id": "cst_13szwq",
+      "name": "DELTA_PLUS_ONE",
+      "value": "$01"
+    },
+    {
+      "id": "cst_elonet",
+      "name": "WHITE",
+      "value": "$01"
+    },
+    {
+      "id": "cst_gpw93p",
+      "name": "LEFT_ZAPPER",
+      "value": "$01"
+    },
+    {
+      "id": "cst_ln60sg",
+      "name": "JOY_UP",
+      "value": "$01"
+    },
+    {
+      "id": "cst_22ntlu",
+      "name": "JOY_DOWN",
+      "value": "$02"
+    },
+    {
+      "id": "cst_5518js",
+      "name": "RED",
+      "value": "$02"
+    },
+    {
+      "id": "cst_61vmwi",
+      "name": "BOTTOM_ZAPPER",
+      "value": "$02"
+    },
+    {
+      "id": "cst_x4qqeh",
+      "name": "CYAN",
+      "value": "$03"
+    },
+    {
+      "id": "cst_epzrno",
+      "name": "JOY_LEFT",
+      "value": "$04"
+    },
+    {
+      "id": "cst_ltrgeb",
+      "name": "LASER_FRAME1",
+      "value": "$05"
+    },
+    {
+      "id": "cst_quf0fq",
+      "name": "GREEN",
+      "value": "$05"
+    },
+    {
+      "id": "cst_su3m14",
+      "name": "LASER_FRAME2",
+      "value": "$06"
+    },
+    {
+      "id": "cst_0msx8w",
+      "name": "SHIP",
+      "value": "$07"
+    },
+    {
+      "id": "cst_pglngt",
+      "name": "YELLOW",
+      "value": "$07"
+    },
+    {
+      "id": "cst_e7duzq",
+      "name": "ORANGE",
+      "value": "$08"
+    },
+    {
+      "id": "cst_shhvo1",
+      "name": "JOY_RIGHT",
+      "value": "$08"
+    },
+    {
+      "id": "cst_xjp6c6",
+      "name": "DISABLE_CASE_SWITCH",
+      "value": "$08"
+    },
+    {
+      "id": "cst_yjhkk9",
+      "name": "BULLET_UP1",
+      "value": "$08"
+    },
+    {
+      "id": "cst_1otr1u",
+      "name": "BULLET_UP2",
+      "value": "$09"
+    },
+    {
+      "id": "cst_coov1k",
+      "name": "BOMB_DOWN",
+      "value": "$0A"
+    },
+    {
+      "id": "cst_3un7re",
+      "name": "POD_STAGE_BLANK",
+      "value": "$0D"
+    },
+    {
+      "id": "cst_eiixiu",
+      "name": "LTGREEN",
+      "value": "$0D"
+    },
+    {
+      "id": "cst_35of89",
+      "name": "LTBLUE",
+      "value": "$0E"
+    },
+    {
+      "id": "cst_0lwne4",
+      "name": "POD3",
+      "value": "$0F"
+    },
+    {
+      "id": "cst_h6aaz6",
+      "name": "MAX_VOLUME",
+      "value": "$0F"
+    },
+    {
+      "id": "cst_khipl5",
+      "name": "JOY_FIRE",
+      "value": "$10"
+    },
+    {
+      "id": "cst_gx6dxr",
+      "name": "TRIANGLE_GATE_ON",
+      "value": "$11"
+    },
+    {
+      "id": "cst_053q1i",
+      "name": "POD6",
+      "value": "$12"
+    },
+    {
+      "id": "cst_2qmej3",
+      "name": "DROID1",
+      "value": "$13"
+    },
+    {
+      "id": "cst_ser72a",
+      "name": "DROID2",
+      "value": "$14"
+    },
+    {
+      "id": "cst_98yzi8",
+      "name": "DROID3",
+      "value": "$15"
+    },
+    {
+      "id": "cst_4a5hrz",
+      "name": "EXPLOSION1",
+      "value": "$16"
+    },
+    {
+      "id": "cst_yoiyv0",
+      "name": "GRID_BOTTOM_PLUS_1",
+      "value": "$16"
+    },
+    {
+      "id": "cst_y89cn5",
+      "name": "POD_STAGE_SPARKS",
+      "value": "$18"
+    },
+    {
+      "id": "cst_63lrhx",
+      "name": "EXPLOSION_LAST_PLUS_1",
+      "value": "$19"
+    },
+    {
+      "id": "cst_e6eeh7",
+      "name": "SPACE",
+      "value": "$20"
+    },
+    {
+      "id": "cst_iaqmt4",
+      "name": "MAX_LEVEL",
+      "value": "$20"
+    },
+    {
+      "id": "cst_ix7is9",
+      "name": "SAW_GATE_ON",
+      "value": "$21"
+    },
+    {
+      "id": "cst_d76xk4",
+      "name": "SAW_RING_GATE_ON",
+      "value": "$25"
+    },
+    {
+      "id": "cst_4jotb1",
+      "name": "GRID_RIGHT_EDGE",
+      "value": "$27"
+    },
+    {
+      "id": "cst_s6l3kg",
+      "name": "KEY_P",
+      "value": "$29"
+    },
+    {
+      "id": "cst_ba7ykl",
+      "name": "DIGIT_ZERO",
+      "value": "$30"
+    },
+    {
+      "id": "cst_3ib4mh",
+      "name": "DIGIT_FOUR",
+      "value": "$34"
+    },
+    {
+      "id": "cst_mr909c",
+      "name": "DIGIT_NINE_PLUS_1",
+      "value": "$3A"
+    },
+    {
+      "id": "cst_mhqlem",
+      "name": "VERTICAL_LINE",
+      "value": "$3F"
+    },
+    {
+      "id": "cst_3wyu4m",
+      "name": "DROID_HEAD",
+      "value": "$40"
+    },
+    {
+      "id": "cst_e5716q",
+      "name": "DROID_NEW_SQUAD_STATUS",
+      "value": "$41"
+    },
+    {
+      "id": "cst_u6yv9w",
+      "name": "DROID_VISIBLE",
+      "value": "$80"
+    },
+    {
+      "id": "cst_xuya73",
+      "name": "DELTA_MINUS_ONE",
+      "value": "$80"
+    },
+    {
+      "id": "cst_myvn33",
+      "name": "NOISE_GATE_ON",
+      "value": "$81"
+    },
+    {
+      "id": "cst_qdv64l",
+      "name": "DROID_HEAD_OR_VISIBLE",
+      "value": "$C0"
+    },
+    {
+      "id": "cst_tjsyu2",
+      "name": "COLOR_RAM_HIGH_OFFSET",
+      "value": "$D4"
+    },
+    {
+      "id": "cst_ebomcq",
+      "name": "JOY_FIRE_ONLY_RAW",
+      "value": "$EF"
+    },
+    {
+      "id": "cst_m6p7aq",
+      "name": "STACK_TOP_ON_RESTART",
+      "value": "$F6"
+    },
+    {
+      "id": "cst_vfrsjw",
+      "name": "JOY_UP_ONLY_RAW",
+      "value": "$FE"
+    },
+    {
+      "id": "cst_28ulmv",
+      "name": "NO_BULLET",
+      "value": "$FF"
+    },
+    {
+      "id": "cst_4obw4y",
+      "name": "LASER_READY",
+      "value": "$FF"
+    },
+    {
+      "id": "cst_p72f6m",
+      "name": "FREE_POD_SLOT",
+      "value": "$FF"
+    }
+  ],
+  "decoders": [
+    {
+      "id": "dec_1znxc3",
+      "name": "gridrunnerCharset",
+      "source": "\n// Gridrunner ships its own 64-glyph character set at $8E00 (copied to $2000 and\n// selected by the $18 written to $D018). No built-in encoding applies, so every\n// string in this program is unreadable without this map. It was read off the\n// glyph bitmaps: render $8E00 as char:8 and the letters are legible.\n//\n// Only the letters the game's own text needs exist: A B D E F G H I J L M N O\n// P R S T U V Y. There is no C, K, Q, W, X or Z anywhere in the set.\n// $30 is a single glyph doing duty as both the letter O and the digit 0, which\n// is why \"PRESS FIRE TO BEGIN\" and a seven-digit score share one byte value.\n// $3C and $3D are the two halves of one copyright symbol.\nconst HIGH = \" GRUIDNEABFHJMPSO123456789TV()L|\";\nconst LOW = {\n  0x00: \"+\", 0x01: \"[\", 0x02: \"^\",\n  0x03: \"/\", 0x04: \"/\", 0x05: \"/\", 0x06: \"/\",\n  0x07: \"^\", 0x08: \"!\", 0x09: \"!\", 0x0a: \"v\",\n  0x0b: \">\", 0x0c: \"<\",\n  0x0d: \".\", 0x0e: \"o\", 0x0f: \"O\", 0x10: \"0\", 0x11: \"@\", 0x12: \"*\",\n  0x13: \"D\", 0x14: \"D\", 0x15: \"D\",\n  0x16: \"'\", 0x17: \"'\", 0x18: \"'\",\n  0x19: \"P\", 0x1a: \"L\", 0x1b: \"Y\", 0x1c: \"Y\", 0x1d: \"H\", 0x1e: \"I\", 0x1f: \"?\",\n};\nlet line = \"\";\nfor (const b of bytes) {\n  if (b === 0x3c) { line += \"(c\"; continue; }\n  if (b >= 0x20 && b <= 0x3f) { line += HIGH[b - 0x20]; continue; }\n  line += LOW[b] !== undefined ? LOW[b] : \"?\";\n}\nconst width = (params && params.width) || 40;\nconst out = [];\nfor (let i = 0; i < line.length; i += width) out.push(line.slice(i, i + width));\nreturn { kind: \"text\", lines: out.length ? out : [\"\"] };\n"
+    },
+    {
+      "id": "dec_j1k7ti",
+      "name": "petsciiWithDuplicateLetterRange",
+      "source": "// PETSCII including the DUPLICATE LETTER RANGE. In the unshifted character set\n// codes $C1-$DA render the same A-Z as $41-$5A; re64's built-in petscii encoding\n// maps that upper range through a graphics table instead, so the standard C64\n// cartridge signature comes out as punctuation rather than as CBM80.\nconst glyph = (b) => {\n  if (b >= 0xc1 && b <= 0xda) return String.fromCharCode(b - 0xc0 + 64);\n  if (b >= 0x41 && b <= 0x5a) return String.fromCharCode(b);\n  if (b >= 0x20 && b <= 0x40) return String.fromCharCode(b);\n  if (b >= 0x5b && b <= 0x5f) return String.fromCharCode(b);\n  return '.';\n};\nlet out = '';\nfor (const b of bytes) out += glyph(b);\nreturn { kind: 'text', lines: [out] };"
+    }
+  ],
+  "primaryLabels": {
+    "$0008": "lbl_ljtgdm",
+    "$0007": "lbl_yo7d6q",
+    "$0009": "lbl_zmkcql",
+    "$0002": "lbl_ab2x56",
+    "$0003": "lbl_c4avum",
+    "$000A": "lbl_pvzwfe"
+  }
+}
