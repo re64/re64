@@ -136,7 +136,10 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "so there is no other way to find out — and an edit recorded against the " +
       "wrong name is invisible until somebody reads the history. Worth one call " +
       "at the start if you care how your work is attributed.",
-    {},
+    // Accepts `project` and ignores it. Every other tool takes one, so passing
+    // it here is the natural thing to do and being refused for it is a round
+    // trip spent on nothing.
+    { project },
     () => {
       const { caller } = context();
       const identity = caller.identity ?? "claimed";

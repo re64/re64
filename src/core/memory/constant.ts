@@ -104,6 +104,22 @@ export class ConstantIndex {
   }
 
   /**
+   * Every address bound to a constant, in address order.
+   *
+   * The question both readers in experiment 3 had to answer by hand, from
+   * opposite ends of a collision: one wanted to know whether renaming a
+   * constant would move sites somebody else had bound, the other whether a
+   * value it was about to claim was already spoken for. `find_immediates` plus
+   * a regular expression over rendered operand text was the only way to ask.
+   */
+  sitesOf(constantId: string): number[] {
+    return [...this.uses.values()]
+      .filter((use) => use.constantId === constantId)
+      .map((use) => use.address)
+      .sort((a, b) => a - b);
+  }
+
+  /**
    * The constants actually meant somewhere, in value order.
    *
    * Derived rather than stored, so an equate block emitted for a listing stays

@@ -594,10 +594,24 @@ export function analyze(
       const cellBytes = bytesPerCell(options);
       const perRow = cellBytes * (options.columns ?? 1);
 
+      // Comments are emitted once, before the dispatch above. Emitting them
+      // again here printed a region's own description twice on every bitmap —
+      // which is the one region kind whose whole purpose is being looked at.
       emitLabels(addr);
-      emitComments(addr);
 
-      const available = Math.min(perRow, rangeEnd - addr);
+      let available = Math.min(perRow, rangeEnd - addr);
+
+      // Stop the run at an annotated address, exactly as a data run does. A
+      // bitmap row covers a whole cell — 64 bytes for `char:8` — so without
+      // this a label or comment anywhere inside one is stepped straight over
+      // and renders nowhere. On a character set, naming which glyph is the
+      // player ship is the entire job.
+      for (let at = addr + 1; at < addr + available; at++) {
+        if (allLabels.hasLabelAt(at) || loaded.comments.has(at)) {
+          available = at - addr;
+          break;
+        }
+      }
       const picture = decodeBitmap(map.readBytes(addr, available), options);
       const art = bitmapToText(picture).split("\n");
 

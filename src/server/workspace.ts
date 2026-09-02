@@ -340,7 +340,18 @@ export class Workspace {
     project: string;
     description?: string;
     version: string;
+    /**
+     * Where the program is *declared* to start — the project's own entry
+     * points, or a PRG layer's load address.
+     *
+     * Not every address the walk begins from. Every `function`, `code` and
+     * `entry` label seeds the queue too, so on an annotated project that list
+     * runs to hundreds and stops answering the question the field is named for:
+     * experiment 3 reached 155 of them and the reader said so.
+     */
     entryPoints: string[];
+    /** How many addresses decoding actually starts from, labels included. */
+    decodeStartsFrom: number;
     layers: { level: number; name: string; start: string; end: string; labels: number }[];
     regions: { id?: string; start: string; end: string; kind: string; name?: string }[];
     counts: {
@@ -374,7 +385,11 @@ export class Workspace {
       project: this.room.projectId,
       ...(loaded.project.description ? { description: loaded.project.description } : {}),
       version: this.version(),
-      entryPoints: program.entryPoints.map(hex4),
+      entryPoints: (loaded.project.entryPoints?.length
+        ? loaded.project.entryPoints.map((e) => parseProjectAddress(e))
+        : loaded.prgEntries
+      ).map(hex4),
+      decodeStartsFrom: program.entryPoints.length,
       layers: loaded.layers.map((layer, index) => ({
         level: index,
         name: layer.name,
@@ -1164,13 +1179,22 @@ export class Workspace {
    * is reordered. A *use* — a region's `view: "snippet:<id>"` — does belong to a
    * layer, because that is about those bytes.
    */
-  setDecoder(caller: Caller, name: string, source: string, id?: string): EditResult {
+  setDecoder(
+    caller: Caller,
+    name: string,
+    source: string,
+    id?: string
+  ): EditResult & { decoder: string } {
     const existing = (this.program().loaded.project.decoders ?? []).find(
       (d) => d.id === id || (id === undefined && d.name === name)
     );
-    return this.edit(caller, () => [
-      { op: "decoder.set", id: existing?.id ?? newId("dec"), name, source },
-    ]);
+    // Minted here so it can be returned. A region refers to a decoder by id
+    // (`view: "snippet:<id>"`), so writing one and then having to call
+    // list_decoders to find out what it was called is a round trip for
+    // something this call already knew.
+    const decoder = existing?.id ?? newId("dec");
+    const result = this.edit(caller, () => [{ op: "decoder.set", id: decoder, name, source }]);
+    return { ...result, decoder };
   }
 
   removeDecoder(caller: Caller, id: string): EditResult {
@@ -2046,18 +2070,26 @@ export class Workspace {
 
   constants(): {
     total: number;
-    constants: { name: string; value: string; uses: number }[];
+    constants: { name: string; value: string; uses: number; boundAt: string[] }[];
   } {
     const program = this.program();
-    const used = new Set(program.loaded.constants.used().map((c) => c.id));
 
     return {
       total: program.loaded.constants.all().length,
-      constants: program.loaded.constants.all().map((c) => ({
-        name: c.name,
-        value: `$${c.value.toString(16).toUpperCase().padStart(2, "0")}`,
-        uses: used.has(c.id) ? 1 : 0,
-      })),
+      constants: program.loaded.constants.all().map((c) => {
+        // A real count, and the addresses behind it. This was
+        // `used.has(c.id) ? 1 : 0` — a boolean wearing the name of a count, so
+        // a constant bound at thirteen sites and one bound at a single site
+        // both reported `1`, and the field could not answer the question it
+        // appeared to answer.
+        const sites = program.loaded.constants.sitesOf(c.id);
+        return {
+          name: c.name,
+          value: `$${c.value.toString(16).toUpperCase().padStart(2, "0")}`,
+          uses: sites.length,
+          boundAt: sites.map(hex4),
+        };
+      }),
     };
   }
 

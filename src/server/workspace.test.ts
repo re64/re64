@@ -1726,6 +1726,22 @@ describe("finding things across the whole program", () => {
     expect(() => workspace.removeTag("never-made")).toThrow(/no tag called/i);
   });
 
+  it("lets a bitmap region be annotated, which is the point of looking at one", () => {
+    // Both readers in experiment 3 hit this independently. A bitmap region's own
+    // comment rendered twice — once generically, once again inside the bitmap
+    // branch — and a comment or label *inside* the span rendered not at all,
+    // because a row covers a whole cell and the walk stepped over everything in
+    // between. On a character set, naming which glyph is the ship is the job.
+    workspace.setRegion(agent, 0x8e00, 0x8e40, "bitmap", "charset", "ONCE", undefined, "char:8");
+    workspace.setComment(agent, 0x8e08, "INNER", "before");
+    workspace.setLabel(agent, 0x8e08, "innerGlyph");
+
+    const text = workspace.listing(0x8e00, 60).text;
+    expect(text.match(/ONCE/g) ?? []).toHaveLength(1);
+    expect(text).toContain("INNER");
+    expect(text).toContain("innerGlyph");
+  });
+
   it("takes an end address as well as a line count", () => {
     // `set_region` takes an end, so reaching for one here is the natural first
     // guess; it used to be rejected and cost a round trip to discover.
