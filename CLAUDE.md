@@ -2396,6 +2396,53 @@ Adding the op surfaced three exhaustiveness holes at compile time — `applyOp`,
 job. `decoders` is also added to the undo manager's tracked roots; `constants`
 is still missing from that list, which is a separate and pre-existing gap.
 
+### A tool built on a rhetorical flourish, and taken back out
+
+`changes_at` answered "who has already touched this address" — `git log` with an
+address range as the path. It lasted an hour. Worth recording, because the way it
+got built is more instructive than the tool was.
+
+Both readers in experiment 3 collided three times, and one of them wrote: *"the
+write side is complete and the who-else-touched-this side is not."* That sentence
+is a generalisation of the collision it had just hit, and it was taken as the
+finding. **The log says otherwise**, and this file already carries the rule that
+was not applied: where a report and the request log disagree, the log wins.
+
+```
+23:36:59  gfx   set_decoder      <- writes it
+23:37:07  gfx   list_decoders    <- checks, 8s AFTER
+23:38:34  lead  set_decoder      <- writes it
+23:38:39  lead  list_decoders    <- checks, 5s AFTER
+```
+
+Neither checked before writing. Both called `list_decoders` immediately after, to
+obtain the id `set_decoder` did not return — so that collision was not a missing
+query and not a check-then-act race, and the fix was to return the id. Likewise
+`changes_since(0)` "returning empty when it mattered" was empty because nothing
+had happened yet, fifteen minutes before the collision it was blamed for.
+
+The three collisions, honestly attributed:
+
+| collision | cause | fix |
+|---|---|---|
+| one constant bound in two places | a real lookup gap | `boundAt` on `list_constants` |
+| the duplicate decoder | `set_decoder` returned no id | it returns one |
+| identical header edits, 4s apart | genuine simultaneity | none; no query prevents it |
+
+None of them wanted a history-by-address query. **A capability that answers no
+question anybody asked is the thing the vocabulary rule exists to refuse**, and
+"a person would want it in a UI" is the *quiet* signal in that rule rather than a
+licence.
+
+**Parked, from the same conversation:** rather than a filter per question,
+snippets already are the mechanism for expressing logic this project cannot
+anticipate — so a query over the ops log could be a snippet, reusing the SES
+sandbox verbatim. The cost is not safety, which is unchanged, but the contract: a
+decoder is `bytes -> data` and `validateDecoded` checks the shape it returns. A
+log query is `records -> records`, which widens a snippet from "numbers out" to
+"JSON out" and leaves nothing to validate. Nothing needs it at this size —
+scanning the whole log is cheap — so it stays written down rather than built.
+
 ### Bytes as pictures
 
 A C64 program's data is mostly images, and a hex column is the worst possible

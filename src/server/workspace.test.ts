@@ -1742,27 +1742,6 @@ describe("finding things across the whole program", () => {
     expect(text).toContain("innerGlyph");
   });
 
-  it("says who has already touched an address, which is a question about place", () => {
-    // The gap both readers in experiment 3 named from opposite ends of the same
-    // collisions. changes_since answers "what happened while I was away";
-    // no amount of that composes into "is somebody already here", because a
-    // collision is found by looking where you are about to write.
-    workspace.setLabel(agent, 0x8200, "someoneElseWasHere");
-    workspace.setComment(agent, 0x8200, "and commented", "before");
-
-    const here = workspace.changesAt(0x8200, 0x8200);
-    expect(here.total).toBeGreaterThanOrEqual(2);
-    expect(JSON.stringify(here.changes)).toContain("someoneElseWasHere");
-
-    // A range covers a region write, whose op names a span rather than an
-    // address — read off the shape, not switched on the op name.
-    workspace.setRegion(agent, 0x8300, 0x8310, "data", "aSpan");
-    expect(workspace.changesAt(0x8305, 0x8305).total).toBeGreaterThan(0);
-
-    // Somewhere nobody has been is empty, not an error.
-    expect(workspace.changesAt(0x8fff, 0x8fff).total).toBe(0);
-  });
-
   it("takes an end address as well as a line count", () => {
     // `set_region` takes an end, so reaching for one here is the natural first
     // guess; it used to be rejected and cost a round trip to discover.

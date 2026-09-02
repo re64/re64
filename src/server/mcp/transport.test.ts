@@ -439,14 +439,6 @@ describe("editing as an agent", () => {
     expect((page.value as { text: string }).text.length).toBeGreaterThan(0);
   });
 
-  it("reports who has already touched an address", async () => {
-    await callTool("set_label", { address: "$8220", name: "blameMe" });
-    const here = await callTool("changes_at", { from: "$8220" });
-    expect(here.isError).toBe(false);
-    expect(here.text).toContain("blameMe");
-    expect((await callTool("changes_at", { from: "$8FFE" })).text).toContain('"total": 0');
-  });
-
   it("lists who is in the project, including itself", async () => {
     // An agent has no socket and so no awareness; membership is in the document
     // precisely so both consumers can read the same list.
