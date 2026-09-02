@@ -681,6 +681,32 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "changes_at",
+    "Who has already touched this address range, and what they did — blame, " +
+      "for a listing. changes_since answers \"what happened while I was away\", " +
+      "which is a question about time; this answers \"who has been here\", which " +
+      "is a question about place. Worth a call before working a span somebody " +
+      "else may already be in.",
+    {
+      project,
+      from: address,
+      to: address.optional().describe("Defaults to `from`, for a single address"),
+      limit: z.number().int().min(1).max(500).optional().describe("Default 100"),
+    },
+    ({
+      project: id,
+      from,
+      to,
+      limit,
+    }: {
+      project?: string;
+      from: number;
+      to?: number;
+      limit?: number;
+    }) => context().workspace(id).changesAt(from, to ?? from, limit ?? 100)
+  );
+
+  tool(
     "tag_project",
     "Mark this point with a name you can come back to — a tag, in the git " +
       "sense. It is not a save: the document already holds every edit the " +

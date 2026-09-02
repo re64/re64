@@ -22,9 +22,11 @@ Nothing is required of you regarding any of that. It is there.
 ## Calling the tools
 
 ```
-RE64_PORT=5168 RE64_USER=<your user> RE64_SESSION=<your session> \
+RE64_PORT=<port> RE64_USER=<your user> RE64_SESSION=<your session> \
   <REPO>/experiments/mcp-call.sh <tool> '<json arguments>'
 ```
+
+The port, your user and your session are in your instructions.
 
 Every tool takes `project`, which is `gridrunner`. There are around forty tools;
 read their descriptions before using them, since they carry the caveats that
