@@ -145,26 +145,61 @@ export function labelAddOp(
  * comments, so it targets the existing id rather than stacking a second.
  * Adding a deliberate second is `placement` or another address.
  */
-export function commentSetOp(
+/**
+ * Add a comment. Always a new one.
+ *
+ * There used to be a single `commentSetOp` that matched an existing comment by
+ * `(address, placement)` and reused its id — an upsert keyed by *slot*. That was
+ * justified as "one person changing their mind rather than two comments", which
+ * is true of one author and false the moment there are two: in experiment 3 an
+ * agent's `before` comment silently replaced another's, and three of the four
+ * readers across two runs invented the same bad workaround, using `inline` as a
+ * second slot to avoid the collision. One asked for `append_comment` by name.
+ *
+ * The model always supported several comments at an address — they are all
+ * rendered, ordered deliberately. Only the write path could not reach it. So
+ * this mints, `commentEditOp` revises by id, and slot-keyed upsert is gone: an
+ * address cannot identify a comment for exactly the reason it cannot identify a
+ * label.
+ */
+export function commentAddOp(
   loaded: LoadedProject,
   address: number,
   placement: CommentPlacement,
   text: string
 ): Op {
-  const layerId = owningLayerId(loaded, address);
-  const layer = loaded.project.layers.find((l) => l.id === layerId);
-  const existing = layer?.comments?.find(
-    (c) => parseProjectAddress(c.address) === address && (c.placement ?? "before") === placement
-  );
-
   return {
     op: "comment.set",
-    id: existing?.id ?? newId("cmt"),
-    layerId,
+    id: newId("cmt"),
+    layerId: owningLayerId(loaded, address),
     address,
     placement,
     text,
   };
+}
+
+/** Revise a comment by id: its text, its placement, or where it sits. */
+export function commentEditOp(
+  loaded: LoadedProject,
+  id: string,
+  changes: { text?: string; placement?: CommentPlacement; order?: number }
+): Op {
+  for (const layer of loaded.project.layers) {
+    const existing = layer.comments?.find((c) => c.id === id);
+    if (!existing || !layer.id) continue;
+    return {
+      op: "comment.set",
+      id,
+      layerId: layer.id,
+      address: parseProjectAddress(existing.address),
+      placement: changes.placement ?? existing.placement ?? "before",
+      text: changes.text ?? existing.text,
+      ...(changes.order ?? existing.order) === undefined
+        ? {}
+        : { order: changes.order ?? existing.order },
+    };
+  }
+  throw new Error(`No comment ${id}. list_comments shows what this project has.`);
 }
 
 /** Undefined when there is no comment in that slot to remove. */

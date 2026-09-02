@@ -18,7 +18,8 @@ import {
   Project,
   RegionKind,
   labelDeleteOp,
-  commentSetOp,
+  commentAddOp,
+  commentEditOp,
   labelSetOp,
   owningLayerId,
   parseProject,
@@ -73,7 +74,7 @@ export class ProjectEditor {
     const loaded = this.loadedProject();
     return [
       labelSetOp(loaded, address, name, type),
-      ...(comment ? [commentSetOp(loaded, address, "before", comment)] : []),
+      ...(comment ? [commentAddOp(loaded, address, "before", comment)] : []),
     ];
   }
 

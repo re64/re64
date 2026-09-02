@@ -40,15 +40,30 @@ export interface Comment {
   readonly address: number;
   readonly placement: CommentPlacement;
   readonly text: string;
+  /**
+   * Where this sits among the comments sharing its address.
+   *
+   * Absent until somebody arranges them. Ordering was by id alone — stable and
+   * identical on every peer, which is what merge needs, and arbitrary, which is
+   * no use once several comments at one address is the *intended* flow rather
+   * than an accident to be tidied away. Adding one is cheap and deciding the
+   * running order is an editing pass, so the two have to be separable.
+   *
+   * A plain number, last-writer-wins per comment like every other field here.
+   * Two peers arranging the same address concurrently converge on something
+   * neither chose, which for prose is untidy rather than wrong.
+   */
+  readonly order?: number;
 }
 
 export function createComment(
   id: string,
   address: number,
   placement: CommentPlacement,
-  text: string
+  text: string,
+  order?: number
 ): Comment {
-  return { id, address, placement, text };
+  return { id, address, placement, text, ...(order === undefined ? {} : { order }) };
 }
 
 /**
@@ -69,7 +84,13 @@ export class CommentIndex {
   add(comment: Comment): void {
     const at = this.byAddress.get(comment.address) ?? [];
     at.push(comment);
-    at.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    // Arranged order first, then id — so an unarranged comment keeps the old
+    // stable-but-arbitrary behaviour and an arranged one wins over it.
+    at.sort(
+      (a, b) =>
+        (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER) ||
+        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+    );
     this.byAddress.set(comment.address, at);
   }
 
@@ -80,6 +101,11 @@ export class CommentIndex {
   /** Comments at an address with the given placement, in stable order. */
   at(address: number, placement: CommentPlacement): readonly Comment[] {
     return (this.byAddress.get(address) ?? []).filter((c) => c.placement === placement);
+  }
+
+  /** Every comment at an address, whatever its placement, in rendered order. */
+  allAt(address: number): readonly Comment[] {
+    return this.byAddress.get(address) ?? [];
   }
 
   /** Whether anything is written about this address at all. */

@@ -108,6 +108,8 @@ export interface ProjectComment {
   /** Default "before". An inline comment shares the instruction's row. */
   placement?: CommentPlacement;
   text: string;
+  /** Position among the comments sharing this address; unset until arranged. */
+  order?: number;
 }
 
 /** Label definition in a project file */
@@ -272,7 +274,7 @@ export function projectCommentsToComments(
     const address = parseProjectAddress(pc.address);
     const placement = pc.placement ?? "before";
     const id = pc.id ?? derivedId("cmt", layerId, address, placement);
-    return createComment(id, address, placement, pc.text);
+    return createComment(id, address, placement, pc.text, pc.order);
   });
 
   for (const label of layer.labels ?? []) {

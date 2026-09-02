@@ -1068,12 +1068,14 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
-    "set_comment",
-    "Write a comment about an address. \"before\" gets its own rows above the " +
-      "label and may run to several lines; \"inline\" shares the instruction's " +
-      "row and cannot. Comments are their own objects, so an address needs no " +
-      "label to carry one. Writing the same slot twice revises it rather than " +
-      "stacking a second comment.",
+    "add_comment",
+    "Add a comment about an address, and return its id. \"before\" gets its own " +
+      "rows above the label and may run to several lines; \"inline\" shares the " +
+      "instruction's row and cannot. Comments are their own objects, so an " +
+      "address needs no label to carry one — and SEVERAL can share an address: " +
+      "all of them render. Adding is cheap and deciding what survives is an " +
+      "editing pass, so add freely, then use edit_comment, reorder_comments and " +
+      "remove_comment, each by id. This never overwrites anybody, including you.",
     {
       project,
       address,
@@ -1098,13 +1100,13 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.setComment(caller, args.address, args.text, args.placement ?? "before");
+      return space.addComment(caller, args.address, args.text, args.placement ?? "before");
     }
   );
 
   tool(
-    "set_comments",
-    "Write several comments in one call, as one action. Undo takes the batch " +
+    "add_comments",
+    "Add several comments in one call, as one action. Undo takes the batch " +
       "back whole. A real disassembly carries more comments than labels, so " +
       "one round trip each is almost all protocol.",
     {
@@ -1129,7 +1131,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.setComments(caller, args.comments);
+      return space.addComments(caller, args.comments);
     }
   );
 
@@ -1158,25 +1160,69 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
-    "remove_comment",
-    "Delete the comment at an address. Give a placement to pick one when the " +
-      "address carries both.",
+    "edit_comment",
+    "Revise a comment by id: its text, its placement, or where it sits among " +
+      "the comments at its address. The half add_comment deliberately does not " +
+      "do — an address does not identify a comment, so revising by address is " +
+      "how one writer silently destroys another's.",
     {
       project,
-      address,
+      id: z.string().describe("From list_comments or add_comment"),
+      text: z.string().min(1).optional(),
       placement: z.enum(["before", "inline", "after"]).optional(),
       expectVersion: z.string().optional(),
     },
     (args: {
       project?: string;
-      address: number;
+      id: string;
+      text?: string;
       placement?: "before" | "inline" | "after";
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.removeComment(caller, args.address, args.placement);
+      return space.editComment(caller, args.id, {
+        ...(args.text === undefined ? {} : { text: args.text }),
+        ...(args.placement === undefined ? {} : { placement: args.placement }),
+      });
+    }
+  );
+
+  tool(
+    "reorder_comments",
+    "Put the comments at an address in the order given, by id. Ordering is " +
+      "otherwise by id — stable everywhere and arbitrary — which is fine while " +
+      "an address carries one comment and no use once several do. Ids you leave " +
+      "out keep their places after the ones you name.",
+    {
+      project,
+      address,
+      ids: z.array(z.string()).min(1).describe("In the order you want them"),
+      expectVersion: z.string().optional(),
+    },
+    (args: { project?: string; address: number; ids: string[]; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.reorderComments(caller, args.address, args.ids);
+    }
+  );
+
+  tool(
+    "remove_comment",
+    "Delete a comment by id. Several comments can share an address, so an " +
+      "address does not identify one.",
+    {
+      project,
+      id: z.string().describe("From list_comments"),
+      expectVersion: z.string().optional(),
+    },
+    (args: { project?: string; id: string; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.removeComment(caller, args.id);
     }
   );
 

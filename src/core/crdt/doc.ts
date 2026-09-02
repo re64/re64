@@ -277,7 +277,7 @@ const REGION_FIELDS = [
   "encoding",
   "view",
 ] as const;
-const COMMENT_FIELDS = ["id", "address", "placement", "text"] as const;
+const COMMENT_FIELDS = ["id", "address", "placement", "text", "order"] as const;
 const USE_FIELDS = ["id", "address", "constant"] as const;
 const LABEL_USE_FIELDS = ["id", "address", "label"] as const;
 const CONSTANT_FIELDS = ["id", "name", "value"] as const;

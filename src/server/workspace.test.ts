@@ -438,7 +438,7 @@ describe("writing about an address", () => {
     // The gap this closes: a comment used to be a field on a label, so
     // commenting an instruction meant inventing a name for it and putting a
     // name in the listing that nobody wanted there.
-    const result = workspace.setComment(agent, 0x8015, "wait for the raster");
+    const result = workspace.addComment(agent, 0x8015, "wait for the raster");
 
     expect(result.ok).toBe(true);
     const rows = workspace.disassembly(0x8015, 3).lines.map((l) => l.text);
@@ -447,7 +447,7 @@ describe("writing about an address", () => {
   });
 
   it("puts a comment above the label it introduces", () => {
-    workspace.setComment(agent, 0x8015, "the main loop");
+    workspace.addComment(agent, 0x8015, "the main loop");
     const rows = workspace.disassembly(0x8015, 4).lines.map((l) => l.text);
 
     const comment = rows.findIndex((r) => r.includes("; the main loop"));
@@ -457,7 +457,7 @@ describe("writing about an address", () => {
   });
 
   it("puts an inline comment on the instruction's own row", () => {
-    workspace.setComment(agent, 0x8015, "counts up", "inline");
+    workspace.addComment(agent, 0x8015, "counts up", "inline");
     const row = workspace
       .disassembly(0x8015, 4)
       .lines.map((l) => l.text)
@@ -467,38 +467,67 @@ describe("writing about an address", () => {
   });
 
   it("refuses an inline comment that cannot fit on a row", () => {
-    expect(() => workspace.setComment(agent, 0x8015, "one\ntwo", "inline")).toThrow(
+    expect(() => workspace.addComment(agent, 0x8015, "one\ntwo", "inline")).toThrow(
       /cannot\s+contain newlines/is
     );
   });
 
-  it("revises a slot rather than stacking a second comment", () => {
-    workspace.setComment(agent, 0x8015, "first thought");
-    workspace.setComment(agent, 0x8015, "second thought");
+  it("keeps both when two people write about the same address", () => {
+    // This used to revise the slot, justified as "one person changing their
+    // mind rather than two comments" — true of one author, false of two. In
+    // experiment 3 an agent's comment silently replaced another's, and three of
+    // four readers across two runs invented the same bad workaround, using the
+    // inline slot as a second channel to avoid the collision.
+    const first = workspace.addComment(agent, 0x8015, "first thought");
+    const second = workspace.addComment(agent, 0x8015, "second thought");
+    expect(first.comment).not.toBe(second.comment);
 
-    const rows = workspace.disassembly(0x8015, 4).lines.map((l) => l.text);
-    expect(rows.join("\n")).toContain("second thought");
-    expect(rows.join("\n")).not.toContain("first thought");
+    const rows = workspace.disassembly(0x8015, 6).lines.map((l) => l.text).join("\n");
+    expect(rows).toContain("first thought");
+    expect(rows).toContain("second thought");
+  });
+
+  it("revises one by id, which is the half adding does not do", () => {
+    const { comment } = workspace.addComment(agent, 0x8015, "first thought");
+    workspace.editComment(agent, comment, { text: "corrected" });
+
+    const rows = workspace.disassembly(0x8015, 6).lines.map((l) => l.text).join("\n");
+    expect(rows).toContain("corrected");
+    expect(rows).not.toContain("first thought");
+  });
+
+  it("arranges the comments at an address in the order asked for", () => {
+    const a = workspace.addComment(agent, 0x8015, "AAA").comment;
+    const b = workspace.addComment(agent, 0x8015, "BBB").comment;
+    workspace.reorderComments(agent, 0x8015, [b, a]);
+
+    const rows = workspace.disassembly(0x8015, 6).lines.map((l) => l.text).join("\n");
+    expect(rows.indexOf("BBB")).toBeLessThan(rows.indexOf("AAA"));
+  });
+
+  it("refuses to arrange a comment that is not there", () => {
+    workspace.addComment(agent, 0x8015, "here");
+    expect(() => workspace.reorderComments(agent, 0x8015, ["cmt_nope"])).toThrow(/No comment/);
   });
 
   it("renders a multi-line comment on its own rows", () => {
-    workspace.setComment(agent, 0x8015, "why this exists\nand what it assumes");
+    workspace.addComment(agent, 0x8015, "why this exists\nand what it assumes");
     const rows = workspace.disassembly(0x8015, 5).lines.map((l) => l.text);
 
     // One row per line, each still carrying the address column.
     expect(rows.filter((r) => /^[0-9A-F]{4}\s+; /.test(r))).toHaveLength(2);
   });
 
-  it("takes one back", () => {
-    workspace.setComment(agent, 0x8015, "temporary");
-    workspace.removeComment(agent, 0x8015);
+  it("takes one back, by id", () => {
+    const { comment } = workspace.addComment(agent, 0x8015, "temporary");
+    workspace.removeComment(agent, comment);
 
     const rows = workspace.disassembly(0x8015, 4).lines.map((l) => l.text);
     expect(rows.join("\n")).not.toContain("temporary");
   });
 
   it("says so when there is nothing to remove", () => {
-    expect(() => workspace.removeComment(agent, 0x8016)).toThrow(/No comment at/);
+    expect(() => workspace.removeComment(agent, "cmt_nope")).toThrow(/No comment/);
   });
 
   it("undoes as one action alongside the label it came with", () => {
@@ -560,7 +589,7 @@ describe("naming what holds no bytes", () => {
 
   it("comments an address that holds no bytes too", () => {
     const blank = blankWorkspace();
-    const result = blank.setComment(agent, 0x02, "the player's column");
+    const result = blank.addComment(agent, 0x02, "the player's column");
 
     expect(result.did.some((d) => d.includes("symbols layer"))).toBe(true);
   });
@@ -1007,7 +1036,7 @@ describe("comments on rows that are not instructions", () => {
     // Handled only where instructions were emitted, so a comment on a data row
     // was stored and rendered nowhere: written, kept, and never seen.
     workspace.setRegion(agent, 0x8080, 0x8090, "data", "copyright");
-    workspace.setComment(agent, 0x8080, "(c) 1982 HES", "inline");
+    workspace.addComment(agent, 0x8080, "(c) 1982 HES", "inline");
 
     const rows = workspace.disassembly(0x8080, 2).lines.map((l) => l.text).join("\n");
     expect(rows).toContain("; (c) 1982 HES");
@@ -1077,7 +1106,7 @@ describe("the last of trial 2's list", () => {
   });
 
   it("writes a batch of comments as one action", () => {
-    const result = workspace.setComments(agent, [
+    const result = workspace.addComments(agent, [
       { address: 0x8015, text: "first" },
       { address: 0x8016, text: "second", placement: "inline" },
       { address: 0x8018, text: "third" },
@@ -1091,7 +1120,7 @@ describe("the last of trial 2's list", () => {
 
   it("makes one symbols layer for a batch of comments on unowned addresses", () => {
     const blank = blankWorkspace();
-    blank.setComments(agent, [
+    blank.addComments(agent, [
       { address: 0x02, text: "the player's column" },
       { address: 0x03, text: "the player's row" },
     ]);
@@ -1121,7 +1150,7 @@ describe("the last of trial 2's list", () => {
 
   it("refuses an inline comment with newlines, naming the address", () => {
     expect(() =>
-      workspace.setComments(agent, [
+      workspace.addComments(agent, [
         { address: 0x8015, text: "one\ntwo", placement: "inline" },
       ])
     ).toThrow(/\$8015.*inline/s);
@@ -1234,7 +1263,7 @@ describe("the rest of trial 3's list", () => {
   it("puts an after comment on its own row below", () => {
     // The reference writes ";Returns" under a JMP: about what happens next,
     // which inline would attach to the jump itself.
-    workspace.setComment(agent, 0x8018, "returns to the caller", "after");
+    workspace.addComment(agent, 0x8018, "returns to the caller", "after");
     const rows = workspace.disassembly(0x8018, 3).lines.map((l) => l.text);
 
     const jump = rows.findIndex((r) => /BNE|JMP/.test(r));
@@ -1386,7 +1415,7 @@ describe("paging through a listing", () => {
     // then being unable to page past it: the failure arrives through following
     // the brief well, which is the worst way for a bug to be reachable.
     const long = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n");
-    workspace.setComment(agent, 0x8040, long, "before");
+    workspace.addComment(agent, 0x8040, long, "before");
 
     let start = 0x8000;
     const visited = new Set<number>();
@@ -1404,7 +1433,7 @@ describe("paging through a listing", () => {
 
   it("does the same for the rendered listing", () => {
     const long = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n");
-    workspace.setComment(agent, 0x8040, long, "before");
+    workspace.addComment(agent, 0x8040, long, "before");
 
     const first = workspace.listing(0x8000, 10);
     expect(first.nextStart).toBeDefined();
@@ -1419,7 +1448,7 @@ describe("quoting the line that refers to something", () => {
     // commented caller the quoted line was the caller's own name, or somebody's
     // prose. The better the project was annotated, the worse the answer got.
     workspace.setLabel(agent, 0x81c4, "SomewhereThatCalls");
-    workspace.setComment(agent, 0x81c4, "and here is why", "before");
+    workspace.addComment(agent, 0x81c4, "and here is why", "before");
 
     const { inbound } = workspace.references(0x8172);
     const caller = inbound?.find((i) => i.from === "$81C4");
@@ -1733,7 +1762,7 @@ describe("finding things across the whole program", () => {
     // because a row covers a whole cell and the walk stepped over everything in
     // between. On a character set, naming which glyph is the ship is the job.
     workspace.setRegion(agent, 0x8e00, 0x8e40, "bitmap", "charset", "ONCE", undefined, "char:8");
-    workspace.setComment(agent, 0x8e08, "INNER", "before");
+    workspace.addComment(agent, 0x8e08, "INNER", "before");
     workspace.setLabel(agent, 0x8e08, "innerGlyph");
 
     const text = workspace.listing(0x8e00, 60).text;
@@ -1789,7 +1818,7 @@ describe("finding things across the whole program", () => {
   });
 
   it("lists what has been understood so far", () => {
-    workspace.setComment(agent, 0x8100, "the entry point", "before");
+    workspace.addComment(agent, 0x8100, "the entry point", "before");
     const listed = workspace.comments();
     expect(listed.total).toBeGreaterThan(0);
     expect(listed.comments.some((c) => c.text === "the entry point")).toBe(true);

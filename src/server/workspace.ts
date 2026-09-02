@@ -42,7 +42,8 @@ import {
   describeOp,
   labelDeleteOp,
   commentDeleteOp,
-  commentSetOp,
+  commentAddOp,
+  commentEditOp,
   ensureOwningLayer,
   labelAddOp,
   labelSetOp,
@@ -1148,16 +1149,20 @@ export class Workspace {
   comments(limit = 200): {
     total: number;
     truncated: boolean;
-    comments: { address: string; placement: string; text: string }[];
+    comments: { id: string; address: string; placement: string; text: string; order?: number }[];
   } {
     const all = [...this.program().loaded.comments.all()].sort((a, b) => a.address - b.address);
     return {
       total: all.length,
       truncated: all.length > limit,
       comments: all.slice(0, limit).map((c) => ({
+        // Without the id nothing downstream is reachable: editing, moving and
+        // removing are all by id, because an address identifies no single one.
+        id: c.id,
         address: hex4(c.address),
         placement: c.placement,
         text: c.text,
+        ...(c.order === undefined ? {} : { order: c.order }),
       })),
     };
   }
@@ -1649,7 +1654,7 @@ export class Workspace {
                     placement: "before",
                     text: comment,
                   } as Op)
-                : commentSetOp(loaded, address, "before", comment),
+                : commentAddOp(loaded, address, "before", comment),
             ]
           : []),
       ];
@@ -1726,7 +1731,7 @@ export class Workspace {
                   placement: "before",
                   text: entry.comment,
                 } as Op)
-              : commentSetOp(loaded, entry.address, "before", entry.comment)
+              : commentAddOp(loaded, entry.address, "before", entry.comment)
           );
         }
       }
@@ -2197,25 +2202,26 @@ export class Workspace {
     return result;
   }
 
-  setComment(
+  addComment(
     caller: Caller,
     address: number,
     text: string,
     placement: CommentPlacement = "before"
-  ): EditResult {
+  ): EditResult & { comment: string } {
     if (placement === "inline" && text.includes("\n")) {
       throw new Error(
         "An inline comment shares a row with the instruction, so it cannot " +
           "contain newlines. Use placement \"before\" for anything longer."
       );
     }
+    // Minted here so it can be returned: editing, moving or removing a comment
+    // is by id, and having to call list_comments afterwards to learn what you
+    // just wrote is the round trip `set_decoder` used to cost.
+    const comment = newId("cmt");
     const result = this.edit(caller, (loaded) => {
       const { layerId, create } = ensureOwningLayer(loaded, address, this.room.projectId);
-      if (!create) return [commentSetOp(loaded, address, placement, text)];
-      return [
-        create,
-        { op: "comment.set", id: newId("cmt"), layerId, address, placement, text } as Op,
-      ];
+      const add: Op = { op: "comment.set", id: comment, layerId, address, placement, text };
+      return create ? [create, add] : [add];
     });
 
     // An inline comment shares its row and therefore cannot be wrapped — which
@@ -2232,7 +2238,53 @@ export class Workspace {
       ];
     }
 
-    return this.warnIfInsideInstruction(result, address, "comment");
+    return { ...this.warnIfInsideInstruction(result, address, "comment"), comment };
+  }
+
+  /**
+   * Revise a comment by id — its text, its placement, or where it sits among
+   * the comments sharing its address.
+   *
+   * The half that `add_comment` deliberately does not do. Together they replace
+   * a single `set_comment` that upserted by `(address, placement)`, which made
+   * one agent's write silently destroy another's.
+   */
+  editComment(
+    caller: Caller,
+    id: string,
+    changes: { text?: string; placement?: CommentPlacement; order?: number }
+  ): EditResult {
+    if (changes.text === undefined && changes.placement === undefined && changes.order === undefined) {
+      throw new Error("Give something to change: text, placement, or order.");
+    }
+    return this.edit(caller, (loaded) => [commentEditOp(loaded, id, changes)]);
+  }
+
+  /**
+   * Put the comments at an address in the order given.
+   *
+   * Ordering was by id — stable on every peer, which is what merge needs, and
+   * arbitrary, which is no use once adding freely and arranging later is the
+   * intended flow rather than an accident. Declarative on purpose: a caller
+   * says what the order should be rather than nudging one comment past
+   * another, so the result does not depend on what it believed the order was.
+   */
+  reorderComments(caller: Caller, address: number, ids: readonly string[]): EditResult {
+    const here = this.program().loaded.comments.allAt(address);
+    const known = new Set(here.map((c) => c.id));
+    const unknown = ids.filter((id) => !known.has(id));
+    if (unknown.length) {
+      throw new Error(
+        `No comment ${unknown.join(", ")} at ${hex4(address)}. ` +
+          `It holds ${here.map((c) => c.id).join(", ") || "none"}.`
+      );
+    }
+    // Anything not named keeps its place after those that are, rather than
+    // being silently dropped to an arbitrary position.
+    const ordered = [...ids, ...here.map((c) => c.id).filter((id) => !ids.includes(id))];
+    return this.edit(caller, (loaded) =>
+      ordered.map((id, at) => commentEditOp(loaded, id, { order: at }))
+    );
   }
 
   /**
@@ -2242,7 +2294,7 @@ export class Workspace {
    * `set_labels` exist applies here at least as strongly: one round trip each
    * is almost all protocol.
    */
-  setComments(
+  addComments(
     caller: Caller,
     comments: readonly { address: number; text: string; placement?: CommentPlacement }[]
   ): EditResult {
@@ -2288,7 +2340,7 @@ export class Workspace {
             text: entry.text,
           });
         } else {
-          ops.push(commentSetOp(loaded, entry.address, placement, entry.text));
+          ops.push(commentAddOp(loaded, entry.address, placement, entry.text));
         }
       }
 
@@ -2321,15 +2373,22 @@ export class Workspace {
     );
   }
 
-  removeComment(caller: Caller, address: number, placement?: CommentPlacement): EditResult {
+  /**
+   * Remove a comment by id.
+   *
+   * By id, not by slot. An address does not identify a comment — several share
+   * one, which is the intended flow — so "remove the comment at $8100" is a
+   * question with no answer, and answering it anyway is how one agent's writing
+   * disappeared under another's.
+   */
+  removeComment(caller: Caller, id: string): EditResult {
     return this.edit(caller, (loaded) => {
-      const op = commentDeleteOp(loaded, address, placement);
-      if (!op) {
-        throw new Error(
-          `No comment at ${hex4(address)}${placement ? ` (${placement})` : ""}.`
-        );
+      for (const layer of loaded.project.layers) {
+        if (layer.id && layer.comments?.some((c) => c.id === id)) {
+          return [{ op: "comment.delete", id, layerId: layer.id } as Op];
+        }
       }
-      return [op];
+      throw new Error(`No comment ${id}. list_comments shows what this project has.`);
     });
   }
 

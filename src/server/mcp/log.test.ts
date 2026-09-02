@@ -73,13 +73,18 @@ describe("the transcript", () => {
     // The most informative line in the file: an agent reaching for something
     // that isn't there is a gap in the API, and it never reaches a handler,
     // so nothing below this layer could see it.
-    await call("add_comment", { address: "$8870", text: "wait for raster" });
+    //
+    // The example used to be `add_comment`, which an agent invented and which
+    // now exists. `run_routine` is a real one from the same run: running a
+    // whole routine rather than one block, deliberately not built because it
+    // means following jumps whose targets depend on state nobody supplied.
+    await call("run_routine", { address: "$8870" });
 
-    const [entry] = transcript().filter((e) => e.tool === "add_comment");
+    const [entry] = transcript().filter((e) => e.tool === "run_routine");
     expect(entry).toBeDefined();
     expect(entry.ok).toBe(false);
-    expect(entry.error).toMatch(/add_comment/);
-    expect(entry.args).toEqual({ address: "$8870", text: "wait for raster" });
+    expect(entry.error).toMatch(/run_routine/);
+    expect(entry.args).toEqual({ address: "$8870" });
   });
 
   it("separates a refusal from a failure", async () => {

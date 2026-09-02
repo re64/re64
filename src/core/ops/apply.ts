@@ -144,6 +144,7 @@ export function applyOp(raw: string, op: Op): string {
         // produces the same text a hand-written file would.
         ...(op.placement === "before" ? {} : { placement: op.placement }),
         text: op.text,
+        ...(op.order === undefined ? {} : { order: op.order }),
       });
 
     case "comment.delete":

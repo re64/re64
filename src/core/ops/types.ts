@@ -67,6 +67,8 @@ export interface CommentSetOp {
   address: number;
   placement: CommentPlacement;
   text: string;
+  /** Position among the comments at this address; unset until arranged. */
+  order?: number;
 }
 
 export interface CommentDeleteOp {

@@ -865,8 +865,34 @@ rendered, ordered by id — arbitrary, but stable and identical on every peer
 without coordination — and a second inline comment is indented under the first,
 where the redundancy is visible enough that whoever sees it removes one.
 
-Writing the same slot twice **revises** rather than stacking, since that is one
-person changing their mind rather than two comments.
+**Adding and revising are different operations, and conflating them cost real
+work.** There used to be one `set_comment` that matched by `(address,
+placement)` and reused the id it found — an upsert keyed by *slot*, justified as
+"one person changing their mind rather than two comments". True of one author.
+False the moment there are two, and the justification was never revisited when
+collaboration arrived: in experiment 3 an agent's `before` comment silently
+replaced another's, and **three of the four readers across two runs** invented
+the same bad workaround — using the `inline` slot as a second channel to dodge
+the collision, which corrupts what placement *means*. One asked for
+`append_comment` by name.
+
+The model always supported this. Several comments at an address are all
+rendered; only the write path could not reach it. So the vocabulary is
+`add_comment` (mints, never overwrites, returns the id), `list_comments`
+(returns ids, or nothing downstream is reachable), `edit_comment` (by id) and
+`remove_comment` (by id) — which is this file's own identity rule finally
+applied here: *an address cannot identify a comment*, for exactly the reason it
+cannot identify a label.
+
+**Order is a field now, because arbitrary-but-stable stopped being enough.**
+Ordering was by id: identical on every peer, which is what merge needs, and
+meaningless, which is fine while an address carries one comment and useless once
+adding freely and arranging later is the *intended* flow. `reorder_comments`
+takes the ids in the order wanted rather than nudging one past another, so the
+result does not depend on what the caller believed the order was; ids left out
+keep their places after the ones named. Last-writer-wins per comment, like every
+other field here — two peers arranging one address concurrently converge on
+something neither chose, which for prose is untidy rather than wrong.
 
 A **region's** `comment` is deliberately not this. It describes a span and is a
 property of the region object alongside its name — but it renders in the listing

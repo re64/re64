@@ -439,6 +439,33 @@ describe("editing as an agent", () => {
     expect((page.value as { text: string }).text.length).toBeGreaterThan(0);
   });
 
+  it("adds comments without clobbering, then edits and reorders by id", async () => {
+    // The defect three of four readers hit across two runs: set_comment upserted
+    // by (address, placement), so a second writer silently replaced the first.
+    // The model always rendered several comments per address; only the write
+    // path could not reach it.
+    const first = await callTool("add_comment", { address: "$8240", text: "first voice" });
+    const second = await callTool("add_comment", { address: "$8240", text: "second voice" });
+    expect(first.isError).toBe(false);
+    expect(second.isError).toBe(false);
+
+    const a = (first.value as { comment: string }).comment;
+    const b = (second.value as { comment: string }).comment;
+    expect(a).not.toBe(b);
+
+    const listed = await callTool("list_comments");
+    const texts = (listed.value as { comments: { id: string; text: string }[] }).comments;
+    expect(texts.filter((c) => /voice$/.test(c.text))).toHaveLength(2);
+    // Without ids on the listing, editing and removing are unreachable.
+    expect(texts.every((c) => typeof c.id === "string")).toBe(true);
+
+    expect((await callTool("edit_comment", { id: a, text: "revised" })).isError).toBe(false);
+    expect((await callTool("reorder_comments", { address: "$8240", ids: [b, a] })).isError).toBe(
+      false
+    );
+    expect((await callTool("remove_comment", { id: b })).isError).toBe(false);
+  });
+
   it("lists who is in the project, including itself", async () => {
     // An agent has no socket and so no awareness; membership is in the document
     // precisely so both consumers can read the same list.
