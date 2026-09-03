@@ -31,17 +31,40 @@ beforeEach(() => {
     baseUrl: "http://127.0.0.1:5164",
   });
 });
-afterEach(() => { storage.close(); rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => {
+  for (const { storage: held } of opened.values()) held.close();
+  opened.clear();
+  storage.close();
+  rmSync(dir, { recursive: true, force: true });
+});
 
-/** What the HTTP route does once the bytes land, without a socket. */
-function upload(projectId: string, name: string, bytes: Uint8Array): Workspace {
+/**
+ * What the HTTP route does once the bytes land, without a socket.
+ *
+ * One Workspace per project, reused: two Workspaces over one database hold two
+ * separate documents that do not see each other in-process, which is a property
+ * of the design and not something a test should route around.
+ */
+const opened = new Map<string, { space: Workspace; storage: SqliteStorage }>();
+function workspaceFor(projectId: string): { space: Workspace; storage: SqliteStorage } {
+  const existing = opened.get(projectId);
+  if (existing) return existing;
   const store = new SqliteStorage(databasePath, projectId);
-  const space = new Workspace({
-    store: new ProjectStore(store),
+  const made = {
+    space: new Workspace({
+      store: new ProjectStore(store),
+      storage: store,
+      projectId,
+      projectPath: databasePath,
+    }),
     storage: store,
-    projectId,
-    projectPath: databasePath,
-  });
+  };
+  opened.set(projectId, made);
+  return made;
+}
+
+function upload(projectId: string, name: string, bytes: Uint8Array): Workspace {
+  const { space, storage: store } = workspaceFor(projectId);
   const hash = store.putBlob(name, bytes);
   space.noteUploadedFile(builder, name, hash, bytes.length);
   return space;
@@ -91,6 +114,85 @@ describe("building a project from a disk image", () => {
       { name: "tiny.prg", hash: expect.any(String), size: 5 },
     ]);
     expect(exported.layers[0]).toMatchObject({ type: "prg", path: "tiny.prg" });
+  });
+
+  it("reads one project as the bytes load, or as the program runs", () => {
+    // The problem both builders hit on roughly their fifth call: the decrunched
+    // image must shadow the packed file, so the project could show one or the
+    // other and their loader annotations vanished into the shadow.
+    ws.createProject("camels");
+    const camels = upload("camels", "packed.prg", new Uint8Array([0x00, 0x08, 0xa9, 0x01, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "packed.prg", name: "packed" });
+
+    const unpacked = upload("camels", "unpacked.prg", new Uint8Array([0x00, 0x08, 0xa2, 0x00, 0xe8, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "unpacked.prg", name: "unpacked" });
+
+    const ids = Object.fromEntries(camels.targets().layers.map((l) => [l.name, l.id]));
+    camels.setTarget(builder, "loader", [ids.packed]);
+    camels.setTarget(builder, "runtime", [ids.unpacked]);
+
+    // Everything, as before: the unpacked layer is on top and shadows the other.
+    expect(camels.targets().total).toBe(2);
+    expect(camels.targets().active).toBeUndefined();
+
+    camels.selectTarget(builder, "loader");
+    const loader = camels.describe();
+    expect(loader.layers).toHaveLength(1);
+    expect(loader.layers[0].name).toBe("packed");
+
+    camels.selectTarget(builder, "runtime");
+    expect(camels.describe().layers[0].name).toBe("unpacked");
+
+    // And back to everything.
+    camels.selectTarget(builder);
+    expect(camels.describe().layers.length).toBeGreaterThan(1);
+  });
+
+  it("keeps a layer's annotations with the target that shows it", () => {
+    // Annotations belong to layers, so they follow activation. That is the rule
+    // working rather than data going missing — which is what it looked like
+    // when there was no way to name the other view.
+    ws.createProject("camels");
+    const camels = upload("camels", "a.prg", new Uint8Array([0x00, 0x08, 0xa9, 0x01, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "a.prg", name: "first" });
+    camels.setLabel(builder, 0x0800, "inTheLoader");
+
+    const other = upload("camels", "b.prg", new Uint8Array([0x00, 0x08, 0xe8, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "b.prg", name: "second" });
+
+    const ids = Object.fromEntries(camels.targets().layers.map((l) => [l.name, l.id]));
+    camels.setTarget(builder, "loader", [ids.first]);
+    camels.setTarget(builder, "runtime", [ids.second]);
+
+    camels.selectTarget(builder, "runtime");
+    expect(camels.labels({ namePattern: "inTheLoader" }).total).toBe(0);
+
+    camels.selectTarget(builder, "loader");
+    expect(camels.labels({ namePattern: "inTheLoader" }).total).toBe(1);
+  });
+
+  it("refuses a target naming a layer that is not there, and one with none", () => {
+    ws.createProject("camels");
+    const camels = upload("camels", "a.prg", new Uint8Array([0x00, 0x08, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "a.prg" });
+    expect(() => camels.setTarget(builder, "bad", ["lay_nope"])).toThrow(/No layer/);
+    expect(() => camels.setTarget(builder, "empty", [])).toThrow(/shows nothing/);
+    expect(() => camels.selectTarget(builder, "missing")).toThrow(/No target/);
+  });
+
+  it("drops the selection when the selected target is removed", () => {
+    // A selection pointing at nothing reads as a filter that silently does
+    // nothing, which is worse than no selection at all.
+    ws.createProject("camels");
+    const camels = upload("camels", "a.prg", new Uint8Array([0x00, 0x08, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "a.prg" });
+    const id = camels.targets().layers[0].id;
+    camels.setTarget(builder, "only", [id]);
+    camels.selectTarget(builder, "only");
+    expect(camels.targets().active).toBe("only");
+
+    camels.removeTarget(builder, "only");
+    expect(camels.targets().active).toBeUndefined();
   });
 
   it("refuses a layer over a file the project does not hold", () => {

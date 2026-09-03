@@ -2465,6 +2465,28 @@ change to what a layer is. Two of them here: the loader, and the runtime image.
 Annotations keep belonging to layers, so they follow activation — which turns a
 mysterious disappearance into a consequence a reader can name.
 
+**Built.** `projectForTarget` narrows the project *before* the memory map is
+built, so ownership, annotations and analysis all work on a stack that simply
+has fewer layers — rather than each of them learning about targets separately.
+Filtering there also keeps `layers[i]` corresponding to `project.layers[i]`,
+which several things rely on.
+
+The selection lives in the document, not in a caller, so it is shared and
+visible. That is deliberate: a view is a fact about the project, and two agents
+disagreeing about which one to read is a conversation rather than a setting. It
+moves `version()` and re-analyses, which is correct — the answer really is
+different. If the shared selection turns out to be contended, the evidence will
+say so and a per-call override is a small addition; guessing now would be
+building the override before anyone has wanted it.
+
+`list_targets` reports **every** layer, including those the current selection
+hides, because that is how a caller finds the view that shows them — the read
+that verifies the write, again.
+
+Removing the selected target clears the selection. A selection pointing at
+nothing reads as a filter that silently does nothing, which is worse than no
+selection at all.
+
 Entry points split rather than move wholesale. A PRG layer's load address is
 *inherent to that file* and stays on the layer; `function` and `code` labels are
 already layer-owned and follow for free; only the project-level `entryPoints`

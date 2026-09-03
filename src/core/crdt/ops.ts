@@ -157,6 +157,30 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         doc.getMap<Y.Map<unknown>>("constants").delete(op.id);
         break;
 
+      case "target.set": {
+        const targets = doc.getMap<Y.Map<unknown>>("targets");
+        let entry = targets.get(op.name);
+        if (!entry) {
+          entry = new Y.Map<unknown>();
+          targets.set(op.name, entry);
+        }
+        assign(entry, {
+          name: op.name,
+          layers: op.layers,
+          entryPoints: op.entryPoints?.length ? op.entryPoints.map(hex4) : undefined,
+        });
+        break;
+      }
+
+      case "target.remove": {
+        doc.getMap<Y.Map<unknown>>("targets").delete(op.name);
+        // A selection pointing at nothing reads as a filter that silently does
+        // nothing, which is worse than no selection at all.
+        const meta = doc.getMap<unknown>("meta");
+        if (meta.get("activeTarget") === op.name) meta.delete("activeTarget");
+        break;
+      }
+
       case "file.add": {
         const files = doc.getMap<Y.Map<unknown>>("files");
         let entry = files.get(op.name);

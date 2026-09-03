@@ -502,6 +502,30 @@ describe("editing as an agent", () => {
     expect((await callTool("remove_label", { id })).isError).toBe(false);
   });
 
+  it("declares a view over the layer stack and selects it", async () => {
+    const listed = await callTool("list_targets");
+    expect(listed.isError).toBe(false);
+    const { layers } = listed.value as { layers: { id: string; name: string }[] };
+    expect(layers.length).toBeGreaterThan(0);
+
+    const made = await callTool("set_target", { name: "just-the-prg", layers: [layers[0].id] });
+    expect(made.isError).toBe(false);
+
+    const chosen = await callTool("select_target", { name: "just-the-prg" });
+    expect(chosen.isError).toBe(false);
+    expect((await callTool("list_targets")).text).toContain("just-the-prg");
+
+    // Back to everything, then tidy up so later cases see the whole project.
+    expect((await callTool("select_target", {})).isError).toBe(false);
+    expect((await callTool("remove_target", { name: "just-the-prg" })).isError).toBe(false);
+  });
+
+  it("refuses a target over a layer that is not there", async () => {
+    const refused = await callTool("set_target", { name: "bad", layers: ["lay_nope"] });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/No layer/);
+  });
+
   it("lists who is in the project, including itself", async () => {
     // An agent has no socket and so no awareness; membership is in the document
     // precisely so both consumers can read the same list.

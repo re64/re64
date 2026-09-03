@@ -183,6 +183,42 @@ export interface ProjectFile {
   size: number;
 }
 
+/**
+ * A named view over the layer stack.
+ *
+ * The answer to a problem that arrived far earlier than expected: a project
+ * holding a crunched file *and* the decrunched image it produces can show the
+ * bytes as they load or the program as it runs, never both, because the second
+ * must shadow the first. Both builders in experiment 5 hit that on roughly
+ * their fifth call, and both lost their loader annotations to the shadow.
+ *
+ * A target is a *view*, not a change to what a layer is. Annotations keep
+ * belonging to layers, so they follow activation — which turns a mysterious
+ * disappearance into something a reader can name and switch back to.
+ *
+ * Keyed by name, like a tag and unlike everything in the document that carries
+ * an id. The reason ids exist there is that a rename must not change what a
+ * thing *is*; a target is chosen by name and referenced by nothing else, so
+ * that does not arise.
+ */
+export interface ProjectTarget {
+  name: string;
+  /**
+   * Layer ids that are active. A layer not named here supplies no bytes, no
+   * labels and no comments while this target is selected.
+   */
+  layers: string[];
+  /**
+   * Where disassembly starts, beyond what the active layers contribute.
+   *
+   * This is the project-level `entryPoints` list, moved. A PRG layer's load
+   * address stays on the layer, because it is inherent to that file rather
+   * than a choice about how to read it; `function` and `code` labels are
+   * already layer-owned and follow activation for free.
+   */
+  entryPoints?: (number | string)[];
+}
+
 export interface Project {
   /** Project name */
   name?: string;
@@ -192,8 +228,17 @@ export interface Project {
   layers: ProjectLayer[];
   /** The binaries this project reads, by the name its layers use. */
   files?: ProjectFile[];
-  /** Manual entry points (addresses) */
+  /**
+   * Manual entry points (addresses).
+   *
+   * The default target's list. A project that declares targets puts them there
+   * instead, so the same field does not mean two things.
+   */
   entryPoints?: (number | string)[];
+  /** Named views over the layer stack. */
+  targets?: ProjectTarget[];
+  /** Which target is selected; every layer when unset. */
+  activeTarget?: string;
   /**
    * Which label to show where several share an address, by label id.
    *

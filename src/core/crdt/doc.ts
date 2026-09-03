@@ -29,6 +29,7 @@ import {
   ProjectConstant,
   ProjectDecoder,
   ProjectFile,
+  ProjectTarget,
   ProjectConstantUse,
   ProjectLabel,
   ProjectLabelUse,
@@ -76,9 +77,10 @@ const ROOT_PRIMARY = "primaryLabels";
 const ROOT_CONSTANTS = "constants";
 const ROOT_DECODERS = "decoders";
 const ROOT_FILES = "files";
+const ROOT_TARGETS = "targets";
 
 /** Scalars a project carries outside its layers. */
-const META_KEYS = ["name", "description", "entryPoints"] as const;
+const META_KEYS = ["name", "description", "entryPoints", "activeTarget"] as const;
 
 function mapFrom(record: Record<string, unknown>): Y.Map<unknown> {
   const map = new Y.Map<unknown>();
@@ -159,6 +161,11 @@ export function docFromProject(project: Project): Y.Doc {
 
     // Project level for the same reason: a way of *reading* bytes describes
     // none of its own, so there is no layer for it to move with.
+    const targets = doc.getMap<Y.Map<unknown>>(ROOT_TARGETS);
+    for (const target of [...(project.targets ?? [])].sort((a, b) => a.name.localeCompare(b.name))) {
+      targets.set(target.name, mapFrom(target as unknown as Record<string, unknown>));
+    }
+
     const files = doc.getMap<Y.Map<unknown>>(ROOT_FILES);
     for (const file of [...(project.files ?? [])].sort((a, b) => a.name.localeCompare(b.name))) {
       files.set(file.name, mapFrom(file as unknown as Record<string, unknown>));
@@ -186,6 +193,7 @@ export function projectFromDoc(doc: Y.Doc): Project {
   const constants = doc.getMap<Y.Map<unknown>>(ROOT_CONSTANTS);
   const decoders = doc.getMap<Y.Map<unknown>>(ROOT_DECODERS);
   const files = doc.getMap<Y.Map<unknown>>(ROOT_FILES);
+  const targets = doc.getMap<Y.Map<unknown>>(ROOT_TARGETS);
 
   const project: Project = {
     layers: layers.toArray().map((entry) => {
@@ -266,6 +274,11 @@ export function projectFromDoc(doc: Y.Doc): Project {
   );
   if (fileList.length) project.files = fileList;
 
+  const targetList = sortedValues<ProjectTarget>(targets, "name").map((t) =>
+    inOrder<ProjectTarget>(t as unknown as Record<string, unknown>, TARGET_FIELDS)
+  );
+  if (targetList.length) project.targets = targetList;
+
   return project;
 }
 
@@ -296,6 +309,7 @@ const LABEL_USE_FIELDS = ["id", "address", "label"] as const;
 const CONSTANT_FIELDS = ["id", "name", "value"] as const;
 const DECODER_FIELDS = ["id", "name", "source"] as const;
 const FILE_FIELDS = ["name", "hash", "size"] as const;
+const TARGET_FIELDS = ["name", "layers", "entryPoints"] as const;
 const LAYER_FIELDS = [
   "id",
   "type",

@@ -97,6 +97,17 @@ export function formatProject(project: Project): string {
     body.push(`  "constants": [\n${entries}\n  ]`);
   }
 
+  if (project.targets?.length) {
+    const entries = project.targets
+      .map((t) => `    ${compactObject(t as unknown as Record<string, unknown>)}`)
+      .join(",\n");
+    body.push(`  "targets": [\n${entries}\n  ]`);
+  }
+
+  if (project.activeTarget !== undefined) {
+    body.push(`  "activeTarget": ${JSON.stringify(project.activeTarget)}`);
+  }
+
   if (project.files?.length) {
     // Before layers in the file, because a layer's `path` refers to one by
     // name: a reader meets the binary and its hash before anything points at
@@ -820,6 +831,36 @@ export function removeLayer(raw: string, id: string): string {
  * effect is still present, so a writer that appended a duplicate instead of
  * doing nothing would make its own operation impossible to take back.
  */
+export function upsertTarget(
+  raw: string,
+  target: { name: string; layers: string[]; entryPoints?: number[] }
+): string {
+  const project = parseProject(raw);
+  const targets = (project.targets ??= []);
+  const entry = {
+    name: target.name,
+    layers: target.layers,
+    ...(target.entryPoints?.length
+      ? { entryPoints: target.entryPoints.map((a) => "$" + a.toString(16).toUpperCase().padStart(4, "0")) }
+      : {}),
+  };
+  const at = targets.findIndex((t) => t.name === target.name);
+  if (at >= 0) targets[at] = entry;
+  else targets.push(entry);
+  return formatProject(project);
+}
+
+export function deleteTarget(raw: string, name: string): string {
+  const project = parseProject(raw);
+  if (!project.targets?.some((t) => t.name === name)) return raw;
+  project.targets = project.targets.filter((t) => t.name !== name);
+  if (project.targets.length === 0) delete project.targets;
+  // A selection pointing at nothing is worse than none: it would read as a
+  // filter that silently does nothing.
+  if (project.activeTarget === name) delete project.activeTarget;
+  return formatProject(project);
+}
+
 export function upsertFile(raw: string, file: { name: string; hash: string; size: number }): string {
   const project = parseProject(raw);
   const files = (project.files ??= []);
@@ -952,7 +993,7 @@ export function unbindLabel(raw: string, layerIndex: number, id: string): string
  */
 export function setProjectMeta(
   raw: string,
-  key: "name" | "description",
+  key: "name" | "description" | "activeTarget",
   value: string | undefined
 ): string {
   const project = parseProject(raw);

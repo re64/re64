@@ -83,6 +83,35 @@ function layerName(layer: ProjectLayer, index: number): string {
  * `loadFile` supplies bytes; `platform` can be disabled for tests that want a
  * map containing nothing but the project's own layers.
  */
+/**
+ * The project as the selected target sees it.
+ *
+ * A target is a *view*: it narrows the layer stack and supplies the entry
+ * points, and everything downstream — ownership, annotations, analysis — then
+ * works on a project that simply has fewer layers. Filtering here rather than
+ * inside the build keeps `layers[i]` corresponding to `project.layers[i]`,
+ * which several things rely on.
+ *
+ * No target selected means every layer and the project's own entry points,
+ * so a one-layer project declares nothing and behaves exactly as before.
+ */
+export function projectForTarget(project: Project): Project {
+  const target = project.targets?.find((t) => t.name === project.activeTarget);
+  if (!target) return project;
+
+  const active = new Set(target.layers);
+  return {
+    ...project,
+    layers: project.layers.filter((l) => l.id && active.has(l.id)),
+    // The target's own list replaces the project's: the same field meaning two
+    // things depending on whether a target is selected is how "entryPoints said
+    // 2 while decodeStartsFrom said 19" happened.
+    ...(target.entryPoints === undefined
+      ? { entryPoints: undefined }
+      : { entryPoints: target.entryPoints }),
+  };
+}
+
 export function buildMemoryMap(
   project: Project,
   loadFile: FileLoader,

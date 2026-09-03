@@ -121,9 +121,14 @@ export function diffProjects(from: Project, to: Project): Op[] {
   // be emitted — so `set_project_description` reached the document, showed up
   // in `describe_project`, and was absent from every export. An op nothing
   // produces is a feature that exists only from the inside.
-  for (const key of ["name", "description"] as const) {
+  for (const key of ["name", "description", "activeTarget"] as const) {
     if (from[key] !== to[key]) ops.push({ op: "meta.set", key, value: to[key] });
   }
+
+  // Targets name layers, so they follow the layers rather than lead them; the
+  // removals go last for the same reason removals always do here.
+  const fromTargets = new Map((from.targets ?? []).map((t) => [t.name, t]));
+  const toTargets = new Map((to.targets ?? []).map((t) => [t.name, t]));
 
   // Files, before layers: a layer may reference one by name, so the file has to
   // be in the export before anything points at it. The same ordering rule that
@@ -168,6 +173,22 @@ export function diffProjects(from: Project, to: Project): Op[] {
         : { address: parseProjectAddress(layer.address) }),
       index: to.layers.findIndex((l) => l.id === id),
     });
+  }
+
+  for (const [name, target] of toTargets) {
+    const before = fromTargets.get(name);
+    if (before && JSON.stringify(before) === JSON.stringify(target)) continue;
+    ops.push({
+      op: "target.set",
+      name,
+      layers: target.layers,
+      ...(target.entryPoints === undefined
+        ? {}
+        : { entryPoints: target.entryPoints.map((a) => parseProjectAddress(a)) }),
+    });
+  }
+  for (const name of fromTargets.keys()) {
+    if (!toTargets.has(name)) ops.push({ op: "target.remove", name });
   }
 
   const beforeLabels = labelsById(from);

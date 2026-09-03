@@ -8,7 +8,7 @@ export {
   projectRegionsToRegions,
   parseProject,
 } from "./project.js";
-export { FileLoader, LoadedProject, buildMemoryMap } from "./loader.js";
+export { FileLoader, LoadedProject, buildMemoryMap, projectForTarget } from "./loader.js";
 export { FileBytes, splitD64Path, blobPaths, makeFileLoader } from "./file-source.js";
 export {
   formatProject,

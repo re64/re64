@@ -38,6 +38,8 @@ import {
   upsertComment,
   upsertFile,
   deleteFile,
+  upsertTarget,
+  deleteTarget,
   upsertConstant,
   upsertDecoder,
   upsertLabel,
@@ -160,6 +162,16 @@ export function applyOp(raw: string, op: Op): string {
 
     case "file.remove":
       return deleteFile(raw, op.name);
+
+    case "target.set":
+      return upsertTarget(raw, {
+        name: op.name,
+        layers: op.layers,
+        ...(op.entryPoints === undefined ? {} : { entryPoints: op.entryPoints }),
+      });
+
+    case "target.remove":
+      return deleteTarget(raw, op.name);
 
     case "label.bind":
       return bindLabel(raw, layerIndexOf(project, op.layerId), {
@@ -307,6 +319,33 @@ export function invertOp(raw: string, op: Op): Op {
       const held = project.files?.find((f) => f.name === op.name);
       if (!held) return { op: "file.remove", name: op.name };
       return { op: "file.add", name: held.name, hash: held.hash, size: held.size };
+    }
+
+    case "target.set": {
+      const held = project.targets?.find((t) => t.name === op.name);
+      return held
+        ? {
+            op: "target.set",
+            name: held.name,
+            layers: held.layers,
+            ...(held.entryPoints === undefined
+              ? {}
+              : { entryPoints: held.entryPoints.map((a) => parseProjectAddress(a)) }),
+          }
+        : { op: "target.remove", name: op.name };
+    }
+
+    case "target.remove": {
+      const held = project.targets?.find((t) => t.name === op.name);
+      if (!held) return { op: "target.remove", name: op.name };
+      return {
+        op: "target.set",
+        name: held.name,
+        layers: held.layers,
+        ...(held.entryPoints === undefined
+          ? {}
+          : { entryPoints: held.entryPoints.map((a) => parseProjectAddress(a)) }),
+      };
     }
 
     case "label.bind": {

@@ -1060,6 +1060,71 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "list_targets",
+    "The named views this project has over its layer stack, which is selected, " +
+      "and every layer with the id a target is defined in terms of — including " +
+      "layers the current selection hides, since that is how you find the view " +
+      "that shows them.",
+    { project },
+    ({ project: id }: { project?: string }) => context().workspace(id).targets()
+  );
+
+  tool(
+    "set_target",
+    "Declare a named view: which layers are active, and where disassembly " +
+      "starts beyond what those layers contribute. A project holding a packed " +
+      "file and the image it unpacks to can be read as the bytes load or as the " +
+      "program runs — one target each — because the second must shadow the " +
+      "first. Annotations belong to layers, so they follow activation.",
+    {
+      project,
+      name: z.string().min(1),
+      layers: z.array(z.string()).min(1).describe("Layer ids, from list_targets"),
+      entryPoints: z.array(address).optional(),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      name: string;
+      layers: string[];
+      entryPoints?: number[];
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.setTarget(caller, args.name, args.layers, args.entryPoints);
+    }
+  );
+
+  tool(
+    "select_target",
+    "Choose which view to read the project through. Omit the name to go back " +
+      "to every layer. This changes what analysis sees, so it moves the " +
+      "version and re-analyses — and it is shared, because the view is part of " +
+      "the project rather than a setting of yours.",
+    { project, name: z.string().optional(), expectVersion: z.string().optional() },
+    (args: { project?: string; name?: string; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.selectTarget(caller, args.name);
+    }
+  );
+
+  tool(
+    "remove_target",
+    "Forget a view. The layers and everything in them are untouched.",
+    { project, name: z.string().min(1), expectVersion: z.string().optional() },
+    (args: { project?: string; name: string; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.removeTarget(caller, args.name);
+    }
+  );
+
+  tool(
     "create_project",
     "Start a project with nothing in it: no layers, no bytes. The first step " +
       "when you have been handed a binary and no project. Follow it with " +

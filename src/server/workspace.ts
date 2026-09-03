@@ -39,6 +39,7 @@ import {
   blobPaths,
   isBitmapView,
   buildMemoryMap,
+  projectForTarget,
   describeOp,
   labelDeleteOp,
   labelDeleteByIdOp,
@@ -322,7 +323,14 @@ export class Workspace {
         ? databaseFileBytes(storage)
         : nodeFileBytes(dirname(projectPath));
 
-    return buildMemoryMap(projectFromDoc(store.document()), makeFileLoader(bytes));
+    // Through the selected target, so analysis, ownership and annotations all
+    // see the same narrowed stack. `describe_project` reads the unfiltered
+    // project separately, since a caller needs to see the layers a target hides
+    // in order to switch to one that shows them.
+    return buildMemoryMap(
+      projectForTarget(projectFromDoc(store.document())),
+      makeFileLoader(bytes)
+    );
   }
 
   /** Content-addressed, for anything crossing a process boundary. */
@@ -711,6 +719,94 @@ export class Workspace {
         path: `${name}:${entry.filename}`,
       })),
     };
+  }
+
+  /**
+   * The views this project declares, and which is selected.
+   *
+   * Reads the *unfiltered* project on purpose: a caller needs to see the layers
+   * the current target hides in order to choose one that shows them.
+   */
+  targets(): {
+    active?: string;
+    total: number;
+    targets: { name: string; layers: string[]; entryPoints?: string[]; active: boolean }[];
+    layers: { id: string; name: string; type: string }[];
+  } {
+    const project = projectFromDoc(this.room.store.document());
+    return {
+      ...(project.activeTarget ? { active: project.activeTarget } : {}),
+      total: (project.targets ?? []).length,
+      targets: (project.targets ?? []).map((t) => ({
+        name: t.name,
+        layers: t.layers,
+        ...(t.entryPoints ? { entryPoints: t.entryPoints.map((a) => hex4(parseProjectAddress(a))) } : {}),
+        active: t.name === project.activeTarget,
+      })),
+      // Every layer, including ones the selection hides, with the ids a target
+      // is defined in terms of.
+      layers: project.layers
+        .filter((l) => l.id)
+        .map((l) => ({ id: l.id!, name: l.name ?? l.path ?? l.id!, type: l.type })),
+    };
+  }
+
+  /** Declare or revise a view over the layer stack. */
+  setTarget(
+    caller: Caller,
+    name: string,
+    layers: readonly string[],
+    entryPoints?: readonly number[]
+  ): EditResult {
+    const known = new Set(
+      projectFromDoc(this.room.store.document())
+        .layers.filter((l) => l.id)
+        .map((l) => l.id!)
+    );
+    const unknown = layers.filter((id) => !known.has(id));
+    if (unknown.length) {
+      throw new Error(
+        `No layer ${unknown.join(", ")} in this project. list_targets shows the ` +
+          `ids a target is defined in terms of.`
+      );
+    }
+    if (layers.length === 0) throw new Error("A target with no layers shows nothing.");
+
+    return this.edit(caller, () => [
+      {
+        op: "target.set",
+        name,
+        layers: [...layers],
+        ...(entryPoints?.length ? { entryPoints: [...entryPoints] } : {}),
+      } as Op,
+    ]);
+  }
+
+  removeTarget(caller: Caller, name: string): EditResult {
+    const held = projectFromDoc(this.room.store.document()).targets ?? [];
+    if (!held.some((t) => t.name === name)) {
+      throw new Error(`No target called "${name}". list_targets shows what there is.`);
+    }
+    return this.edit(caller, () => [{ op: "target.remove", name } as Op]);
+  }
+
+  /**
+   * Choose a view. Passing nothing goes back to every layer.
+   *
+   * A change to what analysis sees, so it moves the version and re-analyses —
+   * which is correct, and is the cost of the view being part of the project
+   * rather than a per-caller setting.
+   */
+  selectTarget(caller: Caller, name?: string): EditResult {
+    if (name !== undefined) {
+      const held = projectFromDoc(this.room.store.document()).targets ?? [];
+      if (!held.some((t) => t.name === name)) {
+        throw new Error(`No target called "${name}". list_targets shows what there is.`);
+      }
+    }
+    return this.edit(caller, () => [
+      { op: "meta.set", key: "activeTarget", value: name } as Op,
+    ]);
   }
 
   /** Disassembly as lines, capped, with a cursor when there is more. */

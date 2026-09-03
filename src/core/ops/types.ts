@@ -86,7 +86,12 @@ export interface CommentDeleteOp {
  */
 export interface MetaSetOp {
   op: "meta.set";
-  key: "name" | "description";
+  /**
+   * `activeTarget` rides here rather than getting an operation of its own:
+   * selecting a view is setting one project-level scalar, which is exactly what
+   * this op is for.
+   */
+  key: "name" | "description" | "activeTarget";
   value?: string;
 }
 
@@ -121,6 +126,19 @@ export interface ConstantSetOp {
  * never linked cannot exist, which is what a project-less upload would have
  * allowed.
  */
+/** Declare or revise a named view over the layer stack. */
+export interface TargetSetOp {
+  op: "target.set";
+  name: string;
+  layers: string[];
+  entryPoints?: number[];
+}
+
+export interface TargetRemoveOp {
+  op: "target.remove";
+  name: string;
+}
+
 export interface FileAddOp {
   op: "file.add";
   name: string;
@@ -233,7 +251,9 @@ export type Op =
   | PrimarySetOp
   | PrimaryClearOp
   | FileAddOp
-  | FileRemoveOp;
+  | FileRemoveOp
+  | TargetSetOp
+  | TargetRemoveOp;
 
 /** One edit, with enough context to undo it and to say who made it. */
 export interface Change {
@@ -306,6 +326,11 @@ export function describeOp(op: Op): string {
       return `define ${op.name} as $${op.value.toString(16).toUpperCase().padStart(2, "0")}`;
     case "constant.delete":
       return `delete constant ${op.id}`;
+
+    case "target.set":
+      return `define target ${op.name} over ${op.layers.length} layer(s)`;
+    case "target.remove":
+      return `remove target ${op.name}`;
 
     case "file.add":
       return `add file ${op.name} (${op.size} bytes)`;
