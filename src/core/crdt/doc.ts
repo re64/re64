@@ -28,6 +28,7 @@ import {
   ProjectComment,
   ProjectConstant,
   ProjectDecoder,
+  ProjectFile,
   ProjectConstantUse,
   ProjectLabel,
   ProjectLabelUse,
@@ -74,6 +75,7 @@ const ROOT_META = "meta";
 const ROOT_PRIMARY = "primaryLabels";
 const ROOT_CONSTANTS = "constants";
 const ROOT_DECODERS = "decoders";
+const ROOT_FILES = "files";
 
 /** Scalars a project carries outside its layers. */
 const META_KEYS = ["name", "description", "entryPoints"] as const;
@@ -157,6 +159,11 @@ export function docFromProject(project: Project): Y.Doc {
 
     // Project level for the same reason: a way of *reading* bytes describes
     // none of its own, so there is no layer for it to move with.
+    const files = doc.getMap<Y.Map<unknown>>(ROOT_FILES);
+    for (const file of [...(project.files ?? [])].sort((a, b) => a.name.localeCompare(b.name))) {
+      files.set(file.name, mapFrom(file as unknown as Record<string, unknown>));
+    }
+
     const decoders = doc.getMap<Y.Map<unknown>>(ROOT_DECODERS);
     for (const decoder of [...(project.decoders ?? [])].sort(byId)) {
       decoders.set(decoder.id!, mapFrom(decoder as unknown as Record<string, unknown>));
@@ -178,6 +185,7 @@ export function projectFromDoc(doc: Y.Doc): Project {
   const primary = doc.getMap<string>(ROOT_PRIMARY);
   const constants = doc.getMap<Y.Map<unknown>>(ROOT_CONSTANTS);
   const decoders = doc.getMap<Y.Map<unknown>>(ROOT_DECODERS);
+  const files = doc.getMap<Y.Map<unknown>>(ROOT_FILES);
 
   const project: Project = {
     layers: layers.toArray().map((entry) => {
@@ -253,6 +261,11 @@ export function projectFromDoc(doc: Y.Doc): Project {
   );
   if (decoderList.length) project.decoders = decoderList;
 
+  const fileList = sortedValues<ProjectFile>(files, "name").map((f) =>
+    inOrder<ProjectFile>(f as unknown as Record<string, unknown>, FILE_FIELDS)
+  );
+  if (fileList.length) project.files = fileList;
+
   return project;
 }
 
@@ -282,6 +295,7 @@ const USE_FIELDS = ["id", "address", "constant"] as const;
 const LABEL_USE_FIELDS = ["id", "address", "label"] as const;
 const CONSTANT_FIELDS = ["id", "name", "value"] as const;
 const DECODER_FIELDS = ["id", "name", "source"] as const;
+const FILE_FIELDS = ["name", "hash", "size"] as const;
 const LAYER_FIELDS = [
   "id",
   "type",

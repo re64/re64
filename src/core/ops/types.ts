@@ -113,6 +113,26 @@ export interface ConstantSetOp {
   value: number;
 }
 
+/**
+ * Record that the project uses a file, by name and content hash.
+ *
+ * An operation rather than a side effect of uploading, so adding a binary is
+ * attributed and undoable like every other edit — and so an upload that is
+ * never linked cannot exist, which is what a project-less upload would have
+ * allowed.
+ */
+export interface FileAddOp {
+  op: "file.add";
+  name: string;
+  hash: string;
+  size: number;
+}
+
+export interface FileRemoveOp {
+  op: "file.remove";
+  name: string;
+}
+
 export interface DecoderSetOp {
   op: "decoder.set";
   id: string;
@@ -157,8 +177,20 @@ export interface ConstantUnbindOp {
 export interface LayerAddOp {
   op: "layer.add";
   id: string;
-  layerType: "symbols";
+  /**
+   * What the layer is.
+   *
+   * `symbols` was the only kind an operation could make, which meant a project
+   * could never be *built* — only annotated, from a stack somebody had already
+   * declared in a file by hand. A byte layer is what lets an agent handed a
+   * disk image end up with something to disassemble.
+   */
+  layerType: "symbols" | "prg" | "raw";
   name: string;
+  /** For a byte layer: the file it reads, as `name` or `disk.d64:NAME`. */
+  path?: string;
+  /** For a `raw` layer, which carries no load address of its own. */
+  address?: number;
   /** Where in declaration order; the bottom of the stack when omitted. */
   index?: number;
 }
@@ -199,7 +231,9 @@ export type Op =
   | LayerAddOp
   | LayerRemoveOp
   | PrimarySetOp
-  | PrimaryClearOp;
+  | PrimaryClearOp
+  | FileAddOp
+  | FileRemoveOp;
 
 /** One edit, with enough context to undo it and to say who made it. */
 export interface Change {
@@ -272,6 +306,11 @@ export function describeOp(op: Op): string {
       return `define ${op.name} as $${op.value.toString(16).toUpperCase().padStart(2, "0")}`;
     case "constant.delete":
       return `delete constant ${op.id}`;
+
+    case "file.add":
+      return `add file ${op.name} (${op.size} bytes)`;
+    case "file.remove":
+      return `remove file ${op.name}`;
 
     case "decoder.set":
       return `define decoder ${op.name}`;

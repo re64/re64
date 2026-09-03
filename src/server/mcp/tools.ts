@@ -1049,6 +1049,75 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "create_project",
+    "Start a project with nothing in it: no layers, no bytes. The first step " +
+      "when you have been handed a binary and no project. Follow it with " +
+      "prepare_upload to put the file in, list_disk_files if it is a .d64, and " +
+      "add_layer to make something disassemblable.",
+    { name: z.string().min(1) },
+    ({ name }: { name: string }) => context().workspace().createProject(name)
+  );
+
+  tool(
+    "prepare_upload",
+    "Get a URL to PUT a binary to. Bytes go over HTTP rather than through a " +
+      "tool argument, because a disk image is ~175KB and base64 of it would be " +
+      "tens of thousands of tokens for a file you never need to read. The URL " +
+      "is good once and expires. The name is what layers will refer to it by.",
+    {
+      project,
+      name: z.string().min(1).describe('What layers will call it, e.g. "revenge.d64"'),
+    },
+    ({ project: id, name }: { project?: string; name: string }) => {
+      const { workspace, caller } = context();
+      return workspace(id).prepareUpload(caller, name);
+    }
+  );
+
+  tool(
+    "list_disk_files",
+    "The directory of a .d64 disk image this project holds — what is on the " +
+      "disk, and the path to give add_layer for each entry.",
+    { project, name: z.string().min(1).describe("The image, as uploaded") },
+    ({ project: id, name }: { project?: string; name: string }) =>
+      context().workspace(id).diskFiles(name)
+  );
+
+  tool(
+    "add_byte_layer",
+    "Add a layer over bytes the project holds — which is what turns an " +
+      "uploaded binary into something to disassemble. `path` is the file's " +
+      'name, or "image.d64:FILE" for one inside a disk image. A .prg carries ' +
+      "its load address in its first two bytes; a raw layer needs one given.",
+    {
+      project,
+      type: z.enum(["prg", "raw"]),
+      path: z.string().min(1),
+      name: z.string().optional().describe("Defaults to the file's name"),
+      address: address.optional().describe("Required for raw, ignored for prg"),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      type: "prg" | "raw";
+      path: string;
+      name?: string;
+      address?: number;
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.addByteLayer(caller, {
+        type: args.type,
+        path: args.path,
+        ...(args.name === undefined ? {} : { name: args.name }),
+        ...(args.address === undefined ? {} : { address: args.address }),
+      });
+    }
+  );
+
+  tool(
     "add_layer",
     "Add a symbols layer: names for addresses that hold no loaded bytes — zero " +
       "page variables, I/O registers, KERNAL entry points. Usually unnecessary, " +

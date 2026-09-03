@@ -2422,6 +2422,56 @@ Adding the op surfaced three exhaustiveness holes at compile time — `applyOp`,
 job. `decoders` is also added to the undo manager's tracked roots; `constants`
 is still missing from that list, which is a separate and pre-existing gap.
 
+### Building a project, rather than annotating one
+
+Every experiment before this handed agents a project that already existed, so
+the path from *a binary* to *something disassemblable* had never been exercised
+by anything but the CLI. `add_layer` made `symbols` layers only, nothing could
+read a disk image, and there was no way to get bytes in at all — which is why
+`layer.set` was recorded as missing and this was not: the gap was larger and
+nobody had noticed, because no run had ever needed it.
+
+**Bytes go over HTTP, never through a tool argument.** A D64 is 175KB, which is
+~233KB of base64 and something like 58k tokens through a model's context for a
+file it never reads. `prepare_upload` returns a URL; the caller PUTs the bytes.
+
+**The token carries the project, the name and the caller**, issued before the
+bytes arrive — so the upload *completes* the link and a blob with no owner
+cannot be created. A project-less upload would have allowed exactly that, in a
+system whose whole identity story is that every edit is attributable; if the
+upload never happens the token expires and nothing was made. It is **not
+authentication**, and the comment on it says so: this server has none, and what
+a single-use expiring token buys is that a blind POST cannot fill the disk.
+
+**Files are in the document, like constants and decoders.** That was the cheap
+answer to "how does an agent verify the upload" — it needs no `list_files`,
+because a file appears wherever the project is described, and the upload is an
+op, so it is attributed, undoable, and in the export. It also closes something
+older: a `.re64` said `"path": "gridrunner.prg"` and could not tell you *which*
+bytes the annotations were made against. Now the hash travels with the name,
+which is what the `blobs` table comment always claimed it was for.
+
+**`diffProjects` emitted `layer.add` for symbols layers only**, from when that
+was the only kind an operation could make — and the filter outlived the limit.
+A byte layer reached the document, was reported by `describe_project`, and never
+reached the file; the next write naming that layer then failed against a text
+project that had never heard of it. Third instance of the same shape, after
+`meta.set` and `layer.add` itself: **the vocabulary being closed is checked by
+the compiler, and whether anything emits a member of it is not.**
+
+Verified end to end on Revenge of the Mutant Camels: create a project, upload
+the disk, read its directory, lay a `prg` layer over `revenge.d64:revenge
+fixed`, and the decode is five instructions — a BASIC stub — until `SYS 2061` is
+marked a routine, at which point it is forty-four. That jump is the acceptance
+test, because it is the moment a project stops being a file and starts being a
+program.
+
+Worth knowing about that disk: it holds a **crunched** build, `SYS 2061` into a
+decruncher, and the standalone `.prg` beside it is a different, unpacked binary
+at `SYS 34800`. The oracle disassembles the second. So a run given only the disk
+reaches a packed program that re64 cannot unpack, which bounds what that
+experiment can ask for — and is itself the kind of thing worth finding out.
+
 ### A name that reaches two addresses, and project hygiene
 
 Two labels can share a name, and in a CRDT that cannot be prevented: peers name

@@ -125,6 +125,17 @@ export function diffProjects(from: Project, to: Project): Op[] {
     if (from[key] !== to[key]) ops.push({ op: "meta.set", key, value: to[key] });
   }
 
+  // Files, before layers: a layer may reference one by name, so the file has to
+  // be in the export before anything points at it. The same ordering rule that
+  // layers and their labels already follow.
+  const fromFiles = new Map((from.files ?? []).map((f) => [f.name, f]));
+  const toFiles = new Map((to.files ?? []).map((f) => [f.name, f]));
+  for (const [name, file] of toFiles) {
+    const before = fromFiles.get(name);
+    if (before && before.hash === file.hash && before.size === file.size) continue;
+    ops.push({ op: "file.add", name, hash: file.hash, size: file.size });
+  }
+
   // Layers first, and only symbols layers, which are the only kind an
   // operation can add. A layer holding bytes is a change to what the project
   // *is*, not an annotation, and arrives by another route.
@@ -137,12 +148,24 @@ export function diffProjects(from: Project, to: Project): Op[] {
   const toLayers = new Map(to.layers.filter((l) => l.id).map((l) => [l.id!, l]));
 
   for (const [id, layer] of toLayers) {
-    if (fromLayers.has(id) || layer.type !== "symbols") continue;
+    if (fromLayers.has(id)) continue;
+    // Every kind an operation can express, not only symbols. This said
+    // `!== "symbols"` from when that was the only kind `layer.add` could make,
+    // and the filter outlived the limit: a byte layer reached the document, was
+    // reported by describe_project, and never reached the exported file — so
+    // the next write naming that layer failed against a text project that had
+    // never heard of it. The same shape as `meta.set`, which had an operation
+    // and an inverse and nothing that emitted one.
+    if (layer.type !== "symbols" && layer.type !== "prg" && layer.type !== "raw") continue;
     ops.push({
       op: "layer.add",
       id,
-      layerType: "symbols",
+      layerType: layer.type,
       name: layer.name ?? id,
+      ...(layer.path === undefined ? {} : { path: layer.path }),
+      ...(layer.address === undefined
+        ? {}
+        : { address: parseProjectAddress(layer.address) }),
       index: to.layers.findIndex((l) => l.id === id),
     });
   }
@@ -287,6 +310,10 @@ export function diffProjects(from: Project, to: Project): Op[] {
     if (beforePrimary[address] !== labelId) {
       ops.push({ op: "primary.set", address: parseProjectAddress(address), labelId });
     }
+  }
+
+  for (const name of fromFiles.keys()) {
+    if (!toFiles.has(name)) ops.push({ op: "file.remove", name });
   }
 
   for (const [id, layer] of fromLayers) {

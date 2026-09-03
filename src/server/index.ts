@@ -29,6 +29,7 @@ import { Caller, resolveCaller } from "./mcp/identity.js";
 import { registerTools } from "./mcp/tools.js";
 import { McpLog, defaultMcpLogPath, openMcpLog } from "./mcp/log.js";
 import { SessionLeases, sessionKeyOf } from "./sessions.js";
+import { MAX_UPLOAD_BYTES, uploadTokens } from "./uploads.js";
 import { applyOpToDoc, joinProject, leaveProject, projectFromDoc } from "../core/crdt/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -282,7 +283,13 @@ export function startServer(options: ServerOptions): RunningServer {
     if (existing) return existing;
 
     const { sync, storage } = room(projectId);
-    const made = new Workspace({ store: sync.store, storage, projectId, projectPath });
+    const made = new Workspace({
+      store: sync.store,
+      storage,
+      projectId,
+      projectPath,
+      baseUrl: `http://${host === "0.0.0.0" ? "127.0.0.1" : host}:${port}`,
+    });
     workspaces.set(projectId, made);
     return made;
   }
@@ -420,6 +427,65 @@ export function startServer(options: ServerOptions): RunningServer {
         const { storage } = room(projectOf(url));
         return sendJson(res, 200, {
           users: storage instanceof SqliteStorage ? storage.users() : [],
+        });
+      }
+
+      // Bytes for a binary, sent straight rather than through a tool argument.
+      // The token was bound to a project, a name and a caller when it was
+      // issued, so this cannot create a blob nobody owns.
+      if (path.startsWith("/api/upload/") && req.method === "PUT") {
+        const claimed = uploadTokens.claim(path.slice("/api/upload/".length));
+        if (!claimed) {
+          return sendJson(res, 404, {
+            error: "That upload token is unknown, spent, or expired. Prepare another.",
+          });
+        }
+
+        const chunks: Buffer[] = [];
+        let size = 0;
+        let refused = false;
+        for await (const chunk of req) {
+          size += (chunk as Buffer).length;
+          if (size > MAX_UPLOAD_BYTES) {
+            refused = true;
+            break;
+          }
+          chunks.push(chunk as Buffer);
+        }
+        if (refused) {
+          return sendJson(res, 413, {
+            error: `Larger than the ${MAX_UPLOAD_BYTES} byte limit.`,
+          });
+        }
+        if (size === 0) return sendJson(res, 400, { error: "No bytes were sent." });
+
+        const { storage, sync } = room(claimed.projectId);
+        if (!(storage instanceof SqliteStorage)) {
+          return sendJson(res, 400, { error: "This server holds a file, not a database." });
+        }
+
+        const bytes = new Uint8Array(Buffer.concat(chunks));
+        const hash = storage.putBlob(claimed.name, bytes);
+        // Recorded in the document too, so the file is attributed, undoable,
+        // and named in the export beside the hash of the bytes it stands for.
+        new Workspace({
+          store: sync.store,
+          storage,
+          projectId: claimed.projectId,
+          projectPath,
+        }).noteUploadedFile(
+          { userId: claimed.author, label: claimed.author },
+          claimed.name,
+          hash,
+          bytes.length
+        );
+
+        return sendJson(res, 200, {
+          ok: true,
+          name: claimed.name,
+          hash,
+          size: bytes.length,
+          project: claimed.projectId,
         });
       }
 

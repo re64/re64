@@ -466,6 +466,27 @@ describe("editing as an agent", () => {
     expect((await callTool("remove_comment", { id: b })).isError).toBe(false);
   });
 
+  it("hands out an upload URL rather than taking bytes as an argument", async () => {
+    // A D64 is 175KB, which is ~233KB of base64 and tens of thousands of tokens
+    // through a transcript for a file nothing needs to read.
+    const prepared = await callTool("prepare_upload", { name: "disk.d64" });
+    expect(prepared.isError).toBe(false);
+    const { url, method, maxBytes } = prepared.value as {
+      url: string;
+      method: string;
+      maxBytes: number;
+    };
+    expect(method).toBe("PUT");
+    expect(url).toMatch(/\/api\/upload\/[0-9a-f]{48}$/);
+    expect(maxBytes).toBeGreaterThan(174848);
+  });
+
+  it("refuses a byte layer over a file the project has not been given", async () => {
+    const refused = await callTool("add_byte_layer", { type: "prg", path: "nothere.prg" });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/holds no file/i);
+  });
+
   it("lists who is in the project, including itself", async () => {
     // An agent has no socket and so no awareness; membership is in the document
     // precisely so both consumers can read the same list.

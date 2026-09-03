@@ -36,6 +36,8 @@ import {
   unbindConstant,
   unbindLabel,
   upsertComment,
+  upsertFile,
+  deleteFile,
   upsertConstant,
   upsertDecoder,
   upsertLabel,
@@ -153,6 +155,12 @@ export function applyOp(raw: string, op: Op): string {
     case "meta.set":
       return setProjectMeta(raw, op.key, op.value);
 
+    case "file.add":
+      return upsertFile(raw, { name: op.name, hash: op.hash, size: op.size });
+
+    case "file.remove":
+      return deleteFile(raw, op.name);
+
     case "label.bind":
       return bindLabel(raw, layerIndexOf(project, op.layerId), {
         id: op.id,
@@ -188,7 +196,16 @@ export function applyOp(raw: string, op: Op): string {
     case "layer.add":
       return insertLayer(
         raw,
-        { id: op.id, type: op.layerType, name: op.name, labels: [] },
+        {
+          id: op.id,
+          type: op.layerType,
+          name: op.name,
+          ...(op.path === undefined ? {} : { path: op.path }),
+          ...(op.address === undefined ? {} : { address: addressHex(op.address) }),
+          // A byte layer's contents come from its file; only a symbols layer
+          // starts with an empty label list to put names in.
+          ...(op.layerType === "symbols" ? { labels: [] } : {}),
+        },
         op.index
       );
 
@@ -276,6 +293,21 @@ export function invertOp(raw: string, op: Op): Op {
 
     case "meta.set":
       return { op: "meta.set", key: op.key, value: project[op.key] };
+
+    case "file.add": {
+      const held = project.files?.find((f) => f.name === op.name);
+      // Restoring the previous entry rather than removing, so re-adding a file
+      // under a name already in use is undone to what was there before.
+      return held
+        ? { op: "file.add", name: held.name, hash: held.hash, size: held.size }
+        : { op: "file.remove", name: op.name };
+    }
+
+    case "file.remove": {
+      const held = project.files?.find((f) => f.name === op.name);
+      if (!held) return { op: "file.remove", name: op.name };
+      return { op: "file.add", name: held.name, hash: held.hash, size: held.size };
+    }
 
     case "label.bind": {
       const found = findLabelUse(project, op.id);

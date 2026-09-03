@@ -97,6 +97,16 @@ export function formatProject(project: Project): string {
     body.push(`  "constants": [\n${entries}\n  ]`);
   }
 
+  if (project.files?.length) {
+    // Before layers in the file, because a layer's `path` refers to one by
+    // name: a reader meets the binary and its hash before anything points at
+    // them.
+    const entries = project.files
+      .map((f) => `    ${compactObject(f as unknown as Record<string, unknown>)}`)
+      .join(",\n");
+    body.push(`  "files": [\n${entries}\n  ]`);
+  }
+
   if (project.decoders?.length) {
     // One per line like everything else, so a decoder's source shows up as one
     // changed line in a diff rather than as a reformatted block.
@@ -810,6 +820,27 @@ export function removeLayer(raw: string, id: string): string {
  * effect is still present, so a writer that appended a duplicate instead of
  * doing nothing would make its own operation impossible to take back.
  */
+export function upsertFile(raw: string, file: { name: string; hash: string; size: number }): string {
+  const project = parseProject(raw);
+  const files = (project.files ??= []);
+  const at = files.findIndex((f) => f.name === file.name);
+  if (at >= 0) {
+    if (files[at].hash === file.hash && files[at].size === file.size) return raw;
+    files[at] = file;
+  } else {
+    files.push(file);
+  }
+  return formatProject(project);
+}
+
+export function deleteFile(raw: string, name: string): string {
+  const project = parseProject(raw);
+  if (!project.files?.some((f) => f.name === name)) return raw;
+  project.files = project.files.filter((f) => f.name !== name);
+  if (project.files.length === 0) delete project.files;
+  return formatProject(project);
+}
+
 export function upsertConstant(raw: string, constant: ProjectConstant): string {
   const project = parseProject(raw);
   const constants = (project.constants ??= []);

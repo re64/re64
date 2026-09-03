@@ -157,6 +157,22 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         doc.getMap<Y.Map<unknown>>("constants").delete(op.id);
         break;
 
+      case "file.add": {
+        const files = doc.getMap<Y.Map<unknown>>("files");
+        let entry = files.get(op.name);
+        if (!entry) {
+          entry = new Y.Map<unknown>();
+          files.set(op.name, entry);
+        }
+        assign(entry, { name: op.name, hash: op.hash, size: op.size });
+        break;
+      }
+
+      case "file.remove": {
+        doc.getMap<Y.Map<unknown>>("files").delete(op.name);
+        break;
+      }
+
       case "decoder.set": {
         const decoders = doc.getMap<Y.Map<unknown>>("decoders");
         let entry = decoders.get(op.id);
@@ -201,6 +217,8 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         entry.set("id", op.id);
         entry.set("type", op.layerType);
         entry.set("name", op.name);
+        if (op.path !== undefined) entry.set("path", op.path);
+        if (op.address !== undefined) entry.set("address", hex4(op.address));
         entry.set("labels", new Y.Map<Y.Map<unknown>>());
         entry.set("regions", new Y.Map<Y.Map<unknown>>());
         entry.set("comments", new Y.Map<Y.Map<unknown>>());

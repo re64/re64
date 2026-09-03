@@ -70,6 +70,8 @@ import { databaseFileBytes } from "../store/load.js";
 import { CommentPlacement, TextEncoding, describeWarning } from "../core/index.js";
 import { FileStorage, ProjectStore, SqliteStorage } from "../store/index.js";
 import { nodeFileBytes } from "../node-files.js";
+import { MAX_UPLOAD_BYTES, uploadTokens } from "./uploads.js";
+import { listDirectory } from "../core/c64/d64.js";
 
 /**
  * Who is asking, and under which lease.
@@ -105,6 +107,14 @@ export interface Room {
   storage: SqliteStorage | FileStorage;
   projectId: string;
   projectPath: string;
+  /**
+   * Where this server answers, for handing out a URL a caller can PUT to.
+   *
+   * The server knows its own address; the MCP context does not carry the
+   * request, so threading an origin down from each call would be ceremony for
+   * a value that never changes.
+   */
+  baseUrl?: string;
 }
 
 const hex4 = (address: number) => `$${address.toString(16).toUpperCase().padStart(4, "0")}`;
@@ -595,6 +605,108 @@ export class Workspace {
         online: p.online,
         joinedAt: new Date(p.joinedAt).toISOString(),
         lastSeen: new Date(p.lastSeen).toISOString(),
+      })),
+    };
+  }
+
+  /**
+   * Start a project with nothing in it.
+   *
+   * The first thing an agent handed a bare disk image needs, and the only tool
+   * here that reaches outside its own project: it opens a second connection to
+   * the same database rather than going through the room, because the room it
+   * would need does not exist yet.
+   */
+  createProject(name: string): { project: string; note: string } {
+    if (!(this.room.storage instanceof SqliteStorage)) {
+      throw new Error("Projects can only be created in a database; this server holds one file.");
+    }
+    const id = name.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-|-$/g, "");
+    if (!id) throw new Error("Give the project a name.");
+
+    const storage = new SqliteStorage(this.room.projectPath, id);
+    if (storage.exists()) {
+      storage.close();
+      throw new Error(`A project called "${id}" is already here. list_projects shows them.`);
+    }
+    storage.initialize(JSON.stringify({ name, layers: [] }, null, 2), Date.now(), name);
+    storage.close();
+
+    return {
+      project: id,
+      note:
+        "Empty: no layers and no bytes. prepare_upload puts a binary in, " +
+        "list_disk_files reads a .d64's directory, and add_layer makes a layer " +
+        "over one of them.",
+    };
+  }
+
+  /**
+   * A URL to send a binary to, and the token that authorises this one upload.
+   *
+   * Bytes go over HTTP rather than through a tool argument: a D64 is 175KB,
+   * which is roughly 58k tokens as base64, for a file nothing needs to read.
+   * The token carries the project, the name and the caller, so the upload
+   * *completes* the link and an unowned blob cannot be created.
+   */
+  prepareUpload(
+    caller: Caller,
+    name: string
+  ): { url: string; token: string; expiresAt: string; maxBytes: number; method: string; note: string } {
+    const clean = name.trim();
+    if (!clean) throw new Error("Give the file a name — the one layers will use for it.");
+
+    const prepared = uploadTokens.issue(this.room.projectId, clean, caller.label ?? caller.userId);
+    return {
+      method: "PUT",
+      url: `${this.room.baseUrl ?? ""}/api/upload/${prepared.token}`,
+      token: prepared.token,
+      expiresAt: new Date(prepared.expiresAt).toISOString(),
+      maxBytes: MAX_UPLOAD_BYTES,
+      note:
+        `PUT the raw bytes to that URL — not base64, not JSON. It is good once. ` +
+        `The file is recorded as "${clean}" in this project when the bytes land.`,
+    };
+  }
+
+  /** Record an uploaded binary in the document, so it is attributed and exported. */
+  noteUploadedFile(caller: Caller, name: string, hash: string, size: number): EditResult {
+    return this.edit(caller, () => [{ op: "file.add", name, hash, size } as Op]);
+  }
+
+  /**
+   * What a D64 holds.
+   *
+   * `d64.ts` has read disk images since early on and only the CLI could reach
+   * it, which is why every experiment so far started from a `.prg` somebody had
+   * already extracted by hand.
+   */
+  diskFiles(name: string): {
+    image: string;
+    total: number;
+    files: { name: string; type: string; blocks: number; approxBytes: number; path: string }[];
+  } {
+    const storage = this.room.storage;
+    const bytes = storage instanceof SqliteStorage ? storage.blob(name) : undefined;
+    if (!bytes) {
+      throw new Error(
+        `No file called "${name}" in this project. prepare_upload puts one here.`
+      );
+    }
+
+    const entries = listDirectory(bytes).filter((e) => e.type !== "del");
+    return {
+      image: name,
+      total: entries.length,
+      files: entries.map((entry) => ({
+        name: entry.filename,
+        type: entry.type,
+        blocks: entry.sizeInSectors,
+        // A sector holds 256 bytes, 254 of them data; the rest is the link to
+        // the next one. Approximate because the last sector is partly used.
+        approxBytes: entry.sizeInSectors * 254,
+        // What a layer's `path` takes, so the next call can be copied from here.
+        path: `${name}:${entry.filename}`,
       })),
     };
   }
@@ -2164,6 +2276,54 @@ export class Workspace {
   addSymbolsLayer(caller: Caller, name: string): EditResult {
     return this.edit(caller, () => [
       { op: "layer.add", id: newId("lay"), layerType: "symbols", name, index: 0 } as Op,
+    ]);
+  }
+
+  /**
+   * Add a layer over bytes the project holds.
+   *
+   * The step that turns an uploaded binary into something to disassemble, and
+   * the reason `add_layer` could only make symbols layers until now: a project
+   * could be annotated but never *built*.
+   *
+   * The path is `name` for a plain file or `image.d64:FILE` for one inside a
+   * disk image — a form the loader has always understood and nothing could ask
+   * for.
+   */
+  addByteLayer(
+    caller: Caller,
+    options: { type: "prg" | "raw"; path: string; name?: string; address?: number }
+  ): EditResult {
+    const { type, path } = options;
+    if (type === "raw" && options.address === undefined) {
+      throw new Error(
+        "A raw layer has no load address of its own, so it needs one. A .prg " +
+          "carries its own in the first two bytes; use type \"prg\" for those."
+      );
+    }
+
+    const held = this.program().loaded.project.files ?? [];
+    const image = path.includes(":") ? path.slice(0, path.indexOf(":")) : path;
+    if (!held.some((f) => f.name === image)) {
+      throw new Error(
+        `This project holds no file called "${image}". describe_project lists ` +
+          `what it has, and prepare_upload adds one.`
+      );
+    }
+
+    // The stack is declared bottom-up and a byte layer is the foundation, so a
+    // new one goes on top of what is already there rather than under it.
+    const index = this.program().loaded.project.layers.length;
+    return this.edit(caller, () => [
+      {
+        op: "layer.add",
+        id: newId("lay"),
+        layerType: type,
+        name: options.name ?? image,
+        path,
+        ...(options.address === undefined ? {} : { address: options.address }),
+        index,
+      } as Op,
     ]);
   }
 

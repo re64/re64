@@ -162,6 +162,27 @@ export interface ProjectRegion {
 }
 
 /** Project file structure */
+/**
+ * A file the project uses, by the name its layers refer to.
+ *
+ * Bytes live in the blob store, content-addressed and shared between projects;
+ * this is the project-local name for one, and the hash is what makes the
+ * export say *which* bytes the annotations were made against. Without it a
+ * `.re64` reads `"path": "gridrunner.prg"` and cannot tell you whether the
+ * binary beside it is the one somebody named these addresses in.
+ *
+ * Project level rather than per-layer, for the same reason a constant
+ * declaration is: several layers can read the same disk image, and a file
+ * describes no addresses of its own.
+ */
+export interface ProjectFile {
+  /** What layers call it: `revenge.d64`, and `revenge.d64:NAME` inside one. */
+  name: string;
+  /** Content hash of the bytes, as the blob store holds them. */
+  hash: string;
+  size: number;
+}
+
 export interface Project {
   /** Project name */
   name?: string;
@@ -169,6 +190,8 @@ export interface Project {
   description?: string;
   /** Memory layers, each owning its labels and regions */
   layers: ProjectLayer[];
+  /** The binaries this project reads, by the name its layers use. */
+  files?: ProjectFile[];
   /** Manual entry points (addresses) */
   entryPoints?: (number | string)[];
   /**
