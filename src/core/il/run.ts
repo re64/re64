@@ -261,9 +261,16 @@ export function runBlock(block: BasicBlock, inputs: BlockInputs = {}): BlockRun 
 
   for (const instruction of block.instructions) {
     if (usesDecimal(instruction) && machine.register(REG.D)) {
+      // The accumulator and carry are right; N and V are the binary ones,
+      // which is the whole of what is not modelled here. Said because a caller
+      // reading flags after a decimal add deserves to know which of them mean
+      // anything — this used to say the result itself was binary, which stopped
+      // being true when decimal was implemented.
       warnings.push(
-        `${instruction.mnemonic} at $${hex(instruction.address)} ran with D set; ` +
-          `decimal arithmetic is not modelled, so this result is the binary one`
+        `${instruction.mnemonic} at $${hex(instruction.address)} ran with D set. ` +
+          `The result and carry are the decimal ones; N and V are the binary ` +
+          `ones, since on this chip they come from a partly-corrected value that ` +
+          `is not modelled. Z is correct either way.`
       );
     }
 

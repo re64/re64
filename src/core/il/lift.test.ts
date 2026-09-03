@@ -199,9 +199,10 @@ describe("saying what the answer rests on", () => {
     expect(result.executed).toHaveLength(2);
   });
 
-  it("says a decimal result is the binary one", () => {
+  it("gets a decimal result right, and says which flags are not", () => {
     const result = run([0xa9, 0x09, 0x69, 0x01], { registers: { D: 1 } });
-    expect(result.registers.A).toBe(0x0a); // $10 on real hardware in decimal mode
+    // $09 + $01 is $0A binary and $10 in decimal, which is what it now gives.
+    expect(result.registers.A).toBe(0x10);
     expect(result.warnings.join(" ")).toContain("decimal");
   });
 
