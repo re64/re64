@@ -2422,6 +2422,78 @@ Adding the op surfaced three exhaustiveness holes at compile time — `applyOp`,
 job. `decoders` is also added to the undo manager's tracked roots; `constants`
 is still missing from that list, which is a separate and pre-existing gap.
 
+### A name that reaches two addresses, and project hygiene
+
+Two labels can share a name, and in a CRDT that cannot be prevented: peers name
+things without seeing each other and a merge brings both in. So the question is
+not how to refuse a collision but how to render one without lying — and the
+listing did lie. With `scoreDigits` at `$0410` and at `$0413`, both rendered as
+bare `scoreDigits`, and `scoreDigits+4` meant `$0414` against one and `$0417`
+against the other. Both neutral readers in experiment 3's control run hit it, and
+one described the result exactly: *a wrong answer that looks right*.
+
+**`primaryLabels` does not help, and it is worth saying why.** It picks one name
+among the labels at *one address*. This is the transpose — one name across
+*several addresses* — and nothing arbitrated it.
+
+**Every colliding label is qualified, not one of them.** `name@<id>`, on all
+holders. Symmetry is what makes it simple: there is no winner to elect, so no
+tie-break rule, and rendering becomes a pure function of the name, the id, and
+whether the name is shared. The invariant bought is the one that matters —
+**every name that appears identifies exactly one label** — and a bare name is
+therefore trustworthy without cross-checking. The cost is that a collision
+changes how *both* labels render, including one somebody had been reading for an
+hour; that is the honest signal, and it is what makes the collision impossible to
+miss.
+
+**Ambiguity is one name reaching two *addresses*, not two labels.** That
+distinction is the whole check. Two labels at one address holding one name is
+duplication — `COLOR_RAM` still identifies `$D800`, the row renders once, nothing
+is unclear — and the reference project has ten such pairs. A first version
+counted labels rather than addresses and reported all ten on a project with
+nothing wrong with it.
+
+Which is the general rule, and it is worth more than the instance:
+
+### Hygiene is not analysis, and a check that fires on a healthy project is not a check
+
+`ProgramAnalysis.hygiene` is deliberately a separate collection from `warnings`,
+because the two have different subjects. A warning is a fact about *the program*
+— "flow reaches `$8D16`, which is declared data" — and you investigate it. A
+hygiene finding is a fact about *your own annotations* — "two labels are called
+scoreDigits" — and you tidy it. One list holding both makes a reader triage prose
+to discover which kind they are looking at.
+
+Two rules decide what belongs, and the second is what keeps the list readable:
+
+- **It renders wrong, renders nowhere, or renders ambiguously.** Tied to a
+  consequence in the listing rather than to taste — which is what excludes two
+  constants sharing a value under different names, since that is
+  `LEFT_ZAPPER`/`WHITE` and the model working as designed.
+- **Zero is the resting state.** `find_undecoded` counts *incompleteness*: it
+  starts at the whole binary and shrinks as work proceeds, so it is a work queue
+  and belongs nowhere near here. A list that always has entries gets ignored, and
+  the one entry that mattered gets ignored with it.
+
+The starting set is shared label names, constants declared with one name and two
+values, annotations sitting inside an instruction, regions naming a decoder that
+is gone, and several inline comments on one row. It should grow from evidence — a
+run tripping on something — rather than from a tidiness instinct, which is how
+the ten false findings above were nearly shipped.
+
+**Cost is a boundary, not a hope.** Every check is O(n) over structures the
+analysis already built, measured at 0.15ms against 10–20ms for the disassembly
+itself; the label-name map is needed for rendering anyway, so the collision list
+falls out of work already done. Anything requiring its own traversal — "is this
+named routine reachable" — goes in a separate on-demand function from the start
+rather than being added here and discovered to be slow later.
+
+**One batch contract, across every batch tool:** apply what you can, report what
+you declined in `rejected`, and fail only when nothing was applicable. Undo stays
+coherent because the changeset covers exactly what was applied. `bind_constants`
+was made partial and `add_comments` was not, so two batch tools disagreed about
+their own contract and a caller could not tell which it would get.
+
 ### A tool built on a rhetorical flourish, and taken back out
 
 `changes_at` answered "who has already touched this address" — `git log` with an

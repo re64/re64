@@ -257,7 +257,15 @@ export function analyze(
     const tolerance = addr < 0x0100 ? 0 : labelTolerance;
     const resolved = allLabels.resolve(addr, tolerance);
     return resolved
-      ? { name: resolved.label.name, offset: resolved.offset, within: resolved.within }
+      ? {
+          // The *display* name, which qualifies a name two labels share. A
+          // bare `scoreDigits+4` is unreadable when two labels are called
+          // scoreDigits: it means $0414 against one and $0417 against the
+          // other, and nothing in the row says which.
+          name: allLabels.displayName(resolved.label),
+          offset: resolved.offset,
+          within: resolved.within,
+        }
       : undefined;
   };
 
@@ -417,15 +425,18 @@ export function analyze(
       if (seen.has(label.name)) continue;
       seen.add(label.name);
 
+      // Qualified here too, or you are told a name is ambiguous by the operand
+      // and cannot find either of the labels it is ambiguous between.
+      const shownName = allLabels.displayName(label);
       const prefix = `${hex4(addr)}  `;
-      let text = `${prefix}${label.name}:`;
+      let text = `${prefix}${shownName}:`;
       const tokens: RowToken[] = [
         {
           start: prefix.length,
-          end: prefix.length + label.name.length,
+          end: prefix.length + shownName.length,
           kind: "label",
           target: addr,
-          name: label.name,
+          name: shownName,
           labelType: label.type,
         },
       ];
@@ -439,7 +450,7 @@ export function analyze(
           end: text.length + tag.length,
           kind: "labeltype",
           target: addr,
-          name: label.name,
+          name: shownName,
           labelType: label.type,
         });
         text += tag;

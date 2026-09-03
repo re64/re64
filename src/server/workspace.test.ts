@@ -1771,6 +1771,57 @@ describe("finding things across the whole program", () => {
     expect(text).toContain("innerGlyph");
   });
 
+  it("writes the good entries in a batch and reports the rest", () => {
+    // One contract across every batch tool: apply what you can, report what you
+    // declined, fail only if nothing was applicable. bind_constants was made
+    // partial and this was not, so two batch tools disagreed about their own
+    // contract and a caller could not tell which it would get.
+    const result = workspace.addComments(agent, [
+      { address: 0x8015, text: "fine" },
+      { address: 0x8020, text: "one\ntwo", placement: "inline" },
+      { address: 0x8030, text: "also fine" },
+    ]);
+
+    expect(result.ok).toBe(true);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected?.[0].address).toBe("$8020");
+
+    const written = workspace.comments(200).comments.map((c) => c.text);
+    expect(written).toContain("fine");
+    expect(written).toContain("also fine");
+  });
+
+  it("says nothing about a healthy project", () => {
+    // The rule that keeps the list worth reading: zero is the resting state.
+    // A first version counted any name held by two labels and reported ten
+    // findings on the reference project — COLOR_RAM at $D800 twice, and so on
+    // — which is duplication rather than ambiguity, and a check that fires on a
+    // healthy project is a progress metric wearing a warning's clothes.
+    expect(workspace.describe().hygiene).toBeUndefined();
+  });
+
+  it("reports a name that points at two addresses, and qualifies it in operands", () => {
+    workspace.setLabel(agent, 0x8cb5, "levelTable");
+    workspace.setLabel(agent, 0x8cd5, "levelTable");
+
+    const [finding] = workspace.describe().hygiene ?? [];
+    expect(finding?.kind).toBe("label.nameShared");
+    expect(finding?.subjects).toHaveLength(2);
+
+    // Where it actually bites: `levelTable-1` means one address against one
+    // label and a different one against the other, and the row cannot say which.
+    const sites = workspace.instructions({ from: 0x8cb5, to: 0x8cd5, limit: 10 });
+    const operands = sites.sites.map((site) => site.text).join("\n");
+    expect(operands).toMatch(/levelTable@lbl_/);
+  });
+
+  it("does not qualify two labels that merely share an address", () => {
+    // One name reaching one address is unambiguous however many labels hold it,
+    // and the reference project has ten such pairs.
+    const before = workspace.listing(0x8cb5, 4).text;
+    expect(before).not.toContain("@lbl_");
+  });
+
   it("takes an end address as well as a line count", () => {
     // `set_region` takes an end, so reaching for one here is the natural first
     // guess; it used to be rejected and cost a round trip to discover.

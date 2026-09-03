@@ -276,6 +276,7 @@ export class LabelIndex {
     this.seen.add(label.id);
 
     this.all.push(label);
+    this.namesCache = undefined;
     const existing = this.byAddress.get(label.address);
     if (existing) {
       existing.push(label);
@@ -289,6 +290,78 @@ export class LabelIndex {
       this.addLabel(label);
     }
   }
+
+  /**
+   * The name to *show* for a label, which is not always the name it holds.
+   *
+   * Two labels can share a name. In a CRDT that cannot be prevented — peers
+   * name things without seeing each other, and a merge brings both in — so the
+   * question is not how to refuse a collision but how to render one without
+   * lying. And the listing does lie today: with `scoreDigits` at $0410 and at
+   * $0413, both render as bare `scoreDigits`, and `scoreDigits+4` means $0414
+   * against one and $0417 against the other. A reader cannot tell which.
+   *
+   * `primaryLabels` does not help here, and it is worth saying why: it picks
+   * one name among the labels at *one address*. This is the transpose — one
+   * name across *several addresses* — and nothing arbitrated it.
+   *
+   * So a name is qualified with the label's id when it is shared, leaving the
+   * bare name to exactly one holder. The invariant that buys is the one that
+   * matters: **every name that appears identifies exactly one label.** Which
+   * holder keeps the bare name is decided by `compareLabels` — source rank,
+   * then id — the same deterministic rule used for labels at one address, so
+   * every peer shows the same thing without coordinating.
+   *
+   * Derived, never stored. The `.re64` keeps the name somebody chose; this is a
+   * rendering decision, like the region tree, and disappears the moment the
+   * collision is resolved.
+   */
+  displayName(label: Label): string {
+    return this.ambiguous(label.name) ? `${label.name}@${label.id}` : label.name;
+  }
+
+  /**
+   * Whether a name points at more than one *address*.
+   *
+   * Distinct addresses, not merely distinct labels — and the difference is the
+   * whole check. Two labels at one address holding one name is duplication:
+   * `COLOR_RAM` still identifies $D800, the listing renders the row once, and
+   * nothing is ambiguous. The reference project has ten such pairs, so a check
+   * that counted them would fire on a healthy project, which is the definition
+   * of a check that is really a progress metric.
+   *
+   * Ambiguity is one name reaching two addresses, because that is when
+   * `name+4` stops having an answer.
+   */
+  private ambiguous(name: string): boolean {
+    const held = this.byName().get(name);
+    if (!held || held.length < 2) return false;
+    return new Set(held.map((l) => l.address)).size > 1;
+  }
+
+  /** Every name that points at more than one address, with its holders. */
+  collisions(): { name: string; labels: readonly Label[] }[] {
+    return [...this.byName()]
+      .filter(([name]) => this.ambiguous(name))
+      .map(([name, labels]) => ({ name, labels }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Labels by the name they hold, each group in the order display uses. */
+  private byName(): Map<string, Label[]> {
+    if (this.namesCache) return this.namesCache;
+    const names = new Map<string, Label[]>();
+    for (const label of this.all) {
+      const held = names.get(label.name);
+      if (held) held.push(label);
+      else names.set(label.name, [label]);
+    }
+    for (const held of names.values()) held.sort((a, b) => compareLabels(a, b));
+    this.namesCache = names;
+    return names;
+  }
+
+  private namesCache?: Map<string, Label[]>;
 
   /** Labels at an address, highest priority first. */
   getLabelsAt(address: number): readonly Label[] {

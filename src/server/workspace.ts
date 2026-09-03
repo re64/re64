@@ -363,6 +363,13 @@ export class Workspace {
     };
     warnings: number;
     /**
+     * What is wrong with the annotations, as opposed to with the program.
+     *
+     * Present only when there is something: zero is the resting state, which is
+     * the property that makes the list worth reading at all.
+     */
+    hygiene?: { kind: string; message: string; subjects: { id?: string; address?: string }[] }[];
+    /**
      * Said only when it is bad news: the export is behind the document and why.
      *
      * A write failure reaches nobody otherwise — the live writer is a detached
@@ -421,6 +428,7 @@ export class Workspace {
         namedByPlatform: supplied.length,
       },
       warnings: program.warnings.length,
+      ...(program.hygiene.length ? { hygiene: [...program.hygiene] } : {}),
       ...(exportStatus.current
         ? {}
         : {
@@ -2300,20 +2308,39 @@ export class Workspace {
   ): EditResult {
     if (comments.length === 0) throw new Error("Give at least one comment.");
 
-    for (const entry of comments) {
+    // One contract for every batch tool here: apply what you can, report what
+    // you declined, fail only if nothing was applicable. A batch exists because
+    // an agent writes forty at a time, and losing thirty-nine to one typo is
+    // the opposite of why it exists — `bind_constants` was made partial for
+    // that reason and this was still all-or-nothing, so two batch tools
+    // disagreed about their own contract and a caller could not tell which it
+    // would get. Undo stays coherent either way: the changeset covers exactly
+    // what was applied.
+    let rejected: { address: string; reason: string }[] = [];
+
+    const usable = comments.filter((entry) => {
       if ((entry.placement ?? "before") === "inline" && entry.text.includes("\n")) {
-        throw new Error(
-          `The comment for ${hex4(entry.address)} is inline, so it shares a row ` +
-            `with the instruction and cannot contain newlines.`
-        );
+        rejected.push({
+          address: hex4(entry.address),
+          reason: "inline comments share a row with the instruction and cannot contain newlines",
+        });
+        return false;
       }
+      return true;
+    });
+
+    if (usable.length === 0) {
+      throw new Error(
+        `None of the ${comments.length} comments could be written. ` +
+          rejected.map((r) => `${r.address}: ${r.reason}`).join(" ")
+      );
     }
 
-    return this.edit(caller, (loaded) => {
+    const result = this.edit(caller, (loaded) => {
       const ops: Op[] = [];
       let madeLayer: string | undefined;
 
-      for (const entry of comments) {
+      for (const entry of usable) {
         const placement = entry.placement ?? "before";
         if (madeLayer !== undefined && !ownsAddress(loaded, entry.address)) {
           ops.push({
@@ -2346,6 +2373,8 @@ export class Workspace {
 
       return ops;
     });
+
+    return rejected.length ? { ...result, rejected } : result;
   }
 
   /** Declare several constants as one action. */

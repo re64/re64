@@ -15,6 +15,7 @@ import { InstructionIndex, disassemble } from "../arch/mos6502/disassembler.js";
 import { BasicBlock, buildBlocks } from "./blocks.js";
 import { DisassemblyWarning } from "../arch/mos6502/disassembler.js";
 import { Label, LabelIndex, createAutoLabel } from "../memory/label.js";
+import { HygieneFinding, checkHygiene } from "./hygiene.js";
 import { LoadedProject } from "../project/loader.js";
 import { parseProjectAddress } from "../project/project.js";
 import { derivedId } from "../project/identity.js";
@@ -60,6 +61,17 @@ export interface ProgramAnalysis {
    */
   autoLabels: readonly Label[];
   warnings: readonly DisassemblyWarning[];
+  /**
+   * What is wrong with the *annotations*, as opposed to with the program.
+   *
+   * Kept apart from `warnings` because the subjects differ: a warning is a
+   * fact about 1982 that you investigate, a hygiene finding is a fact about
+   * your own project that you tidy. See `hygiene.ts` for what qualifies — the
+   * short version is that it must have a rendering consequence, and that zero
+   * is the resting state, which is what keeps `find_undecoded`'s kind of
+   * "incompleteness" out of it.
+   */
+  hygiene: readonly HygieneFinding[];
 }
 
 const hex4 = (address: number) => address.toString(16).toUpperCase().padStart(4, "0");
@@ -173,5 +185,6 @@ export function analyzeProgram(
     labels,
     autoLabels,
     warnings: result.warnings,
+    hygiene: checkHygiene(loaded, labels, instructions),
   };
 }

@@ -104,6 +104,10 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
           // project file so a flatten produces the same text.
           placement: op.placement === "before" ? undefined : op.placement,
           text: op.text,
+          // Unset until somebody arranges the comments at this address, and
+          // recorded by absence like `placement`, so an unarranged project
+          // flattens to the same text it always did.
+          order: op.order,
         });
         break;
       }
