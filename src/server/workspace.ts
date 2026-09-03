@@ -74,6 +74,7 @@ import { CommentPlacement, TextEncoding, describeWarning } from "../core/index.j
 import { FileStorage, ProjectStore, SqliteStorage } from "../store/index.js";
 import { nodeFileBytes } from "../node-files.js";
 import { MAX_UPLOAD_BYTES, uploadTokens } from "./uploads.js";
+import { runProgram } from "../core/il/program.js";
 import { listDirectory } from "../core/c64/d64.js";
 
 /**
@@ -807,6 +808,91 @@ export class Workspace {
     return this.edit(caller, () => [
       { op: "meta.set", key: "activeTarget", value: name } as Op,
     ]);
+  }
+
+  /**
+   * Run the program from an address, and optionally keep what it produced.
+   *
+   * The step that had to happen outside re64. Both builders in experiment 5
+   * wrote their own 6502 interpreter to get past a decruncher, because
+   * `run_block` is scoped to a straight line by design and static analysis of a
+   * crunched disk stops at 141 instructions. re64 already owned a CPU that
+   * passes the functional suite; this is the driver it lacked.
+   *
+   * Capturing is a separate decision from running, and both happen in one call
+   * so nothing has to be held between requests: run it, read what it says, run
+   * it again with `capture` when you know which range you want. A run is under
+   * a second.
+   */
+  runProgram(
+    caller: Caller,
+    from: number,
+    options: {
+      stopAt?: number;
+      maxInstructions?: number;
+      capture?: { name: string; from: number; to: number };
+    } = {}
+  ): Record<string, unknown> {
+    const program = this.program();
+    const run = runProgram(program.loaded.map, {
+      from,
+      ...(options.stopAt === undefined ? {} : { stopAt: options.stopAt }),
+      ...(options.maxInstructions === undefined
+        ? {}
+        : { maxInstructions: options.maxInstructions }),
+    });
+
+    const { memory, ...reported } = run;
+    const notes: string[] = [];
+    if (run.reason === "budget") {
+      notes.push(
+        "Ran out of budget rather than finishing, so this is the program " +
+          "mid-flight and anything captured from it is a partial result."
+      );
+    }
+    if (run.ioTouched.length) {
+      notes.push(
+        `Touched ${run.ioTouched.length} hardware address(es); this runs over flat ` +
+          `memory and does not emulate the VIC, SID or CIA, so a program that ` +
+          `depends on one will not behave as it would on a machine.`
+      );
+    }
+
+    if (!options.capture) {
+      return { ...reported, ...(notes.length ? { notes } : {}) };
+    }
+
+    const { name, from: start, to } = options.capture;
+    if (to <= start) throw new Error(`A capture needs at least one byte; ${hex4(start)}-${hex4(to)} has none.`);
+
+    // Stored as a .prg — load address first — so the captured image is an
+    // ordinary file the project can lay a layer over, rather than a new kind of
+    // thing that only this tool understands.
+    const bytes = new Uint8Array(2 + (to - start));
+    bytes[0] = start & 0xff;
+    bytes[1] = (start >> 8) & 0xff;
+    bytes.set(memory.slice(start, to), 2);
+
+    const storage = this.room.storage;
+    if (!(storage instanceof SqliteStorage)) {
+      throw new Error("Capturing needs a database; this server holds one file.");
+    }
+    const hash = storage.putBlob(name, bytes);
+    const noted = this.noteUploadedFile(caller, name, hash, bytes.length);
+
+    return {
+      ...reported,
+      ...(notes.length ? { notes } : {}),
+      captured: {
+        file: name,
+        start: hex4(start),
+        end: hex4(to - 1),
+        bytes: bytes.length,
+        hash,
+        version: noted.version,
+        next: `add_byte_layer type:"prg" path:"${name}" — then mark_function where it starts.`,
+      },
+    };
   }
 
   /** Disassembly as lines, capped, with a cursor when there is more. */

@@ -195,6 +195,37 @@ describe("building a project from a disk image", () => {
     expect(camels.targets().active).toBeUndefined();
   });
 
+  it("runs the real decruncher and captures what it produced", () => {
+    // The whole point: both builders in experiment 5 wrote their own 6502
+    // interpreter to get past this, because static analysis of a crunched disk
+    // stops at 141 instructions. re64 already owned a CPU that passes the
+    // functional suite; it lacked a driver.
+    ws.createProject("camels");
+    const image = readFileSync("assets/mutant-camels/revenge-of-the-mutant-camels.d64");
+    const camels = upload("camels", "revenge.d64", new Uint8Array(image));
+    camels.addByteLayer(builder, { type: "prg", path: "revenge.d64:revenge fixed" });
+
+    const run = camels.runProgram(builder, 0x080d, {
+      capture: { name: "decrunched.prg", from: 0x0800, to: 0xc11f },
+    }) as {
+      instructions: number;
+      reason: string;
+      stoppedAt: string;
+      captured: { file: string; bytes: number };
+    };
+
+    expect(run.instructions).toBeGreaterThan(1_700_000);
+    expect(run.reason).toBe("left the program");
+    // A KERNAL call, which is how this loader signals it has finished.
+    expect(run.stoppedAt).toBe("$FFBA");
+    expect(run.captured.bytes).toBe(2 + (0xc11f - 0x0800));
+
+    // And the capture is an ordinary file, so the rest of the flow is unchanged.
+    camels.addByteLayer(builder, { type: "prg", path: "decrunched.prg", name: "runtime" });
+    const marked = camels.markFunction(builder, 0xc065, "Start");
+    expect(marked.instructions.after).toBeGreaterThan(2000);
+  });
+
   it("refuses a layer over a file the project does not hold", () => {
     ws.createProject("camels");
     const camels = upload("camels", "there.prg", new Uint8Array([0x00, 0x80, 0x60]));

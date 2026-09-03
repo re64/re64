@@ -2432,6 +2432,22 @@ that disk tops out at **141 instructions**; everything past it happened
 elsewhere. As one of them put it: *"Every commercial C64 disk is crunched;
 without this, building from a disk image builds a project of the decruncher."*
 
+**Built: `run_program`.** Runs from an address, follows branches and calls, and
+stops when control leaves the program; `capture` keeps a range of the resulting
+memory as an ordinary `.prg` in the file store, so the rest of the flow —
+`add_byte_layer`, `mark_function` — is unchanged. Running and capturing happen
+in one call because a run is under a second and holding one between requests
+would be state the transport does not have.
+
+**The stop rule had to be corrected by running the real thing**, and the
+correction is the interesting part. "Stop where no layer supplies a byte" sounds
+right and is wrong: a loader *relocates itself* and jumps to the copy, so the
+rule fires on the program's own code. Revenge of the Mutant Camels moves its
+decruncher onto the stack page, and the first version stopped at `$0100` after
+1,258 of the 1,768,853 instructions that matter. Code the program wrote is still
+the program; code nobody wrote is the KERNAL, or nowhere. That is a rule a
+walkthrough found and no amount of reading would have.
+
 **re64 can already run it.** Checked rather than assumed: loading the crunched
 file and stepping from `$080D` with the existing `Machine` runs **1,768,853
 instructions in 831ms** — no unmodelled instruction, no illegal opcode, no

@@ -502,6 +502,29 @@ describe("editing as an agent", () => {
     expect((await callTool("remove_label", { id })).isError).toBe(false);
   });
 
+  it("runs a program over the wire and reports where it stopped", async () => {
+    const run = await callTool("run_program", { from: "$8100", maxInstructions: 5000 });
+    expect(run.isError).toBe(false);
+    const { instructions, reason, stoppedAt } = run.value as {
+      instructions: number;
+      reason: string;
+      stoppedAt: string;
+    };
+    expect(instructions).toBeGreaterThan(0);
+    expect(typeof reason).toBe("string");
+    expect(stoppedAt).toMatch(/^\$[0-9A-F]{4}$/);
+  });
+
+  it("refuses a capture of no bytes", async () => {
+    const refused = await callTool("run_program", {
+      from: "$8100",
+      maxInstructions: 100,
+      capture: { name: "nothing.prg", from: "$8000", to: "$8000" },
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/at least one byte/i);
+  });
+
   it("declares a view over the layer stack and selects it", async () => {
     const listed = await callTool("list_targets");
     expect(listed.isError).toBe(false);

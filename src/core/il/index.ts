@@ -33,3 +33,4 @@ export {
   runBlock,
   stepMachine,
 } from "./run.js";
+export { ProgramRun, ProgramRunOptions, StopReason, runProgram } from "./program.js";

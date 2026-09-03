@@ -1060,6 +1060,58 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "run_program",
+    "Run the program from an address until it leaves the bytes this project " +
+      "holds — which is how a loader exits once its work is done, so no limit " +
+      "has to be guessed. Unlike run_block, which is one straight line by " +
+      "design, this follows branches and calls wherever they go. Give " +
+      "`capture` to keep a range of the resulting memory as a file, then " +
+      "add_byte_layer over it: that is how a packed program becomes something " +
+      "you can read. It runs over flat memory and does not emulate the VIC, " +
+      "SID or CIA — hardware it touched is reported so you can judge the " +
+      "answer, and an undocumented opcode stops it rather than being guessed.",
+    {
+      project,
+      from: address,
+      stopAt: address.optional().describe("Stop here instead of running on"),
+      maxInstructions: z
+        .number()
+        .int()
+        .min(1)
+        .max(100_000_000)
+        .optional()
+        .describe("Default 20 million, about ten seconds"),
+      capture: z
+        .object({
+          name: z.string().min(1).describe('What to call the file, e.g. "decrunched.prg"'),
+          from: address,
+          to: address.describe("Exclusive"),
+        })
+        .optional(),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      from: number;
+      stopAt?: number;
+      maxInstructions?: number;
+      capture?: { name: string; from: number; to: number };
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.runProgram(caller, args.from, {
+        ...(args.stopAt === undefined ? {} : { stopAt: args.stopAt }),
+        ...(args.maxInstructions === undefined
+          ? {}
+          : { maxInstructions: args.maxInstructions }),
+        ...(args.capture === undefined ? {} : { capture: args.capture }),
+      });
+    }
+  );
+
+  tool(
     "list_targets",
     "The named views this project has over its layer stack, which is selected, " +
       "and every layer with the id a target is defined in terms of — including " +
