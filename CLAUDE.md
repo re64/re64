@@ -2105,7 +2105,20 @@ inspection and to the tests written alongside the code:
   happens.
 
 It now reaches the decimal section (test case 42) having executed all 56
-documented instructions, and stops there. That boundary is asserted by
+documented instructions, and stops there.
+
+**How much is behind that stop is now known, and it is very little.** The suite
+has 45 groups: 0-43, then 240 as a completion marker. We clear 0-41. Group 43 is
+the only real test after the stop, and it is *also* decimal — `CLD/PHP/ADC`
+against `SED/PHP/ADC`, checking that `D` survives `PHP`, `PLP` and `RTI`, and
+verifying it through decimal arithmetic (`$55 + $55` is `$AA` binary and `$10`
+decimal). The flag plumbing it exercises already works; only the arithmetic
+fails. Group 240 is `LDA #$F0 / STA $0200 / JMP *`, the success marker.
+
+So implementing decimal takes the suite from "stops at 42" to complete, with
+nothing else outstanding — which is a more useful thing to know than "stops
+partway". Established by scanning the binary for the `LDA #n / STA $0200` that
+each group writes, then disassembling `$340C` with re64's own disassembler. That boundary is asserted by
 `src/core/il/functional.test.ts` rather than described, so the gap is a passing
 test instead of prose, and nothing can regress into looking like a decimal
 failure. It is opt-in twice: the binary is fetched rather than committed, and
