@@ -82,7 +82,7 @@ describe("C64 symbol table", () => {
   });
 
   it("matches the addresses the reference disassembly names independently", () => {
-    // Cross-checked against assets/gridrunner.asm, which was produced without
+    // Cross-checked against assets/gridrunner/gridrunner.asm, which was produced without
     // this table: a wrong entry here would silently mislabel operands.
     const layer = createC64PlatformLayer();
     const byAddress = new Map(layer.getLabels().map((l) => [l.address, l.name]));

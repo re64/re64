@@ -44,8 +44,8 @@ fi
 
 rm -rf "$run"
 mkdir -p "$run"
-cp "$repo/assets/gridrunner.prg" "$run/"
-cp "$repo/assets/gridrunner.asm" "$run/reference.asm"
+cp "$repo/assets/gridrunner/gridrunner.prg" "$run/"
+cp "$repo/assets/gridrunner/gridrunner.asm" "$run/reference.asm"
 
 # The human's project, under a name that says what the task is.
 node -e '
@@ -54,7 +54,7 @@ node -e '
   p.name = "gridrunner-improved";
   p.description = "Gridrunner, seeded with the human reading; the task is to better it";
   fs.writeFileSync(process.argv[2], JSON.stringify(p, null, 2));
-' "$repo/assets/gridrunner.re64" "$run/gridrunner-improved.re64"
+' "$repo/assets/gridrunner/gridrunner.re64" "$run/gridrunner-improved.re64"
 
 node "$repo/dist/cli/index.js" import "$run/gridrunner-improved.re64" >/dev/null
 

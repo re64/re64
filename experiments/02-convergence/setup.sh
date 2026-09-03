@@ -35,7 +35,7 @@ fi
 
 rm -rf "$run"
 mkdir -p "$run"
-cp "$repo/assets/gridrunner.prg" "$run/"
+cp "$repo/assets/gridrunner/gridrunner.prg" "$run/"
 
 db="$run/convergence.re64db"
 names=()

@@ -10,7 +10,7 @@ import { loadProjectFile } from "../../node-files.js";
  * These tests are the record of which are now answerable and which are not.
  */
 
-const gridrunner = () => analyzeProgram(loadProjectFile("assets/gridrunner.re64"));
+const gridrunner = () => analyzeProgram(loadProjectFile("assets/gridrunner/gridrunner.re64"));
 
 describe("what an agent can now ask", () => {
   it("which branch targets are still auto-named", () => {

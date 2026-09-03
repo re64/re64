@@ -20,8 +20,8 @@ let endpoint: string;
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "re64-mcp-"));
   const projectPath = join(dir, "gridrunner.re64");
-  copyFileSync("assets/gridrunner.re64", projectPath);
-  copyFileSync("assets/gridrunner.prg", join(dir, "gridrunner.prg"));
+  copyFileSync("assets/gridrunner/gridrunner.re64", projectPath);
+  copyFileSync("assets/gridrunner/gridrunner.prg", join(dir, "gridrunner.prg"));
   const { databasePath } = importProject(projectPath);
 
   server = startServer({ projectPath: databasePath, port: 0, host: "127.0.0.1", quiet: true });

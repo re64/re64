@@ -1834,7 +1834,7 @@ are less independent than the stateless decision above assumed.
 ### The experiments this is for
 
 Three, escalating, each adding one variable. The rare thing here is an
-**oracle**: `assets/gridrunner.asm` is 65KB of human reverse engineering, so
+**oracle**: `assets/gridrunner/gridrunner.asm` is 65KB of human reverse engineering, so
 there is a gold standard to compare against.
 
 1. **Expressiveness audit.** Give an agent the project *and* the human's

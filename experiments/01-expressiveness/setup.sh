@@ -30,8 +30,8 @@ fi
 
 rm -rf "$run"
 mkdir -p "$run"
-cp "$repo/assets/gridrunner.prg" "$run/"
-cp "$repo/assets/gridrunner.asm" "$run/reference.asm"
+cp "$repo/assets/gridrunner/gridrunner.prg" "$run/"
+cp "$repo/assets/gridrunner/gridrunner.asm" "$run/reference.asm"
 
 # The bytes, and nothing else. Analysis still generates sub_/loc_/dat_ names and
 # the built-in C64 layer still supplies KERNAL symbols, which is what a person

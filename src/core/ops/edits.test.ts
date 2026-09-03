@@ -18,7 +18,7 @@ import { loadProjectFile } from "../../node-files.js";
  * minted a project label carrying an identity it had no claim to.
  */
 
-const gridrunner = () => loadProjectFile("assets/gridrunner.re64");
+const gridrunner = () => loadProjectFile("assets/gridrunner/gridrunner.re64");
 
 /** Inside the PRG, so a layer owns it, but nothing names it. */
 const UNNAMED = 0x8f00;

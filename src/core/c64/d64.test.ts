@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { listDirectory, extractFile, findFile } from "./d64.js";
 
-const d64Path = "assets/revenge-of-the-mutant-camels.d64";
+const d64Path = "assets/mutant-camels/revenge-of-the-mutant-camels.d64";
 
 describe("d64", () => {
   const image = new Uint8Array(readFileSync(d64Path));

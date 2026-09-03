@@ -4,7 +4,7 @@ Three, escalating, each adding one variable. They exist to find gaps in re64 by
 watching agents hit them, rather than by imagining what an agent would want.
 
 There is an **oracle**, with limits worth stating before anyone leans on it.
-`assets/gridrunner.asm` is a complete human reverse engineering of the same
+`assets/gridrunner/gridrunner.asm` is a complete human reverse engineering of the same
 binary — mwenge's `matrix`, released into the public domain.
 
 **It is a linear sweep with names, not a reachability analysis.** Its author

@@ -248,8 +248,8 @@ describe("a socket asking for something that is not here", () => {
     // handler, which is not inside any request, so it took the process down
     // before anyone connected on purpose.
     const dir = mkdtempSync(join(tmpdir(), "re64-unknown-room-"));
-    copyFileSync("assets/gridrunner.re64", join(dir, "gridrunner.re64"));
-    copyFileSync("assets/gridrunner.prg", join(dir, "gridrunner.prg"));
+    copyFileSync("assets/gridrunner/gridrunner.re64", join(dir, "gridrunner.re64"));
+    copyFileSync("assets/gridrunner/gridrunner.prg", join(dir, "gridrunner.prg"));
     const { databasePath } = importProject(join(dir, "gridrunner.re64"));
 
     const server = startServer({

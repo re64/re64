@@ -23,8 +23,8 @@ let storage: SqliteStorage;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "re64-identity-"));
   const project = join(dir, "gridrunner.re64");
-  copyFileSync("assets/gridrunner.re64", project);
-  copyFileSync("assets/gridrunner.prg", join(dir, "gridrunner.prg"));
+  copyFileSync("assets/gridrunner/gridrunner.re64", project);
+  copyFileSync("assets/gridrunner/gridrunner.prg", join(dir, "gridrunner.prg"));
   const { databasePath, projectId } = importProject(project);
   storage = new SqliteStorage(databasePath, projectId);
 });

@@ -40,7 +40,7 @@ fi
 
 rm -rf "$run"
 mkdir -p "$run"
-cp "$repo/assets/gridrunner.prg" "$run/"
+cp "$repo/assets/gridrunner/gridrunner.prg" "$run/"
 
 # The bytes and nothing else, exactly as experiment 2 started. Blank keeps the
 # work real and the result comparable to the solo readings.

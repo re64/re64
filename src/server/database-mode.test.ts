@@ -24,8 +24,8 @@ let databaseUnderTest: string;
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "re64-dbmode-"));
   const projectPath = join(dir, "gridrunner.re64");
-  copyFileSync("assets/gridrunner.re64", projectPath);
-  copyFileSync("assets/gridrunner.prg", join(dir, "gridrunner.prg"));
+  copyFileSync("assets/gridrunner/gridrunner.re64", projectPath);
+  copyFileSync("assets/gridrunner/gridrunner.prg", join(dir, "gridrunner.prg"));
 
   const { databasePath, projectId } = importProject(projectPath);
   // Nothing left on disk but the database.

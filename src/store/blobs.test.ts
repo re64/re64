@@ -89,8 +89,8 @@ describe("a project that carries its own binaries", () => {
 
   it("disassembles with the binary deleted from disk", () => {
     const projectPath = join(dir, "gridrunner.re64");
-    copyFileSync("assets/gridrunner.re64", projectPath);
-    copyFileSync("assets/gridrunner.prg", join(dir, "gridrunner.prg"));
+    copyFileSync("assets/gridrunner/gridrunner.re64", projectPath);
+    copyFileSync("assets/gridrunner/gridrunner.prg", join(dir, "gridrunner.prg"));
 
     const { databasePath, files } = importProject(projectPath);
     expect(files).toEqual(["gridrunner.prg"]);
@@ -105,7 +105,7 @@ describe("a project that carries its own binaries", () => {
     // the entry happens above the byte layer.
     const projectPath = join(dir, "camels.re64");
     copyFileSync(
-      "assets/revenge-of-the-mutant-camels.d64",
+      "assets/mutant-camels/revenge-of-the-mutant-camels.d64",
       join(dir, "revenge-of-the-mutant-camels.d64")
     );
     writeFileSync(
@@ -142,8 +142,8 @@ describe("a project that carries its own binaries", () => {
 
   it("says what it holds when asked for something else", () => {
     const projectPath = join(dir, "gridrunner.re64");
-    copyFileSync("assets/gridrunner.re64", projectPath);
-    copyFileSync("assets/gridrunner.prg", join(dir, "gridrunner.prg"));
+    copyFileSync("assets/gridrunner/gridrunner.re64", projectPath);
+    copyFileSync("assets/gridrunner/gridrunner.prg", join(dir, "gridrunner.prg"));
     const { databasePath, projectId } = importProject(projectPath);
 
     const storage = new SqliteStorage(databasePath, projectId);

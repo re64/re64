@@ -36,7 +36,7 @@ Not verified: the other ~12 corrections. They carry evidence in §1 of
 ## The trigger was in the harness, not the tool
 
 `setup.sh` re-serialized the seed with `JSON.stringify(p, null, 2)`.
-`assets/gridrunner.re64` is written one entry per line, and the line editor
+`assets/gridrunner/gridrunner.re64` is written one entry per line, and the line editor
 could not handle the pretty-printed shape. So the defect is real and was
 reachable only because the experiment created a file re64 had never had to read.
 

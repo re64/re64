@@ -13,7 +13,7 @@ import { loadProjectFile } from "./node-files.js";
  * are only there to say *how* it moved.
  */
 
-const PROJECT = "assets/gridrunner.re64";
+const PROJECT = "assets/gridrunner/gridrunner.re64";
 // Moved once, deliberately: fuzzy label matching is now off below $0100.
 //
 // Eighteen zero-page operands used to borrow a neighbour's name — `$1A`
