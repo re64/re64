@@ -2468,6 +2468,31 @@ neither, and the next one might.
 ROM — here `$FFBA`, a KERNAL call to load the next file — which is necessarily
 after decrunching is done. Nothing has to guess a limit.
 
+### Running the ROM to learn the machine's own defaults
+
+`CHROUT`, `GETIN` and `LOAD` are a `JMP` through a vector in RAM. That is how
+they are hooked, so it is correct rather than a failure — and it means their
+effects cannot be derived from the ROM alone, because the vector is empty until
+something installs it.
+
+`RESTOR` installs it, and `RESTOR` is in the ROM. So the defaults are not
+something re64 has to be told: **it runs the routine that sets them.** 232
+instructions, writing exactly the 32-byte vector table at `$0314`, and every
+value matches published documentation — `$0314` → `$EA31`, `$0326` → `$F1CA`,
+`$0330` → `$F4A5`. Which is the trick that gets a project past a decruncher,
+turned on the machine itself.
+
+Worth recording because **the chain was not designed**. The lifter and
+interpreter exist because two published 6502 references *both* get `ADC` wrong,
+so the flag arithmetic had to be tested by executing it rather than by reading
+either one. That produced a CPU; Klaus Dormann's suite made it trustworthy; a
+trustworthy CPU could run a decruncher; and the driver written for decrunchers
+turns out to execute the KERNAL. Every step was justified on its own, and the
+capability at the end was nobody's plan.
+
+It is opt-in twice, like the functional test: the ROM is not in this repository
+and never will be, so `kernal-vectors.test.ts` skips when it is absent.
+
 ### Targets: a named view over the layer stack
 
 The problem both builders hit second: the decrunched image must shadow the
