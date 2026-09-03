@@ -896,14 +896,25 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
 
   tool(
     "remove_label",
-    "Remove the label at an address. Only labels this project declares; a " +
-      "built-in name is not one of them.",
-    { project, address, expectVersion: z.string().optional() },
-    (args: { project?: string; address: number; expectVersion?: string }) => {
+    "Remove a label, by id or by an address that names exactly one. Several " +
+      "labels can share an address, so an address does not identify one — where " +
+      "it is ambiguous this refuses and names the candidates, which is where " +
+      "the id comes from. list_labels reports ids for the labels this project " +
+      "owns; a built-in or invented name has none and cannot be removed.",
+    {
+      project,
+      address: address.optional().describe("When exactly one label is yours here"),
+      id: z.string().optional().describe("From list_labels; unambiguous"),
+      expectVersion: z.string().optional(),
+    },
+    (args: { project?: string; address?: number; id?: string; expectVersion?: string }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.removeLabel(caller, args.address);
+      if (args.id === undefined && args.address === undefined) {
+        throw new Error("Give an id, or an address that names exactly one label.");
+      }
+      return space.removeLabel(caller, args.id ?? args.address!);
     }
   );
 

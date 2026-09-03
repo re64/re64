@@ -964,6 +964,34 @@ describe("two names for one address", () => {
     );
   });
 
+  it("refuses an address that names two labels, and says which ids are there", () => {
+    // An address does not identify a label — this project's own rule, unapplied
+    // here until two agents lost work to it: one had the wrong label deleted
+    // silently and was left with an orphan nothing could reach.
+    const blank = blankWorkspace();
+    blank.setLabel(agent, 0x08, "randomValue");
+    blank.addLabel(agent, 0x08, "gridXPos");
+
+    expect(() => blank.removeLabel(agent, 0x08)).toThrow(/carries 2 labels/);
+    // The refusal is where the ids come from, as it is for remove_region.
+    expect(() => blank.removeLabel(agent, 0x08)).toThrow(/lbl_/);
+
+    const listed = blank.labels({ namePattern: "gridXPos" }, 10).labels[0];
+    expect(listed.id).toBeDefined();
+    expect(blank.removeLabel(agent, listed.id!).ok).toBe(true);
+    expect(blank.labels({ namePattern: "gridXPos" }, 10).total).toBe(0);
+  });
+
+  it("withholds ids for names nothing owns", () => {
+    // An auto label's id is derived rather than stored, and a platform name
+    // belongs to the built-in layer. Handing either out invites a write
+    // carrying an identity nothing owns.
+    const blank = blankWorkspace();
+    const auto = blank.labels({ source: "auto" }, 5).labels[0];
+    expect(auto?.id).toBeUndefined();
+    expect(auto?.writable).toBe(false);
+  });
+
   it("falls back to the primary when the bound label is deleted", () => {
     const blank = blankWorkspace();
     blank.markFunction(agent, 0x8011);
@@ -975,7 +1003,13 @@ describe("two names for one address", () => {
       .find((i) => (i.operand as { address?: number }).address === 0x08)!;
     blank.bindLabel(agent, "gridXPos", 0x08, site.address);
 
-    blank.removeLabel(agent, 0x08);
+    // By id: $08 carries two labels, so an address does not say which. This
+    // used to delete whichever the layer listed first, silently.
+    const bound = blank
+      .labels({ namePattern: "gridXPos" }, 10)
+      .labels.find((l) => l.name === "gridXPos")!;
+    expect(bound.id).toBeDefined();
+    blank.removeLabel(agent, bound.id!);
 
     // A dangling use resolves by the ordinary rule rather than breaking.
     expect(() => blank.disassembly(site.address, 1)).not.toThrow();

@@ -41,6 +41,8 @@ import {
   buildMemoryMap,
   describeOp,
   labelDeleteOp,
+  labelDeleteByIdOp,
+  projectLabelsAt,
   commentDeleteOp,
   commentAddOp,
   commentEditOp,
@@ -916,6 +918,7 @@ export class Workspace {
     const invented = label.source.kind === "auto";
     const builtIn = label.source.kind === "platform";
     return {
+      ...(invented || builtIn ? {} : { id: label.id }),
       address: hex4(label.address),
       name: label.name,
       type: label.type,
@@ -1664,6 +1667,18 @@ export class Workspace {
       };
 
       for (let address = layer.start; address < layer.end; address++) {
+        // Shadowed bytes are nobody's work queue. The map's rule is that the
+        // topmost layer supplying an address wins, and this walked every layer
+        // as though it were alone — so a project holding a crunched file under
+        // its decrunched image reported every hole twice, once in bytes that
+        // cannot be rendered, decoded, or annotated. Both builders in
+        // experiment 5 hit it and called it what it is: a doubled work queue of
+        // invisible bytes.
+        if (loaded.map.layerAt(address) !== layer) {
+          close(address);
+          continue;
+        }
+
         const kind = loaded.map.getKindAt(address);
         // Explained: something decoded here, or someone said what it holds.
         const explained =
@@ -2581,8 +2596,40 @@ export class Workspace {
     });
   }
 
-  removeLabel(caller: Caller, address: number): EditResult {
+  /**
+   * Remove a label, by id or by an address that names exactly one.
+   *
+   * An address does not identify a label — several share one — so this used to
+   * take the first the owning layer listed and delete it silently, leaving the
+   * other unreachable because nothing handed out ids. Both builders in
+   * experiment 5 lost a label that way and ended with an orphan they could not
+   * delete.
+   *
+   * An address still works where it is unambiguous, because that is the common
+   * case and a caller reading a listing sees an address rather than an id. Where
+   * it is not, the refusal names the candidates — which is also how a caller
+   * learns the ids it should have passed, exactly as `remove_region` does.
+   */
+  removeLabel(caller: Caller, target: number | string): EditResult {
+    if (typeof target === "string") {
+      return this.edit(caller, (loaded) => {
+        const op = labelDeleteByIdOp(loaded, target);
+        if (!op) throw new Error(`No label ${target}. list_labels shows what this project has.`);
+        return [op];
+      });
+    }
+
+    const address = target;
     return this.edit(caller, (loaded) => {
+      const here = projectLabelsAt(loaded, owningLayerId(loaded, address), address);
+      if (here.length > 1) {
+        throw new Error(
+          `${hex4(address)} carries ${here.length} labels — ` +
+            here.map((l) => `${l.name} (${l.id})`).join(", ") +
+            `. Give the id of the one to remove.`
+        );
+      }
+
       const op = labelDeleteOp(loaded, address);
       if (op) return [op];
 
@@ -2902,6 +2949,16 @@ export interface DisassemblyLine {
 }
 
 export interface LabelSummary {
+  /**
+   * Stable identity, for the labels a project owns.
+   *
+   * Withheld for auto and platform labels for the reason `summarise` gives:
+   * their ids are derived rather than stored. Present for everything else,
+   * because without it `remove_label` and friends can only be told an address —
+   * and an address does not identify a label, which is this project's own rule
+   * and was not applied here until two agents lost work to it.
+   */
+  id?: string;
   address: string;
   name: string;
   type: LabelType;

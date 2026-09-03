@@ -487,6 +487,21 @@ describe("editing as an agent", () => {
     expect(refused.text).toMatch(/holds no file/i);
   });
 
+  it("removes a label by id when an address names more than one", async () => {
+    await callTool("set_label", { address: "$8250", name: "firstName" });
+    await callTool("add_label", { address: "$8250", name: "secondName" });
+
+    const refused = await callTool("remove_label", { address: "$8250" });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/carries 2 labels/);
+
+    const listed = await callTool("list_labels", { namePattern: "secondName" });
+    const { labels } = listed.value as { labels: { id?: string; name: string }[] };
+    const id = labels.find((l) => l.name === "secondName")?.id;
+    expect(id).toBeDefined();
+    expect((await callTool("remove_label", { id })).isError).toBe(false);
+  });
+
   it("lists who is in the project, including itself", async () => {
     // An agent has no socket and so no awareness; membership is in the document
     // precisely so both consumers can read the same list.

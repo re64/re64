@@ -2422,6 +2422,63 @@ Adding the op surfaced three exhaustiveness holes at compile time — `applyOp`,
 job. `decoders` is also added to the undo manager's tracked roots; `constants`
 is still missing from that list, which is a separate and pre-existing gap.
 
+### Running the program's own code, and what experiment 5 settled
+
+Two agents were given a disk image and nothing else. Both identified the packer
+as Exomizer 2, **both wrote their own 6502 interpreter outside re64**, both
+snapshotted the decrunched image as a layer, and they finished four instructions
+apart — 3452 and 3456 — having never seen each other's work. Static analysis of
+that disk tops out at **141 instructions**; everything past it happened
+elsewhere. As one of them put it: *"Every commercial C64 disk is crunched;
+without this, building from a disk image builds a project of the decruncher."*
+
+**re64 can already run it.** Checked rather than assumed: loading the crunched
+file and stepping from `$080D` with the existing `Machine` runs **1,768,853
+instructions in 831ms** — no unmodelled instruction, no illegal opcode, no
+undecodable byte, 140 distinct addresses executed, one I/O address touched. The
+result disassembles to 2481 instructions from `$C065` and 3241 with the raster
+IRQ, against the agents' 2495 and 2593. So the CPU is not the missing piece; a
+driver is.
+
+**Flat memory is correct here, for a specific reason.** On this machine writes to
+`$A000-$BFFF` and `$E000-$FFFF` always land in RAM whatever is banked in — which
+is why `POKE I, PEEK(I)` copies ROM into the RAM beneath it — and the only
+exception is `$D000-$DFFF` while I/O is banked in. A decruncher writes under ROM,
+so a flat 64K model gives the right answer *for the right reason*. What it would
+get wrong is reading ROM, or touching I/O with I/O banked in. This binary does
+neither, and the next one might.
+
+**The stop condition is semantic, not a budget.** The run ends when the PC enters
+ROM — here `$FFBA`, a KERNAL call to load the next file — which is necessarily
+after decrunching is done. Nothing has to guess a limit.
+
+### Targets: a named view over the layer stack
+
+The problem both builders hit second: the decrunched image must shadow the
+crunched file, so a project can show the bytes **as they load** or the program
+**as it runs**, never both, and annotations on the shadowed layer vanish. That is
+"one interpretation per address" arriving on call five rather than with Bard's
+Tale.
+
+A **target** is a named set of active layers, and it is a view rather than a
+change to what a layer is. Two of them here: the loader, and the runtime image.
+Annotations keep belonging to layers, so they follow activation — which turns a
+mysterious disappearance into a consequence a reader can name.
+
+Entry points split rather than move wholesale. A PRG layer's load address is
+*inherent to that file* and stays on the layer; `function` and `code` labels are
+already layer-owned and follow for free; only the project-level `entryPoints`
+list belongs to a target. That is one field moving, and it dissolves the
+`describe_project` complaint that entry points read 2 while `decodeStartsFrom`
+read 19 — those were two different questions with no way to say which was being
+asked. A default target takes every layer and every entry point, so a one-layer
+project declares nothing.
+
+Held loosely on purpose: whether *comments* should belong to a layer or a target
+is exactly the kind of thing to settle with evidence rather than by argument,
+having already been burned once by `set_comment`'s slot-keyed upsert being
+justified for a single author and never revisited.
+
 ### Building a project, rather than annotating one
 
 Every experiment before this handed agents a project that already existed, so

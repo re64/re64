@@ -1,0 +1,98 @@
+{
+  "name": "camels-1",
+  "description": "Revenge of the Mutant Camels (Llamasoft / Jeff Minter, 1984), C64, built from revenge-of-the-mutant-camels.d64.\n\nThe disk holds two files: REVENGE FIXED (75 blocks) and ATTACK MUTANT.HI (1 block, the hi-score save). REVENGE FIXED loads to $0801-$51A6, and almost all of it is compressed: a BASIC stub SYS 2061 runs an Exomizer 2 self-extractor which unpacks 47391 bytes over $0800-$C11E and jumps to $C065 -- an address the file never loads into. Static analysis of the file as it comes off the disk reaches 141 instructions and can reach no more, because the program is not in the file in executable form.\n\nLayer 2 is that decrunched image. It was produced by running the game s own loader: extract REVENGE FIXED from the .d64, execute from $080D in a 6502 interpreter with $01 banking modelled and $D000-$DFFF treated as I/O, and stop at the JMP $C065 the decruncher ends with. 1,768,814 instructions later every byte of $0800-$C11E has been written, with no gaps. The scripts are run/extract-d64.cjs and run/run6502.cjs.\n\nMemory map as it runs: VIC bank 0, video matrix $0400, character base $2000 (from $8AE7 STA $D018 with #$18). $0800-$1EFF and $2800-$4FFF graphics; $1F00-$1FFF variables; $5000-$5847 and $87FE-$9FEE and $C000-$C0CA code; $5848-$65FF music and text; $6600-$87FD the 42 attack-wave descriptors on a 200-byte stride; $A100-$BFFF working RAM, all zero as loaded.\n\nLayer 0 (the crunched file) is kept as provenance and is fully shadowed by layer 2 above $0800. Layer 1 is the decruncher at the address it actually runs at, $0100-$01BF, reconstructed from the copy loop at $0813.",
+  "layers": [
+    {
+      "id": "lay_qyo9c9",
+      "type": "prg",
+      "name": "revenge",
+      "path": "revenge.d64:revenge fixed",
+      "labels": [
+        { "id": "lbl_2rn8zx", "address": "$080D", "name": "SysEntry", "type": "function" }
+      ]
+    },
+    {
+      "id": "lay_oxc5fy",
+      "type": "raw",
+      "name": "decruncher (runtime copy)",
+      "path": "decruncher-at-00FD.bin",
+      "address": "$00FD",
+      "regions": [
+        { "id": "rgn_fb5obd", "start": "$0100", "end": "$01C0", "kind": "code", "name": "ExomizerDecruncher", "comment": "Exomizer 2 sfx decruncher, as it exists at run time. SysEntry ($080D in the file as loaded from disk) copies it here from $50A4-$5199 and jumps to $5068, which builds the tables at $0334/$0368/$039C and enters at $013E. $0100 is get_bits, $0108 get_bit. The crunched stream is read backwards from $5067 through a self-modified LDA whose pointer lives at $0120/$0121. It leaves at $01BB: DEC $01, CLI, JMP $C065 -- which is the real entry point of the game and lies outside the range the file loads into." }
+      ],
+      "comments": [
+        { "id": "cmt_93jv6r", "address": "$0100", "text": "get_bits: reads X bits from the crunched stream into A (low) and $9F (high). $0108 is get_bit, which refills from the byte at the self-modified LDA at $011F, whose operand at $0120/$0121 walks backwards from $5068." }
+      ]
+    },
+    {
+      "id": "lay_99lwyd",
+      "type": "prg",
+      "name": "revenge (decrunched)",
+      "path": "revenge-decrunched.prg",
+      "regions": [
+        { "id": "rgn_6ylxjv", "start": "$0800", "end": "$1F00", "kind": "data", "name": "GraphicsBank0Low", "comment": "Graphics data. Evidence: 337 absolute accesses land in $0800-$1FFF but nearly all of them in $1F00-$1FFF; this part is read by the VIC directly (bank 0) or copied through zero-page pointers, of which 19 are unresolved." },
+        { "id": "rgn_bbrejf", "start": "$1F00", "end": "$2000", "kind": "data", "name": "Variables1F00", "comment": "Variable/state page: $1F98, $1F9C, $1F9D, $1FF0, $1FF5, $1FF9 are all written by name from several routines." },
+        { "id": "rgn_8bsqpd", "start": "$2000", "end": "$2800", "kind": "bitmap", "name": "CharacterSet", "comment": "The game character set. Evidence: $8AE7 writes $18 to VMCSB ($D018) and nothing writes $DD00, so the VIC bank is 0 -- video matrix $0400, character base $2000. 256 glyphs of 8 bytes.", "view": "char:32" },
+        { "id": "rgn_h7sfbe", "start": "$2800", "end": "$5000", "kind": "data", "name": "GraphicsAndShapes", "comment": "Graphics. Exactly one absolute instruction anywhere in the program touches this 10K span (a CPX that is almost certainly a mis-decode), so it is read by the VIC or through pointers. $2800-$3FFF is inside VIC bank 0; $4000-$4FFF is not, so that part must be copied before use." },
+        { "id": "rgn_p84qyz", "start": "$511B", "end": "$5143", "kind": "text", "name": "MsgBeastsRemaining", "encoding": "screen" },
+        { "id": "rgn_u55ubf", "start": "$5199", "end": "$51C4", "kind": "text", "name": "MsgStandByYourBeast", "encoding": "screen" },
+        { "id": "rgn_bzuy7f", "start": "$52C2", "end": "$52E5", "kind": "text", "name": "MsgOptions", "encoding": "screen" },
+        { "id": "rgn_358vt1", "start": "$533F", "end": "$5355", "kind": "text", "name": "MsgDistanceBetweenZones", "encoding": "screen" },
+        { "id": "rgn_0x7wfa", "start": "$540C", "end": "$5438", "kind": "text", "name": "MsgBeastsExtinct", "encoding": "screen" },
+        { "id": "rgn_2cjf4m", "start": "$5474", "end": "$551F", "kind": "text", "name": "HiScoreDisplayRows", "encoding": "screen" },
+        { "id": "rgn_6eoueq", "start": "$55ED", "end": "$560B", "kind": "text", "name": "MsgEnterYourName", "encoding": "screen" },
+        { "id": "rgn_bq98bl", "start": "$56AF", "end": "$56CA", "kind": "text", "name": "NameEntryAlphabet", "encoding": "screen" },
+        { "id": "rgn_9vm8ho", "start": "$57B3", "end": "$57CC", "kind": "text", "name": "MsgSavedCamelkind", "encoding": "screen" },
+        { "id": "rgn_i258tm", "start": "$5848", "end": "$5A0C", "kind": "data", "name": "MusicData1", "comment": "Note/duration byte pairs; the intro tune. Read only through pointers, so no absolute instruction names it." },
+        { "id": "rgn_q1lkn6", "start": "$5A0C", "end": "$5DE4", "kind": "text", "name": "IntroCredits", "comment": "The scrolling attract-mode text, in screen codes. Names the author: THIS PROGRAM WAS WRITTEN OVER A TWO MONTH PERIOD BY JEFF MINTER, and the music arranger, JAMES LISNEY.", "encoding": "screen" },
+        { "id": "rgn_jyeygw", "start": "$5DE4", "end": "$5FA2", "kind": "text", "name": "HiScoreTableAndStatusLine", "comment": "Default hi-score table plus the two status-line templates. $5E00-$5ECF is what Start loads over from the disk file ATTACK MUTANT.HI and what SaveHiScoreAndRestart writes back (SETNAM at $C09C, save range from ($FB)=$5E00 to $5ED0).", "encoding": "screen" },
+        { "id": "rgn_mis6ge", "start": "$5FA2", "end": "$6600", "kind": "data", "name": "MusicData2" },
+        { "id": "rgn_dnxzn9", "start": "$6600", "end": "$87FE", "kind": "data", "name": "WaveDescriptors", "comment": "The 42 attack waves. A screen-code name field recurs on an exact 200-byte stride from $67A0 (ASSORTED EASY AVIAN ALIENS) to $8618 (ZAPSTARS III) -- 40 of them, the other two apparently blank. The record base and the rest of the layout are not established; only the stride and the name offset are evidence." },
+        { "id": "rgn_6pkx1l", "start": "$898C", "end": "$8A3C", "kind": "data", "name": "SidNoteTable", "comment": "Rising byte sequence that wraps every octave -- the SID frequency table. Read only through indexed pointers." },
+        { "id": "rgn_gwwjx8", "start": "$8DF4", "end": "$8E74", "kind": "text", "name": "ShapeRows8DF4", "encoding": "screen" },
+        { "id": "rgn_9opsq6", "start": "$90E4", "end": "$9170", "kind": "text", "name": "StatusLineTemplate", "comment": "PETSCII, not screen codes -- $8A44 reads it with LDA dat_90F8,X / AND #$3F / STA $5F00,X, and that mask is exactly the PETSCII-to-screen-code conversion for uppercase.", "encoding": "petscii" },
+        { "id": "rgn_fojalc", "start": "$9FEF", "end": "$A100", "kind": "data", "name": "TableA000" },
+        { "id": "rgn_k63i7i", "start": "$A100", "end": "$C000", "kind": "data", "name": "UninitialisedBuffer", "comment": "7936 bytes, every one of them zero in the decrunched image, and no instruction anywhere refers to the span by absolute address. Working RAM the program fills at run time, not content." },
+        { "id": "rgn_snuxhg", "start": "$C0CB", "end": "$C11F", "kind": "data", "name": "LoaderFilenames", "comment": "The two PETSCII filenames the startup code passes to SETNAM: ATTACK MUTANT.HI at $C102 for the load, @:ATTACK MUTANT.HI at $C100 for the save-with-replace." }
+      ],
+      "labels": [
+        { "id": "lbl_egb9k0", "address": "$5359", "name": "ReadStatusLineBuffers", "type": "function" },
+        { "id": "lbl_29ua9k", "address": "$539B", "name": "WriteStatusLineBuffers", "type": "function" },
+        { "id": "lbl_29of0x", "address": "$5F00", "name": "statusLinePlayer1", "extent": 48 },
+        { "id": "lbl_m7gqoy", "address": "$5F80", "name": "statusLinePlayer2", "extent": 48 },
+        { "id": "lbl_tn936r", "address": "$87FE", "name": "ColdStart", "type": "function" },
+        { "id": "lbl_t2csvj", "address": "$886F", "name": "InstallInterrupts", "type": "function" },
+        { "id": "lbl_fx70o1", "address": "$88D4", "name": "NmiHandler", "type": "function" },
+        { "id": "lbl_cno2ch", "address": "$88D5", "name": "RasterIrq", "type": "function" },
+        { "id": "lbl_bkjasz", "address": "$8A3C", "name": "Main", "type": "function" },
+        { "id": "lbl_jtafbn", "address": "$8D25", "name": "WriteScreenColumnAndColour", "type": "function" },
+        { "id": "lbl_tfku5y", "address": "$9328", "name": "SetSpriteFlags", "type": "function" },
+        { "id": "lbl_ibec85", "address": "$994F", "name": "sub_994F", "type": "function" },
+        { "id": "lbl_p2cf1h", "address": "$99C0", "name": "sub_99C0", "type": "function" },
+        { "id": "lbl_9w8y1v", "address": "$C046", "name": "sub_C046", "type": "function" },
+        { "id": "lbl_w5cxwl", "address": "$C065", "name": "Start", "type": "function" },
+        { "id": "lbl_i3mml4", "address": "$C082", "name": "SaveHiScoreAndRestart", "type": "function" },
+        { "id": "lbl_t3mn42", "address": "$C0B9", "name": "RestoreKernalIrq", "type": "function" }
+      ],
+      "comments": [
+        { "id": "cmt_0kbd2s", "address": "$886F", "text": "Installs the interrupt handlers: CINV -> $88D5 (raster), NMINV -> $88D4 (which is a bare RTI, so RESTORE is dead), $0291 = $80 to lock the character set, RASTER = $60, IRQMASK = $81 (raster IRQ on), and opens the SID with volume 15." },
+        { "id": "cmt_31hpqi", "address": "$88D4", "text": "NMI handler: a single RTI. Standard protection against RESTORE." },
+        { "id": "cmt_z48wuc", "address": "$8A3C", "text": "Main. Zeroes the game state in zero page, installs the raster interrupt, fills the screen with character $28 and colour $06, then falls into the attract/title sequence." },
+        { "id": "cmt_7gprpx", "address": "$8AE7", "placement": "inline", "text": "$18 = video matrix $0400, character base $2000 -- and nothing writes $DD00, so VIC bank 0" },
+        { "id": "cmt_1tx3jw", "address": "$C065", "text": "THE REAL ENTRY POINT.\n\nThe file on disk loads to $0801-$51A6 and nothing in it lives here. The chain: BASIC line 10 SYS 2061 -> $080D copies 200-odd bytes from $50A4 down into $00FD-$01F2 and jumps to $5068, which builds the Exomizer tables at $0334/$0368/$039C and enters the decruncher at $013E; the decruncher unpacks $0800-$C11E from the backwards stream ending at $5067 and finishes with DEC $01 / CLI / JMP $C065 at $01BB.\n\nWith only the image address $0800 as an entry point, 14 instructions decode. With this one, 2495." },
+        { "id": "cmt_vzc8x0", "address": "$C065", "placement": "inline", "text": "logical file 0, device 8, secondary 0" },
+        { "id": "cmt_twmn6p", "address": "$C07C", "placement": "inline", "text": "loads ATTACK MUTANT.HI to $5E00" },
+        { "id": "cmt_r1df89", "address": "$C07F", "placement": "inline", "text": "into the game proper" },
+        { "id": "cmt_cimp2a", "address": "$C082", "text": "Game over: re-init the machine, restore the KERNAL IRQ, then SAVE $5E00-$5ED0 back to the disk as @:ATTACK MUTANT.HI and restart. Reached by a computed jump; no absolute reference points here." },
+        { "id": "cmt_uhir69", "address": "$5359", "text": "Reads the two status-line buffers at $5F00 and $5F80 and their three-byte fields at +$30 and +$B0. $539B is the write side, same layout." },
+        { "id": "cmt_bj7o0g", "address": "$8D25", "text": "Writes six screen cells 40 bytes apart ($0657, $067F, $06A7, $06CF, $06F7, $071F) and the matching colour RAM ($DA57 ...), i.e. one column of six rows. routine_effects names all twelve addresses." },
+        { "id": "cmt_h2eil3", "address": "$9328", "text": "Writes YXPAND ($D017), SPMC ($D01C) and XXPAND ($D01D) -- per-sprite expand and multicolour flags -- from a bit built out of $1F98/$1F99 and $32." }
+      ]
+    }
+  ],
+  "files": [
+    { "name": "revenge.d64", "hash": "e4cc65f20fc1d50de9547dfe1ad0810c9246202048576299ddd5741da908190c", "size": 174848 },
+    { "name": "decruncher-at-00FD.bin", "hash": "b690e0aa7904ed99a2de4f24e1220f0f9f1e72ce3fd07dd0990d73a88299f8b9", "size": 201 },
+    { "name": "revenge-decrunched.prg", "hash": "bc77a7c6392e3d649dfe9d3659af8996a6ff016a3f000e058d8bae0b1846f8ca", "size": 47393 }
+  ]
+}

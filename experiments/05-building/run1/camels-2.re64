@@ -1,0 +1,111 @@
+{
+  "name": "camels-2",
+  "description": "Revenge of the Mutant Camels (Llamasoft, 1984), from revenge-of-the-mutant-camels.d64, file \"revenge fixed\" (75 blocks, loads $0801-$51A6). The disk holds a CRUNCHED program: only ~330 bytes of it are code. BASIC line 20 SYS 2061 enters at $080D, which relocates an Exomizer 2 decruncher from $50A4 to $0100 and jumps to $5068; that builds the Huffman-ish tables at $0333/$0367/$039B, decrunches the stream at $07E7-$5067 (read backwards from $5067), and jumps to $C065. The decruncher is disassembled at its true addresses through a second, raw layer over the same bytes. The decrunched program is held in a third layer, produced by running the loader in a 6502 interpreter outside re64, because no tool here can execute one.",
+  "layers": [
+    {
+      "id": "lay_vpvi7z",
+      "type": "symbols",
+      "name": "camels-2 symbols",
+      "labels": [
+        { "id": "lbl_x3nfem", "address": "$C065", "name": "GameEntry" }
+      ]
+    },
+    {
+      "id": "lay_1iexjh",
+      "type": "prg",
+      "name": "revenge",
+      "path": "revenge.d64:revenge fixed",
+      "regions": [
+        { "id": "rgn_e7ptt2", "start": "$0801", "end": "$080D", "kind": "data", "name": "basicStub", "comment": "BASIC line 20 SYS 2061 ($080D). The only thing the KERNAL RUN reaches; everything else in this file is reached from there." },
+        { "id": "rgn_112d0y", "start": "$081F", "end": "$5068", "kind": "data", "name": "crunchedStream", "comment": "Exomizer-crunched payload. Read BACKWARDS: the byte fetch at $011F is a self-modifying LDA $5068 whose operand at $0120/$0121 is decremented, so the stream runs from $5067 down. At run time it continues below this into $07E7-$081E, which the loader copies in from $516E because the BASIC stub occupies those addresses in the file." },
+        { "id": "rgn_bea610", "start": "$50A3", "end": "$5168", "kind": "data", "name": "decruncherImage", "comment": "Image of the decruncher, copied to $00FC-$01xx by the loop at $0813 and executed there, never here. See the exoDecruncher region at $0100." },
+        { "id": "rgn_onfiwm", "start": "$5168", "end": "$516E", "kind": "data", "name": "decruncherTablesImage", "comment": "Image of the two 3-byte tables the decruncher indexes as $01C0,Y and $01C3,Y with Y=1..3 (bit counts 2,4,4 and offsets $30,$20,$10)." },
+        { "id": "rgn_5hhq4d", "start": "$516E", "end": "$51A7", "kind": "data", "name": "crunchHeadStash", "comment": "The first 56 bytes of the crunched stream, held here because the BASIC stub and SYS code occupy $0801-$081E in the file. $5068 copies $516E-$51A5 to $07E7-$081E before decrunching starts." }
+      ],
+      "labels": [
+        { "id": "lbl_t79t2l", "address": "$080D", "name": "SysEntry", "type": "function" },
+        { "id": "lbl_e1f7mp", "address": "$0813", "name": "RelocateDecruncher", "type": "code" },
+        { "id": "lbl_kqmm8q", "address": "$5068", "name": "ExoInitTables", "type": "function" }
+      ]
+    },
+    {
+      "id": "lay_wz3mgv",
+      "type": "raw",
+      "name": "decruncher@0100",
+      "path": "decruncher.bin",
+      "address": "$00FC",
+      "regions": [
+        { "id": "rgn_j3m07l", "start": "$00FC", "end": "$0100", "kind": "data", "name": "decruncherCopyHead", "comment": "Not code: the copy loop at $0813 walks a fixed offset, so these four bytes ride along from $50A3-$50A6. $FC-$FF are the decruncher zero-page workspace and are overwritten before use." },
+        { "id": "rgn_eu21xk", "start": "$0100", "end": "$01F3", "kind": "code", "name": "exoDecruncher", "comment": "Exomizer 2 decruncher, copied here at run time from $50A4-$5199 by the loop at $0813. A source address S in the file maps to run address S-$4FA7. It is disassembled here at its true addresses via a raw layer holding the same bytes; the copies at $50A4 in the file are never executed in place." },
+        { "id": "rgn_ir4661", "start": "$01C1", "end": "$01C7", "kind": "data", "name": "exoTables", "comment": "Two 3-byte tables, indexed as $01C0,Y and $01C3,Y with Y=1..3." },
+        { "id": "rgn_bvjrn8", "start": "$01C7", "end": "$01F3", "kind": "data", "name": "copyOverrun", "comment": "Not part of the decruncher. The relocation loop at $0813 takes its count from TSX rather than a fixed length, so it drags whatever follows the decruncher in the file ($516E onward, the stashed crunch head) up to here. Never read; harmless because the stack pointer sits above it." }
+      ],
+      "labels": [
+        { "id": "lbl_f9kyl0", "address": "$0100", "name": "ExoGetBits", "type": "function" },
+        { "id": "lbl_1acbcm", "address": "$0108", "name": "ExoGetBitsLoop", "type": "function" },
+        { "id": "lbl_g1xbzb", "address": "$011F", "name": "ExoGetCrunchedByte", "type": "code" },
+        { "id": "lbl_0qqo9u", "address": "$013E", "name": "ExoDecrunchLoop", "type": "code" },
+        { "id": "lbl_is8jby", "address": "$01BB", "name": "ExoDone", "type": "code" },
+        { "id": "lbl_0qdaer", "address": "$01C1", "name": "exoTablBit", "extent": 3 },
+        { "id": "lbl_iovcxm", "address": "$01C4", "name": "exoTablOff", "extent": 3 }
+      ],
+      "comments": [
+        { "id": "cmt_7s7xwj", "address": "$0100", "text": "Boot chain, start to finish:\n  $0801  BASIC line 20 SYS 2061\n  $080D  LDY #$38, SEI, INC $01 ($37 -> $38, so $D000-$DFFF is RAM), TSX\n  $0813  copy $50A3+X -> $00FC+X down to X=1 - the decruncher, landing here\n  $081C  JMP $5068\n  $5068  copy $516E-$51A5 -> $07E7-$081E: the head of the crunched stream,\n         which could not be stored there in the file because the BASIC stub\n         occupies those addresses\n  $5071  build the three decode tables at $0333/$0367/$039B, 52 entries\n  $50A1  JMP $013E, the decrunch loop here\n  $01BB  DEC $01 back to $37, CLI, JMP $C065\nThe stream runs $07E7-$5067 and is read BACKWARDS: the fetch at $011F is a\nself-modifying LDA whose operand at $0120/$0121 is decremented each time." },
+        { "id": "cmt_8hx61k", "address": "$0117", "placement": "inline", "text": "loading stripe: bank I/O in for one store to colour RAM" },
+        { "id": "cmt_dx5fl1", "address": "$011F", "placement": "inline", "text": "operand at $0120/$0121 counts down from $5068" }
+      ]
+    },
+    {
+      "id": "lay_tw1xsk",
+      "type": "raw",
+      "name": "decrunched",
+      "path": "decrunched.bin",
+      "address": "$0800",
+      "regions": [
+        { "id": "rgn_lmiv37", "start": "$0800", "end": "$C11F", "kind": "code", "name": "decrunchedImage", "comment": "The program as it exists in memory after the loader has run. Provisionally all code so control flow from $C065 can be followed; data spans get carved out of it as they are identified." },
+        { "id": "rgn_ef4vpn", "start": "$0800", "end": "$5000", "kind": "data", "name": "graphicsBank", "comment": "18KB of graphics and tables below the first code. Sprite-shaped: rows of three bytes with 24-bit-wide figures. Nothing in the decoded program transfers control here; it is referenced only as data." },
+        { "id": "rgn_36tk9f", "start": "$1D60", "end": "$1FC0", "kind": "data", "name": "objectTables", "comment": "Not graphics: parallel per-object arrays on a 16-byte stride, indexed by X. Several are addressed one low ($1F3F,X for the table at $1F40) because the object index is 1-based." },
+        { "id": "rgn_929nvw", "start": "$3000", "end": "$307E", "kind": "bitmap", "name": "spriteSample", "comment": "Sample: the $0800-$5000 bank read as C64 sprites (21 rows of three bytes). Drawn here to show the bank really is sprite data rather than to claim these two are the only ones.", "view": "sprite:2" },
+        { "id": "rgn_74g2ec", "start": "$5474", "end": "$5544", "kind": "text", "name": "defaultHiScoreTable", "comment": "The built-in high score table, copied to $5E00 by InitHiScoreTable and overwritten by ATTACK MUTANT.HI when that file loads. 13 rows of 16 bytes: rank, score, name.", "encoding": "petscii" },
+        { "id": "rgn_xymzzo", "start": "$5848", "end": "$87FE", "kind": "data", "name": "gameDataBank", "comment": "12KB of data between the two code banks: note/duration pairs from about $5900, map or screen tables around $6800, and screen-code text around $7C00." },
+        { "id": "rgn_mgfpub", "start": "$89CF", "end": "$8A3C", "kind": "data", "name": "rampTable", "comment": "Monotonically rising byte table (02,02,...,03,04,05,...) - an acceleration or brightness ramp." },
+        { "id": "rgn_7fszc2", "start": "$8DF4", "end": "$8E74", "kind": "data", "name": "spriteAnimTable", "comment": "Eight-byte rows of screen codes ($26-$28) padded with spaces and two zero bytes - a small animation, one frame per row." },
+        { "id": "rgn_54p1xt", "start": "$90E4", "end": "$9170", "kind": "text", "name": "statusPanelText", "encoding": "petscii" },
+        { "id": "rgn_7yul3h", "start": "$9933", "end": "$9939", "kind": "jumptable", "name": "objectBehaviourVectors", "comment": "Three little-endian addresses read as split tables: $9942 takes the low byte from $9933,Y and $9947 the high byte from $9934,Y, with Y = 2*index, then $994C does JMP ($02). Targets $9939 (an RTS, do nothing), $994F and $99C0. The index comes from bit 0-6 of $1FB0,X." },
+        { "id": "rgn_8lpkwj", "start": "$9FEF", "end": "$C000", "kind": "data", "name": "workingStorage", "comment": "Almost entirely zero in the decrunched image: buffers the program fills at run time rather than data it ships. Code resumes at $C000." },
+        { "id": "rgn_tbchtg", "start": "$C0CB", "end": "$C11F", "kind": "data", "name": "hiScoreFilename", "comment": "\"@:ATTACK MUTANT.HI\" at $C100; the load at $C065 passes $C102 length 16, the save at $C082 passes $C100 length 18 so the @ replace prefix is included." }
+      ],
+      "labels": [
+        { "id": "lbl_j7m5b6", "address": "$1F40", "name": "spriteXPos", "extent": 15 },
+        { "id": "lbl_67gxp8", "address": "$1F50", "name": "spriteYPos", "extent": 15 },
+        { "id": "lbl_f4686g", "address": "$1F60", "name": "spriteColour", "extent": 15 },
+        { "id": "lbl_vr57p1", "address": "$1F70", "name": "spritePointer", "extent": 15 },
+        { "id": "lbl_kzrcqr", "address": "$1FB0", "name": "objectBehaviour", "extent": 16 },
+        { "id": "lbl_z2vvg6", "address": "$545C", "name": "InitHiScoreTable", "type": "function" },
+        { "id": "lbl_3lbyih", "address": "$886F", "name": "InstallInterrupts", "type": "function" },
+        { "id": "lbl_h7i9kz", "address": "$88D4", "name": "NmiHandler", "type": "function" },
+        { "id": "lbl_rdnzi7", "address": "$88D5", "name": "IrqHandler", "type": "function" },
+        { "id": "lbl_952q7e", "address": "$8A3C", "name": "GameStart", "type": "function" },
+        { "id": "lbl_tt21ee", "address": "$929D", "name": "UpdateSpriteRegisters", "type": "function" },
+        { "id": "lbl_wjd9ot", "address": "$993A", "name": "DispatchObjectBehaviour", "type": "function" },
+        { "id": "lbl_cldsbq", "address": "$C065", "name": "GameEntry", "type": "function" },
+        { "id": "lbl_1gjpz7", "address": "$C082", "name": "SaveHiScores", "type": "function" },
+        { "id": "lbl_qdreob", "address": "$C0B9", "name": "RestoreKernalVectors", "type": "function" }
+      ],
+      "comments": [
+        { "id": "cmt_3uhpo9", "address": "$0800", "text": "18KB of graphics before the first instruction. Read as C64 sprites it draws\ncamels - see the sample at $3000. Marked data on that evidence plus the fact\nthat no decoded instruction transfers control into it; if something reaches it\nby a route a static walk cannot follow, that would show up as a hole here." },
+        { "id": "cmt_0mv3so", "address": "$5848", "text": "Data between the two code banks. From about $5900 it is note/duration byte\npairs, around $6800 map or screen tables, around $7C00 screen-code text." },
+        { "id": "cmt_j5r3kt", "address": "$886F", "text": "Installs the game interrupts: IRQ -> $88D5 via $0314, NMI -> $88D4 via $0318,\nand $0291 = $80. Compare $C0B9, which puts the KERNAL default $EA31 back." },
+        { "id": "cmt_96da7m", "address": "$994C", "placement": "inline", "text": "three-way dispatch; see the jumptable at $9933" },
+        { "id": "cmt_g8oa8t", "address": "$C065", "text": "Entry after decrunching - the address the loader jumps to, and not where the\nprogram loads. LOAD \"ATTACK MUTANT.HI\" ,8 to $5E00 (secondary address 0, so\nthe address in X/Y is used), then JMP $8A3C into the game proper.\nIts sibling at $C082 saves the same buffer back as \"@:ATTACK MUTANT.HI\"." },
+        { "id": "cmt_kn1fsm", "address": "$1F40", "text": "Four parallel sprite tables on a 16-byte stride, indexed 1-based, so every read\nis one below the base: $1F40 X, $1F50 Y, $1F60 colour (copied to $D027,X),\n$1F70 shape pointer (copied to $07F8,X). Their extents are declared as 15 and\nnot 16 on purpose: at 16, $1F4F falls inside spriteXPos and renders as\n\"spriteXPos + $000F\" instead of \"spriteYPos-1\", which is the same address and\nthe wrong statement about what the code means." },
+        { "id": "cmt_0utxtn", "address": "$929D", "text": "Sprite N: copy X, Y, colour and shape pointer out of the object tables into the\nVIC registers. Y = (X-1)*2 indexes $D000/$D001 in pairs; bit 7 of the colour\nbyte means \"animate\", and is incremented in place with the flag kept." }
+      ]
+    }
+  ],
+  "files": [
+    { "name": "revenge.d64", "hash": "e4cc65f20fc1d50de9547dfe1ad0810c9246202048576299ddd5741da908190c", "size": 174848 },
+    { "name": "decruncher.bin", "hash": "7e0f365da4f13e3f3a90066875d807f0db4aef5c694dc953f59143514b35b5ce", "size": 247 },
+    { "name": "decrunched.bin", "hash": "1ef91e0ef049b31d13c29d31e11dececf6cf9c48f6df2aafa33cc6a08a8857d4", "size": 47391 }
+  ]
+}

@@ -97,6 +97,35 @@ export function projectLabelAt(
   return found?.id ? { id: found.id, name: found.name, type: found.type } : undefined;
 }
 
+/**
+ * Every project label at an address, in the layer that owns it.
+ *
+ * `projectLabelAt` returns the first, which is right for a revise and wrong for
+ * a delete: with two labels there, "remove the label at $C065" has no single
+ * answer, and answering anyway removed one of them silently and left the other
+ * unreachable. Both builders in experiment 5 hit that.
+ */
+export function projectLabelsAt(
+  loaded: LoadedProject,
+  layerId: string,
+  address: number
+): { id: string; name: string; type?: LabelType }[] {
+  const layer = loaded.project.layers.find((l) => l.id === layerId);
+  return (layer?.labels ?? [])
+    .filter((l) => l.id && parseProjectAddress(l.address) === address)
+    .map((l) => ({ id: l.id!, name: l.name, type: l.type }));
+}
+
+/** Delete a label by id, wherever it lives. */
+export function labelDeleteByIdOp(loaded: LoadedProject, id: string): Op | undefined {
+  for (const layer of loaded.project.layers) {
+    if (layer.id && layer.labels?.some((l) => l.id === id)) {
+      return { op: "label.delete", id, layerId: layer.id };
+    }
+  }
+  return undefined;
+}
+
 export function labelSetOp(
   loaded: LoadedProject,
   address: number,
