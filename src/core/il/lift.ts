@@ -269,16 +269,79 @@ function compare(seq: Sequence, register: Varnode, value: Varnode): void {
  * these flags and both are wrong, so the only way to be right is to run a
  * program somebody else wrote.
  */
-function addWithCarry(seq: Sequence, value: Varnode): void {
+/**
+ * Whether decimal mode is on where an instruction runs.
+ *
+ * Almost always answerable, and worth answering: `D` is set by `SED`, cleared
+ * by `CLD`, and on both real targets here the answer is the same everywhere.
+ * Gridrunner has one `CLD` and no `SED`; the KERNAL clears it once in its reset
+ * routine and never sets it. So the whole cost of modelling decimal lands only
+ * where a program genuinely leaves it in doubt.
+ *
+ * `unknown` is the honest case, not a fallback for laziness: after `PLP` or
+ * `RTI` the flag comes off the stack, and on this chip an interrupt does not
+ * clear it either — which is exactly why KERNAL handlers do so themselves.
+ */
+export type DecimalMode = "binary" | "decimal" | "unknown";
+
+/**
+ * Pick between two values on the decimal flag, without branching.
+ *
+ * `mask` is `$00` or `$FF`, so this is `binary` where `D` is clear and
+ * `decimal` where it is set. Branchless because an instruction's operations are
+ * one straight run — there is nowhere to put a `CBRANCH` — and because the
+ * effect sets must come out identical either way, or every routine's clobber
+ * set would depend on a flag.
+ */
+function selectOnDecimal(
+  seq: Sequence,
+  binary: Varnode,
+  decimal: Varnode,
+  mask: Varnode
+): Varnode {
+  const differing = seq.into("INT_XOR", 1, binary, decimal);
+  const taken = seq.into("INT_AND", 1, differing, mask);
+  return seq.into("INT_XOR", 1, binary, taken);
+}
+
+function addWithCarry(seq: Sequence, value: Varnode, mode: DecimalMode = "binary"): void {
   const carryA = seq.into("INT_CARRY", 1, reg(REG.A), value);
   const overflowA = seq.into("INT_SCARRY", 1, reg(REG.A), value);
   const partial = seq.into("INT_ADD", 1, reg(REG.A), value);
   const carryB = seq.into("INT_CARRY", 1, partial, reg(REG.C));
   const overflowB = seq.into("INT_SCARRY", 1, partial, reg(REG.C));
-  seq.to(reg(REG.A), "INT_ADD", partial, reg(REG.C));
-  seq.to(reg(REG.C), "BOOL_OR", carryA, carryB);
+  const sum = seq.into("INT_ADD", 1, partial, reg(REG.C));
+  const carry = seq.into("BOOL_OR", 1, carryA, carryB);
+
+  // V and N are the binary ones even in decimal mode, and that is a stated gap
+  // rather than an oversight: on this chip they come from a partly-corrected
+  // intermediate. Z *is* the binary result's on real hardware, so it is right
+  // for free. The functional test checks the accumulator and the carry and
+  // nothing else here, and no real program branches on N after a decimal add.
   seq.to(reg(REG.V), "BOOL_XOR", overflowA, overflowB);
-  setZN(seq, reg(REG.A));
+
+  if (mode === "binary") {
+    seq.to(reg(REG.A), "COPY", sum);
+    seq.to(reg(REG.C), "COPY", carry);
+    setZN(seq, reg(REG.A));
+    return;
+  }
+
+  const both = seq.into("INT_BCD_ADD", 2, reg(REG.A), value, reg(REG.C));
+  const bcdSum = seq.into("SUBPIECE", 1, both, constant(0));
+  const bcdCarry = seq.into("SUBPIECE", 1, both, constant(1));
+
+  if (mode === "decimal") {
+    seq.to(reg(REG.A), "COPY", bcdSum);
+    seq.to(reg(REG.C), "COPY", bcdCarry);
+  } else {
+    const mask = seq.into("INT_SUB", 1, constant(0), reg(REG.D));
+    seq.to(reg(REG.A), "COPY", selectOnDecimal(seq, sum, bcdSum, mask));
+    seq.to(reg(REG.C), "COPY", selectOnDecimal(seq, carry, bcdCarry, mask));
+  }
+  // Z and N off the *binary* sum, which is what the hardware does.
+  seq.to(reg(REG.Z), "INT_EQUAL", sum, constant(0));
+  seq.to(reg(REG.N), "INT_SLESS", sum, constant(0));
 }
 
 /**
@@ -288,9 +351,34 @@ function addWithCarry(seq: Sequence, value: Varnode): void {
  * hardware does and what makes carry come out right — carry set means no borrow,
  * so it enters the sum as the low bit rather than being subtracted.
  */
-function subtractWithCarry(seq: Sequence, value: Varnode): void {
+function subtractWithCarry(seq: Sequence, value: Varnode, mode: DecimalMode = "binary"): void {
   const complement = seq.into("INT_XOR", 1, value, constant(0xff));
-  addWithCarry(seq, complement);
+
+  // Taken before the binary pass, which overwrites both. Decimal subtraction
+  // needs the accumulator and carry as they were on entry, and reading the
+  // registers afterwards would silently use the binary answer as its own input.
+  const beforeA = mode === "binary" ? undefined : seq.into("COPY", 1, reg(REG.A));
+  const beforeC = mode === "binary" ? undefined : seq.into("COPY", 1, reg(REG.C));
+
+  // Decimal subtraction is not decimal addition of the complement — the
+  // correction goes the other way, six subtracted rather than added — so it
+  // cannot ride on `addWithCarry` the way the binary case does.
+  addWithCarry(seq, complement, "binary");
+
+  if (mode === "binary") return;
+
+  const both = seq.into("INT_BCD_SUB", 2, beforeA!, value, beforeC!);
+  const bcdDifference = seq.into("SUBPIECE", 1, both, constant(0));
+
+  // Only the accumulator differs in decimal mode here: every flag after a
+  // decimal `SBC` is the one binary subtraction would have set, carry included.
+  // So the binary pass above has already left them right.
+  if (mode === "decimal") {
+    seq.to(reg(REG.A), "COPY", bcdDifference);
+    return;
+  }
+  const mask = seq.into("INT_SUB", 1, constant(0), reg(REG.D));
+  seq.to(reg(REG.A), "COPY", selectOnDecimal(seq, reg(REG.A), bcdDifference, mask));
 }
 
 /** One shift or rotate, over whatever the operand names. */
@@ -372,7 +460,7 @@ const TRANSFER: Record<string, { from: number; to: number; flags: boolean }> = {
  * which would read as an instruction with no effects — the most damaging
  * possible wrong answer for a clobber set.
  */
-export function lift(instr: Instruction): PcodeOp[] {
+export function lift(instr: Instruction, decimal: DecimalMode = "binary"): PcodeOp[] {
   const seq = new Sequence();
   const mnemonic = instr.mnemonic.toUpperCase();
 
@@ -449,10 +537,10 @@ export function lift(instr: Instruction): PcodeOp[] {
     }
 
     case "ADC":
-      addWithCarry(seq, load(seq, locate(seq, instr)));
+      addWithCarry(seq, load(seq, locate(seq, instr)), decimal);
       return seq.ops;
     case "SBC":
-      subtractWithCarry(seq, load(seq, locate(seq, instr)));
+      subtractWithCarry(seq, load(seq, locate(seq, instr)), decimal);
       return seq.ops;
 
     case "CMP":

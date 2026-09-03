@@ -54,6 +54,14 @@ const TEST_CASE = 0x0200;
  */
 const DECIMAL_TEST_CASE = 42;
 
+/**
+ * What the program writes when every group has passed.
+ *
+ * `LDA #$F0 / STA $0200 / JMP *` at the end of the suite. Reaching it is the
+ * whole claim: 45 groups, 0 through 43, and this.
+ */
+const SUCCESS_TEST_CASE = 0xf0;
+
 interface Outcome {
   /** Where it stopped, and why. */
   address: number;
@@ -96,12 +104,16 @@ const enabled = process.env.RE64_FUNCTIONAL_TEST === "1" && existsSync(BINARY);
 describe.skipIf(!enabled)("the 6502 functional test", () => {
   const outcome = enabled ? runFunctionalTest(40_000_000) : undefined!;
 
-  it("gets as far as decimal mode, and no further", () => {
-    // Everything before this is arithmetic, flags, addressing modes, stack and
-    // control flow on the documented instruction set, passing against a
-    // program written by somebody else.
-    expect(outcome.reason).toBe("trap");
-    expect(outcome.testCase).toBe(DECIMAL_TEST_CASE);
+  it("runs the whole suite to its success marker", () => {
+    // All 45 groups, against a program written by somebody else: arithmetic,
+    // flags, every addressing mode, the stack, control flow, and — since
+    // decimal was implemented — binary-coded arithmetic and the `D` flag
+    // surviving `PHP`, `PLP` and `RTI`.
+    //
+    // It used to stop at group 42, the decimal section, which was the only
+    // thing behind that wall: 43 is also decimal, and 240 is the marker the
+    // program writes when everything has passed.
+    expect(outcome.testCase).toBe(SUCCESS_TEST_CASE);
   });
 
   it("exercises every documented instruction on the way there", () => {
@@ -119,9 +131,10 @@ describe.skipIf(!enabled)("the 6502 functional test", () => {
     expect(documented.filter((m) => !outcome.mnemonics.has(m))).toEqual([]);
   });
 
-  it("stops on the sum decimal mode would have got right", () => {
-    // $99 + $99 + 1 is $99 with a carry in BCD, and $33 in binary. The trap is
-    // the model saying what it does not know, at the first point it matters.
+  it("gets the sum decimal mode calls for", () => {
+    // $99 + $99 + 1 is $99 carry 1 in BCD, and $33 carry 1 in binary. This used
+    // to be the boundary — the model saying what it did not know, at the first
+    // point it mattered. It now says the decimal answer.
     const machine = new Machine();
     machine.memory.set(readFileSync(BINARY), 0);
     machine.set({ space: "register", offset: REG.D, size: 1 }, 1);
@@ -133,6 +146,7 @@ describe.skipIf(!enabled)("the 6502 functional test", () => {
     machine.memory[0x2002] = 0x10;
 
     stepMachine(machine, 0x2000);
-    expect(machine.register(REG.A)).toBe(0x33);
+    expect(machine.register(REG.A)).toBe(0x99);
+    expect(machine.register(REG.C)).toBe(1);
   });
 });

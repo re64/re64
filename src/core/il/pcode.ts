@@ -74,6 +74,24 @@ export type Opcode =
   | "INT_SCARRY"
   | "INT_SBORROW"
   | "INT_2COMP"
+  /**
+   * Binary-coded decimal add and subtract, returning result and carry together.
+   *
+   * The one place this IL departs from Ghidra's vocabulary, and it departs
+   * because there is nothing to be faithful to: Ghidra's `6502.slaspec` does not
+   * check `D` at all, so it has no decimal operations to borrow names from.
+   *
+   * Two bytes out — the low byte is the result, bit 8 is the carry — so one
+   * operation answers both and `SUBPIECE` takes them apart, rather than needing
+   * a second opcode purely to report a flag.
+   *
+   * The alternative was expressing nibble-wise correction in existing
+   * operations: roughly thirty per `ADC`, branchless, for arithmetic no target
+   * we have actually uses. That is unreadable in a listing and unmaintainable in
+   * the lifter, and the decimal-mode flag rules would still not come out right.
+   */
+  | "INT_BCD_ADD"
+  | "INT_BCD_SUB"
   // Bitwise
   | "INT_NEGATE"
   | "INT_XOR"

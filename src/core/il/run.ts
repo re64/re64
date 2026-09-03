@@ -158,7 +158,13 @@ export function stepMachine(
   if (!decoded.ok) return undefined;
 
   const instruction = decoded.instruction;
-  const flow = execute(lift(instruction), machine);
+  // Lifted as though decimal mode were in doubt, which is the right call for
+  // *execution*: the machine holds a real `D` flag, so the select resolves it
+  // exactly. A static caller has no such luxury and takes the binary default,
+  // which costs it nothing — the operations differ but the registers they touch
+  // do not, so effect sets come out identical either way. That was the point of
+  // making the choice branchless.
+  const flow = execute(lift(instruction, "unknown"), machine);
   const after = (address + instruction.bytes.length) & 0xffff;
 
   const next =
@@ -261,7 +267,7 @@ export function runBlock(block: BasicBlock, inputs: BlockInputs = {}): BlockRun 
       );
     }
 
-    const ops = lift(instruction);
+    const ops = lift(instruction, "unknown");
     current = { address: instruction.address, reads: [], writes: [], registersWritten: [] };
     const flow = execute(ops, machine);
     for (const output of outputsOf(ops)) {

@@ -80,7 +80,11 @@ function accumulate(sequences: readonly (readonly PcodeOp[])[]): {
 }
 
 export function blockEffects(instructions: readonly Instruction[]): BlockEffects {
-  const sequences = instructions.map(lift);
+  // The binary default, deliberately: a static reading of a block cannot know
+  // what `D` holds, and it does not need to. The decimal select touches exactly
+  // the same registers as the binary path, so inputs and outputs come out
+  // identical either way — which is what made the choice branchless worth it.
+  const sequences = instructions.map((instr) => lift(instr));
   const { inputs, outputs } = accumulate(sequences);
 
   const unmodelled = instructions

@@ -2124,7 +2124,47 @@ test instead of prose, and nothing can regress into looking like a decimal
 failure. It is opt-in twice: the binary is fetched rather than committed, and
 26 million instructions take about thirteen seconds.
 
-Decimal is the one thing left, and it does not touch the subject at hand —
+**Decimal is done, and the suite now passes outright.** All 45 groups: 0-43 and
+the `$F0` success marker. Three things made it smaller than it looked.
+
+The functional test checks **only the accumulator and the carry** in decimal
+mode — `PHP / CMP` for the result, then `PLA / AND #$01 / CMP` for the carry. It
+never looks at N, V or Z there. So the notorious part of NMOS decimal, where N
+and V come from a partly-corrected intermediate, is not what stands between this
+model and a passing suite.
+
+`Z` is the *binary* result's on real hardware, so it is right for free. N and V
+stay binary and that is a **stated gap** rather than an oversight, recorded at
+the point it happens: no real program branches on N after a decimal add, and
+inventing an answer there would be exactly the confident wrong answer this
+project refuses everywhere else.
+
+The arithmetic is **two new IL operations**, `INT_BCD_ADD` and `INT_BCD_SUB` —
+the one place this IL departs from Ghidra's vocabulary, and it departs because
+there is nothing to be faithful to: Ghidra's `6502.slaspec` does not check `D` at
+all. Each returns two bytes, result in the low and carry in bit 8, so one
+operation answers both and `SUBPIECE` takes them apart. The alternative was
+thirty-odd branchless nibble operations per `ADC`, unreadable in a listing and
+still not right about the flags.
+
+Decimal `SBC` is **not** decimal `ADC` of the complement — the correction goes
+the other way — so it cannot ride on the binary path the way binary `SBC` does.
+And only the accumulator differs: every flag after a decimal `SBC` is the one
+binary subtraction would have set. Worth knowing, because the first attempt read
+`A` and `C` *after* the binary pass had already overwritten them.
+
+**The select is free, measured rather than assumed.** Execution lifts as though
+`D` were in doubt, since the machine holds a real flag and resolves it exactly;
+static callers take the binary default, which costs them nothing because the two
+paths touch identical registers and effect sets come out the same either way.
+The decruncher runs 1,768,854 instructions in 672-748ms with the select in
+place, against 831ms before it existed. So the dataflow pass that would prove
+`D` per block — cheap and obvious, and it would find that Gridrunner and the
+KERNAL never set it — has **no cost to remove**, and is not built. It would earn
+its place as a *finding* rather than an optimisation: BCD arithmetic usually
+means a score, a clock, or a displayed number.
+
+Decimal used to be the one thing left, and it did not touch the subject at hand —
 Gridrunner has a single `CLD` at `$83C2` and no `SED` anywhere. When it is
 wanted, the shape is a **branchless select** rather than intra-instruction
 control flow: `mask = INT_SUB(#0, D)` is `$00` or `$FF`, and

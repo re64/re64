@@ -168,6 +168,37 @@ export function execute(ops: readonly PcodeOp[], machine: Machine): Flow {
         put(-input(0));
         break;
 
+      // Binary-coded decimal, as the NMOS 6502 does it. Result in the low byte,
+      // carry in bit 8, so one operation answers both.
+      case "INT_BCD_ADD": {
+        const a = input(0);
+        const m = input(1);
+        let low = (a & 0x0f) + (m & 0x0f) + (input(2) & 1);
+        if (low > 0x09) low += 0x06;
+        let high = (a >> 4) + (m >> 4) + (low > 0x0f ? 1 : 0);
+        if (high > 0x09) high += 0x06;
+        put((((high & 0x0f) << 4) | (low & 0x0f)) | (high > 0x0f ? 0x100 : 0));
+        break;
+      }
+
+      case "INT_BCD_SUB": {
+        const a = input(0);
+        const m = input(1);
+        const borrow = 1 - (input(2) & 1);
+        let low = (a & 0x0f) - (m & 0x0f) - borrow;
+        let high = (a >> 4) - (m >> 4);
+        if (low & 0x10) {
+          low -= 0x06;
+          high -= 1;
+        }
+        if (high & 0x10) high -= 0x06;
+        // Carry after a decimal SBC is the *binary* borrow, not a decimal one:
+        // on this chip only the accumulator differs between the two modes.
+        const binary = a - m - borrow;
+        put((((high & 0x0f) << 4) | (low & 0x0f)) | (binary >= 0 ? 0x100 : 0));
+        break;
+      }
+
       // Carry and borrow are their own operations rather than something a
       // reader has to reconstruct, which is where both references went wrong.
       case "INT_CARRY":
