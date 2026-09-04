@@ -36,7 +36,7 @@ import { MemoryMap } from "../core/memory/memory-map.js";
 import { runProgram } from "../core/il/program.js";
 import { InstructionIndex, disassemble } from "../core/arch/mos6502/disassembler.js";
 import { buildBlocks } from "../core/analysis/blocks.js";
-import { analyzeRoutines } from "../core/analysis/routines.js";
+import { analyzeRoutines, describeGap } from "../core/analysis/routines.js";
 import { C64_SYMBOLS } from "../core/c64/symbols.js";
 import { REGISTER_NAMES } from "../core/il/run.js";
 
@@ -132,9 +132,11 @@ for (const address of TABLE) {
   // hiding the other would dress a limitation as an answer.
   const ownMemory = cells(routine.own);
   const ownRegisters = regs(routine.own);
-  const incomplete = [...routine.incomplete];
+  const incomplete = routine.incomplete.map(describeGap);
   if (routine.total.readsComputedMemory || routine.total.writesComputedMemory) {
-    incomplete.push("touches memory at an address that depends on a register, so the list of cells is short");
+    incomplete.push(
+      "touches memory at an address that depends on a register, so the list of cells is short"
+    );
   }
 
   rows.push({

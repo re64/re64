@@ -28,7 +28,9 @@ import {
   routineAt,
   targetsOf,
   Effects,
+  EffectGap,
   RoutineEffects,
+  describeGap,
   blockAt,
   blockEffects,
   describeEffects,
@@ -217,7 +219,7 @@ export interface EffectsAnswer {
   /** `returning` only: the callees it refused to enter. */
   stoppedAt?: string[];
   returns?: string[];
-  incomplete?: string[];
+  incomplete?: (EffectGap & { why: string })[];
   note?: string;
 }
 
@@ -1716,7 +1718,13 @@ export class Workspace {
       // Derived from the stack delta, which knows exactly: a block is
       // straight-line, so how far the stack moved needs no guessing.
       returns: found.returns.length > 0 ? found.returns.map((r) => r.why) : undefined,
-      incomplete: found.incomplete.length > 0 ? found.incomplete : undefined,
+      // Both halves: the kind is what a caller decides on, the sentence is what
+      // a reader sees. Handing over only prose meant an agent that knows a
+      // routine is harmless had nothing to match on but a string.
+      incomplete:
+        found.incomplete.length > 0
+          ? found.incomplete.map((gap) => ({ ...gap, why: describeGap(gap) }))
+          : undefined,
       note:
         follow === "returning"
           ? "What it can touch without entering anything that never comes back. " +

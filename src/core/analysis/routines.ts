@@ -97,13 +97,55 @@ export interface RoutineEffects {
   /** True when it returns past its caller, so a caller does not get control back. */
   skipsFrames: boolean;
   /**
-   * Why the answer may be short, in the caller's terms.
+   * Why the answer may be short — named, so a caller can act on it.
    *
-   * Never empty of meaning: an instruction with no semantics makes both sets
-   * incomplete by an unknown amount, and a routine that leaves the stack
-   * somewhere unexpected breaks the return edge every caller assumes.
+   * These used to be sentences. Prose is the right thing to *show* somebody and
+   * the wrong thing to hand a caller who has to decide what to do about it: an
+   * agent that knows the routine at `$F1CA` cannot say "ignore that one" when
+   * the only handle it has is a string it would have to parse. Every other
+   * observation here carries a kind — `DisassemblyWarning`, `HygieneFinding`,
+   * and now `ReturnBehaviour` — and this was the holdout, on the one field that
+   * answers "can I trust this list".
+   *
+   * The prose is still there. `describeGap` renders it, exactly as
+   * `describeWarning` does, so nothing is lost by naming it.
    */
-  incomplete: string[];
+  incomplete: EffectGap[];
+}
+
+/**
+ * A reason an effects answer may be short.
+ *
+ * Named rather than written out, so an agent can bring knowledge this analysis
+ * does not have — that an unlifted instruction is an illegal opcode it
+ * recognises, that a callee it has already read is harmless — and settle the
+ * ambiguity itself. The C64 is full of these: what looks like a gap is very
+ * often an idiom somebody could name in one word.
+ */
+export type EffectGap =
+  /** An instruction with no modelled semantics. Both sets are short by an unknown amount. */
+  | { kind: "unmodelledInstruction"; at: number; mnemonic: string }
+  /** A callee that returns past its caller, so the code after the `JSR` is not reached through it. */
+  | { kind: "calleeSkipsFrames"; at: number }
+  /** A callee nothing decoded, so what it touches is unknown. */
+  | { kind: "calleeNotDecoded"; at: number };
+
+/** A gap as a line somebody can read. Structure for a caller, prose for a reader. */
+export function describeGap(gap: EffectGap): string {
+  switch (gap.kind) {
+    case "unmodelledInstruction":
+      return (
+        `${hex(gap.at)} is ${gap.mnemonic}, which has no modelled semantics, so ` +
+        `these sets are short by an unknown amount`
+      );
+    case "calleeSkipsFrames":
+      return (
+        `${hex(gap.at)} returns past whoever called it, so the code after that ` +
+        `JSR is not reached through it`
+      );
+    case "calleeNotDecoded":
+      return `it calls ${hex(gap.at)}, which did not decode, so what that touches is unknown`;
+  }
 }
 
 export interface Effects {
@@ -429,7 +471,7 @@ export function analyzeRoutines(
   for (const entry of entries) {
     const { body, continuesInto } = bodyOf(entry, byStart, entrySet);
     const own = empty();
-    const incomplete: string[] = [];
+    const incomplete: EffectGap[] = [];
     const returns: ReturnBehaviour[] = [];
     let skipsFrames = false;
     const calls = new Set<number>();
@@ -440,10 +482,7 @@ export function analyzeRoutines(
       for (const target of block.calls) calls.add(target);
 
       for (const { address, mnemonic } of effects.unmodelled) {
-        incomplete.push(
-          `${hex(address)} is ${mnemonic}, which has no modelled semantics, so ` +
-            `these sets are short by an unknown amount`
-        );
+        incomplete.push({ kind: "unmodelledInstruction", at: address, mnemonic });
       }
     }
 
@@ -464,7 +503,10 @@ export function analyzeRoutines(
       continuesInto,
       returns,
       skipsFrames,
-      incomplete: [...new Set(incomplete)],
+      // Deduplicated on the whole observation, not on a sentence: the same
+      // unlifted instruction reached twice is one gap, and two different ones
+      // are two.
+      incomplete: [...new Map(incomplete.map((g) => [JSON.stringify(g), g])).values()],
     });
   }
 
@@ -545,15 +587,10 @@ export function analyzeRoutines(
       // itself and which the block graph assumes otherwise.
       const callee = routines.get(target);
       if (callee?.skipsFrames) {
-        routine.incomplete.push(
-          `${hex(target)} returns past whoever called it, so the code after that ` +
-            `JSR is not reached through it`
-        );
+        routine.incomplete.push({ kind: "calleeSkipsFrames", at: target });
       }
       if (!routines.has(target)) {
-        routine.incomplete.push(
-          `it calls ${hex(target)}, which did not decode, so what that touches is unknown`
-        );
+        routine.incomplete.push({ kind: "calleeNotDecoded", at: target });
       }
     }
   }

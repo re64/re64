@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { analyzeRoutines, routineEntries } from "./routines.js";
+import { analyzeRoutines, routineEntries, describeGap } from "./routines.js";
 import { buildBlocks } from "./blocks.js";
 import { InstructionIndex, disassemble } from "../arch/mos6502/disassembler.js";
 import { MemoryMap } from "../memory/memory-map.js";
@@ -80,7 +80,10 @@ describe("what a routine touches", () => {
   it("says when an instruction has no semantics, rather than answering short", () => {
     // $02 is an undocumented opcode.
     const { routines: r } = routines([0xa9, 0x01, 0x02, 0x60]);
-    expect(r.get(ORG)!.incomplete.join(" ")).toMatch(/no modelled semantics/);
+    // The kind is what a caller acts on; the sentence is what a reader sees.
+    const gaps = r.get(ORG)!.incomplete;
+    expect(gaps.map((g) => g.kind)).toContain("unmodelledInstruction");
+    expect(gaps.map(describeGap).join(" ")).toMatch(/no modelled semantics/);
   });
 
   it("takes call targets as entries without being told", () => {
@@ -140,7 +143,9 @@ describe("how a routine leaves", () => {
   it("warns a caller that it will not get control back", () => {
     // $1000: JSR $1004 / RTS      $1004: PLA PLA RTS
     const { routines: r } = routines([0x20, 0x04, 0x10, 0x60, 0x68, 0x68, 0x60]);
-    expect(r.get(ORG)!.incomplete.join(" ")).toMatch(/returns past whoever called it/);
+    const gaps = r.get(ORG)!.incomplete;
+    expect(gaps).toContainEqual({ kind: "calleeSkipsFrames", at: 0x1004 });
+    expect(gaps.map(describeGap).join(" ")).toMatch(/returns past whoever called it/);
   });
 
   it("keeps abandoning the chain apart from not knowing", () => {

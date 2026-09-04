@@ -2930,6 +2930,47 @@ falls out of work already done. Anything requiring its own traversal — "is thi
 named routine reachable" — goes in a separate on-demand function from the start
 rather than being added here and discovered to be slow later.
 
+### Name the observation; let the caller bring the knowledge
+
+This machine is full of things that look like defects and are idioms. `BIT $10A9`
+is a two-byte skip that swallows its own `LDA #$10`, and it really does read
+`$10A9`. `RDTIM` falls through into `SETTIM`, so reading the clock writes it back
+and re-enables interrupts. `PLA PLA RTS` returns to its caller's caller. `JMP
+($10FF)` takes its high byte from `$1000`. A `CLC` before `SBC` subtracts one
+more than the operand reads, and is sometimes deliberate.
+
+Trying to *resolve* these in the analysis is the losing move: each one wants its
+own special case, and every special case is a place where a confident wrong
+answer can hide. What the analysis can do well is **notice precisely and name
+what it noticed**, and then let whoever is reading — a person, or an agent with
+knowledge of the machine that no pass here encodes — settle it.
+
+So an observation is a **kind**, not a sentence:
+
+| | |
+|---|---|
+| `DisassemblyWarning` | `undefined`, `truncated`, `overlap`, `oddJumptable`, `flowIntoData`, `indirectJump` |
+| `HygieneFinding` | `label.nameShared`, `constant.nameShared`, `region.missingDecoder`, … |
+| `ReturnBehaviour` | `abandons`, `skips`, `ambiguous` |
+| `EffectGap` | `unmodelledInstruction`, `calleeSkipsFrames`, `calleeNotDecoded` |
+
+`EffectGap` was the last holdout and the most costly one, because it sits on the
+field that answers *"can I trust this list"*. It was `string[]`: an agent that
+knows perfectly well what `$F1CA` does could not say "ignore that gap" without
+parsing English. Each type keeps a `describe*` beside it, so the prose is still
+there for a reader and the kind is there for a caller. **Naming costs nothing and
+un-naming is expensive**, which is the argument for doing it at the point the
+observation is made rather than when somebody finally needs it.
+
+The two failures this prevents are opposite, and this file has now made both:
+
+- **Conflating two observations under one name.** `skipsFrames: 0` meant both
+  "resets the stack" and "the analysis cannot tell", so a cut keyed on it threw
+  away whole routine bodies. A fact about the program and an admission about the
+  pass must never share a name.
+- **Giving an observation no name at all**, which forces every consumer to
+  either ignore it or parse it.
+
 **One batch contract, across every batch tool:** apply what you can, report what
 you declined in `rejected`, and fail only when nothing was applicable. Undo stays
 coherent because the changeset covers exactly what was applied. `bind_constants`
