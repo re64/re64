@@ -18,6 +18,7 @@ import { Label, LabelIndex, createAutoLabel } from "../memory/label.js";
 import { HygieneFinding, checkHygiene } from "./hygiene.js";
 import { decimalSites } from "./flags.js";
 import { ValueAnalysis, proveValues } from "./values.js";
+import { classifyOrigins } from "../c64/entry-vectors.js";
 import type { DecimalMode } from "../il/lift.js";
 import { LoadedProject } from "../project/loader.js";
 import { parseProjectAddress } from "../project/project.js";
@@ -258,7 +259,10 @@ export function analyzeProgram(
     // collaborator. Nothing on the read path asks for this until something asks
     // about a flag.
     get values(): ValueAnalysis {
-      return (cachedValues ??= proveValues(blocks, origins, { cover: entryPoints }));
+      return (cachedValues ??= proveValues(blocks, origins, {
+        cover: entryPoints,
+        kinds: classifyOrigins(map),
+      }));
     },
     get decimalSites() {
       return (cachedDecimal ??= decimalSites(blocks, entryPoints, this.values));

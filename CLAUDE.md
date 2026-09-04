@@ -2256,16 +2256,22 @@ every routine body was a block nothing entered, seeded `unknown`. It came back
 `ColdStart` and never reached what `ColdStart` calls. Judged on that output the
 pass looks useless, which is exactly the trap.
 
-Following calls, both real targets prove **binary everywhere**: 19 of 19 on
-Gridrunner, 3 of 3 in the KERNAL, no unknowns — **measured from `$83C1` alone,
-which the sentence did not say and which turns out to be the whole of it.** Given
-the project's own entry points the answer is `unknown` at all 18, because
-`$83E2` is the IRQ handler, an origin in its own right, and a 6502 does not
-clear `D` on interrupt. Code shared between the main flow and the handler
-therefore has genuinely unknown `D`. That is the honest answer and it is much
-less useful than the one recorded here for months; see "Seeding an interrupt
-handler" in the task list for the fix, which is that a handler is not entered
-with nothing known but with whatever the program had.
+Following calls, both real targets appeared to prove **binary everywhere**: 19 of
+19 on Gridrunner, 3 of 3 in the KERNAL, no unknowns.
+
+**That number was never real, and how it was produced is the more useful thing to
+record.** `canTouch` walked from a call target and did `if (!block) continue` —
+so a callee it could not see was assumed to touch nothing. Gridrunner calls five
+KERNAL routines and the project loads no ROM, so all five were skipped and `D`
+sailed through them. It was not a proof, it was an omission that looked like one.
+
+The value analysis assumes an unseen callee can write anything, which is sound
+and costs the whole proof: 19 of 19 unknown. The right answer is neither — it is
+to *ask*, and `KERNAL_EFFECTS` exists to be asked. See the task list.
+
+The general lesson is worth more than the instance, and this file has now been
+caught by it twice: **a check that cannot see something must say so, not skip
+it.** A silent skip is indistinguishable from a proof at the point of use.
 
 The question a callee raises is *"can this touch `D` at all"* rather than *"what
 does it leave"*. The second is more precise and needs a second fixpoint over
@@ -2348,6 +2354,53 @@ one-byte patterns against every concrete pair they stand for, for and, or, xor,
 add, subtract, both comparisons and equality: a bit the domain claims to know
 must be that bit in every concretisation. It is cheap at this width and it is
 the property everything above rests on.
+
+### An interrupt is not entered from nowhere
+
+Seeding every origin with "nothing is known" is right for something reached from
+outside and wrong for the two ways this machine re-enters its own code. An
+interrupt arrives from *somewhere in this program*, and the processor changes
+almost nothing on the way in: it pushes the return address and the status byte,
+sets `I`, and jumps. `A`, `X`, `Y`, memory and every other flag are exactly what
+the interrupted code had.
+
+So an origin has a **kind**, and the two re-entrant ones are derived rather than
+declared:
+
+| | entered from | `B` |
+|---|---|---|
+| `external` | outside; nothing can be assumed | — |
+| `interrupt` | between any two instructions | clear |
+| `brk` | the `BRK` instructions, and only those | set |
+| `interruptOrBrk` | both, so it cannot be told | unknown |
+
+The last row is the ordinary case on a bare 6502, where `BRK` and `IRQ` share
+`$FFFE` — and it is exactly why a real handler tests bit four rather than knowing.
+The C64 splits them, because the KERNAL's own handler reads `B` and dispatches to
+`$0316` or `$0314`.
+
+`src/core/c64/entry-vectors.ts` reads the kinds **out of the project's bytes**,
+the same stance taken with the KERNAL's default vectors: the hardware vectors if
+a ROM is loaded, the RAM vectors if RAM is, and a cartridge's warm start if the
+`CBM80` signature is there. Which is how Gridrunner turned out to be a cartridge
+dump: `$8000 → $83C1` cold, `$8002 → $83E2` warm, `CBM80` at `$8004`. Both of the
+project's `entry` labels are that header, and `$83E2` is the **warm start**
+reached through NMI rather than an IRQ handler the game installed.
+
+Two details in the derivation. The entry state's **status byte is assembled from
+the joined flags**, so `PLP` restores what the interrupted code had and
+`PLA / AND #$10` answers about `B`. Each flag is masked to its own bit *before*
+being shifted into place, because OR-ing in one unknown flag otherwise destroys a
+known **zero** elsewhere in the byte — it preserves a known one, so this failed
+for hardware interrupts while working for `BRK`, which is a confusing way to
+find out. And the **stack is seeded as exactly the three entries the processor
+pushed**, not as the joined one: depths differ all over a program, so a joined
+stack is abandoned immediately, and abandoning it is the one thing that makes `B`
+unreachable. Claiming a depth of three is not a claim that nothing is underneath
+— a fourth pull comes back unknown, which is the truth.
+
+It converges because the handler's own instructions become states to join over,
+and joining only ever loses precision.
 
 ### An origin is not a decode root
 

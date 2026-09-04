@@ -23,11 +23,36 @@
 
 import { BasicBlock } from "./blocks.js";
 import { AbstractState, cloneState, initialState, joinStates, sameState, stepAbstract } from "../il/abstract.js";
-import { Bits, unknown } from "../il/known-bits.js";
+import { Bits, and, exact, or, shiftLeft, unknown } from "../il/known-bits.js";
 import { lift } from "../il/lift.js";
 import { PcodeOp, REG, Varnode, writes } from "../il/pcode.js";
 
 export type Known = "set" | "clear" | "unknown";
+
+/**
+ * How an origin is entered, which decides what can be assumed there.
+ *
+ * Seeding every origin with "nothing is known" is right for something reached
+ * from outside the program and wrong for the two ways this machine re-enters
+ * its own code. An interrupt does not arrive from nowhere: it arrives from
+ * *somewhere in this program*, and the processor changes almost nothing on the
+ * way in — it pushes the return address and the status byte, sets `I`, and
+ * jumps. `A`, `X`, `Y`, memory and every other flag are exactly what the
+ * interrupted code had.
+ */
+export type OriginKind =
+  /** Reached from outside. Nothing can be assumed. */
+  | "external"
+  /** Asynchronous: can arrive between any two instructions, with `B` clear. */
+  | "interrupt"
+  /** Reached by executing a `BRK`, so only from those sites, and `B` is set. */
+  | "brk"
+  /**
+   * Both, which on a bare 6502 is the ordinary case: `BRK` and `IRQ` share
+   * `$FFFE`. `B` is then genuinely undecidable at the handler's first
+   * instruction, which is exactly why a real one looks at it.
+   */
+  | "interruptOrBrk";
 
 export interface ValueAnalysis {
   /** The state as each instruction is about to run. */
@@ -107,6 +132,15 @@ export function proveValues(
      * "what does this do", because it does two things.
      */
     stackAt?: ReadonlyMap<number, readonly Bits[]>;
+    /**
+     * How each origin is entered. Anything unlisted is `external`.
+     *
+     * `interrupt` and `brk` origins are deliberately *not* seeded on the first
+     * pass. Their entry state is derived from the program once the rest of it
+     * has been analysed, and then joined in repeatedly until it stops moving —
+     * joining only ever loses precision, so that terminates.
+     */
+    kinds?: ReadonlyMap<number, OriginKind>;
   } = {}
 ): ValueAnalysis {
   const real = blocks.filter((b) => !b.alternate);
@@ -139,7 +173,9 @@ export function proveValues(
     entering.set(at, state);
     queue.push(at);
   };
-  const started = origins.filter((at) => byStart.has(at));
+  const kindOf = (at: number): OriginKind => options.kinds?.get(at) ?? "external";
+  const reentrant = origins.filter((at) => byStart.has(at) && kindOf(at) !== "external");
+  const started = origins.filter((at) => byStart.has(at) && kindOf(at) === "external");
   // Every declared origin is reached from inside, so there is no outside to
   // start from. Fall back to the decode roots and assume nothing anywhere.
   for (const at of started.length > 0 ? started : (options.cover ?? [])) seed(at);
@@ -204,8 +240,48 @@ export function proveValues(
 
   drain();
 
-  // Anything the origins never reached, analysed conservatively — and only now,
-  // so it cannot take back what they proved on the way in.
+  // Now the origins that are re-entered from inside the program.
+  //
+  // An interrupt can arrive between any two instructions, so its handler is
+  // entered with the join of the state everywhere; a `BRK` handler is entered
+  // only from the `BRK` instructions, which is both narrower and more useful.
+  // Either way the processor pushes the return address and the status byte,
+  // sets `I`, and changes nothing else — so the handler inherits `A`, `X`, `Y`,
+  // memory, and every flag but `I`.
+  //
+  // Repeated because the handler's own instructions become states to join over,
+  // and stopped when nothing moves. It converges because joining can only ever
+  // lose precision.
+  const brkSites: number[] = [];
+  for (const block of real) {
+    for (const instruction of block.instructions) {
+      if (instruction.mnemonic.toUpperCase() === "BRK") brkSites.push(instruction.address);
+    }
+  }
+
+  for (let round = 0; round < 4 && reentrant.length > 0; round++) {
+    let moved = false;
+    for (const origin of reentrant) {
+      const kind = kindOf(origin);
+      const sites = kind === "brk" ? brkSites : [...before.keys()];
+      const breakFlag =
+        kind === "brk" ? exact(1, 1) : kind === "interrupt" ? exact(0, 1) : unknown();
+      const entered = interruptedState(sites, before, breakFlag);
+      if (!entered) continue;
+      const held = entering.get(origin);
+      const merged = held ? joinStates(held, entered) : entered;
+      if (held && sameState(held, merged)) continue;
+      entering.set(origin, merged);
+      queue.push(origin);
+      moved = true;
+    }
+    if (!moved) break;
+    drain();
+  }
+
+  // Anything still unreached, analysed conservatively — and only now, so it
+  // cannot take back what the origins proved on the way in, nor pre-empt a
+  // handler's derived entry state with a blanket "nothing is known".
   for (const root of options.cover ?? []) {
     if (entering.has(root)) continue;
     seed(root);
@@ -213,6 +289,62 @@ export function proveValues(
   }
 
   return { before };
+}
+
+/**
+ * What a handler is entered with, given every point it can be entered from.
+ *
+ * The processor's own contribution is three bytes on the stack and `I` set. The
+ * status byte is assembled from the joined flags, so `PLP` restores what the
+ * interrupted code had and `PLA / AND #$10` answers about `B` — which is the
+ * only place `B` exists on this machine.
+ *
+ * The stack is seeded as exactly those three entries rather than as the joined
+ * one. Depths differ all over a program, so a joined stack is abandoned almost
+ * immediately, and abandoning it is the one thing that makes `B` unreachable.
+ * Claiming a depth of three is not a claim that nothing is underneath: a fourth
+ * pull simply comes back unknown, which is the truth.
+ */
+function interruptedState(
+  sites: readonly number[],
+  before: ReadonlyMap<number, AbstractState>,
+  breakFlag: Bits
+): AbstractState | undefined {
+  let joined: AbstractState | undefined;
+  for (const at of sites) {
+    const state = before.get(at);
+    if (!state) continue;
+    joined = joined ? joinStates(joined, state) : cloneState(state);
+  }
+  if (!joined) return undefined;
+
+  const flag = (offset: number): Bits => joined!.registers[offset]?.bits ?? unknown();
+  // Masked to its own bit *before* shifting, so every other bit is a known
+  // zero. Without that, OR-ing in one unknown flag destroys a known zero
+  // elsewhere in the byte — which is exactly bit four, and would lose `B` for a
+  // hardware interrupt while keeping it for a `BRK`, since OR preserves a known
+  // one and not a known zero.
+  const bit = (value: Bits, shift: number): Bits =>
+    shiftLeft(and(value, exact(1, 1), 1), exact(shift, 1), 1);
+
+  // Bit 5 has no flag behind it and reads as set; bit 4 is `B`, which is a
+  // property of how the byte got here rather than of any stored state.
+  let status: Bits = or(exact(0x20, 1), shiftLeft(and(breakFlag, exact(1, 1), 1), exact(4, 1), 1), 1);
+  for (const [offset, shift] of [
+    [REG.C, 0],
+    [REG.Z, 1],
+    [REG.I, 2],
+    [REG.D, 3],
+    [REG.V, 6],
+    [REG.N, 7],
+  ] as const) {
+    status = or(status, bit(flag(offset), shift), 1);
+  }
+
+  const entered = cloneState(joined);
+  entered.registers[REG.I] = { bits: exact(1, 1), fromStack: false };
+  entered.stack = [unknown(), unknown(), status];
+  return entered;
 }
 
 /**

@@ -144,3 +144,67 @@ describe("analysing an interrupt handler as either of the two things it is", () 
     expect(flagBefore(v, ORG + 3, REG.Z)).toBe("unknown");
   });
 });
+
+describe("an origin that is re-entered from inside the program", () => {
+  /** Same as `analyse`, with a second origin classified. */
+  function withKinds(bytes: number[], origins: number[], kinds: [number, "interrupt" | "brk"][]) {
+    const map = new MemoryMap();
+    map.addLayer(new BytesLayer("test", ORG, new Uint8Array(bytes)));
+    const index = new InstructionIndex(disassemble(map, { entryPoints: origins }).instructions);
+    return proveValues(buildBlocks(index, origins), origins, {
+      cover: origins,
+      kinds: new Map(kinds),
+    });
+  }
+
+  //   $1000  D8        CLD              <- the program's own origin
+  //   $1001  A2 05     LDX #$05
+  //   $1003  00        BRK
+  //   $1004  60        RTS
+  //   $1005  ...handler at $1005
+  //   $1005  68        PLA              take the pushed status
+  //   $1006  29 10     AND #$10
+  //   $1008  60        RTS
+  const PROGRAM = [0xd8, 0xa2, 0x05, 0x00, 0x60, 0x68, 0x29, 0x10, 0x60];
+
+  it("gives a handler the flags the interrupted code had", () => {
+    // CLD runs before the BRK, so D is clear at the only site the handler can
+    // be entered from — and the handler inherits it. Seeded as `external` it
+    // would be unknown, which is what this whole task was about.
+    const v = withKinds(PROGRAM, [ORG, ORG + 5], [[ORG + 5, "brk"]]);
+    expect(flagBefore(v, ORG + 5, REG.D)).toBe("clear");
+    // The processor sets I on the way in, whatever the interrupted code had.
+    expect(flagBefore(v, ORG + 5, REG.I)).toBe("set");
+  });
+
+  it("keeps the registers, because an interrupt does not touch them", () => {
+    const v = withKinds(PROGRAM, [ORG, ORG + 5], [[ORG + 5, "brk"]]);
+    const x = valueBefore(v, ORG + 5, REG.X);
+    expect(isExact(x, 1)).toBe(true);
+    expect(x.value).toBe(0x05);
+  });
+
+  it("knows B is set when the handler was reached by BRK", () => {
+    const v = withKinds(PROGRAM, [ORG, ORG + 5], [[ORG + 5, "brk"]]);
+    const extracted = valueBefore(v, ORG + 8, REG.A);
+    expect(isExact(extracted, 1)).toBe(true);
+    expect(extracted.value).toBe(0x10);
+  });
+
+  it("knows B is clear when it was reached by an interrupt", () => {
+    const v = withKinds(PROGRAM, [ORG, ORG + 5], [[ORG + 5, "interrupt"]]);
+    const extracted = valueBefore(v, ORG + 8, REG.A);
+    expect(isExact(extracted, 1)).toBe(true);
+    expect(extracted.value).toBe(0x00);
+  });
+
+  it("cannot say, for a handler reached both ways", () => {
+    // Which is the whole reason a real handler tests it: on a 6502 `BRK` and
+    // `IRQ` share $FFFE, so one routine serves both and has to look.
+    const both = withKinds(PROGRAM, [ORG, ORG + 5], [[ORG + 5, "brk"]]);
+    const other = withKinds(PROGRAM, [ORG, ORG + 5], [[ORG + 5, "interrupt"]]);
+    expect(valueBefore(both, ORG + 8, REG.A).value).not.toBe(
+      valueBefore(other, ORG + 8, REG.A).value
+    );
+  });
+});
