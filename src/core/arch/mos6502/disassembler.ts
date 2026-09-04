@@ -23,7 +23,15 @@ export type DisassemblyWarning =
   | { type: "truncated"; address: number; needed: number; available: number }
   | { type: "overlap"; address: number; existingAddress: number }
   | { type: "oddJumptable"; address: number; bytes: number }
-  | { type: "flowIntoData"; address: number; kind: RegionKind };
+  | { type: "flowIntoData"; address: number; kind: RegionKind }
+  | {
+      type: "indirectJump";
+      address: number;
+      /** The two-byte cell the jump reads its destination from. */
+      pointer: number;
+      /** What the memory map holds there now, if anything supplies those bytes. */
+      target?: number;
+    };
 
 /** A warning as a line someone can read. */
 export function describeWarning(w: DisassemblyWarning): string {
@@ -39,6 +47,15 @@ export function describeWarning(w: DisassemblyWarning): string {
       return (
         `${hex(w.address)}: jumptable covers ${w.bytes} bytes, which is odd — ` +
         `the last byte is not part of any entry and is being ignored`
+      );
+    case "indirectJump":
+      return (
+        `${hex(w.address)}: jumps through ${hex(w.pointer)}, which this walk does ` +
+        `not follow — a vector holds whatever the program last wrote there. ` +
+        (w.target === undefined
+          ? `Nothing in this project supplies ${hex(w.pointer)}, so there is nothing to read.`
+          : `It currently reads ${hex(w.target)}; mark_function there if that is the ` +
+            `routine you mean.`)
       );
     case "flowIntoData":
       return (
@@ -312,6 +329,32 @@ export function disassemble(
     const instrRefs = extractReferences(instr);
     for (const ref of instrRefs) {
       addReference(references, ref.target, ref.type, address);
+    }
+
+    // An indirect jump names no target and the walk does not follow one: a
+    // vector holds whatever the program last wrote there, and the bytes in the
+    // map are only what it held when the project was put together. Hooking
+    // $0314 is the standard C64 idiom, so following it would be wrong exactly
+    // where it is most often used.
+    //
+    // Knowing nothing and saying nothing are different, though. The pointer is
+    // readable, and somebody who knows this vector is not hooked can declare
+    // the target — which on the KERNAL is the difference between decoding 669
+    // instructions and 2583. So the warning names both the cell and what is in
+    // it, and asserts nothing about whether that is where control goes.
+    if (instr.flow === "jump" && instr.operand.type === "indirect") {
+      const pointer = instr.operand.address;
+      const lo = reader.readByte(pointer);
+      // The 6502 reads the high byte from the same page — `JMP ($10FF)` takes
+      // it from $1000, not $1100. Modelled here for the same reason the lifter
+      // models it: people relied on it.
+      const hi = reader.readByte((pointer & 0xff00) | ((pointer + 1) & 0x00ff));
+      warnings.push({
+        type: "indirectJump",
+        address,
+        pointer,
+        ...(lo !== undefined && hi !== undefined ? { target: lo | (hi << 8) } : {}),
+      });
     }
 
     // Queue targets for further disassembly.

@@ -2372,6 +2372,43 @@ What is genuinely missing, and neither position supplies: a way to say **"this
 is code, render it as bytes"**. That is a display preference, and a region kind
 is the wrong place for it.
 
+### An indirect jump is not followed, and now says what it would have reached
+
+`JMP ($0326)` names no destination, so the walk queues nothing. That is right and
+it was silent, and silence is what made the KERNAL undecodable: 15 of its 42
+documented entry points are a three-byte jump through a RAM vector, so decoding
+from the jump table gives **669 instructions** where declaring the 16 targets
+gives **2583**. Experiment 6's agent worked every one of those targets out by
+hand and recorded that it had — `$F1CA` for `CHROUT`, `$F13E` for `GETIN` — which
+is a lot of effort to recover something the memory map can be asked for.
+
+**Following it is still refused, and hooking `$0314` is exactly why.** A vector
+holds whatever the program last wrote there; the bytes in the map are what it
+held when the project was put together. Reading them and queueing the target
+would be the `flowIntoData` mistake again — a correct-looking answer from a
+premise nothing checked — and it would be wrong precisely where vectors are most
+used, since installing your own raster interrupt is the standard idiom on this
+machine.
+
+**But knowing nothing and saying nothing are different.** The warning names the
+cell, what the map currently holds there, and `mark_function` as the remedy:
+
+```
+$FFC0: jumps through $031A, which this walk does not follow — a vector holds
+       whatever the program last wrote there. It currently reads $F34A;
+       mark_function there if that is the routine you mean.
+```
+
+It asserts nothing about whether control goes there. That judgement needs
+somebody who knows whether this vector is hooked, which is the same division of
+labour every other warning here follows.
+
+Two details. Where no layer supplies the pointer the warning says so rather than
+omitting itself, because "nothing to read" is a different problem from "read
+something" and leads somewhere else. And the high byte comes from the **same
+page** — `JMP ($10FF)` takes it from `$1000` — modelled here for the reason the
+lifter models it: people relied on it.
+
 **An edit that stops code decoding says so separately from `delta`.** A
 catastrophic loss used to arrive in the same field, shape and tone as a useful
 gain, and every tool description here teaches a reader that a positive delta is

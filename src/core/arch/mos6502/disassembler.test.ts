@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { disassemble, InstructionIndex } from "./disassembler.js";
+import { describeWarning, disassemble, InstructionIndex } from "./disassembler.js";
 import { ByteReader } from "./decoder.js";
 import { RegionIndex, createUserRegion } from "../../memory/region.js";
 
@@ -158,6 +158,47 @@ describe("disassemble", () => {
     const result = disassemble(reader, { entryPoints: [0x1000] });
 
     expect(result.instructions.size).toBe(2);
+  });
+});
+
+describe("an indirect jump", () => {
+  /** A reader over one flat 64K space, so a vector and its target coexist. */
+  function flat(cells: Record<number, number[]>): ByteReader {
+    const memory = new Map<number, number>();
+    for (const [base, bytes] of Object.entries(cells))
+      bytes.forEach((b, i) => memory.set(Number(base) + i, b));
+    return { readByte: (a) => memory.get(a) };
+  }
+
+  it("is not followed, and names the cell and what is in it", () => {
+    // JMP ($0326) at $1000, with $0326 holding $F1CA — the shape of every
+    // vectored KERNAL entry point.
+    const reader = flat({ 0x1000: [0x6c, 0x26, 0x03], 0x0326: [0xca, 0xf1] });
+    const { instructions, warnings } = disassemble(reader, { entryPoints: [0x1000] });
+
+    // Not followed: knowing the bytes is not knowing that control goes there.
+    expect(instructions.size).toBe(1);
+
+    const warning = warnings.find((w) => w.type === "indirectJump");
+    expect(warning).toMatchObject({ address: 0x1000, pointer: 0x0326, target: 0xf1ca });
+    expect(describeWarning(warning!)).toContain("$F1CA");
+    expect(describeWarning(warning!)).toContain("mark_function");
+  });
+
+  it("says so plainly when nothing supplies the vector", () => {
+    const reader = flat({ 0x1000: [0x6c, 0x26, 0x03] });
+    const { warnings } = disassemble(reader, { entryPoints: [0x1000] });
+    const warning = warnings.find((w) => w.type === "indirectJump");
+    expect(warning).toMatchObject({ pointer: 0x0326 });
+    expect(warning && "target" in warning).toBe(false);
+    expect(describeWarning(warning!)).toContain("nothing to read");
+  });
+
+  it("takes the high byte from the same page, as the hardware does", () => {
+    // JMP ($10FF) reads $10FF and $1000 — not $1100. People relied on this.
+    const reader = flat({ 0x2000: [0x6c, 0xff, 0x10], 0x10ff: [0x34], 0x1000: [0x12] });
+    const { warnings } = disassemble(reader, { entryPoints: [0x2000] });
+    expect(warnings.find((w) => w.type === "indirectJump")).toMatchObject({ target: 0x1234 });
   });
 });
 
