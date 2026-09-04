@@ -445,6 +445,58 @@ Identity rides on a header and is never a tool argument, so there was no way to
 ask — and an edit recorded against the wrong name is invisible until somebody
 reads the history.
 
+### What three readers on one document actually collide over
+
+Experiment 7 put three readers in one project holding Revenge of the Mutant
+Camels, decrunched — 47KB, roughly ten times Gridrunner, and the first program
+here big enough that two readers are not in the same routine merely because there
+is nowhere else to be. Every collaboration run before it measured crowding.
+
+**They partitioned themselves, with no machinery for it.** One took the front
+end, one the high code, one the data; the third said so in as many words — *"I
+lost a race for the code, so I took the data"* — and that was the whole
+negotiation. 648 tool calls, unexplained bytes from 40,359 to 13. Nobody asked
+for claims or leases, which is the second run in a row to decline the coordination
+this file deliberately did not build.
+
+**What they collided over was naming, and it was invisible.** `set_label` is an
+upsert keyed by address: it reuses the id already there, so it *renames* rather
+than adds. For one author that is the point — `dat_6700` becoming `zoneTable`.
+For three it destroyed **123 names across 74 addresses, and told nobody**, writer
+or loser. Both got `ok`.
+
+The count understates it, because the losses were **disagreements rather than
+duplicates**: `jumpTimer` against `jumpVelocity`, `shotInFlight` against
+`laserSoundActive`. Two readers concluded different things about one byte and one
+silently won — which is precisely the outcome a shared document exists to
+prevent, and the reason a merge should surface a conflict rather than pick.
+
+This is `set_comment`'s history repeating on the object this file states the rule
+for *first*: **an address cannot identify a label.** Both times the upsert was
+justified by single-author use, both times it survived the arrival of a second
+author unrevisited, and both times an experiment had to find it. The fix is the
+same shape — say so — and discriminates on where the old name came from, because
+replacing an invented name is the ordinary act and warning about it would be
+noise on the first day of every project.
+
+**An extent was shared state nobody could see.** It reshapes every operand in its
+range and any writer can set one, and no read tool reported it: two readers each
+hit the same 2K extent on `$1800` and each blamed the other. A field that only
+the writer can observe is a field that will be fought over.
+
+Two more worth keeping, both from the log rather than the reports:
+
+- **`select_target` is shared by design, so nobody looked at the loader all run.**
+  Reading another view means changing it for everybody, which nobody was willing
+  to do — so a whole target went unread. The parked question of whether the
+  shared selection would be contended has its answer, and it is not the one the
+  note expected: not contention, avoidance.
+- **`$A000-$BFFF` is where the flat memory model finally cost something real.**
+  Eight kilobytes of zeros in the image, nothing writing `$00`/`$01`, so BASIC
+  ROM is banked in and the game's random number generator — eleven callers —
+  reads ROM bytes for entropy. re64 cannot see that, and this is the first time
+  banking has been a missing answer rather than a hypothetical.
+
 ### Chat: the one root the project cannot see
 
 People and agents working the same document need somewhere to talk, and a
