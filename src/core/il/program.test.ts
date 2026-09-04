@@ -78,3 +78,23 @@ describe("running a whole program", () => {
     expect(runProgram(map, { from: 0x0800 }).stoppedAt).toBe("$1234");
   });
 });
+
+describe("calling a routine rather than launching a program", () => {
+  it("returns to where the caller said, instead of into rubbish", () => {
+    // LDA #$07 / STA $10 / RTS, at $1000.
+    const map = new MemoryMap();
+    map.addLayer(new BytesLayer("routine", 0x1000, new Uint8Array([0xa9, 0x07, 0x85, 0x10, 0x60])));
+
+    const called = runProgram(map, { from: 0x1000, returnTo: 0x9000, maxInstructions: 1000 });
+    expect(called.reason).toBe("returned");
+    expect(called.memory[0x10]).toBe(0x07);
+
+    // Without it the RTS pops an untouched stack and control lands wherever
+    // that points. Which reason comes back is then decided by what the rubbish
+    // address happens to hit: running RESTOR out of the KERNAL looked clean for
+    // exactly this reason, while IOINIT — same shape, ordinary RTS — stopped on
+    // an unmodelled instruction four instructions later.
+    const launched = runProgram(map, { from: 0x1000, maxInstructions: 1000 });
+    expect(launched.reason).not.toBe("returned");
+  });
+});

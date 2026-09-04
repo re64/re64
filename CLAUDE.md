@@ -2728,6 +2728,28 @@ capability at the end was nobody's plan.
 It is opt-in twice, like the functional test: the ROM is not in this repository
 and never will be, so `kernal-vectors.test.ts` skips when it is absent.
 
+### Calling a ROM routine, rather than launching it
+
+`runProgram` starts a program. Calling a *subroutine* is a different thing, and
+the difference was hidden until it produced two opposite verdicts on the same
+shape of code. `RESTOR` — 232 instructions, an ordinary `RTS` — reported *"left
+the program"*, which read as a clean finish. `IOINIT` — 38 instructions, no
+illegal opcode, an ordinary `RTS` — reported *"unmodelled instruction"*.
+
+Neither was about the routine. Nothing had pushed a return address, so both
+`RTS`s popped an untouched stack and carried on into whatever that pointed at;
+one address happened to land outside the map and the other inside the ROM. The
+verdict was decided by where the wreckage came to rest.
+
+So `returnTo` pushes a return address and stops when it is reached, giving a
+`returned` reason that means what it says. All three of `RESTOR`, `IOINIT` and
+`RAMTAS` now return cleanly — `RAMTAS` after 895,862 instructions, because
+sizing the RAM means writing all of it.
+
+Worth keeping because the technique it protects is load-bearing: running the
+KERNAL's own initialisation is how this project learns the machine's defaults
+without being told them, and it was working by luck.
+
 ### Shipping what the KERNAL does, to people with no ROM
 
 `npm run gen:kernal` derives `src/core/c64/kernal-effects.ts` — what each of the
@@ -2929,6 +2951,29 @@ itself; the label-name map is needed for rendering anyway, so the collision list
 falls out of work already done. Anything requiring its own traversal — "is this
 named routine reachable" — goes in a separate on-demand function from the start
 rather than being added here and discovered to be slow later.
+
+### A catalogue of the machine's trickery, in the fewest bytes that show it
+
+`src/core/arch/mos6502/idioms.test.ts`. Every entry was met in a real binary —
+Gridrunner, the KERNAL, or Revenge of the Mutant Camels — and each is a place
+where the obvious reading of the bytes is wrong.
+
+It exists because **the evidence now spans three programs and is growing**, and a
+corner case pinned only against a 65KB binary is one nobody can see: that
+assertion says "Gridrunner still works", not "this is what `PLA PLA RTS` means".
+So each is reduced to the fewest bytes that still show it and records **where it
+was seen**, so the provenance outlives the binary. Duplicating a component's own
+test is deliberate and cheap — a component test says the component works, this
+says what the machine does.
+
+The rule for adding one: a *naive* reading gives a confidently wrong answer. Not
+merely unusual — wrong.
+
+Two of the first fifteen were written with the wrong expectation, which is the
+argument for the file in one line. `PLA TAY PLA TAX PLA RTI` is *not* balanced —
+the interrupt pushed what it is popping — and asserting otherwise would have
+pinned a bug. And a `JMP` whose target is inside its own operand bytes was
+written twice, in two different sessions.
 
 ### Name the observation; let the caller bring the knowledge
 

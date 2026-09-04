@@ -41,8 +41,10 @@ describe.runIf(existsSync(ROM))("running RESTOR out of the ROM", () => {
   const run = () => {
     const map = new MemoryMap();
     map.addLayer(new BytesLayer("kernal", 0xe000, new Uint8Array(readFileSync(ROM))));
-    // $FF8A RESTOR: restore the default I/O vectors.
-    return runProgram(map, { from: 0xff8a, maxInstructions: 100_000 });
+    // $FF8A RESTOR: restore the default I/O vectors. Called rather than
+    // launched — its RTS would otherwise pop an untouched stack, and this test
+    // used to pass only because the rubbish address landed outside the map.
+    return runProgram(map, { from: 0xff8a, returnTo: 0x033c, maxInstructions: 100_000 });
   };
 
   it("installs the documented vectors, and only those", () => {
@@ -58,9 +60,9 @@ describe.runIf(existsSync(ROM))("running RESTOR out of the ROM", () => {
     expect(result.wrote.some((w) => w.start === "$0314")).toBe(true);
   });
 
-  it("finishes on its own rather than running out of budget", () => {
+  it("returns rather than running out of budget", () => {
     const result = run();
-    expect(result.reason).toBe("left the program");
+    expect(result.reason).toBe("returned");
     expect(result.instructions).toBeLessThan(1000);
   });
 });

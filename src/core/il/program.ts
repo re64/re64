@@ -43,6 +43,8 @@ export type StopReason =
   | "unmodelled instruction"
   /** Bytes that do not decode. */
   | "undecodable"
+  /** A routine called with `returnTo` reached its own RTS. */
+  | "returned"
   /** Ran out of the instruction budget, so the result is a program mid-flight. */
   | "budget";
 
@@ -51,6 +53,22 @@ export interface ProgramRunOptions {
   from: number;
   /** Stop when the program counter reaches this, instead of running on. */
   stopAt?: number;
+  /**
+   * Call `from` as a subroutine: push this as its return address and stop when
+   * it is reached.
+   *
+   * Without it a routine's own `RTS` pops whatever happens to be at the bottom
+   * of an untouched stack and carries on into nowhere. That is not theoretical:
+   * running `RESTOR` out of the KERNAL looked clean only because the rubbish it
+   * returned to happened to be outside the loaded map, while `IOINIT` — 38
+   * instructions, no illegal opcode, an ordinary `RTS` — ran on for four more
+   * and stopped on an unmodelled instruction. Same routine shape, opposite
+   * verdicts, decided by what the garbage address landed on.
+   *
+   * So a caller who means "call this" says so, and gets `returned` rather than
+   * a reason that describes where the wreckage came to rest.
+   */
+  returnTo?: number;
   /** Default 20 million, which is about ten seconds. */
   maxInstructions?: number;
 }
@@ -119,6 +137,15 @@ export function runProgram(map: MemoryMap, options: ProgramRunOptions): ProgramR
   // the stack page, which `run_block` learned the hard way.
   machine.set({ space: "register", offset: 3, size: 1 }, 0xff);
 
+  // `RTS` pops an address and continues at the byte *after* it, so what goes on
+  // the stack is one less than where control should resume.
+  if (options.returnTo !== undefined) {
+    const pushed = (options.returnTo - 1) & 0xffff;
+    machine.memory[0x01ff] = (pushed >> 8) & 0xff;
+    machine.memory[0x01fe] = pushed & 0xff;
+    machine.set({ space: "register", offset: 3, size: 1 }, 0xfd);
+  }
+
   const budget = options.maxInstructions ?? 20_000_000;
   const seen = new Set<number>();
   let instructions = 0;
@@ -129,6 +156,10 @@ export function runProgram(map: MemoryMap, options: ProgramRunOptions): ProgramR
     const at = machine.pc;
     if (options.stopAt !== undefined && at === options.stopAt && instructions > 0) {
       reason = "reached the stop address";
+      break;
+    }
+    if (options.returnTo !== undefined && at === options.returnTo && instructions > 0) {
+      reason = "returned";
       break;
     }
     // Left the program: an address neither the project supplies nor this run

@@ -57,8 +57,9 @@ const kernalLayer = () => new BytesLayer("kernal", 0xe000, rom);
 // 1. Watch the machine install its own vectors.
 const boot = new MemoryMap();
 boot.addLayer(kernalLayer());
-const restored = runProgram(boot, { from: RESTOR, maxInstructions: 100_000 });
-if (restored.reason !== "left the program") {
+// Called, not launched: $033C is the tape buffer, which nothing here runs.
+const restored = runProgram(boot, { from: RESTOR, returnTo: 0x033c, maxInstructions: 100_000 });
+if (restored.reason !== "returned") {
   throw new Error(`RESTOR did not finish on its own: ${restored.reason}`);
 }
 const installed = new Uint8Array(32);
