@@ -202,6 +202,43 @@ describe("building a project from a disk image", () => {
     expect(camels.targets().layers.map((l) => l.name)).not.toContain("scratch");
   });
 
+  it("says when a write renamed a name somebody chose", () => {
+    // set_label is an upsert keyed by address: it reuses the id already there,
+    // so it renames rather than adds. Right for one author — `dat_6700` into
+    // `zoneTable` is the point — and destructive for three. Experiment 7
+    // measured it: 74 addresses had a name replaced by another reader, 123
+    // names lost, and nobody was told once.
+    ws.createProject("camels");
+    const camels = upload("camels", "p.prg", new Uint8Array([0x01, 0x08, 0xa9, 0x01, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "p.prg" });
+
+    camels.setLabel(builder, 0x0801, "waveTable");
+    const over = camels.setLabel(builder, 0x0801, "zoneTable") as { warnings?: string[] };
+    expect(over.warnings?.join(" ")).toMatch(/was "waveTable"/);
+    expect(over.warnings?.join(" ")).toMatch(/add_label/);
+  });
+
+  it("stays quiet when the name it replaced was invented", () => {
+    // Renaming an auto `dat_XXXX` is the ordinary act and must not warn, or the
+    // signal is noise on the first day of any project.
+    ws.createProject("camels");
+    const camels = upload("camels", "p.prg", new Uint8Array([0x01, 0x08, 0xa9, 0x01, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "p.prg" });
+
+    const first = camels.setLabel(builder, 0x0803, "loadOne") as { warnings?: string[] };
+    expect(first.warnings ?? []).toEqual([]);
+  });
+
+  it("reports a label's extent, which any writer can set", () => {
+    ws.createProject("camels");
+    const camels = upload("camels", "p.prg", new Uint8Array([0x01, 0x08, 0xa9, 0x01, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "p.prg" });
+    camels.setLabel(builder, 0x0801, "table", "address", undefined, 4);
+
+    const found = camels.labels().labels.find((l) => l.name === "table");
+    expect(found?.extent).toBe(4);
+  });
+
   it("does not hide the symbols layer a name had to create", () => {
     // A target is an allowlist of layer ids, so a layer made *after* one exists
     // falls outside it — and naming a byteless address makes exactly that layer,

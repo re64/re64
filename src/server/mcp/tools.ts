@@ -194,7 +194,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "ambiguous, or report what you found. " +
       "It is not an annotation: it goes nowhere near the listing, leaves no " +
       "history entry, cannot be undone, and is not in the exported file. Put a " +
-      "conclusion in a comment; put a conversation here.",
+      "conclusion in a comment; put a conversation here. " +
+      "At most 2000 characters, and it refuses rather than truncating — a " +
+      "long status post is several messages.",
     { project, text: z.string().min(1).max(2000) },
     ({ project: id, text }: { project?: string; text: string }) => {
       const { workspace, caller } = context();
@@ -570,7 +572,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     "Addresses the disassembler had to invent a name for, most-referenced " +
       "first. This is the work queue: an auto-named address is one that has " +
       "been found and not yet understood. Their names cannot be edited by id — " +
-      "name the address instead.",
+      "name the address instead. " +
+      "Returns them in `targets`, beside a `total` that counts them all rather " +
+      "than the page.",
     {
       project,
       kind: z
@@ -1601,11 +1605,11 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "reports the ids.",
     {
       project,
-      start: address,
-      id: z.string().optional().describe("Which region, when several start at that address"),
+      start: address.optional().describe("Where it begins; not needed if you give `id`"),
+      id: z.string().optional().describe("Which region — enough on its own"),
       expectVersion: z.string().optional(),
     },
-    (args: { project?: string; start: number; id?: string; expectVersion?: string }) => {
+    (args: { project?: string; start?: number; id?: string; expectVersion?: string }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);

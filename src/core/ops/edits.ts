@@ -396,7 +396,13 @@ export function regionDeleteOp(
     if (here.length === 0) continue;
     if (here.length > 1) {
       const shown = here
-        .map((r) => `${r.id} (${r.kind}${r.name ? ` "${r.name}"` : ""} to $${String(r.end)})`)
+        // `end` on a project region is already written as `$9120`, so prefixing
+        // it again produced `$$9120` in the one message whose whole job is to
+        // let a caller tell two regions apart.
+        .map(
+          (r) =>
+            `${r.id} (${r.kind}${r.name ? ` "${r.name}"` : ""} to $${hex4(parseProjectAddress(r.end))})`
+        )
         .join(", ");
       throw new Error(
         `Several regions start at $${hex4(start)}, so that does not say which to ` +

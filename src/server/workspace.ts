@@ -1188,6 +1188,11 @@ export class Workspace {
       source: label.source.kind,
       references: program.xrefs.count(label.address),
       writable: !invented && !builtIn,
+      // An extent reshapes every operand in its range and any writer can set
+      // one, and no read tool reported it — so it was shared state nobody could
+      // see. Two readers in experiment 7 each hit the same 2K extent on $1800
+      // and each blamed the other.
+      ...(label.extent === undefined ? {} : { extent: label.extent }),
       ...(label.description === undefined ? {} : { description: label.description }),
     };
   }
@@ -2034,7 +2039,9 @@ export class Workspace {
   ): EditResult {
     // A comment given here is a comment about the address, not a field on the
     // label — one action, two operations, so undo takes both back together.
+    let renamed: { address: number; from: string }[] = [];
     const result = this.edit(caller, (loaded) => {
+      renamed = this.chosenNamesAt(loaded, [address]).filter((r) => r.from !== name);
       const { layerId, create, joins } = ensureOwningLayer(loaded, address, this.room.projectId);
       const label: Op = create
         ? { op: "label.set", id: newId("lbl"), layerId, address, name, type, extent }
@@ -2062,7 +2069,11 @@ export class Workspace {
     // A label inside an instruction resolves in operands and renders no row —
     // the long-standing gap, now said out loud at the point of writing rather
     // than left to be discovered in a listing.
-    return this.warnIfInsideInstruction(result, address, "label");
+    return this.warnIfInsideInstruction(
+      this.warnIfRenamingAChosenName(result, renamed),
+      address,
+      "label"
+    );
   }
 
   /**
@@ -2089,7 +2100,13 @@ export class Workspace {
   ): EditResult {
     if (labels.length === 0) throw new Error("Give at least one label.");
 
-    return this.edit(caller, (loaded) => {
+    let renamed: { address: number; from: string }[] = [];
+    const result = this.edit(caller, (loaded) => {
+      // Read before the write, since afterwards the old name is gone.
+      renamed = this.chosenNamesAt(
+        loaded,
+        labels.map((l) => l.address)
+      ).filter((r) => !labels.some((l) => l.address === r.address && l.name === r.from));
       const ops: Op[] = [];
       let madeLayer: string | undefined;
 
@@ -2138,6 +2155,8 @@ export class Workspace {
 
       return ops;
     });
+
+    return this.warnIfRenamingAChosenName(result, renamed);
   }
 
   /**
@@ -2675,6 +2694,65 @@ export class Workspace {
   }
 
   /** Append the mid-instruction warning to a result, when it applies. */
+  /**
+   * Say so when a write renamed a name somebody chose.
+   *
+   * `set_label` is an upsert keyed by address: it reuses the id of whatever
+   * label is already there, so it *renames* it rather than adding a second. For
+   * one author that is right — turning `dat_6700` into `zoneTable` is the whole
+   * point. For three it is destructive and silent, and experiment 7 measured
+   * the cost: **74 addresses had a name replaced by another reader, 123 names
+   * lost, and nobody was told once.** Both the writer and the loser got `ok`.
+   *
+   * Worse than the count, the losses were *disagreements* — `jumpTimer` against
+   * `jumpVelocity`, `shotInFlight` against `laserSoundActive`. Two readers
+   * concluded different things about one byte and one of them silently won,
+   * which is the one outcome a shared document exists to prevent.
+   *
+   * The discrimination that matters is where the old name came from. Replacing
+   * an invented `dat_XXXX` is the ordinary act and stays quiet; replacing a name
+   * a person chose is the collision, and is reported. Naming *who* chose it is
+   * not on the label — `changes_since` resolves that from the ops log, which is
+   * where the answer lives.
+   */
+  private warnIfRenamingAChosenName(
+    result: EditResult,
+    renamed: { address: number; from: string }[]
+  ): EditResult {
+    if (renamed.length === 0) return result;
+    const list = renamed
+      .slice(0, 6)
+      .map((r) => `${hex4(r.address)} was "${r.from}"`)
+      .join(", ");
+    result.warnings = [
+      ...(result.warnings ?? []),
+      `Renamed ${renamed.length} name(s) somebody had chosen: ${list}` +
+        (renamed.length > 6 ? `, and ${renamed.length - 6} more` : "") +
+        `. set_label replaces the label at an address rather than adding one — ` +
+        `use add_label for a second name, and changes_since to see who chose the ` +
+        `first.`,
+    ];
+    return result;
+  }
+
+  /** Names a write is about to replace that a person, rather than the walk, chose. */
+  private chosenNamesAt(
+    loaded: LoadedProject,
+    addresses: readonly number[]
+  ): { address: number; from: string }[] {
+    const found: { address: number; from: string }[] = [];
+    for (const address of addresses) {
+      for (const layer of loaded.project.layers) {
+        const label = layer.labels?.find((l) => parseProjectAddress(l.address) === address);
+        if (label) {
+          found.push({ address, from: label.name });
+          break;
+        }
+      }
+    }
+    return found;
+  }
+
   private warnIfInsideInstruction(result: EditResult, address: number, what: string): EditResult {
     const inside = this.insideInstruction(address);
     if (inside === undefined) return result;
@@ -3108,10 +3186,35 @@ export class Workspace {
     };
   }
 
-  removeRegion(caller: Caller, start: number, id?: string): EditResult {
+  /**
+   * Remove a region, by where it starts or by which one it is.
+   *
+   * An id was accepted only *alongside* the start address it exists to
+   * disambiguate — so the unambiguous handle had to be sent with the ambiguous
+   * one, which is the wrong way round and is what a reader in experiment 7
+   * complained about. Either identifies a region on its own now.
+   */
+  removeRegion(caller: Caller, start: number | undefined, id?: string): EditResult {
+    if (start === undefined && id === undefined) {
+      throw new Error("Give a start address or a region id; describe_project reports both.");
+    }
     return this.edit(caller, (loaded) => {
-      const op = regionDeleteOp(loaded, start, id);
-      if (!op) throw new Error(`No region starts at ${hex4(start)}`);
+      const at =
+        start ??
+        loaded.project.layers
+          .flatMap((layer) => layer.regions ?? [])
+          .find((region) => region.id === id)?.start;
+      if (at === undefined) {
+        throw new Error(`No region has id ${id}. describe_project reports the ids.`);
+      }
+      const op = regionDeleteOp(loaded, parseProjectAddress(at), id);
+      if (!op) {
+        throw new Error(
+          start === undefined
+            ? `No region has id ${id}.`
+            : `No region starts at ${hex4(start)}.`
+        );
+      }
       return [op];
     });
   }
@@ -3267,6 +3370,8 @@ export interface LabelSummary {
   source: string;
   references: number;
   writable: boolean;
+  /** How many bytes the name covers, when it names an array rather than a spot. */
+  extent?: number;
   /**
    * What the name means, for names this project did not choose.
    *
