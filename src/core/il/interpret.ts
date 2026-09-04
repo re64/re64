@@ -140,6 +140,30 @@ export function execute(ops: readonly PcodeOp[], machine: Machine): Flow {
   let flow: Flow = { kind: "next" };
 
   for (const op of ops) {
+    const next = executeOne(op, machine);
+    if (next) {
+      if (next.kind === "unmodelled") return next;
+      flow = next;
+    }
+  }
+
+  return flow;
+}
+
+/**
+ * Run one operation, and say where control goes if it decides that.
+ *
+ * Split out of `execute` so the abstract interpreter can borrow these semantics
+ * rather than restate them. It needs a concrete answer for every operation whose
+ * inputs it happens to know completely, and 37 opcodes written twice is 37
+ * chances for the two to disagree — with the abstract one being the copy nobody
+ * runs against Klaus Dormann's suite.
+ *
+ * Returns `undefined` where control simply falls through, which is most of them.
+ */
+export function executeOne(op: PcodeOp, machine: Machine): Flow | undefined {
+  let flow: Flow | undefined;
+  {
     const input = (i: number) => machine.get(op.inputs[i]);
     const put = (value: number) => {
       if (op.output) machine.set(op.output, value);

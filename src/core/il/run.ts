@@ -56,6 +56,19 @@ export interface BlockInputs {
    * credibility of the first.
    */
   image?: (address: number) => number | undefined;
+  /**
+   * Bytes already on the stack, deepest first, with the pointer set below them.
+   *
+   * Reachable before this existed — set `SP` and the `$01xx` cells by hand — and
+   * awkward enough that nobody would: the caller had to know the stack page,
+   * know it grows downwards, and keep the pointer consistent with the cells.
+   * An interrupt handler is the case that makes it worth having, since it is
+   * entered with a return address and a status byte already pushed.
+   *
+   * Ignored where the caller sets `SP` itself, since then they have said where
+   * the stack is and this would contradict them.
+   */
+  stack?: number[];
 }
 
 /** How much to trust a value the block read. */
@@ -210,16 +223,24 @@ export function runBlock(block: BasicBlock, inputs: BlockInputs = {}): BlockRun 
   const sourceOf = (at: number): ValueSource =>
     given.has(at) ? "given" : inImage.has(at) ? "image" : "unknown";
 
+  const stackSeed = inputs.stack ?? [];
   const before = {} as Record<RegisterName, number>;
   for (const name of REGISTER_NAMES) {
     // A real program sets the stack pointer to $FF at boot and leaves it near
     // there. Starting it at zero made the first push write $0100 and every pull
     // read $0101, so a block ending in RTS reported reading the bottom of the
     // stack page as though that were a finding.
-    const value = inputs.registers?.[name] ?? (name === "SP" ? 0xff : 0);
+    const value =
+      inputs.registers?.[name] ??
+      (name === "SP" ? 0xff - (inputs.registers?.SP === undefined ? stackSeed.length : 0) : 0);
     machine.set({ space: "register", offset: OFFSETS[name], size: 1 }, value);
     before[name] = machine.register(OFFSETS[name]);
   }
+
+  // Deepest first, so the last entry is what a `PLA` takes. Written straight
+  // into the stack page rather than through `memory`, so the caller does not
+  // have to know where that is or which way it grows.
+  stackSeed.forEach((byte, i) => machine.memory[0x01ff - i] = byte & 0xff);
 
   // Reads are recorded on first sight so a cell read twice reports the value it
   // held on entry, which is what "the block's input" means. Writes report the

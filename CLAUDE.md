@@ -2257,7 +2257,15 @@ every routine body was a block nothing entered, seeded `unknown`. It came back
 pass looks useless, which is exactly the trap.
 
 Following calls, both real targets prove **binary everywhere**: 19 of 19 on
-Gridrunner, 3 of 3 in the KERNAL, no unknowns.
+Gridrunner, 3 of 3 in the KERNAL, no unknowns — **measured from `$83C1` alone,
+which the sentence did not say and which turns out to be the whole of it.** Given
+the project's own entry points the answer is `unknown` at all 18, because
+`$83E2` is the IRQ handler, an origin in its own right, and a 6502 does not
+clear `D` on interrupt. Code shared between the main flow and the handler
+therefore has genuinely unknown `D`. That is the honest answer and it is much
+less useful than the one recorded here for months; see "Seeding an interrupt
+handler" in the task list for the fix, which is that a handler is not entered
+with nothing known but with whatever the program had.
 
 The question a callee raises is *"can this touch `D` at all"* rather than *"what
 does it leave"*. The second is more precise and needs a second fixpoint over
@@ -2273,6 +2281,101 @@ KERNAL handlers do it themselves. Assuming clear would assume the thing those
 The by-product is worth as much as the correctness: `decimalSites` reports every
 `ADC`/`SBC` not proved binary, and BCD on this machine almost always means a
 score, a clock, or a number being shown to somebody.
+
+### One analysis under all of it: known bits
+
+`flags.ts` had a walker per flag, and the two it could not do at all were the
+argument for replacing it. `N` is bit seven of a *value*, so no amount of
+watching `SEC`/`CLC`-shaped instructions will ever prove it; `B` is not stored
+anywhere on this machine and exists only as bit four of the byte `PHP` and `BRK`
+push. So the flags stopped being a special case: every one of them is a register
+the lifter already writes, and `src/core/analysis/values.ts` runs the lifted
+operations over an abstract domain until nothing moves. `proveFlag` is a query
+over that now, and `flags.ts` went from 328 lines to 212.
+
+**The domain is known *bits*, not known bytes, and `PHP` is why.** It assembles
+one byte out of seven independent flags, and a handler asks about exactly one of
+them with `AND #$10`. Under a whole-byte lattice that byte is simply unknown and
+the question has no answer. Per-bit, `B` survives the round trip through the
+stack and the `AND` extracts it.
+
+Three things fell out that were not the reason for doing it:
+
+- **`N` from one bit.** `AND #$7F` proves the flag clear with every other bit of
+  the value still a mystery.
+- **`Z` in both directions.** Any bit known set proves it clear; all bits known
+  clear proves it set.
+- **Carry out of an addition**, which is often settled where the sum is not —
+  two known zeros in the top bits carry nothing whatever the low bits do.
+
+**Comparisons are done on ranges, not by scanning bits.** Scanning from the top
+stops at the first undetermined bit and answers nothing, which is exactly what
+`AND #$7F` leaves; the range says 0 to 127, and nothing in it is negative. That
+one change is the difference between `N` being provable and not.
+
+**Not symbolic execution, and the boundary is what keeps it cheap.** A symbolic
+domain tracks *expressions*, so it can say "A is whatever X was" and relate two
+values it never learned. This tracks per-bit facts only: it cannot say two
+unknowns are equal and never builds a term. In exchange every value is a fixed
+width, the lattice has finite height, and a loop reaches a fixpoint with no
+widening rule. If relational reasoning is ever wanted the escalation is an SMT
+solver rather than a bigger lattice — **Triton** (`triton-library.github.io`) is
+the reference implementation of that shape, with the same caveat as SLEIGH: it
+is C++/Python, so it cannot go where this analysis goes.
+
+**The stack is modelled as a stack.** Its absolute address is not knowable —
+nothing says where `SP` started — but *what was pushed* is, so a value keeps its
+identity across `PHP … PLP` even though the cell it sat in is anonymous.
+Addresses derived from `SP` are found by taint, the same property `blockEffects`
+uses to keep the stack out of "an address I could not name", and the whole stack
+is abandoned when `SP` is assigned from anywhere else — which is `TXS`, and means
+the depth has stopped being relative to anything.
+
+**An interrupt handler can be seeded with what it was entered with.** `stackAt`
+on the analysis and `stack` on `runBlock`: a status byte with `B` decided and
+everything else unknown. That is what lets the same handler be analysed twice
+and give two answers, which is honest, because it does two things. Both were
+reachable before by setting `SP` and the `$01xx` cells by hand, and nobody would.
+
+**Lazy, and it has to be.** The fixpoint costs about as much again as the
+disassembly — 13ms to analyse Gridrunner, 22ms more for this — and `analyze()`
+runs on every document update against a budget of roughly 30ms before the
+browser stutters under a collaborator. `ProgramAnalysis.values` is a memoised
+getter and nothing on the read path touches it until something asks about a flag.
+
+**The lattice is checked exhaustively rather than by example.** Every pair of
+one-byte patterns against every concrete pair they stand for, for and, or, xor,
+add, subtract, both comparisons and equality: a bit the domain claims to know
+must be that bit in every concretisation. It is cheap at this width and it is
+the property everything above rests on.
+
+### An origin is not a decode root
+
+The pass needed seeding, and seeding it with `entryPoints` was wrong in a way
+this file predicted years earlier. `entryPointsFor` returns every `entry`,
+`function` and `code` label plus every code region start, because all of them are
+places the *disassembler* must look. An origin is something else: an address
+reached from outside, where nothing can be assumed.
+
+The guidance on label types said exactly this would happen:
+
+> Do not collapse these because they behave alike today. That sameness is an
+> artifact of the disassembler only ever queueing them; they diverge as soon as
+> there is call-graph or basic-block analysis, which is where the information
+> would be needed and no longer recoverable.
+
+Treating a `function` label as an origin is not merely imprecise, it is
+**contaminating**: an origin asserts "the flags are unknown here", and joining
+that into code the real start had proved something about destroys the proof.
+`ProgramAnalysis.origins` is therefore a separate, strict subset — declared entry
+points, load addresses, and `entry`-typed labels.
+
+Coverage and precision then pull in opposite directions, and the order reconciles
+them: run from the origins first, and only afterwards seed any decode root they
+never reached. Proofs made on the way in survive; code no origin reaches still
+gets an answer. That the second pass can then lose a proof in code both reach is
+not a shortcoming — if a routine really is entered from somewhere this analysis
+cannot see, the flags really are unknown there.
 
 ### The same proof, for carry and for interrupts
 

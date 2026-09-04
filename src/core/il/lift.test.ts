@@ -253,6 +253,25 @@ describe("what a whole block touches", () => {
   });
 });
 
+describe("seeding the stack for a run", () => {
+  it("puts bytes where a pull will find them", () => {
+    // PLA / RTS, with a status byte already pushed — the shape an interrupt
+    // handler is entered in. Reachable before by setting SP and the $01xx cells
+    // by hand, which needed the caller to know where the stack is and which way
+    // it grows.
+    const run = runBlock(blockOf([0x68, 0x60]), { stack: [0xaa, 0x30] });
+    expect(run.registers.A).toBe(0x30);
+  });
+
+  it("leaves the caller's own SP alone", () => {
+    // Saying where the stack pointer is and saying what is on the stack are two
+    // different claims, and the explicit one wins.
+    // SP started at $FE and the pull stepped it to $FF.
+    const run = runBlock(blockOf([0x68, 0x60]), { stack: [0x11], registers: { SP: 0xfe } });
+    expect(run.registers.A).toBe(0x11);
+  });
+});
+
 describe("what a block does to the stack", () => {
   it("counts a call as two bytes, because it emits two pushes", () => {
     expect(stackDelta(blockOf([0x20, 0x00, 0x90]).instructions)).toBe(2); // JSR

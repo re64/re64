@@ -17,6 +17,7 @@ import { DisassemblyWarning } from "../arch/mos6502/disassembler.js";
 import { Label, LabelIndex, createAutoLabel } from "../memory/label.js";
 import { HygieneFinding, checkHygiene } from "./hygiene.js";
 import { decimalSites } from "./flags.js";
+import { ValueAnalysis, proveValues } from "./values.js";
 import type { DecimalMode } from "../il/lift.js";
 import { LoadedProject } from "../project/loader.js";
 import { parseProjectAddress } from "../project/project.js";
@@ -34,6 +35,23 @@ export interface ProgramAnalysis {
   loaded: LoadedProject;
   /** Where disassembly started, after resolving project and label sources. */
   entryPoints: readonly number[];
+  /**
+   * Where execution begins, as opposed to where decoding does.
+   *
+   * A strict subset of `entryPoints`: the declared entry points, the load
+   * addresses, and `entry`-typed labels. A dataflow pass seeds from these,
+   * because an origin means "nothing is known here" and a routine label is not
+   * that — it is called, and gets its state from whoever calls it.
+   */
+  origins: readonly number[];
+  /**
+   * What is known about the machine at each instruction, computed on demand.
+   *
+   * Deliberately lazy: the fixpoint costs about as much as the disassembly it
+   * follows, and nothing on the read path needs it until a question about a
+   * flag is asked.
+   */
+  readonly values: ValueAnalysis;
   /**
    * Every decoded instruction.
    *
@@ -89,6 +107,38 @@ export interface ProgramAnalysis {
 const hex4 = (address: number) => address.toString(16).toUpperCase().padStart(4, "0");
 
 /** Where to start, in order of authority. */
+/**
+ * Where execution *begins*, which is not where decoding begins.
+ *
+ * `entryPointsFor` returns decode roots — every `entry`, `function` and `code`
+ * label, plus the start of every code region — because all of them are places
+ * the disassembler must look. A dataflow analysis needs something narrower: an
+ * origin is an address reached from outside the program, where nothing can be
+ * assumed about the machine's state.
+ *
+ * This file's own guidance predicted the moment the two would have to part:
+ *
+ * > Do not collapse these because they behave alike today. That sameness is an
+ * > artifact of the disassembler only ever queueing them; they diverge as soon
+ * > as there is call-graph or basic-block analysis.
+ *
+ * Treating a `function` label as an origin is not merely imprecise, it is
+ * *contaminating*: an origin asserts "the flags are unknown here", and joining
+ * that into code the real start had already proved something about destroys the
+ * proof. On the reference project it is the difference between `D` proved binary
+ * at every arithmetic site and at none of them.
+ */
+function executionOrigins(loaded: LoadedProject, override?: number[]): number[] {
+  if (override?.length) return override;
+  const { project, prgEntries, userLabels } = loaded;
+  const declared = project.entryPoints?.map(parseProjectAddress) ?? [];
+  const entryLabels = userLabels
+    .getAllLabels()
+    .filter((l) => l.type === "entry")
+    .map((l) => l.address);
+  return [...new Set([...declared, ...prgEntries, ...entryLabels])];
+}
+
 function entryPointsFor(loaded: LoadedProject, override?: number[]): number[] {
   const { project, prgEntries, userLabels } = loaded;
 
@@ -159,6 +209,7 @@ export function analyzeProgram(
   const { map, userLabels } = loaded;
 
   const entryPoints = entryPointsFor(loaded, override);
+  const origins = executionOrigins(loaded, override);
   const result = disassemble(map, { entryPoints, regions: map });
 
   const labels = new LabelIndex();
@@ -171,6 +222,8 @@ export function analyzeProgram(
   for (const [site, labelId] of map.labelUses) labels.bindUse(site, labelId);
 
   const autoLabels = autoLabelsFor(result.references, labels, labelTolerance);
+  let cachedValues: ValueAnalysis | undefined;
+  let cachedDecimal: ReturnType<typeof decimalSites> | undefined;
   labels.addLabels(autoLabels);
 
   const instructions = new InstructionIndex(result.instructions);
@@ -191,6 +244,7 @@ export function analyzeProgram(
     loaded,
     blocks,
     entryPoints,
+    origins,
     instructions,
     xrefs: new XrefIndex(result.references),
     outbound: OutboundIndex.from(instructions),
@@ -198,6 +252,16 @@ export function analyzeProgram(
     autoLabels,
     warnings: result.warnings,
     hygiene: checkHygiene(loaded, labels, instructions),
-    decimalSites: decimalSites(blocks, entryPoints),
+    // Lazy, and it has to be. The value fixpoint costs about as much again as
+    // the whole disassembly, and `analyze()` runs on every document update with
+    // a budget of roughly 30ms before the browser stutters under a
+    // collaborator. Nothing on the read path asks for this until something asks
+    // about a flag.
+    get values(): ValueAnalysis {
+      return (cachedValues ??= proveValues(blocks, origins, { cover: entryPoints }));
+    },
+    get decimalSites() {
+      return (cachedDecimal ??= decimalSites(blocks, entryPoints, this.values));
+    },
   };
 }

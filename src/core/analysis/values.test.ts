@@ -1,0 +1,146 @@
+import { describe, it, expect } from "vitest";
+import { proveValues, flagBefore, stackBefore, valueBefore } from "./values.js";
+import { buildBlocks } from "./blocks.js";
+import { InstructionIndex, disassemble } from "../arch/mos6502/disassembler.js";
+import { MemoryMap } from "../memory/memory-map.js";
+import { BytesLayer } from "../memory/layer.js";
+import { REG } from "../il/pcode.js";
+import { isExact } from "../il/known-bits.js";
+
+const ORG = 0x1000;
+function analyse(bytes: number[]) {
+  const map = new MemoryMap();
+  map.addLayer(new BytesLayer("test", ORG, new Uint8Array(bytes)));
+  const index = new InstructionIndex(disassemble(map, { entryPoints: [ORG] }).instructions);
+  const blocks = buildBlocks(index, [ORG]);
+  return proveValues(blocks, [ORG]);
+}
+
+describe("proving flags from values rather than from set/clear instructions", () => {
+  it("decides Z and N from an immediate load", () => {
+    // LDA #$00 / RTS — the whole point: nothing sets Z here, a value does.
+    const v = analyse([0xa9, 0x00, 0x60]);
+    expect(flagBefore(v, ORG + 2, REG.Z)).toBe("set");
+    expect(flagBefore(v, ORG + 2, REG.N)).toBe("clear");
+  });
+
+  it("proves N from bit seven with every other bit unknown", () => {
+    // LDA $10 / AND #$7F / RTS — the value stays a mystery, the sign does not.
+    const v = analyse([0xa5, 0x10, 0x29, 0x7f, 0x60]);
+    expect(isExact(valueBefore(v, ORG + 4, REG.A), 1)).toBe(false);
+    expect(flagBefore(v, ORG + 4, REG.N)).toBe("clear");
+    // Z is genuinely undecided: the low seven bits could be anything.
+    expect(flagBefore(v, ORG + 4, REG.Z)).toBe("unknown");
+  });
+
+  it("proves Z clear from one bit known set", () => {
+    // LDA $10 / ORA #$80 / RTS — cannot be zero, whatever was loaded.
+    const v = analyse([0xa5, 0x10, 0x09, 0x80, 0x60]);
+    expect(flagBefore(v, ORG + 4, REG.Z)).toBe("clear");
+    expect(flagBefore(v, ORG + 4, REG.N)).toBe("set");
+  });
+
+  it("still answers the flags the old walker answered", () => {
+    // SEI / CLD / SEC / RTS — these are register writes like any other now.
+    const v = analyse([0x78, 0xd8, 0x38, 0x60]);
+    expect(flagBefore(v, ORG + 3, REG.I)).toBe("set");
+    expect(flagBefore(v, ORG + 3, REG.D)).toBe("clear");
+    expect(flagBefore(v, ORG + 3, REG.C)).toBe("set");
+  });
+
+  it("keeps a value across the stack, and loses it on TXS", () => {
+    // LDA #$42 / PHA / LDA #$00 / PLA / RTS
+    const kept = analyse([0xa9, 0x42, 0x48, 0xa9, 0x00, 0x68, 0x60]);
+    const pulled = valueBefore(kept, ORG + 6, REG.A);
+    expect(isExact(pulled, 1)).toBe(true);
+    expect(pulled.value).toBe(0x42);
+
+    // LDA #$42 / PHA / TXS / PLA / RTS — TXS moves the pointer somewhere
+    // unrelated, so what was pushed is no longer addressable by position.
+    const lost = analyse([0xa9, 0x42, 0x48, 0x9a, 0x68, 0x60]);
+    expect(stackBefore(lost, ORG + 5)).toBeUndefined();
+    expect(isExact(valueBefore(lost, ORG + 5, REG.A), 1)).toBe(false);
+  });
+
+  it("carries B off the stack, though nothing stores it", () => {
+    // PHP / PLA / AND #$10 / RTS — B is not a register anywhere on this machine.
+    // It exists only as bit four of the byte PHP pushes, and the only way to
+    // reason about it is to follow that byte. Every other flag here is unknown.
+    const v = analyse([0x08, 0x68, 0x29, 0x10, 0x60]);
+    const extracted = valueBefore(v, ORG + 4, REG.A);
+    expect(isExact(extracted, 1)).toBe(true);
+    expect(extracted.value).toBe(0x10);
+  });
+
+  it("keeps only what both paths agree on", () => {
+    // LDA #$00 / BEQ +2 / LDA #$01 / (join) RTS
+    //   $1000 A9 00     LDA #$00
+    //   $1002 F0 02     BEQ $1006
+    //   $1004 A9 01     LDA #$01
+    //   $1006 60        RTS
+    const v = analyse([0xa9, 0x00, 0xf0, 0x02, 0xa9, 0x01, 0x60]);
+    const joined = valueBefore(v, ORG + 6, REG.A);
+    // $00 and $01 agree on the top seven bits and disagree on the last.
+    expect(joined.known).toBe(0xfe);
+    expect(flagBefore(v, ORG + 6, REG.Z)).toBe("unknown");
+    expect(flagBefore(v, ORG + 6, REG.N)).toBe("clear");
+  });
+
+  it("keeps a flag a callee cannot touch", () => {
+    //   $1000 78        SEI
+    //   $1001 20 05 10  JSR $1005
+    //   $1004 60        RTS
+    //   $1005 EA        NOP
+    //   $1006 60        RTS
+    // The callee cannot reach I, so the critical section survives the call.
+    const v = analyse([0x78, 0x20, 0x05, 0x10, 0x60, 0xea, 0x60]);
+    expect(flagBefore(v, ORG + 4, REG.I)).toBe("set");
+  });
+
+  it("gives up a flag the callee does reach", () => {
+    // Same, but the callee does CLI.
+    const v = analyse([0x78, 0x20, 0x05, 0x10, 0x60, 0x58, 0x60]);
+    expect(flagBefore(v, ORG + 4, REG.I)).toBe("unknown");
+  });
+});
+
+describe("analysing an interrupt handler as either of the two things it is", () => {
+  // A handler is entered with a status byte pushed underneath it, and the one
+  // bit that says how it got there — B, set by BRK and clear by a hardware
+  // interrupt — lives nowhere else on this machine. Seeding that byte with B
+  // decided and the rest a mystery is what lets the same code give two answers.
+  //
+  //   $1000  PLA        take the status byte
+  //   $1001  29 10      AND #$10
+  //   $1003  F0 03      BEQ $1008        (hardware interrupt path)
+  //   $1005  A9 42      LDA #$42         (BRK path)
+  //   $1007  60         RTS
+  //   $1008  A9 99      LDA #$99
+  //   $100A  60         RTS
+  const HANDLER = [0x68, 0x29, 0x10, 0xf0, 0x03, 0xa9, 0x42, 0x60, 0xa9, 0x99, 0x60];
+
+  const withStatus = (bits: { known: number; value: number }) => {
+    const map = new MemoryMap();
+    map.addLayer(new BytesLayer("handler", ORG, new Uint8Array(HANDLER)));
+    const index = new InstructionIndex(disassemble(map, { entryPoints: [ORG] }).instructions);
+    return proveValues(buildBlocks(index, [ORG]), [ORG], {
+      stackAt: new Map([[ORG, [bits]]]),
+    });
+  };
+
+  it("takes the BRK path when B is pushed set", () => {
+    // Bit 4 known set, every other bit unknown — which is all anybody knows.
+    const v = withStatus({ known: 0x10, value: 0x10 });
+    expect(flagBefore(v, ORG + 3, REG.Z)).toBe("clear");
+  });
+
+  it("takes the interrupt path when B is pushed clear", () => {
+    const v = withStatus({ known: 0x10, value: 0x00 });
+    expect(flagBefore(v, ORG + 3, REG.Z)).toBe("set");
+  });
+
+  it("cannot say which, with nothing pushed", () => {
+    const v = withStatus({ known: 0, value: 0 });
+    expect(flagBefore(v, ORG + 3, REG.Z)).toBe("unknown");
+  });
+});

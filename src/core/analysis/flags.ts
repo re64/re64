@@ -39,8 +39,9 @@
  */
 
 import { BasicBlock } from "./blocks.js";
-import { DecimalMode, lift } from "../il/lift.js";
-import { FLAGS, REG, flagsWritten } from "../il/pcode.js";
+import { ValueAnalysis, flagBefore, proveValues } from "./values.js";
+import { DecimalMode } from "../il/lift.js";
+import { REG } from "../il/pcode.js";
 import { Instruction } from "../arch/mos6502/instruction.js";
 
 /** What is known about a flag at a point. */
@@ -70,39 +71,6 @@ export const FLAG_RULES = {
 
 export type ProvableFlag = keyof typeof FLAG_RULES;
 
-/**
- * Two paths meeting. Agreement survives; disagreement does not.
- *
- * `undefined` means a path has not been seen yet, so it contributes nothing —
- * without that, the first predecessor examined would drag every block to
- * `unknown` before the fixpoint had a chance to agree.
- */
-function meet(a: FlagState | undefined, b: FlagState): FlagState {
-  if (a === undefined) return b;
-  return a === b ? a : "unknown";
-}
-
-/**
- * How one instruction changes what is known.
- *
- * The two named instructions decide it; anything else that writes the flag —
- * `PLP` and `RTI` for all three, and every arithmetic and shift instruction for
- * carry — makes it unknown. Asking the lifter who writes it keeps this from
- * becoming a hand table that drifts: `flagsWritten` reads the operations, so a
- * new instruction is covered the day it is lifted.
- */
-function after(
-  state: FlagState,
-  instruction: Instruction,
-  rules: FlagRules,
-  writes: (instruction: Instruction) => boolean
-): FlagState {
-  const mnemonic = instruction.mnemonic.toUpperCase();
-  if (mnemonic === rules.sets) return "set";
-  if (mnemonic === rules.clears) return "clear";
-  return writes(instruction) ? "unknown" : state;
-}
-
 const MODE: Record<FlagState, DecimalMode> = {
   clear: "binary",
   set: "decimal",
@@ -116,126 +84,34 @@ const MODE: Record<FlagState, DecimalMode> = {
  * depends on `D`, so a map of every address would be mostly noise.
  */
 /**
- * What is known about one flag at every instruction that reads it.
+ * A flag at every instruction the caller cares about.
  *
- * `interesting` picks which addresses are recorded: for decimal that is `ADC`
- * and `SBC`, the only instructions whose result depends on it, because a map of
- * every address would be mostly noise.
+ * A thin query over `proveValues` now, rather than a walker of its own. Every
+ * flag on this machine is a register the lifter writes — `SED` and `CLD` write
+ * `D` exactly as `LDA` writes `Z` and `N` — so "prove this flag" stopped being
+ * a rule per flag and became one question asked of the state. What that bought,
+ * beyond having one mechanism instead of two: `N` can now be proved from bit
+ * seven of a value nobody knows, which no set/clear-instruction walker can see.
  */
 export function proveFlag(
   blocks: readonly BasicBlock[],
   entryPoints: readonly number[],
   flag: ProvableFlag,
-  interesting: (instruction: Instruction) => boolean
+  interesting: (instruction: Instruction) => boolean,
+  analysis?: ValueAnalysis
 ): Map<number, FlagState> {
-  const rules = FLAG_RULES[flag];
-  const real = blocks.filter((b) => !b.alternate);
-  const byStart = new Map(real.map((b) => [b.start, b]));
-
-  // Lifting is not free and the fixpoint revisits blocks, so who clobbers the
-  // flag is asked once per instruction.
-  const clobbers = new Map<number, boolean>();
-  const writes = (instruction: Instruction): boolean => {
-    const known = clobbers.get(instruction.address);
-    if (known !== undefined) return known;
-    const found = flagsWritten(lift(instruction)).includes(rules.register);
-    clobbers.set(instruction.address, found);
-    return found;
-  };
-
-  /** What is known on entry to each block. */
-  const entering = new Map<number, FlagState>();
-
-  /**
-   * Whether anything reachable from a call target can change the flag.
-   *
-   * Asking what a callee *leaves* would be more precise and needs a second
-   * fixpoint over routine exits. Asking whether it can touch the flag at all is
-   * one walk, and answers the question that actually arises: for `D` and `I`
-   * almost nothing does, so the caller carries on with what it had.
-   */
-  const touches = new Map<number, boolean>();
-  const canTouch = (target: number): boolean => {
-    const known = touches.get(target);
-    if (known !== undefined) return known;
-    // Assume the worst while walking, so a recursive routine terminates by
-    // answering conservatively rather than by looping.
-    touches.set(target, true);
-
-    const seen = new Set<number>();
-    const pending = [target];
-    let found = false;
-    while (pending.length > 0) {
-      const at = pending.pop()!;
-      if (seen.has(at)) continue;
-      seen.add(at);
-      const block = byStart.get(at);
-      if (!block) continue;
-      for (const instruction of block.instructions) {
-        const mnemonic = instruction.mnemonic.toUpperCase();
-        if (mnemonic === rules.sets || mnemonic === rules.clears || writes(instruction)) {
-          found = true;
-        }
+  const values = analysis ?? proveValues(blocks, entryPoints, { cover: entryPoints });
+  const register = FLAG_RULES[flag].register;
+  const found = new Map<number, FlagState>();
+  for (const block of blocks) {
+    if (block.alternate) continue;
+    for (const instruction of block.instructions) {
+      if (interesting(instruction)) {
+        found.set(instruction.address, flagBefore(values, instruction.address, register));
       }
-      pending.push(...block.successors, ...block.calls);
     }
-
-    touches.set(target, found);
-    return found;
-  };
-
-  const known = new Map<number, FlagState>();
-  const queue: number[] = [];
-  let guard = real.length * 16 + 1024;
-
-  const push = (start: number, state: FlagState) => {
-    if (!byStart.has(start)) return;
-    const merged = meet(entering.get(start), state);
-    if (entering.get(start) === merged) return;
-    entering.set(start, merged);
-    queue.push(start);
-  };
-
-  const settle = () => {
-    while (queue.length > 0 && guard-- > 0) {
-      const start = queue.shift()!;
-      const block = byStart.get(start);
-      if (!block) continue;
-
-      let state = entering.get(start) ?? "unknown";
-      for (const instruction of block.instructions) {
-        if (interesting(instruction)) {
-          const before = known.get(instruction.address);
-          // A site reached two ways is only proved if both ways agree.
-          known.set(
-            instruction.address,
-            before === undefined || before === state ? state : "unknown"
-          );
-        }
-        state = after(state, instruction, rules, writes);
-      }
-
-      for (const target of block.calls) push(target, state);
-      if (block.exit === "call" && block.calls.some(canTouch)) state = "unknown";
-
-      for (const next of block.successors) push(next, state);
-    }
-  };
-
-  for (const entry of entryPoints) push(entry, "unknown");
-  settle();
-
-  // Only now: a block the walk never entered gets `unknown` and is read on its
-  // own terms. Seeding these up front is what a first version did, and it
-  // defeats the analysis — `unknown` meets everything to `unknown`, so a block
-  // would be spoiled by its own placeholder before any predecessor agreed.
-  for (const block of real) {
-    if (entering.has(block.start)) continue;
-    push(block.start, "unknown");
-    settle();
   }
-
-  return known;
+  return found;
 }
 
 /** The instructions whose result depends on `D`, and on `C`. */
@@ -246,9 +122,10 @@ const isArithmetic = (instruction: Instruction): boolean => {
 
 export function decimalModes(
   blocks: readonly BasicBlock[],
-  entryPoints: readonly number[]
+  entryPoints: readonly number[],
+  analysis?: ValueAnalysis
 ): Map<number, DecimalMode> {
-  const proved = proveFlag(blocks, entryPoints, "decimal", isArithmetic);
+  const proved = proveFlag(blocks, entryPoints, "decimal", isArithmetic, analysis);
   return new Map([...proved].map(([address, state]) => [address, MODE[state]]));
 }
 
@@ -267,9 +144,10 @@ export function decimalModes(
  */
 export function carrySites(
   blocks: readonly BasicBlock[],
-  entryPoints: readonly number[]
+  entryPoints: readonly number[],
+  analysis?: ValueAnalysis
 ): { address: number; mnemonic: string; carry: "clear" | "set" }[] {
-  const proved = proveFlag(blocks, entryPoints, "carry", isArithmetic);
+  const proved = proveFlag(blocks, entryPoints, "carry", isArithmetic, analysis);
   const byAddress = new Map<number, Instruction>();
   for (const block of blocks) {
     for (const instruction of block.instructions) byAddress.set(instruction.address, instruction);
@@ -298,11 +176,16 @@ export function carrySites(
  */
 export function interruptsDisabledAt(
   blocks: readonly BasicBlock[],
-  entryPoints: readonly number[]
+  entryPoints: readonly number[],
+  analysis?: ValueAnalysis
 ): number[] {
   const starts = new Set(blocks.filter((b) => !b.alternate).map((b) => b.start));
-  const proved = proveFlag(blocks, entryPoints, "interruptDisable", (instruction) =>
-    starts.has(instruction.address)
+  const proved = proveFlag(
+    blocks,
+    entryPoints,
+    "interruptDisable",
+    (instruction) => starts.has(instruction.address),
+    analysis
   );
   return [...proved]
     .filter(([, state]) => state === "set")
@@ -319,9 +202,10 @@ export function interruptsDisabledAt(
  */
 export function decimalSites(
   blocks: readonly BasicBlock[],
-  entryPoints: readonly number[]
+  entryPoints: readonly number[],
+  analysis?: ValueAnalysis
 ): { address: number; mode: DecimalMode }[] {
-  return [...decimalModes(blocks, entryPoints)]
+  return [...decimalModes(blocks, entryPoints, analysis)]
     .filter(([, mode]) => mode !== "binary")
     .map(([address, mode]) => ({ address, mode }))
     .sort((a, b) => a.address - b.address);
