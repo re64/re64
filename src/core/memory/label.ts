@@ -40,6 +40,24 @@ export interface Label {
   /** Source of this label */
   readonly source: LabelSource;
   /**
+   * What this name means, where somebody other than this project decided.
+   *
+   * Deliberately *not* a `Comment`, and the distinction is the point. A comment
+   * is what someone wrote about an address **in this project**; this is what a
+   * name means on this **machine**, and it travels with the name rather than
+   * with the address. The practical difference: nothing supplies the bytes at
+   * `$FFD2` in an ordinary game, so a comment there would render nowhere, while
+   * the description is reachable everywhere the name is.
+   *
+   * It does not reintroduce the field that was removed from labels. That one
+   * was the *only* home for a comment, so commenting an instruction meant
+   * inventing a name for it; comments are still their own objects and still
+   * reach any address. This carries documentation for names the project did not
+   * choose — today the built-in C64 symbol table, which had 382 descriptions
+   * that reached no consumer at all.
+   */
+  readonly description?: string;
+  /**
    * How many bytes this name covers, when it names an array rather than a spot.
    *
    * An operand inside the extent renders as `SCREEN_RAM + $000F` instead of a
@@ -95,7 +113,8 @@ export function createPlatformLabel(
   id: string,
   address: number,
   name: string,
-  type: LabelType = "address"
+  type: LabelType = "address",
+  description?: string
 ): Label {
   if (address < 0 || address > 0x10000) {
     throw new Error("Label address must be in range 0x0000-0x10000");
@@ -106,6 +125,7 @@ export function createPlatformLabel(
     name,
     type,
     source: { kind: "platform", auto: true },
+    ...(description === undefined ? {} : { description }),
   };
 }
 

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { analyze, wrapCommentText } from "./rows.js";
 import { MemoryMap } from "../memory/memory-map.js";
 import { FileLayer } from "../memory/file-layer.js";
-import { LabelIndex, createUserLabel } from "../memory/label.js";
+import { LabelIndex, createPlatformLabel, createUserLabel } from "../memory/label.js";
 import { CommentIndex } from "../memory/comment.js";
 import { ConstantIndex } from "../memory/constant.js";
 import { createUserRegion, RegionKind } from "../memory/region.js";
@@ -314,6 +314,36 @@ describe("wrapping a comment", () => {
 
   it("terminates on a word longer than the width", () => {
     expect(wrapCommentText("aaaaaaaaaaaaaaaa bb", 4)).toEqual(["aaaaaaaaaaaaaaaa", "bb"]);
+  });
+});
+
+describe("a name the project did not choose", () => {
+  it("renders its description above its own label row", () => {
+    // The built-in table carried 382 of these and no consumer saw one. It goes
+    // above the label because it introduces the name, which is how a
+    // hand-written disassembly reads.
+    const loaded = project([0xea, 0x60]);
+    const described = createPlatformLabel("lbl_plat", ORG, "CHROUT", "address", "Write a byte");
+    loaded.userLabels.addLabel(described);
+
+    const rows = analyze(loaded, { annotations: false }).rows;
+    const here = rows.filter((r) => r.address === ORG);
+    const comment = here.findIndex((r) => r.kind === "comment" && r.text.includes("Write a byte"));
+    const label = here.findIndex((r) => r.kind === "label");
+    expect(comment).toBeGreaterThanOrEqual(0);
+    expect(comment).toBeLessThan(label);
+  });
+
+  it("says nothing where the name has no row", () => {
+    // Nothing supplies $FFD2 in an ordinary game, so there is no row to hang it
+    // on — which is exactly why this is a description on the label rather than
+    // a Comment at the address.
+    const loaded = project([0xea, 0x60]);
+    loaded.userLabels.addLabel(
+      createPlatformLabel("lbl_far", 0xffd2, "CHROUT", "address", "Write a byte")
+    );
+    const rows = analyze(loaded, { annotations: false }).rows;
+    expect(rows.some((r) => r.text.includes("Write a byte"))).toBe(false);
   });
 });
 

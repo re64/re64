@@ -425,6 +425,20 @@ export function analyze(
       if (seen.has(label.name)) continue;
       seen.add(label.name);
 
+      // What the name means, for names the project did not choose. Directly
+      // above its own label rather than with the `before` comments, because it
+      // is about this name and a project may have several labels here — and
+      // below them, since what somebody wrote about this address outranks a
+      // built-in gloss. Renders only where the address has a row at all, which
+      // is why the description lives on the label and not in a `Comment`: in an
+      // ordinary game nothing supplies $FFD2, and a comment there would reach
+      // no reader.
+      if (label.description) {
+        for (const line of wrapCommentText(label.description, commentTextWidth)) {
+          push({ address: addr, kind: "comment", text: `${hex4(addr)}  ; ${line}`, tokens: [] });
+        }
+      }
+
       // Qualified here too, or you are told a name is ambiguous by the operand
       // and cannot find either of the labels it is ambiguous between.
       const shownName = allLabels.displayName(label);

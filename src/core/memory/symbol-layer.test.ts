@@ -95,6 +95,18 @@ describe("C64 symbol table", () => {
     expect(byAddress.get(0x0400)).toBe("SCREEN_RAM");
   });
 
+  it("carries every description onto its label", () => {
+    // The table held 382 descriptions and createPlatformLabel dropped the
+    // argument, so none of them reached any consumer — the fourth instance of
+    // this project's "a field nothing reads" shape.
+    const layer = createC64PlatformLayer();
+    expect(layer.labels).toHaveLength(C64_SYMBOLS.length);
+    expect(layer.labels.every((l) => l.description !== undefined)).toBe(true);
+    expect(layer.labels.find((l) => l.name === "CHROUT")?.description).toBe(
+      "Write byte to output channel"
+    );
+  });
+
   it("lays out the three SID voices at seven-byte strides", () => {
     const byAddress = new Map(C64_SYMBOLS.map((s) => [s.address, s.name]));
     expect(byAddress.get(0xd400)).toBe("V1FREQLO");

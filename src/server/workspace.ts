@@ -1142,6 +1142,7 @@ export class Workspace {
       source: label.source.kind,
       references: program.xrefs.count(label.address),
       writable: !invented && !builtIn,
+      ...(label.description === undefined ? {} : { description: label.description }),
     };
   }
 
@@ -3177,6 +3178,14 @@ export interface LabelSummary {
   source: string;
   references: number;
   writable: boolean;
+  /**
+   * What the name means, for names this project did not choose.
+   *
+   * Present on the built-in C64 symbols and nowhere else yet. It answers "what
+   * is CHROUT" without a ROM and without a second call, which is the whole
+   * reason the table carries descriptions.
+   */
+  description?: string;
 }
 
 export interface EditResult {

@@ -894,6 +894,30 @@ keep their places after the ones named. Last-writer-wins per comment, like every
 other field here — two peers arranging one address concurrently converge on
 something neither chose, which for prose is untidy rather than wrong.
 
+**A description is not a comment, and the difference is where it lives.** The
+built-in C64 table carried a one-line gloss for every symbol — `CHROUT`, "write
+byte to output channel" — and `createPlatformLabel` dropped the argument, so all
+382 of them reached no consumer at all. The fourth instance of the shape this
+file keeps recording: the vocabulary being closed is checked by the compiler, and
+whether anything ever *reads* a field is not.
+
+Making them `Comment` objects was the obvious fix and is wrong. A comment is what
+somebody wrote about an address **in this project**; this is what a name means on
+this **machine**, and it travels with the name. The practical difference decides
+it: nothing supplies the bytes at `$FFD2` in an ordinary game, so a comment there
+would render nowhere — while `description` on the label is reachable everywhere
+the name is, which is what `list_labels` now returns.
+
+It does not reintroduce the field that was removed from labels. That one was the
+*only* home for a comment, so commenting an instruction meant inventing a name
+for it. Comments are still their own objects and still reach any address; this
+carries documentation for names the project did not choose.
+
+In a listing it renders directly above its own label row — below any `before`
+comment, since what somebody wrote about this address outranks a built-in gloss.
+On Gridrunner that changes nothing, because the game's KERNAL calls point outside
+its own map; on a project holding the ROM, every entry point introduces itself.
+
 A **region's** `comment` is deliberately not this. It describes a span and is a
 property of the region object alongside its name — but it renders in the listing
 too, where the region begins, because a description that appeared only in the

@@ -467,6 +467,14 @@ export function createC64PlatformLayer(): SymbolLayer {
   return new SymbolLayer(
     "c64",
     // Derived, not minted: the built-in set must have the same ids everywhere.
-    C64_SYMBOLS.map((s) => createPlatformLabel(derivedId("lbl", "c64", s.address), s.address, s.name))
+    C64_SYMBOLS.map((s) =>
+      createPlatformLabel(
+        derivedId("lbl", "c64", s.address),
+        s.address,
+        s.name,
+        "address",
+        s.comment
+      )
+    )
   );
 }
