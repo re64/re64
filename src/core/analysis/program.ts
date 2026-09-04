@@ -18,7 +18,7 @@ import { Label, LabelIndex, createAutoLabel } from "../memory/label.js";
 import { HygieneFinding, checkHygiene } from "./hygiene.js";
 import { decimalSites } from "./flags.js";
 import { ValueAnalysis, proveValues } from "./values.js";
-import { classifyOrigins } from "../c64/entry-vectors.js";
+import { classifyOrigins, kernalClobbers } from "../c64/entry-vectors.js";
 import type { DecimalMode } from "../il/lift.js";
 import { LoadedProject } from "../project/loader.js";
 import { parseProjectAddress } from "../project/project.js";
@@ -262,6 +262,7 @@ export function analyzeProgram(
       return (cachedValues ??= proveValues(blocks, origins, {
         cover: entryPoints,
         kinds: classifyOrigins(map),
+        externalWrites: kernalClobbers(map),
       }));
     },
     get decimalSites() {

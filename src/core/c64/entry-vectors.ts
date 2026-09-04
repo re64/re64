@@ -14,6 +14,8 @@
 
 import { MemoryMap } from "../memory/memory-map.js";
 import { OriginKind } from "../analysis/values.js";
+import { REGISTER_NAMES } from "../il/run.js";
+import { KERNAL_CLOBBERS } from "./kernal-effects.js";
 
 /** The 6502's own vectors, at the top of memory. */
 const NMI = 0xfffa;
@@ -69,3 +71,29 @@ export function classifyOrigins(map: MemoryMap): Map<number, OriginKind> {
 
   return kinds;
 }
+
+/**
+ * What calling an address in the ROM writes, for a project that has no ROM.
+ *
+ * Consulted only where the project supplies no bytes at all: if it loads its own
+ * ROM, the real analysis is better, and it is right about *that* ROM rather than
+ * about the one this table came from. `undefined` means the table cannot say,
+ * which a caller must read as "assume anything" — an under-approximation here
+ * would be believed.
+ */
+export function kernalClobbers(map: MemoryMap): (address: number) => readonly number[] | undefined {
+  const byAddress = new Map(
+    KERNAL_CLOBBERS.map((c) => {
+      const offsets = c.writes
+        .map((name) => REGISTER_OFFSETS[name])
+        .filter((offset): offset is number => offset !== undefined);
+      return [c.address, offsets] as const;
+    })
+  );
+  return (address) => (map.readByte(address) === undefined ? byAddress.get(address) : undefined);
+}
+
+/** Register names as the generated table spells them, back to IL offsets. */
+const REGISTER_OFFSETS: Record<string, number> = Object.fromEntries(
+  REGISTER_NAMES.map((name, offset) => [name, offset])
+);

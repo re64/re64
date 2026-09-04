@@ -67,7 +67,10 @@ export interface ValueAnalysis {
  * came back unknown at 17 of Gridrunner's 19 sites. Assumes the worst while
  * walking, so a recursive routine answers conservatively rather than looping.
  */
-function registersWrittenFrom(blocks: readonly BasicBlock[]): (entry: number) => Set<number> {
+function registersWrittenFrom(
+  blocks: readonly BasicBlock[],
+  externalWrites?: (address: number) => readonly number[] | undefined
+): (entry: number) => Set<number> {
   const byStart = new Map(blocks.map((b) => [b.start, b]));
   const cache = new Map<number, Set<number>>();
   const everything = new Set([...Array(16).keys()]);
@@ -85,7 +88,14 @@ function registersWrittenFrom(blocks: readonly BasicBlock[]): (entry: number) =>
       if (seen.has(at)) continue;
       seen.add(at);
       const block = byStart.get(at);
-      if (!block) return everything;
+      if (!block) {
+        // Nothing decoded here. Ask, and only assume the worst when the answer
+        // is that nobody knows.
+        const told = externalWrites?.(at);
+        if (!told) return everything;
+        for (const offset of told) found.add(offset);
+        continue;
+      }
       for (const instruction of block.instructions) {
         for (const node of writes(lift(instruction))) {
           if (node.space === "register") found.add(node.offset);
@@ -141,11 +151,50 @@ export function proveValues(
      * joining only ever loses precision, so that terminates.
      */
     kinds?: ReadonlyMap<number, OriginKind>;
+    /**
+     * What calling an address nothing decoded can write, by register offset.
+     *
+     * Returning `undefined` means "no idea", and the walk then assumes the
+     * worst. That is the sound default and it is also useless: Gridrunner calls
+     * five KERNAL routines, loads no ROM, and one unanswered call loses every
+     * proof after it.
+     *
+     * The predecessor of this pass *skipped* callees it could not see, which
+     * silently assumed they touch nothing — the difference between a proof and
+     * an omission, and it is where a figure recorded in this repo for months
+     * came from. Asking is the third option, and `KERNAL_CLOBBERS` exists to be
+     * asked.
+     */
+    externalWrites?: (address: number) => readonly number[] | undefined;
+    /**
+     * Values to start every external origin with, by register offset.
+     *
+     * For asking whether a routine *preserves* something rather than what it
+     * touches. Run it twice with complementary seeds: a flag that comes back
+     * matching its own seed both times was restored rather than decided, which
+     * is the difference between `PLP` and `CLD` — and every write to `D` in the
+     * whole KERNAL is a `PLP`.
+     */
+    seedRegisters?: ReadonlyMap<number, Bits>;
+    /**
+     * Which registers a call gives back unchanged, by target address.
+     *
+     * Without it, a callee that merely `PLP`s a byte it pushed itself counts as
+     * writing every flag in that byte, and the caller loses them. That is not a
+     * corner case on this machine: **every** write to `D` in the whole KERNAL is
+     * a `PLP`, so one `JSR $FFD2` would cost a program its decimal proof for
+     * good.
+     *
+     * Establishing it is circular — proving a routine preserves a flag needs an
+     * analysis that does not already assume it clobbers it — so whoever computes
+     * this iterates, feeding each round's answer back in.
+     */
+    preserves?: (address: number) => readonly number[] | undefined;
   } = {}
 ): ValueAnalysis {
   const real = blocks.filter((b) => !b.alternate);
   const byStart = new Map(real.map((b) => [b.start, b]));
-  const written = registersWrittenFrom(real);
+  const written = registersWrittenFrom(real, options.externalWrites);
 
   const entering = new Map<number, AbstractState>();
   const before = new Map<number, AbstractState>();
@@ -170,12 +219,32 @@ export function proveValues(
     const state = initialState();
     const pushed = options.stackAt?.get(at);
     if (pushed) state.stack = [...pushed];
+    for (const [offset, bits] of options.seedRegisters ?? []) {
+      state.registers[offset] = { bits, fromStack: offset === REG.SP };
+    }
     entering.set(at, state);
     queue.push(at);
   };
   const kindOf = (at: number): OriginKind => options.kinds?.get(at) ?? "external";
   const reentrant = origins.filter((at) => byStart.has(at) && kindOf(at) !== "external");
-  const started = origins.filter((at) => byStart.has(at) && kindOf(at) === "external");
+
+  // An external origin that something in the program already reaches does not
+  // need seeding: it gets its state from whatever reaches it, and that is
+  // strictly better. Seeding it anyway asserts "nothing is known here", and the
+  // join takes back what the real start proved — one level further in than the
+  // decode-root mistake, and with the same shape.
+  //
+  // The evidence that this is annotation rather than fact: Gridrunner declares
+  // `InitializeGame` an entry label, and the cartridge header says the machine
+  // enters at exactly two addresses, neither of them that one. `entry` is being
+  // used to mean "a routine begins here", which is what `function` means.
+  const reachedByCode = new Set<number>();
+  for (const block of real) {
+    for (const next of [...block.successors, ...block.calls]) reachedByCode.add(next);
+  }
+  const external = origins.filter((at) => byStart.has(at) && kindOf(at) === "external");
+  const unreached = external.filter((at) => !reachedByCode.has(at));
+  const started = unreached.length > 0 ? unreached : external;
   // Every declared origin is reached from inside, so there is no outside to
   // start from. Fall back to the decode roots and assume nothing anywhere.
   for (const at of started.length > 0 ? started : (options.cover ?? [])) seed(at);
@@ -219,7 +288,10 @@ export function proveValues(
       // and keeps what it cannot — which is the whole value of asking.
       const resumed = cloneState(state);
       const touched = new Set<number>();
-      for (const target of block.calls) for (const offset of written(target)) touched.add(offset);
+      for (const target of block.calls) {
+        const kept = new Set(options.preserves?.(target) ?? []);
+        for (const offset of written(target)) if (!kept.has(offset)) touched.add(offset);
+      }
       for (const offset of touched) {
         // Keep the taint: the depth is still relative to where we started, since
         // an ordinary call returns balanced. A callee that does not is reported

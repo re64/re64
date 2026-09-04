@@ -2266,8 +2266,36 @@ KERNAL routines and the project loads no ROM, so all five were skipped and `D`
 sailed through them. It was not a proof, it was an omission that looked like one.
 
 The value analysis assumes an unseen callee can write anything, which is sound
-and costs the whole proof: 19 of 19 unknown. The right answer is neither — it is
-to *ask*, and `KERNAL_EFFECTS` exists to be asked. See the task list.
+and costs the whole proof. The right answer is neither: it is to **ask**, and
+`KERNAL_CLOBBERS` exists to be asked — what calling any of the ROM's 202 routines
+writes, derived from the ROM so a project without one can still be understood.
+Consulted only where the project supplies no bytes itself, since a project that
+loads its own ROM has a better answer about *that* ROM. Only routines whose
+analysis is complete are listed at all, because an under-approximation here would
+be believed; an absent row means "assume anything".
+
+It takes `D` on the reference project from 3 proved clear to 9, and no further,
+for a reason worth keeping: **every write to `D` in the entire KERNAL is a
+`PLP`** — four of them, no `CLD` and no `SED` anywhere. So "CHROUT writes D" is
+true and costs a caller nothing, and Gridrunner's one `JSR $FFD2` still loses the
+flag for the rest of the program.
+
+Saying so needs a *preservation* result, and that is where this stops rather than
+guessing. Running the routine with distinct seeds and seeing what comes back
+matching was built and does find it — 142 of 202 routines look like they preserve
+`D` — and was then taken back out of the shipped analysis, because it is a
+**check and not a proof**: a routine doing `if C then D := 0` passes complementary
+seeds while preserving nothing. A sampled result presented as an analysis result
+is exactly the confident wrong answer refused everywhere else here.
+
+The proof needs an **identity** rather than a sample: give each opaque value at an
+origin a fresh identifier and carry it through operations that only *move* a
+value, dropping it at anything that computes. A flag holding the identifier it
+started with was preserved. Per bit rather than per value, for the same reason
+the value domain is per bit — `PHP` assembles seven flags into a byte and `PLP`
+takes them apart, and a byte-level identifier does not survive the assembly.
+That also settles `TXA / TAX` preserving `X`, which the reviewing agent spotted
+in the KERNAL by hand.
 
 The general lesson is worth more than the instance, and this file has now been
 caught by it twice: **a check that cannot see something must say so, not skip

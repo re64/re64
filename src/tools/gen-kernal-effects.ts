@@ -153,6 +153,53 @@ for (const address of TABLE) {
   });
 }
 
+// Everything the ROM analysis found, not only the documented entries.
+//
+// A dataflow pass asking "what does this call clobber" needs an answer for
+// whatever address the program actually called, and programs call ROM internals
+// directly: Gridrunner calls $E518 (the editor init) and the implementations
+// behind RESTOR, RAMTAS and IOINIT, none of which is a jump-table entry. One
+// unanswered call is enough to lose a proof for the rest of the program, so
+// partial coverage of this is worth very little.
+//
+// Registers *written*, not touched — what a caller loses by making the call. PC
+// and SP are left out for the reason the effect sets leave them out: every JSR
+// and RTS moves both, so including them would put the same two entries on every
+// row.
+const vectorTargets = new Map([...vectoredBy.values()].map((v) => [v.pointer, v.target]));
+const impliedBy = new Map<number, number>();
+for (const [site, v] of vectoredBy) impliedBy.set(site, v.target);
+
+const clobbers = [...routines.entries()]
+  .filter(([, routine]) => {
+    // Only where the answer is complete. A routine with an unmodelled
+    // instruction, or one that calls something nothing decoded, has a clobber
+    // set that is short by an unknown amount — and an under-approximation here
+    // is worse than no answer at all, because a caller would believe it.
+    // Omitting it means "unknown", which the consumer turns back into
+    // "assume anything".
+    return routine.incomplete.length === 0;
+  })
+  .map(([address, routine]) => ({
+    address,
+    writes: [
+      ...new Set(
+        // A vectored entry point is a three-byte jump this walk does not
+        // follow, so its own writes are none — which would read as "touches
+        // nothing" and be believed. What it does is whatever the vector points
+        // at, so the default implementation's writes stand in, exactly as they
+        // do on the entry-point table above.
+        [...routine.total.writes, ...(routines.get(impliedBy.get(address) ?? -1)?.total.writes ?? [])]
+          .filter((v) => v.space === "register")
+          // `REGISTER_NAMES` has no entry for PC, so it drops out here; SP is
+          // named and excluded deliberately.
+          .map((v) => REGISTER_NAMES[v.offset] as string | undefined)
+          .filter((name): name is string => name !== undefined && name !== "SP")
+      ),
+    ].sort(),
+  }))
+  .sort((a, b) => a.address - b.address);
+
 const hex = (n: number) => `0x${n.toString(16).padStart(4, "0")}`;
 const list = (xs: string[]) => `[${xs.map((x) => `"${x}"`).join(", ")}]`;
 const addresses = (xs: number[]) => (xs.length === 0 ? "[]" : `[${xs.map(hex).join(", ")}]`);
@@ -230,10 +277,38 @@ export interface KernalEffects {
 export const KERNAL_EFFECTS: readonly KernalEffects[] = [
 ${body}
 ];
+
+/**
+ * What calling any routine in the ROM can write, by address.
+ *
+ * A different question from \`KERNAL_EFFECTS\`, and a different shape for it. That
+ * one answers "what does CHROUT do" for somebody reading; this answers "what do
+ * I lose by calling this" for an analysis, and it has to cover every address a
+ * program might call rather than only the documented ones — Gridrunner calls
+ * \`$E518\` directly, and one unanswered call loses a proof for everything after
+ * it.
+ *
+ * Registers and flags only. What a routine writes to *memory* is on the entry
+ * points above where it is worth reading; a dataflow pass that wanted it for all
+ * ${clobbers.length} routines would carry a great deal of data to answer a question nobody
+ * has asked yet.
+ *
+ * Derived from ${ROM.split("/").pop()}. Consult it only for addresses the project itself does
+ * not supply — where a project loads its own ROM, the real analysis is better
+ * and is right about *that* ROM, which may not be this one.
+ */
+export const KERNAL_CLOBBERS: readonly {
+  address: number;
+  /** Registers and flags it can write. */
+  writes: string[];
+}[] = [
+${clobbers.map((c) => `  { address: ${hex(c.address)}, writes: ${list(c.writes)} },`).join("\n")}
+];
 `;
 
 writeFileSync(OUT, source);
 console.log(
-  `${OUT}: ${rows.length} entry points (${vectoredCount} vectored), ` +
+  `${OUT}: ${rows.length} entry points (${vectoredCount} vectored) and ` +
+    `${clobbers.length} routines' clobber sets, ` +
     `from ${result.instructions.size} instructions in ${routines.size} routines`
 );
