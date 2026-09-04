@@ -102,7 +102,15 @@ export function projectForTarget(project: Project): Project {
   const active = new Set(target.layers);
   return {
     ...project,
-    layers: project.layers.filter((l) => l.id && active.has(l.id)),
+    // A symbols layer is never filtered out. It supplies no bytes, so it shadows
+    // nothing and occupies no range, and a target is a view over *which bytes
+    // you are reading* — there is nothing for it to say about a layer that has
+    // none. Keeping it is also the only version that survives the offline test:
+    // adding it to each target meant writing each target's whole layer list, so
+    // two people naming an address at the same time would drop one another's
+    // layers out of the view, and a name written offline would land in a target
+    // made since.
+    layers: project.layers.filter((l) => l.id && (l.type === "symbols" || active.has(l.id))),
     // The target's own list replaces the project's: the same field meaning two
     // things depending on whether a target is selected is how "entryPoints said
     // 2 while decodeStartsFrom said 19" happened.

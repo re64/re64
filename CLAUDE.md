@@ -1916,6 +1916,17 @@ way.
 > hygiene* and corrected by whoever is there — not prevented at the point of
 > writing.
 
+And the test that decides it, which is sharper than any of the above:
+
+> **What works offline — locally, ignorant of every other edit — must also work
+> online. And the reverse.**
+
+There is no second mode. An operation whose correctness depends on having seen
+what everybody else did fails the first direction; one that assumes it is alone
+fails the second. Both are the same defect, and the test catches things no amount
+of reasoning about layers does — it found one within a minute of being written
+down, described below.
+
 Three consequences worth stating, because each contradicts an instinct that keeps
 resurfacing:
 
@@ -1935,6 +1946,21 @@ resurfacing:
 The test to apply: *could this operation fail, and is the reason a fact about the
 request or a judgement about the result?* A judgement about the result belongs
 somewhere else.
+
+**The first thing the offline test caught, an hour after the rule was written,
+was a bug introduced that same day.** Naming a byteless address creates a symbols
+layer, and a target is an allowlist of layer ids — so the new layer was being
+added to every target by writing each target's layer list. `target.set` replaces
+that list wholesale, so two people naming an address at the same time drop one
+another's layers out of the view, and a name written offline lands outside a
+target made since. Reasoning about which layer the complexity belonged in had not
+found that; asking whether it worked offline found it immediately.
+
+The fix removed code rather than adding it: **a symbols layer is never filtered
+by a target at all.** It supplies no bytes, so it shadows nothing and occupies no
+range, and a target is a view over which bytes you are reading — there is nothing
+for it to say about a layer that has none. That is the shape a fix should have
+under this rule, and it is a fair signal when it does not.
 
 ### Convergence is not atomicity
 

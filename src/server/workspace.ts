@@ -2043,7 +2043,7 @@ export class Workspace {
     // label — one action, two operations, so undo takes both back together.
     let beside: { address: number; from: string }[] = [];
     const result = this.edit(caller, (loaded) => {
-      const { layerId, create, joins } = ensureOwningLayer(loaded, address, this.room.projectId);
+      const { layerId, create } = ensureOwningLayer(loaded, address, this.room.projectId);
       const built = create
         ? { ops: [{ op: "label.set", id: newId("lbl"), layerId, address, name, type, extent } as Op] }
         : labelSetOps(loaded, address, name, type, extent);
@@ -2051,7 +2051,7 @@ export class Workspace {
       const label: Op[] = built.ops;
 
       return [
-        ...(create ? [create, ...joins] : []),
+        ...(create ? [create] : []),
         ...label,
         ...(comment
           ? [
@@ -2140,7 +2140,7 @@ export class Workspace {
           const owning = ensureOwningLayer(loaded, entry.address, this.room.projectId);
           layerId = owning.layerId;
           if (owning.create) {
-            ops.push(owning.create, ...owning.joins);
+            ops.push(owning.create);
             madeLayer = owning.layerId;
           }
         }

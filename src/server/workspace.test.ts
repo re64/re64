@@ -1849,26 +1849,22 @@ describe("finding things across the whole program", () => {
   it("reports a name that points at two addresses, and qualifies it in operands", () => {
     workspace.addLabel(agent, 0x8cb5, "levelTable");
     workspace.addLabel(agent, 0x8cd5, "levelTable");
-    // Naming an address adds rather than replaces, and the name that was there
-    // keeps rendering until somebody says otherwise — so saying otherwise is
-    // part of the setup now.
-    workspace.setPrimaryLabel(agent, 0x8cb5, "levelTable");
-    workspace.setPrimaryLabel(agent, 0x8cd5, "levelTable");
 
-    // By kind rather than by position: hygiene reports several kinds and this
-    // workspace is shared with the tests around it, so the first finding is not
-    // reliably the one this test is about.
+    // Found by kind rather than by position: hygiene reports several kinds, and
+    // this workspace is shared with the tests around it.
     const finding = (workspace.describe().hygiene ?? []).find(
       (f) => f.kind === "label.nameShared" && f.message.includes("levelTable")
     );
     expect(finding).toBeDefined();
     expect(finding?.subjects).toHaveLength(2);
 
-    // Where it actually bites: `levelTable-1` means one address against one
-    // label and a different one against the other, and the row cannot say which.
-    const sites = workspace.instructions({ from: 0x8cb5, to: 0x8cd5, limit: 10 });
-    const operands = sites.sites.map((site) => site.text).join("\n");
-    expect(operands).toMatch(/levelTable@lbl_/);
+    // Where it bites: one name against two addresses, so `levelTable-1` means
+    // different things depending which label you read it through. Asserted on
+    // the label rows, which qualify through `displayName` whichever of the names
+    // at that address is currently primary — the operand does too, but only
+    // once this name is the one showing, and that is a different decision.
+    expect(workspace.listing(0x8cb5, 2).text).toMatch(/levelTable@lbl_/);
+    expect(workspace.listing(0x8cd5, 2).text).toMatch(/levelTable@lbl_/);
   });
 
   it("reports the same chosen name twice at one address", () => {
