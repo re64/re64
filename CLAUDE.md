@@ -3307,7 +3307,15 @@ Two rules decide what belongs, and the second is what keeps the list readable:
 
 The starting set is shared label names, constants declared with one name and two
 values, annotations sitting inside an instruction, regions naming a decoder that
-is gone, and several inline comments on one row. It should grow from evidence — a
+is gone, and several inline comments on one row. **The same chosen name twice at
+one address** joined it when naming became additive: the write that would make
+one used to refuse, so it could not arise, and a retry or a re-run of a batch is
+now the ordinary way to get one. It is not ambiguity — the name still reaches
+exactly one address, which is the distinction the collision check turns on — but
+the row builder shows each name at an address once, so the second **renders
+nowhere**, which is the admission rule almost word for word. Restricted to labels
+a person chose, because pairing a user name with a layer's or a region's is the
+thing the reference project does ten times over with nothing wrong. It should grow from evidence — a
 run tripping on something — rather than from a tidiness instinct, which is how
 the ten false findings above were nearly shipped.
 

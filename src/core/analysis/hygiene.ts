@@ -39,6 +39,8 @@ import { LoadedProject } from "../project/loader.js";
 export type HygieneKind =
   /** Several labels hold one name, so `name+4` identifies nothing. */
   | "label.nameShared"
+  /** One address carries the same chosen name twice, and only one of them renders. */
+  | "label.duplicated"
   /** Several constants hold one name with different values. */
   | "constant.nameShared"
   /** An annotation inside an instruction: stored, and rendered nowhere. */
@@ -87,6 +89,23 @@ export function checkHygiene(
   // A name two labels hold identifies neither, and the offset form is worse
   // than useless: `scoreDigits+4` means one address against one label and a
   // different one against the other.
+  // The same name twice at one address. Not ambiguity — the name still reaches
+  // exactly one address — but the row builder shows each name here once, so the
+  // second renders nowhere and is dead weight that looks like work.
+  //
+  // Only reachable since naming became additive: the write that would have made
+  // one used to refuse, and a retry is now the ordinary way to get one.
+  for (const { address, name, labels: twins } of labels.duplicates()) {
+    found.push({
+      kind: "label.duplicated",
+      message:
+        `${hex4(address)} is called "${name}" ${twins.length} times over. Only one of ` +
+        `them renders, so the rest are invisible — remove_label takes one by id, ` +
+        `or rename_label makes it say something different.`,
+      subjects: twins.map((label) => ({ address: hex4(label.address), id: label.id })),
+    });
+  }
+
   for (const { name, labels: holders } of labels.collisions()) {
     found.push({
       kind: "label.nameShared",

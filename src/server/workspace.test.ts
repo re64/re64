@@ -1866,6 +1866,22 @@ describe("finding things across the whole program", () => {
     expect(operands).toMatch(/levelTable@lbl_/);
   });
 
+  it("reports the same chosen name twice at one address", () => {
+    // Impossible until naming became additive — the write that would make one
+    // used to refuse — and a retry, or a batch re-run after a partial failure,
+    // is the ordinary way to get one now. Not ambiguity, since the name still
+    // reaches exactly one address; but the row builder shows each name here
+    // once, so the second renders nowhere and is dead weight that looks like
+    // work. Which is hygiene's admission rule almost word for word.
+    const blank = blankWorkspace();
+    blank.addLabel(agent, 0x8100, "initGame");
+    blank.addLabel(agent, 0x8100, "initGame");
+
+    const finding = (blank.describe().hygiene ?? []).find((f) => f.kind === "label.duplicated");
+    expect(finding?.message).toMatch(/"initGame" 2 times over/);
+    expect(finding?.subjects).toHaveLength(2);
+  });
+
   it("does not qualify two labels that merely share an address", () => {
     // One name reaching one address is unambiguous however many labels hold it,
     // and the reference project has ten such pairs.

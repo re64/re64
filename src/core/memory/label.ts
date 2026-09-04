@@ -367,6 +367,39 @@ export class LabelIndex {
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  /**
+   * Names held twice at one address by labels a person chose.
+   *
+   * Not ambiguity — the name still reaches exactly one address, which is the
+   * distinction the collision check turns on — but the second one **renders
+   * nowhere**, because the row builder shows each name at an address once. It is
+   * dead weight that looks like work.
+   *
+   * Only possible since naming became purely additive: the write that would have
+   * made one used to refuse. A retry, or a batch re-run after a partial failure,
+   * is the ordinary way to end up with one.
+   *
+   * Restricted to labels a person chose. A layer's entry label named after its
+   * file and a region's name are machinery, and the reference project pairs
+   * those with user names ten times over without anything being wrong.
+   */
+  duplicates(): { address: number; name: string; labels: readonly Label[] }[] {
+    const found: { address: number; name: string; labels: readonly Label[] }[] = [];
+    for (const [address, here] of this.byAddress) {
+      const byName = new Map<string, Label[]>();
+      for (const label of here) {
+        if (label.source.kind !== "user") continue;
+        const held = byName.get(label.name);
+        if (held) held.push(label);
+        else byName.set(label.name, [label]);
+      }
+      for (const [name, labels] of byName) {
+        if (labels.length > 1) found.push({ address, name, labels });
+      }
+    }
+    return found.sort((a, b) => a.address - b.address || a.name.localeCompare(b.name));
+  }
+
   /** Labels by the name they hold, each group in the order display uses. */
   private byName(): Map<string, Label[]> {
     if (this.namesCache) return this.namesCache;
