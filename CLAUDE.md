@@ -3266,6 +3266,21 @@ one described the result exactly: *a wrong answer that looks right*.
 among the labels at *one address*. This is the transpose — one name across
 *several addresses* — and nothing arbitrated it.
 
+**A name held twice at one address is qualified too, but only in its own rows.**
+The two cases are not the same question. One name reaching two *addresses* makes
+an operand ambiguous — `levelTable-1` means one address against one label and a
+different one against the other — so it is qualified everywhere, through
+`displayName`. One name held twice at a *single* address leaves the operand
+perfectly clear, since `$1000` is `$1000` whichever label you read it through, so
+qualifying it there would be noise; only the label rows need telling apart.
+
+The row builder shows each name at an address once, which is right for the
+ordinary pair — a user name beside the region-generated one carrying it, ten
+times over in the reference project — and wrong for two labels a person made,
+because hiding one hides a real object somebody wrote. So it renders both,
+qualified, when more than one *user* label holds the name. Same predicate as the
+hygiene check, which is the sign it is the right one.
+
 **Every colliding label is qualified, not one of them.** `name@<id>`, on all
 holders. Symmetry is what makes it simple: there is no winner to elect, so no
 tie-break rule, and rendering becomes a pure function of the name, the id, and

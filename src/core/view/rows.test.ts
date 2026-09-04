@@ -43,8 +43,10 @@ function project(
   }
 
   const userLabels = new LabelIndex();
-  for (const l of extra.labels ?? []) {
-    const label = createUserLabel(`lbl_${l.address.toString(16)}`, l.address, l.name, l.type ?? "address");
+  // Indexed as well as addressed: several labels can share an address, and an
+  // id derived from the address alone would make two of them one.
+  for (const [i, l] of (extra.labels ?? []).entries()) {
+    const label = createUserLabel(`lbl_${l.address.toString(16)}_${i}`, l.address, l.name, l.type ?? "address");
     layer.labels.push(label);
     userLabels.addLabel(label);
   }
@@ -314,6 +316,47 @@ describe("wrapping a comment", () => {
 
   it("terminates on a word longer than the width", () => {
     expect(wrapCommentText("aaaaaaaaaaaaaaaa bb", 4)).toEqual(["aaaaaaaaaaaaaaaa", "bb"]);
+  });
+});
+
+describe("one address named the same thing twice", () => {
+  it("renders both, qualified, rather than hiding one", () => {
+    // Reachable since naming became additive, and two people naming a byte the
+    // same thing is an ordinary way to get here. Showing each name once is right
+    // for a user name beside the region-generated one that carries it; it is
+    // wrong for two labels somebody made, because hiding one hides a real
+    // object.
+    const loaded = project([0xea, 0x60], {
+      labels: [
+        { address: ORG, name: "initGame" },
+        { address: ORG, name: "initGame" },
+      ],
+    });
+
+    const rows = analyze(loaded, { annotations: false }).rows;
+    const labels = rows.filter((r) => r.address === ORG && r.kind === "label");
+    expect(labels).toHaveLength(2);
+    // Both holders marked, never one: there is no winner to elect.
+    expect(labels.every((r) => /initGame@lbl_/.test(r.text))).toBe(true);
+  });
+
+  it("leaves the operand alone, because it is not ambiguous", () => {
+    // One name at two addresses makes an operand ambiguous and is qualified
+    // everywhere. One name twice at a single address leaves the operand perfectly
+    // clear — $1000 is $1000 — so qualifying it there would be noise.
+    //
+    //   $1000  JMP $1004      $1004: the doubly-named address
+    const loaded = project([0x4c, 0x04, 0x10, 0xea, 0xea, 0x60], {
+      labels: [
+        { address: ORG + 4, name: "target" },
+        { address: ORG + 4, name: "target" },
+      ],
+    });
+
+    const rows = analyze(loaded, { annotations: false }).rows;
+    const jump = rows.find((r) => r.address === ORG && r.kind === "instruction");
+    expect(jump?.text).toContain("JMP target");
+    expect(jump?.text).not.toContain("@lbl_");
   });
 });
 
