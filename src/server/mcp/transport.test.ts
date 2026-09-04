@@ -95,7 +95,7 @@ describe("speaking the protocol", () => {
         "find_references",
         "find_unnamed",
         "changes_since",
-        "set_label",
+        "add_label",
         "mark_function",
         "set_region",
         "remove_region",
@@ -299,7 +299,7 @@ describe("asking what a routine does", () => {
 
 describe("editing as an agent", () => {
   it("names an address and says what it did", async () => {
-    const { value } = await callTool("set_label", {
+    const { value } = await callTool("add_label", {
       address: "$8870",
       name: "NamedByAnAgent",
       type: "function",
@@ -322,8 +322,8 @@ describe("editing as an agent", () => {
     const { value: described } = await callTool("describe_project");
     const stale = (described as { version: string }).version;
 
-    await callTool("set_label", { address: "$8870", name: "Meanwhile" });
-    const conflicted = await callTool("set_label", {
+    await callTool("add_label", { address: "$8870", name: "Meanwhile" });
+    const conflicted = await callTool("add_label", {
       address: "$8450",
       name: "TooLate",
       expectVersion: stale,
@@ -334,7 +334,7 @@ describe("editing as an agent", () => {
   });
 
   it("records the change, attributed to the caller", async () => {
-    await callTool("set_label", { address: "$8870", name: "Attributed" });
+    await callTool("add_label", { address: "$8870", name: "Attributed" });
     const { value } = await callTool("changes_since", { cursor: 0 });
     const { changes } = value as { changes: { did: string; by: string }[] };
 
@@ -344,11 +344,11 @@ describe("editing as an agent", () => {
   });
 
   it("lets a caller catch up on what it missed", async () => {
-    await callTool("set_label", { address: "$8870", name: "First" });
+    await callTool("add_label", { address: "$8870", name: "First" });
     const { value: first } = await callTool("changes_since", { cursor: 0 });
     const cursor = (first as { cursor: number }).cursor;
 
-    await callTool("set_label", { address: "$8450", name: "Second" });
+    await callTool("add_label", { address: "$8450", name: "Second" });
     const { value: next } = await callTool("changes_since", { cursor });
 
     const { changes } = next as { changes: { did: string }[] };
@@ -369,7 +369,7 @@ describe("editing as an agent", () => {
   });
 
   it("takes an edit back", async () => {
-    await callTool("set_label", { address: "$8870", name: "Regretted" });
+    await callTool("add_label", { address: "$8870", name: "Regretted" });
     const { value } = await callTool("undo");
 
     expect((value as { undone: string }).undone).toContain("Regretted");
@@ -515,7 +515,7 @@ describe("editing as an agent", () => {
   });
 
   it("removes a label by id when an address names more than one", async () => {
-    await callTool("set_label", { address: "$8250", name: "firstName" });
+    await callTool("add_label", { address: "$8250", name: "firstName" });
     await callTool("add_label", { address: "$8250", name: "secondName" });
 
     const refused = await callTool("remove_label", { address: "$8250" });
@@ -594,7 +594,7 @@ describe("editing as an agent", () => {
     const tagged = await callTool("tag_project", { name: "wire-test", note: "over MCP" });
     expect(tagged.isError).toBe(false);
 
-    await callTool("set_label", { address: "$8210", name: "afterWireTag" });
+    await callTool("add_label", { address: "$8210", name: "afterWireTag" });
 
     const since = await callTool("changes_since", { tag: "wire-test" });
     expect(since.isError).toBe(false);

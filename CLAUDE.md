@@ -474,10 +474,41 @@ prevent, and the reason a merge should surface a conflict rather than pick.
 This is `set_comment`'s history repeating on the object this file states the rule
 for *first*: **an address cannot identify a label.** Both times the upsert was
 justified by single-author use, both times it survived the arrival of a second
-author unrevisited, and both times an experiment had to find it. The fix is the
-same shape — say so — and discriminates on where the old name came from, because
-replacing an invented name is the ordinary act and warning about it would be
-noise on the first day of every project.
+author unrevisited, and both times an experiment had to find it.
+
+**And the first fix was too timid.** Reporting the rename stops the silence and
+leaves the destruction. The document could always hold several names at one
+address — that is *why* `primaryLabels` exists — so nothing about the CRDT
+required a name to be lost. The API was the whole problem, and its shape was the
+tell: there were tools to mint a second name, to remove one by id and to choose
+which renders, and **no tool to rename one by id at all**. Renaming could only be
+done by the address-keyed call, so the destructive path was not the default by
+choice; it was the only path.
+
+So there is no "set" for a label any more:
+
+| | |
+|---|---|
+| `add_label`, `add_labels` | name an address — **always adds, never replaces** |
+| `rename_label` | correct a name, **by id** |
+| `remove_label` | by id |
+| `set_primary_label` | the one thing anybody sets, last-write-wins |
+
+Three rules fell out, and two of them came from being wrong first:
+
+- **Even the same name twice adds.** Two labels are told apart by id, and two
+  people each making one is simpler than making the second react to a merge they
+  did not ask for. Duplication at one address is not ambiguity — the name still
+  reaches exactly one address — and this project already tolerates it, ten times
+  over in the reference file.
+- **Adding pins what was showing**, unless somebody has chosen. Two user labels
+  tie on rank so the winner falls to id order, which is random: without the pin a
+  second name silently renames every reference to the address. The newcomer adds
+  a name; it does not seize the display.
+- **Only a name a *person* chose counts as somebody's judgement.** An invented
+  `dat_XXXX`, a PRG layer's entry label named after its file, and a region's name
+  are machinery, and warning about joining those would be noise on the first day
+  of every project.
 
 **An extent was shared state nobody could see.** It reshapes every operand in its
 range and any writer can set one, and no read tool reported it: two readers each
@@ -1405,7 +1436,7 @@ Orient, read, decide, act, catch up:
 | `find_references`, `find_unnamed`, `find_instructions`, `call_graph` | who calls this, what touches the SID, and the shape of the whole |
 | `effects` | what code at an address touches, over a scope the caller names |
 | `run_block` | what a routine *does*, by running it |
-| `set_label`, `remove_label`, `mark_function`, `unmark_function` | naming |
+| `add_label`, `rename_label`, `remove_label`, `mark_function` | naming |
 | `set_region`, `remove_region` | exposed to agents **before** the web UI; the ops and the CLI already did this, so it was wiring rather than new capability |
 | `list_decoders`, `set_decoder`, `remove_decoder` | decoders the project carries |
 | `undo` | the same inverse the CLI and the browser use |

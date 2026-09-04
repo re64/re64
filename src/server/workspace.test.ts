@@ -167,7 +167,7 @@ describe("cross-references", () => {
 
 describe("editing", () => {
   it("names an address and reports what it did", () => {
-    const result = workspace.setLabel(agent, 0x8f00, "FoundByAgent");
+    const result = workspace.addLabel(agent, 0x8f00, "FoundByAgent");
 
     expect(result.ok).toBe(true);
     expect(result.did[0]).toContain("FoundByAgent");
@@ -189,7 +189,7 @@ describe("editing", () => {
   });
 
   it("records the edit durably, attributed", () => {
-    workspace.setLabel(agent, 0x8f00, "Recorded");
+    workspace.addLabel(agent, 0x8f00, "Recorded");
     const recorded = storage.readOps();
 
     expect(recorded).toHaveLength(1);
@@ -198,7 +198,7 @@ describe("editing", () => {
   });
 
   it("can take an edit back", () => {
-    workspace.setLabel(agent, 0x8f00, "Regretted");
+    workspace.addLabel(agent, 0x8f00, "Regretted");
     expect(workspace.undo(agent).undone).toContain("Regretted");
     expect(workspace.labels({ namePattern: "Regretted" }).total).toBe(0);
   });
@@ -213,7 +213,7 @@ describe("editing", () => {
 
   it("refuses to write against a project that has moved", () => {
     const stale = workspace.version();
-    workspace.setLabel(agent, 0x8f00, "Meanwhile");
+    workspace.addLabel(agent, 0x8f00, "Meanwhile");
 
     expect(() => workspace.expect(stale)).toThrow(/changed since you read it/);
     expect(() => workspace.expect(workspace.version())).not.toThrow();
@@ -227,10 +227,10 @@ describe("editing", () => {
 
 describe("catching up after being away", () => {
   it("reports what happened since a position", () => {
-    workspace.setLabel(agent, 0x8f00, "First");
+    workspace.addLabel(agent, 0x8f00, "First");
     const { cursor } = workspace.changesSince();
 
-    workspace.setLabel(agent, 0x8f10, "Second");
+    workspace.addLabel(agent, 0x8f10, "Second");
     const since = workspace.changesSince(cursor);
 
     expect(since.changes).toHaveLength(1);
@@ -239,7 +239,7 @@ describe("catching up after being away", () => {
   });
 
   it("returns nothing when nothing has happened", () => {
-    workspace.setLabel(agent, 0x8f00, "Only");
+    workspace.addLabel(agent, 0x8f00, "Only");
     const { cursor } = workspace.changesSince();
     expect(workspace.changesSince(cursor).changes).toEqual([]);
   });
@@ -248,9 +248,9 @@ describe("catching up after being away", () => {
     // The reason the log is append-only. It used to be rewritten wholesale on
     // every undo, renumbering everything, so a held cursor silently came to
     // mean something else.
-    workspace.setLabel(agent, 0x8f00, "First");
+    workspace.addLabel(agent, 0x8f00, "First");
     const { cursor } = workspace.changesSince();
-    workspace.setLabel(agent, 0x8f10, "Second");
+    workspace.addLabel(agent, 0x8f10, "Second");
 
     workspace.undo(agent);
 
@@ -260,7 +260,7 @@ describe("catching up after being away", () => {
   });
 
   it("resumes from the last entry it returned, not the last that exists", () => {
-    for (let i = 0; i < 5; i++) workspace.setLabel(agent, 0x8f00 + i * 0x10, `L${i}`);
+    for (let i = 0; i < 5; i++) workspace.addLabel(agent, 0x8f00 + i * 0x10, `L${i}`);
 
     const page = workspace.changesSince(0, 2);
     expect(page.truncated).toBe(true);
@@ -279,7 +279,7 @@ describe("the cache", () => {
 
   it("re-analyses after an edit, so a reader never sees stale code", () => {
     const before = workspace.program();
-    workspace.setLabel(agent, 0x8f00, "Changed", "function");
+    workspace.addLabel(agent, 0x8f00, "Changed", "function");
     expect(workspace.program()).not.toBe(before);
     expect(workspace.labels({ namePattern: "Changed" }).total).toBe(1);
   });
@@ -300,7 +300,7 @@ describe("a project written by hand", () => {
     // first thing anyone would try was the thing that did not work.
     const blank = blankWorkspace();
 
-    const result = blank.setLabel(agent, 0x8011, "GameEntry", "function");
+    const result = blank.addLabel(agent, 0x8011, "GameEntry", "function");
     expect(result.did[0]).toContain("GameEntry");
 
     const labels = blank.labels({ namePattern: "GameEntry" });
@@ -532,7 +532,7 @@ describe("writing about an address", () => {
 
   it("undoes as one action alongside the label it came with", () => {
     // set_label with a comment is one decision made of two operations.
-    workspace.setLabel(agent, 0x8450, "Considered", "function", "because of the timing");
+    workspace.addLabel(agent, 0x8450, "Considered", "function", "because of the timing");
     workspace.undo(agent);
 
     const rows = workspace.disassembly(0x8450, 3).lines.map((l) => l.text).join("\n");
@@ -548,7 +548,7 @@ describe("naming what holds no bytes", () => {
     // every variable lives in zero page, so roughly half of what a person
     // contributes to a listing could not be said at all.
     const blank = blankWorkspace();
-    const result = blank.setLabel(agent, 0x02, "currentXPosition");
+    const result = blank.addLabel(agent, 0x02, "currentXPosition");
 
     expect(result.did.some((d) => d.includes("symbols layer"))).toBe(true);
     expect(blank.labels({ namePattern: "currentXPosition" }).total).toBe(1);
@@ -557,7 +557,7 @@ describe("naming what holds no bytes", () => {
   it("uses the operand name once it has one", () => {
     const blank = blankWorkspace();
     blank.markFunction(agent, 0x8011);
-    blank.setLabel(agent, 0x0c, "previousYPosition");
+    blank.addLabel(agent, 0x0c, "previousYPosition");
 
     // Somewhere in the decoded program something touches $0C; the name has to
     // reach the operand column, which is the whole point of naming it.
@@ -567,9 +567,9 @@ describe("naming what holds no bytes", () => {
 
   it("makes only one layer, however many addresses are named", () => {
     const blank = blankWorkspace();
-    blank.setLabel(agent, 0x02, "currentXPosition");
-    blank.setLabel(agent, 0x03, "currentYPosition");
-    blank.setLabel(agent, 0x04, "currentCharacter");
+    blank.addLabel(agent, 0x02, "currentXPosition");
+    blank.addLabel(agent, 0x03, "currentYPosition");
+    blank.addLabel(agent, 0x04, "currentCharacter");
 
     const symbols = blank.describe().layers.filter((l) => l.name.includes("symbols"));
     expect(symbols).toHaveLength(1);
@@ -580,7 +580,7 @@ describe("naming what holds no bytes", () => {
     const blank = blankWorkspace();
     const before = blank.describe().layers.length;
 
-    blank.setLabel(agent, 0x02, "currentXPosition");
+    blank.addLabel(agent, 0x02, "currentXPosition");
     blank.undo(agent);
 
     expect(blank.describe().layers).toHaveLength(before);
@@ -600,7 +600,7 @@ describe("naming what holds no bytes", () => {
 
     expect(blank.describe().layers.map((l) => l.name)).toContain("hardware");
     // And the next unowned name goes into it rather than making another.
-    blank.setLabel(agent, 0x02, "currentXPosition");
+    blank.addLabel(agent, 0x02, "currentXPosition");
     expect(blank.describe().layers.filter((l) => l.name === "hardware")).toHaveLength(1);
   });
 });
@@ -640,21 +640,21 @@ describe("an edit that breaks the decode", () => {
     // allows it, but the row builder cannot draw two streams claiming one byte,
     // so everything after resyncs into garbage. The renderer still cannot cope
     // — this is the difference between a wrong answer and one that admits it.
-    const result = workspace.setLabel(agent, 0x8d5a, "b8D5A", "code");
+    const result = workspace.addLabel(agent, 0x8d5a, "b8D5A", "code");
 
     expect(result.warnings).toBeDefined();
     expect(result.warnings!.some((w) => /overlaps instruction/.test(w))).toBe(true);
   });
 
   it("stays quiet when nothing broke", () => {
-    const result = workspace.setLabel(agent, 0x8870, "PerfectlyOrdinary", "function");
+    const result = workspace.addLabel(agent, 0x8870, "PerfectlyOrdinary", "function");
     expect(result.warnings).toBeUndefined();
   });
 });
 
 describe("naming many addresses at once", () => {
   it("takes a batch and reports it as one action", () => {
-    const result = workspace.setLabels(agent, [
+    const result = workspace.addLabels(agent, [
       { address: 0x8450, name: "BatchedOne", type: "function" },
       { address: 0x8870, name: "BatchedTwo", type: "function" },
       { address: 0x8230, name: "BatchedThree" },
@@ -667,7 +667,7 @@ describe("naming many addresses at once", () => {
   });
 
   it("undoes the whole batch, not the last of it", () => {
-    workspace.setLabels(agent, [
+    workspace.addLabels(agent, [
       { address: 0x8450, name: "BatchedOne" },
       { address: 0x8870, name: "BatchedTwo" },
     ]);
@@ -678,7 +678,7 @@ describe("naming many addresses at once", () => {
 
   it("makes one symbols layer for a batch of unowned addresses, not one each", () => {
     const blank = blankWorkspace();
-    blank.setLabels(agent, [
+    blank.addLabels(agent, [
       { address: 0x02, name: "currentXPosition" },
       { address: 0x03, name: "currentYPosition" },
       { address: 0x04, name: "currentCharacter" },
@@ -690,7 +690,7 @@ describe("naming many addresses at once", () => {
   });
 
   it("carries comments through the batch", () => {
-    workspace.setLabels(agent, [
+    workspace.addLabels(agent, [
       { address: 0x8450, name: "Named", comment: "and explained" },
     ]);
 
@@ -699,7 +699,7 @@ describe("naming many addresses at once", () => {
   });
 
   it("refuses an empty batch rather than reporting success", () => {
-    expect(() => workspace.setLabels(agent, [])).toThrow(/at least one/);
+    expect(() => workspace.addLabels(agent, [])).toThrow(/at least one/);
   });
 });
 
@@ -870,7 +870,7 @@ describe("a region where there are no bytes", () => {
     // let a region land on a symbols layer, producing a document the loader
     // refused — after which no interface could write to the project at all.
     const blank = blankWorkspace();
-    blank.setLabel(agent, 0x02, "currentXPosition"); // creates the symbols layer
+    blank.addLabel(agent, 0x02, "currentXPosition"); // creates the symbols layer
 
     expect(() => blank.setRegion(agent, 0x0400, 0x07e8, "data", "SCREEN_RAM")).toThrow(
       /No loaded bytes at \$0400/
@@ -879,7 +879,7 @@ describe("a region where there are no bytes", () => {
 
   it("leaves the project writable afterwards", () => {
     const blank = blankWorkspace();
-    blank.setLabel(agent, 0x02, "currentXPosition");
+    blank.addLabel(agent, 0x02, "currentXPosition");
     try {
       blank.setRegion(agent, 0x0400, 0x07e8, "data");
     } catch {
@@ -887,14 +887,14 @@ describe("a region where there are no bytes", () => {
     }
 
     // The point of the bug: everything after used to fail too.
-    expect(() => blank.setLabel(agent, 0x8011, "StillWorks")).not.toThrow();
+    expect(() => blank.addLabel(agent, 0x8011, "StillWorks")).not.toThrow();
     expect(blank.labels({ namePattern: "StillWorks" }).total).toBe(1);
   });
 });
 
 describe("two names for one address", () => {
   it("adds a second rather than renaming", () => {
-    workspace.setLabel(agent, 0x08, "randomValue");
+    workspace.addLabel(agent, 0x08, "randomValue");
     workspace.addLabel(agent, 0x08, "gridXPos");
 
     const names = workspace.labels({ source: "user" }).labels
@@ -904,15 +904,27 @@ describe("two names for one address", () => {
     expect(names).toContain("gridXPos");
   });
 
-  it("refuses the same name twice at one address", () => {
-    workspace.setLabel(agent, 0x08, "randomValue");
-    expect(() => workspace.addLabel(agent, 0x08, "randomValue")).toThrow(/already called/);
+  it("adds even the same name twice, told apart by id", () => {
+    // It used to refuse. Naming always adds now, with no special case: two
+    // labels are distinguishable by id, and two people each making one is
+    // simpler semantics than making the second react to a merge they did not
+    // ask for. Duplication at one address is not ambiguity — the name still
+    // reaches exactly one address — and the reference project ships ten such
+    // pairs already.
+    workspace.addLabel(agent, 0x08, "randomValue");
+    workspace.addLabel(agent, 0x08, "randomValue");
+
+    const here = workspace
+      .labels({ range: { start: 0x08, end: 0x09 } })
+      .labels.filter((l) => l.name === "randomValue");
+    expect(here.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(here.map((l) => l.id)).size).toBe(here.length);
   });
 
   it("shows the primary where no site says otherwise", () => {
     const blank = blankWorkspace();
     blank.markFunction(agent, 0x8011);
-    blank.setLabel(agent, 0x08, "randomValue");
+    blank.addLabel(agent, 0x08, "randomValue");
     blank.addLabel(agent, 0x08, "gridXPos");
     blank.setPrimaryLabel(agent, 0x08, "randomValue");
 
@@ -924,7 +936,7 @@ describe("two names for one address", () => {
   it("shows the bound name at the site that says so", () => {
     const blank = blankWorkspace();
     blank.markFunction(agent, 0x8011);
-    blank.setLabel(agent, 0x08, "randomValue");
+    blank.addLabel(agent, 0x08, "randomValue");
     blank.addLabel(agent, 0x08, "gridXPos");
     blank.setPrimaryLabel(agent, 0x08, "randomValue");
 
@@ -950,7 +962,7 @@ describe("two names for one address", () => {
   it("binds a whole span in one call", () => {
     const blank = blankWorkspace();
     blank.markFunction(agent, 0x8011);
-    blank.setLabel(agent, 0x08, "randomValue");
+    blank.addLabel(agent, 0x08, "randomValue");
     blank.addLabel(agent, 0x08, "gridXPos");
 
     const result = blank.bindLabel(agent, "gridXPos", 0x08, 0x8011, 0x8fff);
@@ -958,7 +970,7 @@ describe("two names for one address", () => {
   });
 
   it("says when a span refers to nothing", () => {
-    workspace.setLabel(agent, 0x08, "randomValue");
+    workspace.addLabel(agent, 0x08, "randomValue");
     expect(() => workspace.bindLabel(agent, "randomValue", 0x08, 0x8011, 0x8012)).toThrow(
       /No instruction between/
     );
@@ -969,7 +981,7 @@ describe("two names for one address", () => {
     // here until two agents lost work to it: one had the wrong label deleted
     // silently and was left with an orphan nothing could reach.
     const blank = blankWorkspace();
-    blank.setLabel(agent, 0x08, "randomValue");
+    blank.addLabel(agent, 0x08, "randomValue");
     blank.addLabel(agent, 0x08, "gridXPos");
 
     expect(() => blank.removeLabel(agent, 0x08)).toThrow(/carries 2 labels/);
@@ -995,7 +1007,7 @@ describe("two names for one address", () => {
   it("falls back to the primary when the bound label is deleted", () => {
     const blank = blankWorkspace();
     blank.markFunction(agent, 0x8011);
-    blank.setLabel(agent, 0x08, "randomValue");
+    blank.addLabel(agent, 0x08, "randomValue");
     blank.addLabel(agent, 0x08, "gridXPos");
     const site = blank
       .program()
@@ -1021,7 +1033,7 @@ describe("naming an array", () => {
     // The reference writes `LDA SCREEN_RAM + $000F,X`; re64 wrote
     // `LDA dat_040F,X`, losing the fact that it indexes the screen. Hundreds
     // of sites in this one game.
-    workspace.setLabel(agent, 0x0400, "SCREEN_RAM", undefined, undefined, 1000);
+    workspace.addLabel(agent, 0x0400, "SCREEN_RAM", undefined, undefined, 1000);
 
     // Two rows at this address: the label, then the instruction.
     const rows = workspace.disassembly(0x8072, 2).lines.map((l) => l.text).join("\n");
@@ -1034,22 +1046,22 @@ describe("naming an array", () => {
     const at8072 = () =>
       workspace.disassembly(0x8072, 2).lines.map((l) => l.text).join("\n");
 
-    workspace.setLabel(agent, 0x0400, "SCREEN_RAM", undefined, undefined, 1000);
+    workspace.addLabel(agent, 0x0400, "SCREEN_RAM", undefined, undefined, 1000);
     expect(at8072()).toContain("SCREEN_RAM + ");
 
-    workspace.setLabel(agent, 0x040f, "cursorCell");
+    workspace.addLabel(agent, 0x040f, "cursorCell");
     expect(at8072()).toContain("cursorCell");
   });
 
   it("leaves an address outside the extent alone", () => {
-    workspace.setLabel(agent, 0x0400, "SCREEN_RAM", undefined, undefined, 4);
+    workspace.addLabel(agent, 0x0400, "SCREEN_RAM", undefined, undefined, 4);
     const rows = workspace.disassembly(0x8072, 2).lines.map((l) => l.text).join("\n");
     expect(rows).not.toContain("SCREEN_RAM");
   });
 
   it("prefers the innermost array when they nest", () => {
-    workspace.setLabel(agent, 0x0400, "SCREEN_RAM", undefined, undefined, 1000);
-    workspace.addLabel(agent, 0x0408, "topRow", undefined, 40);
+    workspace.addLabel(agent, 0x0400, "SCREEN_RAM", undefined, undefined, 1000);
+    workspace.addLabel(agent, 0x0408, "topRow", undefined, undefined, 40);
 
     const rows = workspace.disassembly(0x8072, 2).lines.map((l) => l.text).join("\n");
     expect(rows).toContain("topRow + $0007");
@@ -1058,7 +1070,7 @@ describe("naming an array", () => {
   it("keeps the tolerance idiom looking different", () => {
     // `table-1,X` with X from 1 is a 1-indexed table, which is a different
     // statement from "element N of this array" and should not read alike.
-    workspace.setLabel(agent, 0x0400, "SCREEN_RAM", undefined, undefined, 1000);
+    workspace.addLabel(agent, 0x0400, "SCREEN_RAM", undefined, undefined, 1000);
     const rows = workspace.disassembly(0x8800, 30).lines.map((l) => l.text).join("\n");
 
     expect(rows).toContain("SCREEN_RAM-1,X");
@@ -1253,7 +1265,7 @@ describe("adding a second name", () => {
     // unpredictably enough that testing it once told you nothing.
     const blank = blankWorkspace();
     blank.setRegion(agent, 0x8011, 0x8015, "code");
-    blank.setLabel(agent, 0x02, "currentXPosition");
+    blank.addLabel(agent, 0x02, "currentXPosition");
 
     const before = blank.disassembly(0x8132, 1).lines[0].text;
     blank.addLabel(agent, 0x02, "vicRegisterLoPtr");
@@ -1264,7 +1276,7 @@ describe("adding a second name", () => {
   it("leaves an explicit choice alone", () => {
     const blank = blankWorkspace();
     blank.setRegion(agent, 0x8011, 0x8015, "code");
-    blank.setLabel(agent, 0x02, "currentXPosition");
+    blank.addLabel(agent, 0x02, "currentXPosition");
     blank.addLabel(agent, 0x02, "vicRegisterLoPtr");
     blank.setPrimaryLabel(agent, 0x02, "vicRegisterLoPtr");
 
@@ -1313,7 +1325,7 @@ describe("the rest of trial 3's list", () => {
   });
 
   it("takes an extent in a batch of labels", () => {
-    workspace.setLabels(agent, [
+    workspace.addLabels(agent, [
       { address: 0x0400, name: "SCREEN_RAM", extent: 1000 },
       { address: 0xd800, name: "COLOUR_RAM", extent: 1000 },
     ]);
@@ -1481,7 +1493,7 @@ describe("quoting the line that refers to something", () => {
     // Both readers in experiment 2 hit this independently: at a labelled or
     // commented caller the quoted line was the caller's own name, or somebody's
     // prose. The better the project was annotated, the worse the answer got.
-    workspace.setLabel(agent, 0x81c4, "SomewhereThatCalls");
+    workspace.addLabel(agent, 0x81c4, "SomewhereThatCalls");
     workspace.addComment(agent, 0x81c4, "and here is why", "before");
 
     const { inbound } = workspace.references(0x8172);
@@ -1760,7 +1772,7 @@ describe("finding things across the whole program", () => {
     const tag = workspace.tagProject(agent, "before-renames", "about to rename the zero page");
     expect(tag.name).toBe("before-renames");
 
-    workspace.setLabel(agent, 0x8200, "afterTheTag");
+    workspace.addLabel(agent, 0x8200, "afterTheTag");
 
     const since = workspace.changesSince("before-renames");
     expect(since.changes.length).toBeGreaterThan(0);
@@ -1797,7 +1809,7 @@ describe("finding things across the whole program", () => {
     // between. On a character set, naming which glyph is the ship is the job.
     workspace.setRegion(agent, 0x8e00, 0x8e40, "bitmap", "charset", "ONCE", undefined, "char:8");
     workspace.addComment(agent, 0x8e08, "INNER", "before");
-    workspace.setLabel(agent, 0x8e08, "innerGlyph");
+    workspace.addLabel(agent, 0x8e08, "innerGlyph");
 
     const text = workspace.listing(0x8e00, 60).text;
     expect(text.match(/ONCE/g) ?? []).toHaveLength(1);
@@ -1835,8 +1847,13 @@ describe("finding things across the whole program", () => {
   });
 
   it("reports a name that points at two addresses, and qualifies it in operands", () => {
-    workspace.setLabel(agent, 0x8cb5, "levelTable");
-    workspace.setLabel(agent, 0x8cd5, "levelTable");
+    workspace.addLabel(agent, 0x8cb5, "levelTable");
+    workspace.addLabel(agent, 0x8cd5, "levelTable");
+    // Naming an address adds rather than replaces, and the name that was there
+    // keeps rendering until somebody says otherwise — so saying otherwise is
+    // part of the setup now.
+    workspace.setPrimaryLabel(agent, 0x8cb5, "levelTable");
+    workspace.setPrimaryLabel(agent, 0x8cd5, "levelTable");
 
     const [finding] = workspace.describe().hygiene ?? [];
     expect(finding?.kind).toBe("label.nameShared");

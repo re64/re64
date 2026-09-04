@@ -71,7 +71,7 @@ describe("joining a project", () => {
 describe("editing", () => {
   it("shows a rename without waiting for anything", async () => {
     const session = await open();
-    session.setLabel(0x8100, "Renamed", undefined);
+    session.addLabel(0x8100, "Renamed", undefined);
     await session.refresh();
     expect(labelAt(session, 0x8100)).toBe("Renamed");
     session.close();
@@ -89,7 +89,7 @@ describe("editing", () => {
 describe("undo", () => {
   it("takes back the last edit and says what it took", async () => {
     const session = await open();
-    session.setLabel(0x8100, "Renamed", undefined);
+    session.addLabel(0x8100, "Renamed", undefined);
     await session.refresh();
 
     expect(session.undo()).toContain("$8100");
@@ -107,7 +107,7 @@ describe("undo", () => {
 
   it("redoes what it undid, and stops", async () => {
     const session = await open();
-    session.setLabel(0x8100, "Renamed", undefined);
+    session.addLabel(0x8100, "Renamed", undefined);
     await session.refresh();
     session.undo();
     await session.refresh();
@@ -125,7 +125,7 @@ describe("two sessions, as two tabs would be", () => {
     const a = await open();
     const b = await open();
 
-    a.setLabel(0x8100, "FromA", undefined);
+    a.addLabel(0x8100, "FromA", undefined);
     await settle();
     await b.refresh();
 
@@ -140,7 +140,7 @@ describe("two sessions, as two tabs would be", () => {
     const a = await open();
     const b = await open();
 
-    a.setLabel(0x8100, "FromA", undefined);
+    a.addLabel(0x8100, "FromA", undefined);
     await settle();
     await b.refresh();
 
@@ -158,8 +158,8 @@ describe("two sessions, as two tabs would be", () => {
     const a = await open();
     const b = await open();
 
-    a.setLabel(0x8100, "FromA", undefined);
-    b.setLabel(0x81a2, "FromB", undefined);
+    a.addLabel(0x8100, "FromA", undefined);
+    b.addLabel(0x81a2, "FromB", undefined);
     await settle();
     await a.refresh();
 
@@ -175,7 +175,7 @@ describe("what the record says afterwards", () => {
     // Only CLI edits were ever recorded. A browser could rename a hundred
     // labels and the history would know a session happened and nothing else.
     const session = await open();
-    session.setLabel(0x8100, "ByAParticipant", undefined);
+    session.addLabel(0x8100, "ByAParticipant", undefined);
     await settle();
 
     const storage = new SqliteStorage(databaseUnderTest, project);
@@ -190,7 +190,7 @@ describe("what the record says afterwards", () => {
 
   it("records an inverse, so the CLI can take it back", async () => {
     const session = await open();
-    session.setLabel(0x8100, "Reversible", undefined);
+    session.addLabel(0x8100, "Reversible", undefined);
     await settle();
 
     const storage = new SqliteStorage(databaseUnderTest, project);
@@ -203,13 +203,13 @@ describe("what the record says afterwards", () => {
 
   it("hands out stable positions, so a reader can ask what it has missed", async () => {
     const session = await open();
-    session.setLabel(0x8100, "First", undefined);
+    session.addLabel(0x8100, "First", undefined);
     await settle();
 
     const storage = new SqliteStorage(databaseUnderTest, project);
     const cursor = storage.readOps().at(-1)!.seq;
 
-    session.setLabel(0x81a2, "Second", "function");
+    session.addLabel(0x81a2, "Second", "function");
     await settle();
 
     const since = storage.readOps(cursor);
@@ -228,7 +228,7 @@ describe("as a headless participant", () => {
     const a = await open();
     const b = await open();
 
-    a.setLabel(0x8100, "FromA", undefined);
+    a.addLabel(0x8100, "FromA", undefined);
     await b.settled();
 
     expect(labelAt(b, 0x8100)).toBe("FromA");
@@ -240,8 +240,8 @@ describe("as a headless participant", () => {
     const a = await open();
     const b = await open();
 
-    a.setLabel(0x8100, "One", undefined);
-    a.setLabel(0x81a2, "Two", "function");
+    a.addLabel(0x8100, "One", undefined);
+    a.addLabel(0x81a2, "Two", "function");
     await b.settled();
 
     expect(labelAt(b, 0x8100)).toBe("One");
@@ -259,7 +259,7 @@ describe("as a headless participant", () => {
     const seen: (string | undefined)[] = [];
     b.onChange(() => seen.push(labelAt(b, 0x8100)));
 
-    a.setLabel(0x8100, "Observed", undefined);
+    a.addLabel(0x8100, "Observed", undefined);
     await b.settled();
 
     expect(seen.length).toBeGreaterThan(0);
@@ -273,7 +273,7 @@ describe("as a headless participant", () => {
     const b = await open();
     expect(b.debug().changes).toBe(0);
 
-    a.setLabel(0x8100, "Counted", undefined);
+    a.addLabel(0x8100, "Counted", undefined);
     await b.settled();
 
     expect(b.debug().changes).toBeGreaterThan(0);
@@ -329,7 +329,7 @@ describe("the exported view", () => {
 
   it("follows an edit", async () => {
     const session = await open();
-    session.setLabel(0x8100, "Renamed", undefined);
+    session.addLabel(0x8100, "Renamed", undefined);
     await session.refresh();
     expect(session.exportedText()).toContain("Renamed");
     session.close();

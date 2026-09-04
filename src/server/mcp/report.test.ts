@@ -16,7 +16,7 @@ describe("what the transcript is asked", () => {
     // The point of the whole exercise: the agent says what is missing by
     // trying to use it.
     const summary = summarise([
-      entry({ tool: "set_label" }),
+      entry({ tool: "add_label" }),
       entry({
         tool: "add_comment",
         ok: false,
@@ -34,7 +34,7 @@ describe("what the transcript is asked", () => {
       { tool: "add_comment", calls: 2, example: { address: "$8870", text: "wait for raster" } },
     ]);
     // And it does not appear as a tool that exists and failed.
-    expect(summary.tools.map((t) => t.tool)).toEqual(["set_label"]);
+    expect(summary.tools.map((t) => t.tool)).toEqual(["add_label"]);
   });
 
   it("keeps a real tool that merely refused out of the missing list", () => {
@@ -89,8 +89,8 @@ describe("what the transcript is asked", () => {
         protocol: "2025-06-18",
         session: "b",
       }),
-      entry({ tool: "set_label", session: "a", sessionId: "ses_1", codename: "basalt" }),
-      entry({ tool: "set_label", session: "b", sessionId: "ses_2", codename: "quartz" }),
+      entry({ tool: "add_label", session: "a", sessionId: "ses_1", codename: "basalt" }),
+      entry({ tool: "add_label", session: "b", sessionId: "ses_2", codename: "quartz" }),
     ]);
 
     expect(summary.hosts).toEqual([
@@ -103,7 +103,7 @@ describe("what the transcript is asked", () => {
   it("counts calls that arrived with no session handle", () => {
     // These all shared one lease, and therefore one undo scope. Silent
     // otherwise, which is exactly what makes it worth counting.
-    const summary = summarise([entry({ tool: "set_label" }), entry({ tool: "set_label" })]);
+    const summary = summarise([entry({ tool: "add_label" }), entry({ tool: "add_label" })]);
     expect(summary.unkeyed).toBe(2);
   });
 
@@ -151,7 +151,7 @@ describe("the printed report", () => {
   it("leads with what is missing", () => {
     const text = formatSummary(
       summarise([
-        entry({ tool: "set_label" }),
+        entry({ tool: "add_label" }),
         entry({ tool: "add_comment", ok: false, error: "Tool add_comment not found" }),
       ])
     );

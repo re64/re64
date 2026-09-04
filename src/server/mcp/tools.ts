@@ -742,11 +742,17 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   // all, so that number is how you tell a good guess from a wasted one.
 
   tool(
-    "set_label",
-    "Name an address, or rename what is already there. Give `extent` when the " +
-      "name covers an array, so operands inside it read as NAME + offset. " +
-      "Note that type \"function\" also makes the address an entry point, so " +
-      "code only reachable from there starts decoding.",
+    "add_label",
+    "Name an address. **This adds a name; it never replaces one.** " +
+      "Several labels can share an address — the reference disassembly calls $08 " +
+      "a scratch byte in most of a program and something specific in one " +
+      "routine, and both are true — so an address cannot say which label you " +
+      "meant, and a write keyed by one must not decide. Where a name is already " +
+      "there you get a second and are told whose you joined. " +
+      "To correct a name rather than add to it, use rename_label with its id. " +
+      "Which name an operand shows is set_primary_label, and that is the only " +
+      "thing about a label anybody sets; without a choice, resolution is by " +
+      "source rank then id — arbitrary, and the same on every machine.",
     {
       project,
       address,
@@ -780,7 +786,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.setLabel(
+      return space.addLabel(
         caller,
         args.address,
         args.name,
@@ -792,7 +798,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
-    "set_labels",
+    "add_labels",
     "Name several addresses in one call, as one action. Undo takes the whole " +
       "batch back. Use this rather than a call per label: a real disassembly " +
       "has hundreds, and one round trip each is almost all protocol.",
@@ -826,28 +832,30 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.setLabels(caller, args.labels);
+      return space.addLabels(caller, args.labels);
     }
   );
 
   tool(
-    "add_label",
-    "Add a SECOND name at an address, rather than renaming the one there. For " +
-      "an address that genuinely has two — the reference calls $08 " +
-      "a general-purpose scratch byte in most of a program and something specific in one routine, which is a " +
-      "finding about the program. Which name an operand shows is bind_label; " +
-      "without one, the primary wins.",
+    "rename_label",
+    "Change a label's name, by its id. " +
+      "The way to correct a name rather than add to it: naming an *address* " +
+      "always adds, because several labels can share an address and so an " +
+      "address cannot say which one you meant. `list_labels` reports the id of " +
+      "every label a project owns — an invented `dat_`/`loc_`/`sub_` name has " +
+      "none, because nothing stored it, and naming that address is an ordinary " +
+      "`add_label`.",
     {
       project,
-      address,
+      id: z.string().describe("Label id, from list_labels"),
       name: z.string().min(1),
       type: z.enum(["entry", "function", "code", "address"]).optional(),
-      extent: z.number().int().min(1).max(0x10000).optional().describe("Bytes this name covers, when it names an array: an operand inside it renders as NAME + $000F instead of a bare address"),
+      extent: z.number().int().min(1).max(0x10000).optional(),
       expectVersion: z.string().optional(),
     },
     (args: {
       project?: string;
-      address: number;
+      id: string;
       name: string;
       type?: LabelType;
       extent?: number;
@@ -856,7 +864,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.addLabel(caller, args.address, args.name, args.type, args.extent);
+      return space.renameLabel(caller, args.id, args.name, args.type, args.extent);
     }
   );
 

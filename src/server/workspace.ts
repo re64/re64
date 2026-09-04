@@ -52,6 +52,8 @@ import {
   ensureOwningLayer,
   labelAddOp,
   labelSetOp,
+  labelSetOps,
+  renameLabelOp,
   owningLayerId,
   ownsAddress,
   newId,
@@ -2029,7 +2031,7 @@ export class Workspace {
 
   // --- writes ---------------------------------------------------------
 
-  setLabel(
+  addLabel(
     caller: Caller,
     address: number,
     name: string,
@@ -2039,17 +2041,18 @@ export class Workspace {
   ): EditResult {
     // A comment given here is a comment about the address, not a field on the
     // label — one action, two operations, so undo takes both back together.
-    let renamed: { address: number; from: string }[] = [];
+    let beside: { address: number; from: string }[] = [];
     const result = this.edit(caller, (loaded) => {
-      renamed = this.chosenNamesAt(loaded, [address]).filter((r) => r.from !== name);
       const { layerId, create, joins } = ensureOwningLayer(loaded, address, this.room.projectId);
-      const label: Op = create
-        ? { op: "label.set", id: newId("lbl"), layerId, address, name, type, extent }
-        : labelSetOp(loaded, address, name, type, extent);
+      const built = create
+        ? { ops: [{ op: "label.set", id: newId("lbl"), layerId, address, name, type, extent } as Op] }
+        : labelSetOps(loaded, address, name, type, extent);
+      if (built.addedBeside) beside = [{ address, from: built.addedBeside }];
+      const label: Op[] = built.ops;
 
       return [
         ...(create ? [create, ...joins] : []),
-        label,
+        ...label,
         ...(comment
           ? [
               create
@@ -2070,10 +2073,30 @@ export class Workspace {
     // the long-standing gap, now said out loud at the point of writing rather
     // than left to be discovered in a listing.
     return this.warnIfInsideInstruction(
-      this.warnIfRenamingAChosenName(result, renamed),
+      this.warnIfAddedBesideAChosenName(result, beside),
       address,
       "label"
     );
+  }
+
+  /**
+   * Correct a label's name, by the only thing that identifies it.
+   *
+   * The gap that made every address-keyed write destructive: renaming could only
+   * be done through `add_label`, which is keyed by address — and an address
+   * cannot identify a label, since several can share one. That is this project's
+   * first identity rule, stated for labels, and labels were the one object it
+   * had never been applied to. Comments got `edit_comment` after experiment 3;
+   * this is the same tool, three experiments later.
+   */
+  renameLabel(
+    caller: Caller,
+    id: string,
+    name: string,
+    type?: LabelType,
+    extent?: number
+  ): EditResult {
+    return this.edit(caller, (loaded) => [renameLabelOp(loaded, id, name, type, extent)]);
   }
 
   /**
@@ -2088,7 +2111,7 @@ export class Workspace {
    * what the first one made — otherwise naming forty zero-page variables would
    * build forty layers.
    */
-  setLabels(
+  addLabels(
     caller: Caller,
     labels: readonly {
       address: number;
@@ -2100,10 +2123,9 @@ export class Workspace {
   ): EditResult {
     if (labels.length === 0) throw new Error("Give at least one label.");
 
-    let renamed: { address: number; from: string }[] = [];
+    let beside: { address: number; from: string }[] = [];
     const result = this.edit(caller, (loaded) => {
-      // Read before the write, since afterwards the old name is gone.
-      renamed = this.chosenNamesAt(
+      beside = this.chosenNamesAt(
         loaded,
         labels.map((l) => l.address)
       ).filter((r) => !labels.some((l) => l.address === r.address && l.name === r.from));
@@ -2123,19 +2145,19 @@ export class Workspace {
           }
         }
 
-        ops.push(
-          madeLayer === layerId
-            ? {
-                op: "label.set",
-                id: newId("lbl"),
-                layerId,
-                address: entry.address,
-                name: entry.name,
-                type: entry.type,
-                extent: entry.extent,
-              }
-            : labelSetOp(loaded, entry.address, entry.name, entry.type, entry.extent)
-        );
+        if (madeLayer === layerId) {
+          ops.push({
+            op: "label.set",
+            id: newId("lbl"),
+            layerId,
+            address: entry.address,
+            name: entry.name,
+            type: entry.type,
+            extent: entry.extent,
+          });
+        } else {
+          ops.push(...labelSetOps(loaded, entry.address, entry.name, entry.type, entry.extent).ops);
+        }
 
         if (entry.comment) {
           ops.push(
@@ -2156,53 +2178,7 @@ export class Workspace {
       return ops;
     });
 
-    return this.warnIfRenamingAChosenName(result, renamed);
-  }
-
-  /**
-   * Add a second name at an address rather than replacing the first.
-   *
-   * `set_label` renames, which is right for a correction. This is for an
-   * address that genuinely has two names — the reference calls `$08`
-   * `a scratch byte` throughout and `something specific` inside one routine, which is a
-   * finding about the program, not a nickname. Which one a given operand shows
-   * is then `bind_label`; without one, the primary wins.
-   */
-  addLabel(
-    caller: Caller,
-    address: number,
-    name: string,
-    type?: LabelType,
-    extent?: number
-  ): EditResult {
-    return this.edit(caller, (loaded) => {
-      const already = loaded.map
-        .getLabels()
-        .getLabelsAt(address)
-        .find((l) => l.name === name);
-      if (already) throw new Error(`${hex4(address)} is already called ${name}.`);
-
-      // Pin whatever is showing now as the primary, unless something already
-      // is. Two user labels at one address tie on rank, so the winner would
-      // otherwise be decided by id order — which is random. Adding a second
-      // name silently renamed every reference to the address, and did so
-      // unpredictably enough that testing it once told you nothing.
-      const showing = loaded.map.getLabels().resolve(address)?.label;
-      const alreadyChosen = loaded.map.primaryLabels.has(address);
-      const pin: Op[] =
-        showing && !alreadyChosen
-          ? [{ op: "primary.set", address, labelId: showing.id }]
-          : [];
-
-      const { layerId, create } = ensureOwningLayer(loaded, address, this.room.projectId);
-      return create
-        ? [
-            create,
-            ...pin,
-            { op: "label.set", id: newId("lbl"), layerId, address, name, type, extent } as Op,
-          ]
-        : [...pin, labelAddOp(loaded, address, name, type, extent)];
-    });
+    return this.warnIfAddedBesideAChosenName(result, beside);
   }
 
   /** Choose which of several names at an address is shown by default. */
@@ -2695,42 +2671,30 @@ export class Workspace {
 
   /** Append the mid-instruction warning to a result, when it applies. */
   /**
-   * Say so when a write renamed a name somebody chose.
+   * Say so when a write added a name beside one somebody had chosen.
    *
-   * `set_label` is an upsert keyed by address: it reuses the id of whatever
-   * label is already there, so it *renames* it rather than adding a second. For
-   * one author that is right — turning `dat_6700` into `zoneTable` is the whole
-   * point. For three it is destructive and silent, and experiment 7 measured
-   * the cost: **74 addresses had a name replaced by another reader, 123 names
-   * lost, and nobody was told once.** Both the writer and the loser got `ok`.
-   *
-   * Worse than the count, the losses were *disagreements* — `jumpTimer` against
-   * `jumpVelocity`, `shotInFlight` against `laserSoundActive`. Two readers
-   * concluded different things about one byte and one of them silently won,
-   * which is the one outcome a shared document exists to prevent.
-   *
-   * The discrimination that matters is where the old name came from. Replacing
-   * an invented `dat_XXXX` is the ordinary act and stays quiet; replacing a name
-   * a person chose is the collision, and is reported. Naming *who* chose it is
-   * not on the label — `changes_since` resolves that from the ops log, which is
-   * where the answer lives.
+   * Not a warning about damage any more — nothing is destroyed — but the caller
+   * still has to know, because two names at one address is a *finding* and the
+   * other one is somebody's judgement. `jumpTimer` beside `jumpVelocity` is the
+   * sharpest thing either reader said about that byte, and it only means
+   * anything if both of them find out.
    */
-  private warnIfRenamingAChosenName(
+  private warnIfAddedBesideAChosenName(
     result: EditResult,
-    renamed: { address: number; from: string }[]
+    beside: { address: number; from: string }[]
   ): EditResult {
-    if (renamed.length === 0) return result;
-    const list = renamed
+    if (beside.length === 0) return result;
+    const list = beside
       .slice(0, 6)
-      .map((r) => `${hex4(r.address)} was "${r.from}"`)
+      .map((r) => `${hex4(r.address)} already had "${r.from}"`)
       .join(", ");
     result.warnings = [
       ...(result.warnings ?? []),
-      `Renamed ${renamed.length} name(s) somebody had chosen: ${list}` +
-        (renamed.length > 6 ? `, and ${renamed.length - 6} more` : "") +
-        `. set_label replaces the label at an address rather than adding one — ` +
-        `use add_label for a second name, and changes_since to see who chose the ` +
-        `first.`,
+      `Added ${beside.length} name(s) beside one somebody had chosen: ${list}` +
+        (beside.length > 6 ? `, and ${beside.length - 6} more` : "") +
+        `. Both names are kept and the older one still renders. To correct a name ` +
+        `rather than add to it, use rename_label with its id; changes_since says ` +
+        `who chose the first.`,
     ];
     return result;
   }
@@ -2854,7 +2818,7 @@ export class Workspace {
    * Write several comments as one action.
    *
    * The reference has more comments than labels, so the argument that made
-   * `set_labels` exist applies here at least as strongly: one round trip each
+   * `add_labels` exist applies here at least as strongly: one round trip each
    * is almost all protocol.
    */
   addComments(

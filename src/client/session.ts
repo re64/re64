@@ -260,7 +260,7 @@ export class ProjectSession {
     this.client.apply(ops);
   }
 
-  setLabel(address: number, name: string, type: ProjectLabel["type"] | undefined): void {
+  addLabel(address: number, name: string, type: ProjectLabel["type"] | undefined): void {
     // The identity rule lives in core/ops/edits, because it used to live here
     // *and* in the CLI and the two disagreed: this one reused whatever label
     // resolved at the address, which includes the built-in platform names.

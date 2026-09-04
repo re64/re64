@@ -374,7 +374,7 @@ async function commitLabelEdit(target: EditTarget, value: string): Promise<void>
   }
 
   await edit(
-    (s) => s.setLabel(target.address, name, undefined),
+    (s) => s.addLabel(target.address, name, undefined),
     () => `${target.isNew ? "Added" : "Renamed"} ${name} at ${hex4(target.address)}`
   );
 }
@@ -583,7 +583,7 @@ async function setLabelType(
   type: LabelType
 ): Promise<void> {
   await edit(
-    (s) => s.setLabel(address, name, type),
+    (s) => s.addLabel(address, name, type),
     (delta) =>
       `${name} is now ${type}` +
       (delta > 0

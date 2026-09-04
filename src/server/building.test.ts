@@ -194,7 +194,7 @@ describe("building a project from a disk image", () => {
     camels.addByteLayer(builder, { type: "prg", path: "p.prg", name: "scratch" });
     const id = camels.targets().layers.find((l) => l.name === "scratch")!.id;
 
-    camels.setLabel(builder, 0x0801, "keepMe");
+    camels.addLabel(builder, 0x0801, "keepMe");
     expect(() => camels.removeLayer(builder, id)).toThrow(/still holds 1 annotation/);
 
     camels.removeLabel(builder, camels.labels().labels.find((l) => l.name === "keepMe")!.id!);
@@ -202,20 +202,23 @@ describe("building a project from a disk image", () => {
     expect(camels.targets().layers.map((l) => l.name)).not.toContain("scratch");
   });
 
-  it("says when a write renamed a name somebody chose", () => {
-    // set_label is an upsert keyed by address: it reuses the id already there,
-    // so it renames rather than adds. Right for one author — `dat_6700` into
-    // `zoneTable` is the point — and destructive for three. Experiment 7
-    // measured it: 74 addresses had a name replaced by another reader, 123
-    // names lost, and nobody was told once.
+  it("adds beside a name somebody chose, and says so", () => {
+    // It used to reuse the id already there, so it renamed rather than added:
+    // 74 addresses had a name replaced by another reader in experiment 7, 123
+    // names lost, nobody told. The document could always hold both.
     ws.createProject("camels");
     const camels = upload("camels", "p.prg", new Uint8Array([0x01, 0x08, 0xa9, 0x01, 0x60]));
     camels.addByteLayer(builder, { type: "prg", path: "p.prg" });
 
-    camels.setLabel(builder, 0x0801, "waveTable");
-    const over = camels.setLabel(builder, 0x0801, "zoneTable") as { warnings?: string[] };
-    expect(over.warnings?.join(" ")).toMatch(/was "waveTable"/);
-    expect(over.warnings?.join(" ")).toMatch(/add_label/);
+    camels.addLabel(builder, 0x0801, "waveTable");
+    const over = camels.addLabel(builder, 0x0801, "zoneTable") as { warnings?: string[] };
+    expect(over.warnings?.join(" ")).toMatch(/already had "waveTable"/);
+    expect(over.warnings?.join(" ")).toMatch(/rename_label/);
+
+    // Both survive, and the one that was there still renders.
+    const here = camels.labels({ range: { start: 0x0801, end: 0x0802 } }).labels.map((l) => l.name);
+    expect(here).toContain("waveTable");
+    expect(here).toContain("zoneTable");
   });
 
   it("stays quiet when the name it replaced was invented", () => {
@@ -225,7 +228,7 @@ describe("building a project from a disk image", () => {
     const camels = upload("camels", "p.prg", new Uint8Array([0x01, 0x08, 0xa9, 0x01, 0x60]));
     camels.addByteLayer(builder, { type: "prg", path: "p.prg" });
 
-    const first = camels.setLabel(builder, 0x0803, "loadOne") as { warnings?: string[] };
+    const first = camels.addLabel(builder, 0x0803, "loadOne") as { warnings?: string[] };
     expect(first.warnings ?? []).toEqual([]);
   });
 
@@ -233,7 +236,7 @@ describe("building a project from a disk image", () => {
     ws.createProject("camels");
     const camels = upload("camels", "p.prg", new Uint8Array([0x01, 0x08, 0xa9, 0x01, 0x60]));
     camels.addByteLayer(builder, { type: "prg", path: "p.prg" });
-    camels.setLabel(builder, 0x0801, "table", "address", undefined, 4);
+    camels.addLabel(builder, 0x0801, "table", "address", undefined, 4);
 
     const found = camels.labels().labels.find((l) => l.name === "table");
     expect(found?.extent).toBe(4);
@@ -254,7 +257,7 @@ describe("building a project from a disk image", () => {
     camels.selectTarget(builder, "runtime");
 
     // $00FB is zero page: nothing supplies it, so this mints a symbols layer.
-    camels.setLabel(builder, 0x00fb, "decrunchPointer");
+    camels.addLabel(builder, 0x00fb, "decrunchPointer");
 
     const named = camels
       .labels({ range: { start: 0x00fb, end: 0x00fc } })
@@ -271,7 +274,7 @@ describe("building a project from a disk image", () => {
     ws.createProject("camels");
     const camels = upload("camels", "a.prg", new Uint8Array([0x00, 0x08, 0xa9, 0x01, 0x60]));
     camels.addByteLayer(builder, { type: "prg", path: "a.prg", name: "first" });
-    camels.setLabel(builder, 0x0800, "inTheLoader");
+    camels.addLabel(builder, 0x0800, "inTheLoader");
 
     const other = upload("camels", "b.prg", new Uint8Array([0x00, 0x08, 0xe8, 0x60]));
     camels.addByteLayer(builder, { type: "prg", path: "b.prg", name: "second" });

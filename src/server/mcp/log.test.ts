@@ -59,9 +59,9 @@ describe("the transcript", () => {
   });
 
   it("records what was asked for, not just that something happened", async () => {
-    await call("set_label", { address: "$8870", name: "Named" });
+    await call("add_label", { address: "$8870", name: "Named" });
 
-    const [entry] = transcript().filter((e) => e.tool === "set_label");
+    const [entry] = transcript().filter((e) => e.tool === "add_label");
     expect(entry.method).toBe("tools/call");
     expect(entry.args).toEqual({ address: "$8870", name: "Named" });
     expect(entry.caller).toBe("usr_agent");

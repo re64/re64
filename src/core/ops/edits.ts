@@ -147,6 +147,88 @@ export function labelDeleteByIdOp(loaded: LoadedProject, id: string): Op | undef
   return undefined;
 }
 
+/**
+ * Name an address. Never replace a name.
+ *
+ * This used to reuse the id of whatever label was already there, so it *renamed*
+ * it — and an address cannot identify a label, which is the first identity rule
+ * this project states. The document was always able to hold several names at one
+ * address with `primaryLabels` deciding which renders; the API was what refused,
+ * and experiment 7 measured the cost: three readers, **123 names replaced across
+ * 74 addresses**, and the losses were judgements rather than duplicates —
+ * `jumpTimer` against `jumpVelocity`, `shotInFlight` against `laserSoundActive`.
+ *
+ * So there is no "set" for a label at all: naming an address adds a name, and the
+ * only thing anybody sets is which of them renders. Correcting a name is
+ * `renameLabelOp`, by id, exactly as revising a comment is.
+ *
+ * An invented `dat_XXXX` is not a chosen name and not a stored object, so naming
+ * such an address still mints, which is the overwhelmingly common act.
+ */
+export function labelSetOps(
+  loaded: LoadedProject,
+  address: number,
+  name: string,
+  type?: LabelType,
+  extent?: number
+): { ops: Op[]; addedBeside?: string } {
+  const layerId = owningLayerId(loaded, address);
+  const index = loaded.map.getLabels();
+  // Only a name a *person* chose is somebody's judgement to be joined rather
+  // than quietly doubled. An invented `dat_XXXX`, a PRG layer's entry label
+  // named after its file, and a region's name are all machinery — naming such an
+  // address is the ordinary act of naming an unnamed one.
+  const chosenHere = index.getLabelsAt(address).filter((l) => l.source.kind === "user");
+
+  // Always adds — even the same name twice. Two labels are told apart by id,
+  // and two people each making one is simpler than making the second react to a
+  // merge they did not ask for. Duplication at one address is already a state
+  // this project tolerates: it is not ambiguity, since the name still reaches
+  // exactly one address, and the reference project ships ten such pairs.
+  const showing = index.resolve(address)?.label;
+  const chosen = loaded.map.primaryLabels.has(address);
+  return {
+    ops: [
+      // Pin what is showing, unless somebody has chosen. Two user labels tie on
+      // rank so the winner falls to id order, which is random: without this a
+      // second name silently renames every reference to the address.
+      ...(chosenHere.length > 0 && showing && !chosen
+        ? [{ op: "primary.set", address, labelId: showing.id } as Op]
+        : []),
+      { op: "label.set", id: newId("lbl"), layerId, address, name, type, extent },
+    ],
+    ...(chosenHere.length > 0 ? { addedBeside: chosenHere[0].name } : {}),
+  };
+}
+
+/** Change a label's name, by the only thing that identifies it. */
+export function renameLabelOp(
+  loaded: LoadedProject,
+  id: string,
+  name: string,
+  type?: LabelType,
+  extent?: number
+): Op {
+  for (const layer of loaded.project.layers) {
+    const found = layer.labels?.find((l) => l.id === id);
+    if (found && layer.id) {
+      return {
+        op: "label.set",
+        id,
+        layerId: layer.id,
+        address: parseProjectAddress(found.address),
+        name,
+        ...(type === undefined ? { type: found.type } : { type }),
+        ...(extent === undefined ? { extent: found.extent } : { extent }),
+      };
+    }
+  }
+  throw new Error(
+    `No label has id ${id}. list_labels reports the id of every label a project ` +
+      `owns; an invented name has none, because nothing stored it.`
+  );
+}
+
 export function labelSetOp(
   loaded: LoadedProject,
   address: number,
