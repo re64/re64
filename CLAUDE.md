@@ -2153,16 +2153,43 @@ And only the accumulator differs: every flag after a decimal `SBC` is the one
 binary subtraction would have set. Worth knowing, because the first attempt read
 `A` and `C` *after* the binary pass had already overwritten them.
 
-**The select is free, measured rather than assumed.** Execution lifts as though
-`D` were in doubt, since the machine holds a real flag and resolves it exactly;
-static callers take the binary default, which costs them nothing because the two
-paths touch identical registers and effect sets come out the same either way.
-The decruncher runs 1,768,854 instructions in 672-748ms with the select in
-place, against 831ms before it existed. So the dataflow pass that would prove
-`D` per block — cheap and obvious, and it would find that Gridrunner and the
-KERNAL never set it — has **no cost to remove**, and is not built. It would earn
-its place as a *finding* rather than an optimisation: BCD arithmetic usually
-means a score, a clock, or a displayed number.
+**The select costs nothing measurable.** Execution lifts as though `D` were in
+doubt, since the machine holds a real flag and resolves it exactly: the
+decruncher runs 1,768,854 instructions in 672-748ms with the select, against
+831ms before it existed.
+
+**That is not a reason to skip proving `D`, and treating it as one was wrong.**
+`lift` took a `DecimalMode` with three values and nothing computed two of them —
+the same shape as `meta.set` with no emitter and `layer.add` filtered to symbols,
+three times over. The binary default was a *guess*: correct on the programs to
+hand, and silently wrong for anything that does use decimal. Effect sets hid it,
+because both paths touch identical registers.
+
+So `decimalModes` proves it, and the proof had to be **interprocedural or it says
+nothing**. A first version followed block successors only — which deliberately
+exclude the call target, since a `JSR`'s successor is where it *returns to* — so
+every routine body was a block nothing entered, seeded `unknown`. It came back
+`unknown` at **17 of Gridrunner's 19 sites**, because the one `CLD` is in
+`ColdStart` and never reached what `ColdStart` calls. Judged on that output the
+pass looks useless, which is exactly the trap.
+
+Following calls, both real targets prove **binary everywhere**: 19 of 19 on
+Gridrunner, 3 of 3 in the KERNAL, no unknowns.
+
+The question a callee raises is *"can this touch `D` at all"* rather than *"what
+does it leave"*. The second is more precise and needs a second fixpoint over
+routine exits; the first is one walk and answers what actually arises, because
+almost nothing touches the flag and the caller simply carries on. A routine that
+might makes everything after the call `unknown` — honest, and rare.
+
+**Entry points start `unknown`, not clear.** A 6502 does not clear `D` on reset
+or on interrupt, unlike the 65C02, which is precisely why real reset routines and
+KERNAL handlers do it themselves. Assuming clear would assume the thing those
+`CLD`s exist to establish.
+
+The by-product is worth as much as the correctness: `decimalSites` reports every
+`ADC`/`SBC` not proved binary, and BCD on this machine almost always means a
+score, a clock, or a number being shown to somebody.
 
 Decimal used to be the one thing left, and it did not touch the subject at hand —
 Gridrunner has a single `CLD` at `$83C2` and no `SED` anywhere. When it is

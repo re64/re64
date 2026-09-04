@@ -18,7 +18,7 @@
  */
 
 import { Instruction } from "../arch/mos6502/instruction.js";
-import { lift } from "./lift.js";
+import { DecimalMode, lift } from "./lift.js";
 import {
   FLAGS,
   PcodeOp,
@@ -79,12 +79,20 @@ function accumulate(sequences: readonly (readonly PcodeOp[])[]): {
   return { inputs, outputs };
 }
 
-export function blockEffects(instructions: readonly Instruction[]): BlockEffects {
-  // The binary default, deliberately: a static reading of a block cannot know
-  // what `D` holds, and it does not need to. The decimal select touches exactly
-  // the same registers as the binary path, so inputs and outputs come out
-  // identical either way — which is what made the choice branchless worth it.
-  const sequences = instructions.map((instr) => lift(instr));
+export function blockEffects(
+  instructions: readonly Instruction[],
+  /**
+   * What was proved about `D` at each address, where anybody has proved it.
+   *
+   * Optional because a caller holding a bare instruction list has no block
+   * graph to prove anything from, and the effect sets are identical either
+   * way — the decimal select touches exactly the same registers as the binary
+   * path, which is what made choosing branchless worth it. It matters for the
+   * *operations*, which is what anybody reading the lift is shown.
+   */
+  decimal?: ReadonlyMap<number, DecimalMode>
+): BlockEffects {
+  const sequences = instructions.map((instr) => lift(instr, decimal?.get(instr.address)));
   const { inputs, outputs } = accumulate(sequences);
 
   const unmodelled = instructions

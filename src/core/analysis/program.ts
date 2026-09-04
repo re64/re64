@@ -16,6 +16,8 @@ import { BasicBlock, buildBlocks } from "./blocks.js";
 import { DisassemblyWarning } from "../arch/mos6502/disassembler.js";
 import { Label, LabelIndex, createAutoLabel } from "../memory/label.js";
 import { HygieneFinding, checkHygiene } from "./hygiene.js";
+import { decimalSites } from "./decimal.js";
+import type { DecimalMode } from "../il/lift.js";
 import { LoadedProject } from "../project/loader.js";
 import { parseProjectAddress } from "../project/project.js";
 import { derivedId } from "../project/identity.js";
@@ -72,6 +74,16 @@ export interface ProgramAnalysis {
    * "incompleteness" out of it.
    */
   hygiene: readonly HygieneFinding[];
+  /**
+   * Every `ADC` or `SBC` the analysis could not prove runs in binary.
+   *
+   * Empty on both real targets: Gridrunner clears `D` once and never sets it,
+   * and the KERNAL does the same in its reset routine with no reachable `SED`
+   * in 8KB. So this is a short list by construction, and a lead when it is not
+   * — BCD arithmetic on this machine almost always means a score, a clock, or a
+   * number being shown to somebody.
+   */
+  decimalSites: readonly { address: number; mode: DecimalMode }[];
 }
 
 const hex4 = (address: number) => address.toString(16).toUpperCase().padStart(4, "0");
@@ -186,5 +198,6 @@ export function analyzeProgram(
     autoLabels,
     warnings: result.warnings,
     hygiene: checkHygiene(loaded, labels, instructions),
+    decimalSites: decimalSites(blocks, entryPoints),
   };
 }
