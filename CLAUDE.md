@@ -2698,7 +2698,9 @@ wearing different clothes:
   opcode on another. Described below; the only case that currently produces a
   *wrong* listing rather than an incomplete one.
 - **Overlays.** A C64 game loads a level over memory that held code a moment
-  ago. Both readings are correct, at different times.
+  ago. Both readings are correct, at different times. **Targets are most of the
+  answer to this one** — see below — which leaves banking as the genuinely
+  unsolved half rather than the pair.
 - **Bank switching.** `$D000` is VIC registers or character ROM depending on
   `$01`. Same address, same instant, different contents.
 
@@ -3083,6 +3085,30 @@ Held loosely on purpose: whether *comments* should belong to a layer or a target
 is exactly the kind of thing to settle with evidence rather than by argument,
 having already been burned once by `set_comment`'s slot-keyed upsert being
 justified for a single author and never revisited.
+
+**A target list is a history, and that is a better description than "a view".**
+The feature was built to stop the decrunched image and the crunched file fighting
+over the same addresses, which is a shadowing problem. What it produces is a
+record of the program's own life: the loader, the runtime image it expands into,
+and — on any game bigger than these — the levels it pulls in later, each correct
+at a different moment. That is the *overlay* problem, and it is answered: a level
+is a target. Banking is not, and stays open, because it is runtime alternation
+inside one moment rather than a sequence of them.
+
+Two things the model cannot say yet, and neither is urgent:
+
+- **Order.** `ProjectTarget` is `{name, layers, entryPoints}` and the list order
+  is incidental. A loader precedes the image it expands, which precedes the
+  levels; nothing records that.
+- **Succession.** The decrunched target is not merely *another* view, it is what
+  the loader *produces* — and re64 knows, because `run_program` with `capture`
+  is what made it. A target could carry that provenance the way a value now
+  carries an identity: this image is what you get by running `$080D` in that one.
+
+Left as an observation rather than built, because the run that would supply
+evidence about whether it matters is exactly the one now going on: a project
+built from a disk image, by somebody who has to name these things as they find
+them.
 
 ### Building a project, rather than annotating one
 
