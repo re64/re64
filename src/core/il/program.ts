@@ -84,8 +84,26 @@ export interface ProgramRun {
   detail?: string;
   /** Hardware addresses read or written, which this does not emulate. */
   ioTouched: string[];
-  /** Ranges the run wrote that no layer supplied — usually the output. */
+  /**
+   * Every range the run wrote, whether or not a layer already supplied it.
+   *
+   * It used to be the ranges *no layer supplied*, described as "usually the
+   * output" — and for the case this whole feature exists for that is exactly
+   * backwards. A decruncher expands over the packed data in place, so its
+   * output is precisely the addresses the project does supply, and they were
+   * the ones left out. Both builders in experiment 5 built a memory model on
+   * this, both were confidently wrong, and both had to rebuild: one lost the
+   * character set and every sprite, the other 900 instructions.
+   */
   wrote: { start: string; end: string; bytes: number }[];
+  /**
+   * The subset of `wrote` that landed where no layer supplied anything.
+   *
+   * Kept, because it is a different and also useful question — a loader
+   * relocating itself into empty memory shows up here and nowhere else — but no
+   * longer the only answer on offer.
+   */
+  wroteBeyondTheProject: { start: string; end: string; bytes: number }[];
   /** The memory afterwards, for capturing a range of it as a layer. */
   memory: Uint8Array;
 }
@@ -118,6 +136,7 @@ export function runProgram(map: MemoryMap, options: ProgramRunOptions): ProgramR
 
   const io = new Set<number>();
   const written = new Set<number>();
+  const beyond = new Set<number>();
   machine.watch = {
     read(address) {
       if (address >= 0xd000 && address < 0xe000) io.add(address);
@@ -126,7 +145,8 @@ export function runProgram(map: MemoryMap, options: ProgramRunOptions): ProgramR
       for (let i = 0; i < size; i++) {
         const at = (address + i) & 0xffff;
         if (at >= 0xd000 && at < 0xe000) io.add(at);
-        if (!supplied[at]) written.add(at);
+        written.add(at);
+        if (!supplied[at]) beyond.add(at);
       }
     },
   };
@@ -195,24 +215,26 @@ export function runProgram(map: MemoryMap, options: ProgramRunOptions): ProgramR
 
   // Contiguous runs, so 47,000 written bytes read as one range rather than as
   // a list nobody can use.
-  const ranges: { start: string; end: string; bytes: number }[] = [];
-  const sorted = [...written].sort((a, b) => a - b);
-  let start: number | undefined;
-  let previous: number | undefined;
-  const close = () => {
-    if (start === undefined || previous === undefined) return;
-    ranges.push({ start: hex4(start), end: hex4(previous), bytes: previous - start + 1 });
-  };
-  for (const address of sorted) {
-    if (previous !== undefined && address === previous + 1) {
+  const rangesOf = (addresses: ReadonlySet<number>) => {
+    const ranges: { start: string; end: string; bytes: number }[] = [];
+    let start: number | undefined;
+    let previous: number | undefined;
+    const close = () => {
+      if (start === undefined || previous === undefined) return;
+      ranges.push({ start: hex4(start), end: hex4(previous), bytes: previous - start + 1 });
+    };
+    for (const address of [...addresses].sort((a, b) => a - b)) {
+      if (previous !== undefined && address === previous + 1) {
+        previous = address;
+        continue;
+      }
+      close();
+      start = address;
       previous = address;
-      continue;
     }
     close();
-    start = address;
-    previous = address;
-  }
-  close();
+    return ranges.sort((a, b) => b.bytes - a.bytes).slice(0, 20);
+  };
 
   return {
     from: hex4(options.from),
@@ -222,7 +244,8 @@ export function runProgram(map: MemoryMap, options: ProgramRunOptions): ProgramR
     reason,
     ...(detail ? { detail } : {}),
     ioTouched: [...io].sort((a, b) => a - b).map(hex4),
-    wrote: ranges.sort((a, b) => b.bytes - a.bytes).slice(0, 20),
+    wrote: rangesOf(written),
+    wroteBeyondTheProject: rangesOf(beyond),
     memory: machine.memory,
   };
 }

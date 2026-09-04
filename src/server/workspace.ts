@@ -881,6 +881,26 @@ export class Workspace {
 
     const { memory, ...reported } = run;
     const notes: string[] = [];
+
+    // A run that never started is not a run that left.
+    //
+    // `run_program` runs over the *selected target*, so a start address in a
+    // layer that target hides supplies no first instruction — and the stop rule,
+    // which is "the program counter reached an address no layer supplies", is
+    // then true immediately. It came back `instructions: 0`, `reason: "left the
+    // program"` and a cheerful capture hash, which reads as a completed run.
+    if (run.instructions === 0 && program.loaded.map.readByte(from) === undefined) {
+      const target = program.loaded.project.activeTarget;
+      throw new Error(
+        `Nothing supplies ${hex4(from)}, so there is no instruction to start at` +
+          (target
+            ? `. The target "${target}" is selected, and it may be hiding the layer ` +
+              `that holds it — list_targets shows every layer, including the ones ` +
+              `the selection excludes.`
+            : `. No layer in this project covers that address.`)
+      );
+    }
+
     if (run.reason === "budget") {
       notes.push(
         "Ran out of budget rather than finishing, so this is the program " +
@@ -909,6 +929,30 @@ export class Workspace {
     bytes[0] = start & 0xff;
     bytes[1] = (start >> 8) & 0xff;
     bytes.set(memory.slice(start, to), 2);
+
+    // How much of what is being captured the run actually produced.
+    //
+    // Capturing a range the run never touched succeeds, hashes, and yields a
+    // plausible file of whatever was already there — in experiment 5 a
+    // correct-looking 20KB of nothing. The bytes are real, so refusing would be
+    // wrong; saying so is not.
+    const wroteWithin = run.wrote.reduce((total, range) => {
+      const low = Math.max(start, parseInt(range.start.slice(1), 16));
+      const high = Math.min(to - 1, parseInt(range.end.slice(1), 16));
+      return total + Math.max(0, high - low + 1);
+    }, 0);
+    if (wroteWithin === 0) {
+      notes.push(
+        `The run wrote nothing in ${hex4(start)}-${hex4(to - 1)}, so this capture is ` +
+          `the memory as it already stood rather than anything the run produced. ` +
+          `\`wrote\` says where it did write.`
+      );
+    } else if (wroteWithin < (to - start) / 2) {
+      notes.push(
+        `The run wrote ${wroteWithin} of the ${to - start} bytes captured; the rest is ` +
+          `memory as it already stood.`
+      );
+    }
 
     const storage = this.room.storage;
     if (!(storage instanceof SqliteStorage)) {
@@ -2513,6 +2557,43 @@ export class Workspace {
     return this.edit(caller, () => [
       { op: "layer.add", id: newId("lay"), layerType: "symbols", name, index: 0 } as Op,
     ]);
+  }
+
+  /**
+   * Take a layer out of the project.
+   *
+   * The gap `layer.set` is recorded as, from the other side: the operation has
+   * existed all along and no tool reached it, so a project accumulated every
+   * scratch layer anybody made. Experiment 5's builder ended with four byte
+   * layers where it wanted one, worked around it with targets, and said the
+   * project "permanently carries dead layers" — which it did.
+   *
+   * Refuses while the layer still owns annotations, which is what
+   * `diffProjects` orders removals last for: a label needs its layer to exist.
+   * The refusal names the count, because "it is not empty" without saying how
+   * full is a dead end.
+   */
+  removeLayer(caller: Caller, id: string): EditResult {
+    return this.edit(caller, (loaded) => {
+      const layer = loaded.project.layers.find((l) => l.id === id);
+      if (!layer) {
+        throw new Error(
+          `No layer has id ${id}. list_targets reports every layer, including ` +
+            `the ones the selected target excludes.`
+        );
+      }
+      const held =
+        (layer.labels?.length ?? 0) +
+        (layer.regions?.length ?? 0) +
+        (layer.comments?.length ?? 0);
+      if (held > 0) {
+        throw new Error(
+          `${layer.name ?? id} still holds ${held} annotation(s), and they would ` +
+            `go with it. Move or remove them first.`
+        );
+      }
+      return [{ op: "layer.remove", id } as Op];
+    });
   }
 
   /**

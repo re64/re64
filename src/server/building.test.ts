@@ -148,6 +148,60 @@ describe("building a project from a disk image", () => {
     expect(camels.describe().layers.length).toBeGreaterThan(1);
   });
 
+  it("reports what a run wrote, including over bytes the project already had", () => {
+    // The report was "ranges no layer supplied", described as usually the
+    // output — and for a decruncher, which expands over the packed data in
+    // place, that is precisely the ranges left out. Both builders in experiment
+    // 5 built a memory model on it and both had to rebuild.
+    ws.createProject("camels");
+    // LDA #$AA / STA $0805 / RTS, overwriting its own last byte's neighbour.
+    const camels = upload("camels", "p.prg", new Uint8Array([0x01, 0x08, 0xa9, 0xaa, 0x8d, 0x05, 0x08, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "p.prg", name: "p" });
+
+    const run = camels.runProgram(builder, 0x0801) as {
+      wrote: { start: string }[];
+      wroteBeyondTheProject: { start: string }[];
+    };
+    // $0805 is inside the layer, so it used to appear nowhere at all.
+    expect(run.wrote.map((r) => r.start)).toContain("$0805");
+    expect(run.wroteBeyondTheProject.map((r) => r.start)).not.toContain("$0805");
+  });
+
+  it("refuses a run that never started, rather than calling it a run that left", () => {
+    // run_program runs over the selected target, so a start address in a hidden
+    // layer supplies no first instruction — and the stop rule is then true
+    // immediately. It returned instructions: 0, "left the program", and a
+    // cheerful capture hash.
+    ws.createProject("camels");
+    const camels = upload("camels", "p.prg", new Uint8Array([0x01, 0x08, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "p.prg", name: "p" });
+    upload("camels", "other.prg", new Uint8Array([0x00, 0x90, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "other.prg", name: "other" });
+
+    // A target holding only the *other* layer, so $0801 is supplied by nothing.
+    const other = camels.targets().layers.find((l) => l.name === "other")!.id;
+    camels.setTarget(builder, "elsewhere", [other]);
+    camels.selectTarget(builder, "elsewhere");
+
+    expect(() => camels.runProgram(builder, 0x0801)).toThrow(/hiding the layer|no instruction to start/);
+  });
+
+  it("takes a layer back out, and refuses while it still holds anything", () => {
+    // layer.remove existed all along and no tool reached it, so a project kept
+    // every scratch layer anybody made.
+    ws.createProject("camels");
+    const camels = upload("camels", "p.prg", new Uint8Array([0x01, 0x08, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "p.prg", name: "scratch" });
+    const id = camels.targets().layers.find((l) => l.name === "scratch")!.id;
+
+    camels.setLabel(builder, 0x0801, "keepMe");
+    expect(() => camels.removeLayer(builder, id)).toThrow(/still holds 1 annotation/);
+
+    camels.removeLabel(builder, camels.labels().labels.find((l) => l.name === "keepMe")!.id!);
+    camels.removeLayer(builder, id);
+    expect(camels.targets().layers.map((l) => l.name)).not.toContain("scratch");
+  });
+
   it("does not hide the symbols layer a name had to create", () => {
     // A target is an allowlist of layer ids, so a layer made *after* one exists
     // falls outside it — and naming a byteless address makes exactly that layer,

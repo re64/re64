@@ -1951,9 +1951,18 @@ Two rules that make these produce measurements rather than anecdotes:
   hurt. Read the reports for what to look for and the log for whether it
   happened. Where they disagree the log wins; but the report is what makes a
   line in the log mean anything.
-- **Only fix what blocks the next experiment.** Everything else becomes a list
-  and stays a list. Without that rule the first experiment's output consumes
-  every week that follows.
+- **Only fix what blocks the next experiment** — where "fix" means *build the
+  capability an agent wished for*. Everything else becomes a list and stays a
+  list, or the first experiment's output consumes every week that follows.
+
+  **It is not a reason to leave a confirmed defect standing**, and reading it
+  that way once cost a whole round. The rule protects against chasing every
+  wish; a bug that has been reproduced and located is not a wish. In production
+  you might leave one alone to keep a measurement clean — here the cost runs the
+  other way, because the next run spends its budget rediscovering what is
+  already in hand. Both of experiment 5's builders lost a full rebuild to the
+  same wrong `wrote` list, which is two agent-runs spent on a bug that took
+  twenty minutes to fix once it was believed.
 
 ### Connecting a client
 

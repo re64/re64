@@ -1281,6 +1281,29 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "remove_layer",
+    "Take a layer out of the project. " +
+      "For the scratch layers a build leaves behind: a capture aimed at the " +
+      "wrong range, a probe, a second attempt. Without it a project carries " +
+      "every one of them for ever, and `list_targets` is the only place they " +
+      "show. " +
+      "Refuses while the layer still owns labels, regions or comments, since " +
+      "those would go with it — move them first. Give the id from " +
+      "`list_targets`, not the name.",
+    {
+      project,
+      id: z.string().describe("Layer id, from list_targets"),
+      expectVersion: z.string().optional(),
+    },
+    (args: { project?: string; id: string; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.removeLayer(caller, args.id);
+    }
+  );
+
+  tool(
     "add_comment",
     "Add a comment about an address, and return its id. \"before\" gets its own " +
       "rows above the label and may run to several lines; \"inline\" shares the " +
