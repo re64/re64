@@ -2728,6 +2728,43 @@ capability at the end was nobody's plan.
 It is opt-in twice, like the functional test: the ROM is not in this repository
 and never will be, so `kernal-vectors.test.ts` skips when it is absent.
 
+### Shipping what the KERNAL does, to people with no ROM
+
+`npm run gen:kernal` derives `src/core/c64/kernal-effects.ts` — what each of the
+39 documented entry points reads and writes — and that file is committed while
+the ROM never is. re64 has always shipped *names* for those addresses; this is
+what they **do**, computed by its own lifter and call graph rather than
+transcribed from a book.
+
+Three steps, and the first is what makes the rest possible:
+
+1. **Run `RESTOR` out of the ROM** for the default vectors. Ten of the 39 are a
+   `JMP` through RAM, so their behaviour is not in the ROM alone — and rather
+   than assume the published values, the generator executes the routine that
+   installs them.
+2. **Declare what the indirect jumps resolve to.** The walk still refuses to
+   follow one; the generator supplies them, which is sound here precisely
+   because step 1 just watched the machine install them.
+3. **Analyse**, recording both the wide and the narrow scope.
+
+**Both scopes ship, and that is an admission rather than a convenience.**
+`CHROUT` dispatches on the current output device, so following its callees
+unions the screen editor, the serial bus, the tape system and the RS-232 code
+into **90 cells** — sound, and no use to somebody asking what printing a
+character does. `follow: "returning"` does not help: the ROM contains no routine
+that abandons its call chain, so there is nothing to cut. The narrow pair is the
+dispatch itself, `$009A` and four registers, and is too little. Publishing one
+and hiding the other would dress a limitation as an answer, so both are there
+with the reason written down. **A dispatching routine wants per-path effects,
+which is a real piece of work and is not this.**
+
+One thing the derivation found that a transcription never would: `CHROUT`
+appears to read `$03A9` and `$10A9`. Both are the `BIT` skip idiom — `2C A9 10`
+is `BIT $10A9`, which exists to swallow the `LDA #$10` in its own operand — so
+the read is genuine on real hardware and meaningless as an effect. Left in and
+recorded rather than filtered, because recognising `BIT`-as-skip is a decode
+question and inventing an exception here would hide it.
+
 ### Targets: a named view over the layer stack
 
 The problem both builders hit second: the decrunched image must shadow the

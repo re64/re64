@@ -25,7 +25,8 @@
     "clean": "rm -rf dist",
     "build:ui": "esbuild src/ui/main.ts --bundle --format=esm --outfile=public/app.js --sourcemap && esbuild src/ui/decoder-worker.ts --bundle --format=iife --minify --outfile=public/decoder-worker.js",
     "dev:ui": "esbuild src/ui/main.ts --bundle --format=esm --outfile=public/app.js --sourcemap --watch",
-    "serve": "node dist/server/index.js"
+    "serve": "node dist/server/index.js",
+    "gen:kernal": "tsc && node dist/tools/gen-kernal-effects.js"
   },
   "keywords": [
     "c64",
