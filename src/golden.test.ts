@@ -35,7 +35,14 @@ const PROJECT = "assets/gridrunner/gridrunner.re64";
 // `(c) 1982 HES` — wrong, but visibly wrong, which is what tells a reader the
 // encoding needs saying. PETSCII and screen codes are now sayable; a custom
 // charset still is not.
-const OUTPUT_SHA1 = "2bac7155ff760f325fbf832738907d4c55ad3c66";
+// Moved a third time: the platform symbol table grew from 160 names to 382,
+// reviewed against the ROM in experiment 6.
+//
+// Exactly one line of this listing moved — `JSR sub_E518` became
+// `JSR ROM_INIT_EDITOR` — which is the point worth pinning. A platform label
+// only renders where an operand reaches it, so 221 new names for KERNAL zero
+// page and ROM internals are invisible to a game that calls the KERNAL once.
+const OUTPUT_SHA1 = "ffb52ef7d2c6d6ebf045f2b639e7f2e027311ba5";
 
 describe("gridrunner disassembly", () => {
   const result = analyze(loadProjectFile(PROJECT), { annotations: false });
@@ -55,7 +62,7 @@ describe("gridrunner disassembly", () => {
       // user label twice, once through the memory map and once directly. The
       // rendered text never showed it because label rows dedupe by name, which
       // is why the hash above is unchanged.
-      labels: 495,
+      labels: 716,
     });
   });
 
