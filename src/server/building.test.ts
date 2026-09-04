@@ -318,6 +318,28 @@ describe("building a project from a disk image", () => {
     expect(() => camels.callGraph(0x8002)).not.toThrow();
   });
 
+  it("reads another view without selecting it for everybody", () => {
+    // select_target is shared, and rightly. The consequence measured in
+    // experiment 7 was not contention but avoidance: changing what two other
+    // people are reading so you can glance at the packed loader is a cost
+    // nobody would pay, so the loader went unread for the whole run.
+    ws.createProject("camels");
+    const camels = upload("camels", "packed.prg", new Uint8Array([0x00, 0x80, 0xaa]));
+    camels.addByteLayer(builder, { type: "prg", path: "packed.prg", name: "packed" });
+    upload("camels", "runtime.prg", new Uint8Array([0x00, 0x80, 0xbb]));
+    camels.addByteLayer(builder, { type: "prg", path: "runtime.prg", name: "runtime" });
+
+    const ids = Object.fromEntries(camels.targets().layers.map((l) => [l.name, l.id]));
+    camels.setTarget(builder, "loader", [ids.packed]);
+    camels.setTarget(builder, "runtime", [ids.runtime]);
+    camels.selectTarget(builder, "runtime");
+
+    expect(camels.bytes(0x8000, 1).hex.toLowerCase()).toBe("bb");
+    expect(camels.bytes(0x8000, 1, "loader").hex.toLowerCase()).toBe("aa");
+    // And looking did not move anybody.
+    expect(camels.targets().active).toBe("runtime");
+  });
+
   it("does not hide the symbols layer a name had to create", () => {
     // A target is an allowlist of layer ids, so a layer made *after* one exists
     // falls outside it — and naming a byteless address makes exactly that layer,

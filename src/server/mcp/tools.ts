@@ -276,10 +276,25 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     {
       project,
       start: address,
+      target: z
+        .string()
+        .optional()
+        .describe(
+          "Read through another view without selecting it. select_target is shared, so switching it to glance at something changes what everybody else is reading"
+        ),
       length: z.number().int().min(1).max(8192).describe("How many bytes; 8192 at a time"),
     },
-    ({ project: id, start, length }: { project?: string; start: number; length: number }) =>
-      context().workspace(id).bytes(start, length)
+    ({
+      project: id,
+      start,
+      length,
+      target,
+    }: {
+      project?: string;
+      start: number;
+      length: number;
+      target?: string;
+    }) => context().workspace(id).bytes(start, length, target)
   );
 
   tool(

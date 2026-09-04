@@ -521,7 +521,11 @@ Two more worth keeping, both from the log rather than the reports:
   Reading another view means changing it for everybody, which nobody was willing
   to do — so a whole target went unread. The parked question of whether the
   shared selection would be contended has its answer, and it is not the one the
-  note expected: not contention, avoidance.
+  note expected: not contention, avoidance. The selection stays shared, because a
+  view is a fact about the project; `read_bytes` takes a `target` instead, since
+  a read changes nothing and can answer for another view without moving anybody.
+  Only the bytes — a disassembly of another target needs its own analysis, which
+  is a real cost to spend when somebody asks rather than now.
 - **`$A000-$BFFF` is where the flat memory model finally cost something real.**
   Eight kilobytes of zeros in the image, nothing writing `$00`/`$01`, so BASIC
   ROM is banked in and the game's random number generator — eleven callers —

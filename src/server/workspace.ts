@@ -1326,14 +1326,56 @@ export class Workspace {
    * the map is a fact about the project, and a decoder handed silent zeroes
    * would draw something that looks like data.
    */
-  bytes(start: number, length: number): {
+  /** The layer stack a named target sees, built without selecting it. */
+  private mapForTarget(name: string): LoadedProject["map"] {
+    const project = projectFromDoc(this.room.store.document());
+    if (!(project.targets ?? []).some((t) => t.name === name)) {
+      throw new Error(
+        `No target called "${name}". list_targets shows what there is, including ` +
+          `the layers each one holds.`
+      );
+    }
+    const { storage, projectPath } = this.room;
+    const bytes =
+      storage instanceof SqliteStorage
+        ? databaseFileBytes(storage)
+        : nodeFileBytes(dirname(projectPath));
+    return buildMemoryMap(
+      projectForTarget({ ...project, activeTarget: name }),
+      makeFileLoader(bytes)
+    ).map;
+  }
+
+  /**
+   * Bytes from the memory map, optionally through a view nobody has selected.
+   *
+   * `select_target` is shared, and rightly — a view is a fact about the project
+   * rather than a setting of yours. The consequence measured in experiment 7 was
+   * not contention but **avoidance**: changing what two other people are reading
+   * so you can glance at the packed loader is a cost nobody would pay, so the
+   * loader went unread for the whole run and a reader tried
+   * `read_bytes {target: "loader"}` and got `Unrecognized key`.
+   *
+   * A read can answer for another view without moving anybody, because it
+   * changes nothing. Only the bytes, deliberately: a disassembly of another
+   * target would need its own analysis, and that is a real cost to spend when
+   * somebody asks for it rather than now.
+   */
+  bytes(
+    start: number,
+    length: number,
+    target?: string
+  ): {
     start: string;
     length: number;
     hex: string;
     base64: string;
+    target?: string;
     unmapped?: { from: string; to: string }[];
   } {
-    const read = this.program().loaded.map.readBytes(start, length);
+    const map =
+      target === undefined ? this.program().loaded.map : this.mapForTarget(target);
+    const read = map.readBytes(start, length);
 
     const gaps: { from: string; to: string }[] = [];
     let run: number | undefined;
@@ -1350,6 +1392,7 @@ export class Workspace {
     return {
       start: hex4(start),
       length: read.length,
+      ...(target === undefined ? {} : { target }),
       // Both, because they answer different questions: hex is readable in a
       // transcript, base64 is what you paste into your own tooling.
       hex: [...filled].map((b) => b.toString(16).toUpperCase().padStart(2, "0")).join(" "),
