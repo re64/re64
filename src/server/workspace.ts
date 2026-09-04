@@ -296,10 +296,21 @@ export class Workspace {
       // root just as much as something a JSR points at, and without it every
       // instruction reachable only from the entry point belongs to nothing —
       // which on this project was most of the initialisation code.
-      program.labels
-        .filter({ type: "function" })
-        .concat(program.labels.filter({ type: "entry" }))
-        .map((l) => l.address)
+      //
+      // And the origins themselves, not only the labels. That correction was
+      // made once for `entry`-typed labels and stopped there, so a project that
+      // declares where execution begins *structurally* — on a target, or in
+      // `entryPoints`, with no label at all — had no routine there. Experiment
+      // 7's project was exactly that, and `call_graph` refused its own first
+      // entry point: the wrong answer to "show me the shape of this program",
+      // which is the first thing anybody asks.
+      [
+        ...program.labels
+          .filter({ type: "function" })
+          .concat(program.labels.filter({ type: "entry" }))
+          .map((l) => l.address),
+        ...program.origins,
+      ]
     );
     this.cachedRoutines = { key, routines };
     return routines;
@@ -2217,6 +2228,86 @@ export class Workspace {
     return this.warnIfAddedBesideAChosenName(result, beside);
   }
 
+  /**
+   * Declare several regions as one action.
+   *
+   * The last write with no batch form, and the most used of all of them: three
+   * readers on one project spent 129 of their 648 calls on `set_region`, one
+   * round trip each, while every other write had taken a list for months.
+   *
+   * Same contract as the others: apply what you can, report what you declined,
+   * fail only when nothing was applicable. Losing forty regions to one typo is
+   * the opposite of why a batch exists.
+   */
+  setRegions(
+    caller: Caller,
+    regions: readonly {
+      start: number;
+      end: number;
+      kind: RegionKind;
+      name?: string;
+      comment?: string;
+      encoding?: TextEncoding;
+      view?: string;
+      id?: string;
+    }[]
+  ): EditResult {
+    if (regions.length === 0) throw new Error("Give at least one region.");
+
+    // `address` rather than `start`, so every batch tool's rejection list has
+    // one shape — the contract is the point of having one.
+    const rejected: { address: string; reason: string }[] = [];
+    const usable: { entry: (typeof regions)[number]; view?: string }[] = [];
+    for (const entry of regions) {
+      try {
+        usable.push({
+          entry,
+          view: this.checkedRegion(entry.start, entry.end, entry.kind, entry.view),
+        });
+      } catch (err) {
+        rejected.push({
+          address: hex4(entry.start),
+          reason: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    if (usable.length === 0) {
+      throw new Error(
+        `None of the ${regions.length} regions could be written. ` +
+          rejected.map((r) => `${r.address}: ${r.reason}`).join(" ")
+      );
+    }
+
+    const span = {
+      start: Math.min(...usable.map((u) => u.entry.start)),
+      end: Math.max(...usable.map((u) => u.entry.end)),
+    };
+    const result = this.edit(
+      caller,
+      (loaded) =>
+        usable.map(({ entry, view }) =>
+          regionSetOp(
+            loaded,
+            entry.start,
+            entry.end,
+            entry.kind,
+            entry.name,
+            entry.comment,
+            entry.encoding,
+            view,
+            entry.id
+          )
+        ),
+      span
+    );
+
+    return {
+      ...result,
+      ...(rejected.length ? { rejected } : {}),
+    };
+  }
+
   /** Choose which of several names at an address is shown by default. */
   setPrimaryLabel(caller: Caller, address: number, name: string): EditResult {
     return this.edit(caller, (loaded) => {
@@ -2781,6 +2872,9 @@ export class Workspace {
     // is by id, and having to call list_comments afterwards to learn what you
     // just wrote is the round trip `set_decoder` used to cost.
     const comment = newId("cmt");
+    // Counted before the write, since afterwards this one is among them.
+    const already = this.program().loaded.comments.allAt(address).length;
+
     const result = this.edit(caller, (loaded) => {
       const { layerId, create } = ensureOwningLayer(loaded, address, this.room.projectId);
       const add: Op = { op: "comment.set", id: comment, layerId, address, placement, text };
@@ -2801,7 +2895,20 @@ export class Workspace {
       ];
     }
 
-    return { ...this.warnIfInsideInstruction(result, address, "comment"), comment };
+    const answer = { ...this.warnIfInsideInstruction(result, address, "comment"), comment };
+    // Somebody has already written here. Not a refusal and not a conflict —
+    // every comment at an address is kept and rendered, which is why nothing was
+    // lost when all three readers in experiment 7 wrote the same paragraph about
+    // the same 200-byte stride. Worth saying so the fourth does not spend the
+    // effort a second time.
+    if (already > 0) {
+      answer.warnings = [
+        ...(answer.warnings ?? []),
+        `${hex4(address)} already had ${already} comment(s), and this is kept beside ` +
+          `them rather than replacing one. list_comments shows what is there.`,
+      ];
+    }
+    return answer;
   }
 
   /**
@@ -3067,31 +3174,21 @@ export class Workspace {
   }
 
   /**
-   * Declare what a span holds.
+   * Everything a region has to satisfy before it can be written.
    *
-   * `end` is exclusive, and a caller that reads it as inclusive gets a region
-   * one byte short. That is silent for most kinds and fatal for a jumptable,
-   * where every entry is two bytes: `$8000-$8001` is one byte, contains no
-   * address, decodes nothing, and returns ok. On a project with nothing else
-   * reachable that is the difference between the whole program and five
-   * instructions.
+   * Extracted so the batch runs the same checks one at a time rather than a
+   * laxer second route: a batch that validated less would be the obvious way to
+   * write the region that a single call refuses.
    *
-   * So the span it actually took is reported back, and an odd-length jumptable
-   * is refused. Odd rather than merely too-short, because the off-by-one is the
-   * same mistake at every size and the extractor drops a trailing odd byte
-   * without saying so.
+   * Returns the view after resolving the one ambiguity in it — an explicit empty
+   * string means "take it off", where omitting the argument means "leave it".
    */
-  setRegion(
-    caller: Caller,
+  private checkedRegion(
     start: number,
     end: number,
     kind: RegionKind,
-    name?: string,
-    comment?: string,
-    encoding?: TextEncoding,
-    view?: string,
-    id?: string
-  ): EditResult {
+    view?: string
+  ): string | undefined {
     if (end <= start) {
       throw new Error(
         `A region must cover at least one byte, and end is exclusive: ` +
@@ -3154,6 +3251,37 @@ export class Workspace {
           `anything else.`
       );
     }
+
+    return viewOrCleared;
+  }
+
+  /**
+   * Declare what a span holds.
+   *
+   * `end` is exclusive, and a caller that reads it as inclusive gets a region
+   * one byte short. That is silent for most kinds and fatal for a jumptable,
+   * where every entry is two bytes: `$8000-$8001` is one byte, contains no
+   * address, decodes nothing, and returns ok. On a project with nothing else
+   * reachable that is the difference between the whole program and five
+   * instructions.
+   *
+   * So the span it actually took is reported back, and an odd-length jumptable
+   * is refused. Odd rather than merely too-short, because the off-by-one is the
+   * same mistake at every size and the extractor drops a trailing odd byte
+   * without saying so.
+   */
+  setRegion(
+    caller: Caller,
+    start: number,
+    end: number,
+    kind: RegionKind,
+    name?: string,
+    comment?: string,
+    encoding?: TextEncoding,
+    view?: string,
+    id?: string
+  ): EditResult {
+    const viewOrCleared = this.checkedRegion(start, end, kind, view);
 
     // Worked out before the edit, because afterwards the enclosing region is no
     // longer the one that was there first.

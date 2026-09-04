@@ -284,6 +284,40 @@ describe("building a project from a disk image", () => {
     );
   });
 
+  it("says a comment is already there, without refusing", () => {
+    // All three readers in experiment 7 independently wrote a long comment at
+    // $6700 about the same 200-byte stride. Nothing was lost — every comment at
+    // an address is kept and rendered — but the third spent the effort twice
+    // over for want of a sentence.
+    ws.createProject("camels");
+    const camels = upload("camels", "p.prg", new Uint8Array([0x01, 0x08, 0xa9, 0x01, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "p.prg" });
+
+    const first = camels.addComment(builder, 0x0801, "The zone table strides 200 bytes");
+    expect((first as { warnings?: string[] }).warnings ?? []).toEqual([]);
+
+    const second = camels.addComment(builder, 0x0801, "Stride is 200; ADC #$C8 confirms it");
+    expect((second as { warnings?: string[] }).warnings?.join(" ")).toMatch(
+      /already had 1 comment/
+    );
+    // Kept beside, not instead of.
+    expect(camels.comments(0x0801).comments).toHaveLength(2);
+  });
+
+  it("makes a routine of an entry point declared on a target", () => {
+    // Routine roots came from labels typed function or entry, so a project that
+    // says where execution begins structurally — on a target, with no label —
+    // had no routine there, and call_graph refused its own first entry point.
+    ws.createProject("camels");
+    const camels = upload("camels", "p.prg", new Uint8Array([0x00, 0x80, 0xa9, 0x01, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "p.prg", name: "p" });
+    const id = camels.targets().layers.find((l) => l.name === "p")!.id;
+    camels.setTarget(builder, "runtime", [id], [0x8002]);
+    camels.selectTarget(builder, "runtime");
+
+    expect(() => camels.callGraph(0x8002)).not.toThrow();
+  });
+
   it("does not hide the symbols layer a name had to create", () => {
     // A target is an allowlist of layer ids, so a layer made *after* one exists
     // falls outside it — and naming a byteless address makes exactly that layer,

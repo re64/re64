@@ -225,6 +225,24 @@ describe("asking what a routine does", () => {
     expect(effects.unmodelled).toEqual([]);
   });
 
+  it("declares several regions at once, and reports the ones it declined", async () => {
+    // The last write with no batch form, and the most used of all of them: 129
+    // of 648 calls in one collaborative run, a round trip each. Partial, like
+    // every other batch here — one bad span must not lose the rest.
+    const { isError, value } = await callTool("set_regions", {
+      regions: [
+        { start: "$8E00", end: "$8E40", kind: "data", name: "batchOne" },
+        { start: "$8E40", end: "$8E80", kind: "data", name: "batchTwo" },
+        // End before start: rejected, and the others still land.
+        { start: "$8F00", end: "$8E00", kind: "data", name: "backwards" },
+      ],
+    });
+    expect(isError).toBeFalsy();
+    const result = value as { rejected?: { address: string }[]; did: string[] };
+    expect(result.rejected?.map((r) => r.address)).toEqual(["$8F00"]);
+    expect(result.did.length).toBeGreaterThanOrEqual(2);
+  });
+
   it("takes an inclusive address range on list_labels", async () => {
     // Every other range on this surface has an inclusive end — `set_region`,
     // `export_listing` — and this one was half-open with `to` carrying no

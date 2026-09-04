@@ -3467,7 +3467,11 @@ The two failures this prevents are opposite, and this file has now made both:
   either ignore it or parse it.
 
 **One batch contract, across every batch tool:** apply what you can, report what
-you declined in `rejected`, and fail only when nothing was applicable. Undo stays
+you declined in `rejected`, and fail only when nothing was applicable. `regions`
+was the last write without a batch form, and the most used of all of them —
+three readers on one project spent 129 of 648 calls on `set_region`, a round trip
+each. The validation is shared rather than restated, since a batch that checked
+less would be the obvious way to write the region a single call refuses. Undo stays
 coherent because the changeset covers exactly what was applied. `bind_constants`
 was made partial and `add_comments` was not, so two batch tools disagreed about
 their own contract and a caller could not tell which it would get.

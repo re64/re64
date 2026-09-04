@@ -1629,6 +1629,64 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "set_regions",
+    "Declare several regions in one call, as one action. Undo takes the batch " +
+      "back whole. " +
+      "The last write that had no batch form, and the most used of all of them: " +
+      "three readers on one project spent 129 of 648 calls on set_region, one " +
+      "round trip each. " +
+      "Applies what it can and reports what it declined in `rejected`, so one " +
+      "bad span does not lose the other thirty-nine. Every entry is checked the " +
+      "same way a single call is.",
+    {
+      project,
+      regions: z
+        .array(
+          z.object({
+            start: address,
+            end: address.optional(),
+            lines: z.number().int().min(1).optional(),
+            kind: z.enum(["code", "data", "text", "jumptable", "bitmap", "unknown"]),
+            name: z.string().optional(),
+            comment: z.string().optional(),
+            encoding: z.enum(["petscii", "screen", "ascii"]).optional(),
+            view: z.string().optional(),
+            id: z.string().optional(),
+          })
+        )
+        .min(1)
+        .max(200),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      regions: {
+        start: number;
+        end?: number;
+        lines?: number;
+        kind: "code" | "data" | "text" | "jumptable" | "bitmap" | "unknown";
+        name?: string;
+        comment?: string;
+        encoding?: "petscii" | "screen" | "ascii";
+        view?: string;
+        id?: string;
+      }[];
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.setRegions(
+        caller,
+        args.regions.map((r) => ({
+          ...r,
+          end: r.end ?? r.start + (r.lines ?? 1),
+        }))
+      );
+    }
+  );
+
+  tool(
     "remove_region",
     "Drop a region, so its span falls back to whatever the region around it — or " +
       "its layer — declares. A start address is enough while only one region " +
