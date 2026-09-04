@@ -337,8 +337,15 @@ export function diffProjects(from: Project, to: Project): Op[] {
     if (!toFiles.has(name)) ops.push({ op: "file.remove", name });
   }
 
-  for (const [id, layer] of fromLayers) {
-    if (toLayers.has(id) || layer.type !== "symbols") continue;
+  // Any kind, not only symbols. The filter here was the twin of the one on
+  // `layer.add` above, left from when that was the only kind an operation could
+  // make — and fixing the addition side did not fix this one, a dozen lines
+  // apart. A byte layer removed from the document stayed in the export for ever:
+  // experiment 5 produced a project whose document held five layers and whose
+  // export emitted eight, three of them scratch layers whose `layer.add` had
+  // been undone, while the export reported `changed: false`.
+  for (const [id] of fromLayers) {
+    if (toLayers.has(id)) continue;
     ops.push({ op: "layer.remove", id });
   }
 

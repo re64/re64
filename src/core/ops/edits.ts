@@ -45,9 +45,9 @@ export function ensureOwningLayer(
   loaded: LoadedProject,
   address: number,
   projectName?: string
-): { layerId: string; create?: Op } {
+): { layerId: string; create?: Op; joins: Op[] } {
   try {
-    return { layerId: owningLayerId(loaded, address) };
+    return { layerId: owningLayerId(loaded, address), joins: [] };
   } catch (err) {
     if (!(err instanceof Error) || !err.message.startsWith("No layer owns")) throw err;
   }
@@ -64,6 +64,27 @@ export function ensureOwningLayer(
       // and ownership resolves to the first symbols layer declared.
       index: 0,
     },
+    // Into every target, or the name renders nowhere and the write still says
+    // `ok`.
+    //
+    // A target is an allowlist of layer ids, so a layer made after one exists is
+    // outside it — and this layer is made *by* the write that needed it. In
+    // experiment 5 a builder named byteless addresses, was told the writes
+    // succeeded, and found `list_labels` still returning the auto `dat_0340`.
+    //
+    // Every target rather than the active one, because a symbols layer supplies
+    // no bytes and describes the machine rather than a phase of the program:
+    // zero page is zero page whether you are reading the loader or the runtime,
+    // and a name that appears only in the view you happened to have selected
+    // when you wrote it is the same failure one step further on.
+    joins: (loaded.project.targets ?? []).map((target) => ({
+      op: "target.set",
+      name: target.name,
+      layers: [...target.layers, id],
+      ...(target.entryPoints === undefined
+        ? {}
+        : { entryPoints: target.entryPoints.map(parseProjectAddress) }),
+    })),
   };
 }
 

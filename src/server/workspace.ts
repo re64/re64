@@ -1991,13 +1991,13 @@ export class Workspace {
     // A comment given here is a comment about the address, not a field on the
     // label — one action, two operations, so undo takes both back together.
     const result = this.edit(caller, (loaded) => {
-      const { layerId, create } = ensureOwningLayer(loaded, address, this.room.projectId);
+      const { layerId, create, joins } = ensureOwningLayer(loaded, address, this.room.projectId);
       const label: Op = create
         ? { op: "label.set", id: newId("lbl"), layerId, address, name, type, extent }
         : labelSetOp(loaded, address, name, type, extent);
 
       return [
-        ...(create ? [create] : []),
+        ...(create ? [create, ...joins] : []),
         label,
         ...(comment
           ? [
@@ -2057,7 +2057,7 @@ export class Workspace {
           const owning = ensureOwningLayer(loaded, entry.address, this.room.projectId);
           layerId = owning.layerId;
           if (owning.create) {
-            ops.push(owning.create);
+            ops.push(owning.create, ...owning.joins);
             madeLayer = owning.layerId;
           }
         }

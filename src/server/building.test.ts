@@ -148,6 +148,31 @@ describe("building a project from a disk image", () => {
     expect(camels.describe().layers.length).toBeGreaterThan(1);
   });
 
+  it("does not hide the symbols layer a name had to create", () => {
+    // A target is an allowlist of layer ids, so a layer made *after* one exists
+    // falls outside it — and naming a byteless address makes exactly that layer,
+    // as part of the write that needed it. In experiment 5 a builder named zero
+    // page under a selected target, was told the writes succeeded, and found
+    // `list_labels` still returning the auto name.
+    ws.createProject("camels");
+    const camels = upload("camels", "packed.prg", new Uint8Array([0x00, 0x08, 0xa9, 0x01, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "packed.prg", name: "packed" });
+
+    const packed = camels.targets().layers.find((l) => l.name === "packed")!.id;
+    camels.setTarget(builder, "runtime", [packed]);
+    camels.selectTarget(builder, "runtime");
+
+    // $00FB is zero page: nothing supplies it, so this mints a symbols layer.
+    camels.setLabel(builder, 0x00fb, "decrunchPointer");
+
+    const named = camels
+      .labels({ range: { start: 0x00fb, end: 0x00fc } })
+      .labels.map((l) => l.name);
+    expect(named, "the name is written but the target hides its layer").toContain(
+      "decrunchPointer"
+    );
+  });
+
   it("keeps a layer's annotations with the target that shows it", () => {
     // Annotations belong to layers, so they follow activation. That is the rule
     // working rather than data going missing — which is what it looked like

@@ -225,6 +225,14 @@ describe("asking what a routine does", () => {
     expect(effects.unmodelled).toEqual([]);
   });
 
+  it("takes an inclusive address range on list_labels", async () => {
+    // Every other range on this surface has an inclusive end — `set_region`,
+    // `export_listing` — and this one was half-open with `to` carrying no
+    // description at all, so asking about a single address came back empty.
+    const { value } = await callTool("list_labels", { from: "$8000", to: "$8000" });
+    expect((value as { total: number }).total).toBeGreaterThan(0);
+  });
+
   it("takes every value of follow, and defaults to calls", async () => {
     // The schema in front of a tool is the one layer neither the Workspace
     // tests nor the analysis tests can reach — both run_block bugs got through

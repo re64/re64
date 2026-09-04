@@ -637,7 +637,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       // one, so "what is named in zero page" could only be answered by pulling
       // every label and filtering locally. `labels()` took a range all along.
       from: address.optional().describe("Inclusive; with `to`, narrows to a range"),
-      to: address.optional(),
+      to: address.optional().describe("Inclusive, like `set_region`'s `end`"),
       limit: z.number().int().min(1).max(500).optional().describe("Default 200"),
     },
     ({
@@ -659,7 +659,13 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
             ...criteria,
             ...(from === undefined && to === undefined
               ? {}
-              : { range: { start: from ?? 0, end: to ?? 0xffff } }),
+              : // Inclusive, because every other range on this surface is —
+                // `set_region` and `export_listing` both take an `end` that is
+                // part of the span. `labels()` itself is half-open and says so;
+                // converting here is what stops `from:$0400 to:$0400` coming
+                // back empty, which is the shape anybody asking about one
+                // address writes.
+                { range: { start: from ?? 0, end: (to ?? 0xffff) + 1 } }),
           },
           limit ?? 200
         )
