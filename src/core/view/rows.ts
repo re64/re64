@@ -420,32 +420,34 @@ export function analyze(
       ? here.filter((l) => l.source.kind !== "platform")
       : here;
 
-    // A name held twice *here* by labels a person chose renders both times,
-    // qualified. The row builder shows each name at an address once, which is
-    // right for the ordinary pair — a user name beside the region-generated one
-    // that carries it, ten times over in the reference project — and wrong for
-    // two people who each named the same byte the same thing: hiding one hides a
-    // real object somebody made.
+    // Each name at an address renders once — unless a person wrote it twice, and
+    // then it renders twice.
     //
-    // Qualified *here* rather than through `displayName`, which decides operand
-    // rendering too. One name reaching two addresses makes an operand ambiguous
-    // and must be qualified everywhere; one name held twice at a single address
-    // leaves the operand perfectly clear, so qualifying it there would be noise.
-    // Both holders are marked, never one, for the reason the cross-address rule
-    // gives: symmetry means there is no winner to elect and no tie-break to
-    // invent.
-    const doubled = new Set<string>();
-    const times = new Map<string, number>();
+    // The repetition *is* the signal, and it needs no machinery to carry it:
+    //
+    //     1000  initGame:
+    //     1000  initGame:
+    //
+    // is obviously wrong to anybody, where hanging an id off each would say the
+    // same thing in a language only this codebase speaks. Suppressing the second
+    // hides that somebody did the work twice, which the whole point of showing a
+    // shared document is to avoid.
+    //
+    // The dedupe still earns its place for the other pair: a name a person chose
+    // beside the region-generated label carrying it, ten times over in the
+    // reference project, where two identical rows would be a false alarm. So the
+    // test is whether *a person* wrote it more than once — the same predicate
+    // the hygiene check uses, which is the sign it is the right one.
+    const written = new Map<string, number>();
     for (const label of shown) {
       if (label.source.kind !== "user") continue;
-      const n = (times.get(label.name) ?? 0) + 1;
-      times.set(label.name, n);
-      if (n > 1) doubled.add(label.name);
+      written.set(label.name, (written.get(label.name) ?? 0) + 1);
     }
 
     const seen = new Set<string>();
     for (const label of shown) {
-      if (!doubled.has(label.name)) {
+      const doubled = (written.get(label.name) ?? 0) > 1;
+      if (!doubled) {
         if (seen.has(label.name)) continue;
         seen.add(label.name);
       }
@@ -466,9 +468,7 @@ export function analyze(
 
       // Qualified here too, or you are told a name is ambiguous by the operand
       // and cannot find either of the labels it is ambiguous between.
-      const shownName = doubled.has(label.name)
-        ? `${label.name}@${label.id}`
-        : allLabels.displayName(label);
+      const shownName = allLabels.displayName(label);
       const prefix = `${hex4(addr)}  `;
       let text = `${prefix}${shownName}:`;
       const tokens: RowToken[] = [

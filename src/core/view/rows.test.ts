@@ -320,12 +320,10 @@ describe("wrapping a comment", () => {
 });
 
 describe("one address named the same thing twice", () => {
-  it("renders both, qualified, rather than hiding one", () => {
-    // Reachable since naming became additive, and two people naming a byte the
-    // same thing is an ordinary way to get here. Showing each name once is right
-    // for a user name beside the region-generated one that carries it; it is
-    // wrong for two labels somebody made, because hiding one hides a real
-    // object.
+  it("renders it twice, plainly, because the repetition is the signal", () => {
+    // Two identical rows are obviously wrong to anybody. Hanging an id off each
+    // would say the same thing in a language only this codebase speaks, and
+    // suppressing the second would hide that somebody did the work twice.
     const loaded = project([0xea, 0x60], {
       labels: [
         { address: ORG, name: "initGame" },
@@ -336,27 +334,27 @@ describe("one address named the same thing twice", () => {
     const rows = analyze(loaded, { annotations: false }).rows;
     const labels = rows.filter((r) => r.address === ORG && r.kind === "label");
     expect(labels).toHaveLength(2);
-    // Both holders marked, never one: there is no winner to elect.
-    expect(labels.every((r) => /initGame@lbl_/.test(r.text))).toBe(true);
+    expect(labels.every((r) => /initGame:/.test(r.text))).toBe(true);
+    expect(labels.every((r) => !r.text.includes("@lbl_"))).toBe(true);
   });
 
-  it("leaves the operand alone, because it is not ambiguous", () => {
-    // One name at two addresses makes an operand ambiguous and is qualified
-    // everywhere. One name twice at a single address leaves the operand perfectly
-    // clear — $1000 is $1000 — so qualifying it there would be noise.
-    //
-    //   $1000  JMP $1004      $1004: the doubly-named address
-    const loaded = project([0x4c, 0x04, 0x10, 0xea, 0xea, 0x60], {
+  it("renders both when the two names differ, which is the case that means something", () => {
+    // The disagreement worth seeing, and it needs no machinery: two readers
+    // concluding different things about one byte, both on the page.
+    const loaded = project([0xea, 0x60], {
       labels: [
-        { address: ORG + 4, name: "target" },
-        { address: ORG + 4, name: "target" },
+        { address: ORG, name: "jumpTimer" },
+        { address: ORG, name: "jumpVelocity" },
       ],
     });
 
-    const rows = analyze(loaded, { annotations: false }).rows;
-    const jump = rows.find((r) => r.address === ORG && r.kind === "instruction");
-    expect(jump?.text).toContain("JMP target");
-    expect(jump?.text).not.toContain("@lbl_");
+    const text = analyze(loaded, { annotations: false })
+      .rows.filter((r) => r.address === ORG && r.kind === "label")
+      .map((r) => r.text)
+      .join("\n");
+    expect(text).toContain("jumpTimer");
+    expect(text).toContain("jumpVelocity");
+    expect(text).not.toContain("@lbl_");
   });
 });
 
