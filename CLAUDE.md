@@ -2191,6 +2191,41 @@ The by-product is worth as much as the correctness: `decimalSites` reports every
 `ADC`/`SBC` not proved binary, and BCD on this machine almost always means a
 score, a clock, or a number being shown to somebody.
 
+### The same proof, for carry and for interrupts
+
+`flags.ts` generalises it. Three flags are worth proving and the reason differs
+for each, which is the interesting part:
+
+- **`D`** changes what an instruction *means*, so proving it is a correctness
+  requirement. It is the only flag that does.
+- **`C`** is a finding. `CLC` before `SBC` subtracts one more than the operand
+  reads — an idiom found **by hand three times across two binaries** before
+  anything computed it. `carrySites` now reports Gridrunner's at `$8279`,
+  `$828D`, `$82CA`, `$82E5`; the readers reported `$8278`, `$828C`, `$82C9`,
+  `$82E4`, which are the `CLC`s one byte earlier. Same finding, mechanised.
+- **`I`** is a finding too, and the KERNAL supplied its shape: `RDTIM` falls
+  through into `SETTIM`, which does `CLI`, so reading the clock inside what a
+  caller believes is a critical section turns interrupts back on underneath it.
+  `interruptsDisabledAt` reports four such blocks in Gridrunner.
+
+**Reported as facts, not defects.** `CLC/SBC` is sometimes deliberate, and all
+of Gridrunner's sit inside visual effects where one out is invisible — which is
+presumably why it shipped.
+
+**Who clobbers a flag comes from the lifter, not from a table.** `flagsWritten`
+reads the operations, so `PLP`, `RTI`, and every arithmetic and shift
+instruction that touches carry are covered without anyone maintaining a list
+that drifts away from the semantics.
+
+`Z`, `N` and `V` are deliberately absent, and parked rather than forgotten. They
+fall out of *data* rather than being set and cleared, so a flag lattice would
+answer `unknown` nearly everywhere — a check that fires on healthy code, which
+is the disqualifier hygiene already settled on. They yield to **value** tracking
+instead: `LDA #$00` fixes `Z` and `N` exactly, and the interpreter is already the
+right evaluation structure for it, with values that are expressions rather than
+numbers. Whether anything interesting depends on knowing them statically is the
+open question, and nothing has asked yet.
+
 Decimal used to be the one thing left, and it did not touch the subject at hand —
 Gridrunner has a single `CLD` at `$83C2` and no `SED` anywhere. When it is
 wanted, the shape is a **branchless select** rather than intra-instruction

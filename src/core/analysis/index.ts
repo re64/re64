@@ -3,4 +3,12 @@ export { BasicBlock, buildBlocks, blockAt, overlappingBlocks } from "./blocks.js
 export * from "./program.js";
 export { Effects, RoutineEffects, analyzeRoutines, routineAt, routineEntries } from "./routines.js";
 export { ResolvedPointer, resolvePointer, targetsOf } from "./pointers.js";
-export { DecimalState, decimalModes, decimalSites } from "./decimal.js";
+export {
+  FlagState,
+  ProvableFlag,
+  proveFlag,
+  decimalModes,
+  decimalSites,
+  carrySites,
+  interruptsDisabledAt,
+} from "./flags.js";

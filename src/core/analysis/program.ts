@@ -16,7 +16,7 @@ import { BasicBlock, buildBlocks } from "./blocks.js";
 import { DisassemblyWarning } from "../arch/mos6502/disassembler.js";
 import { Label, LabelIndex, createAutoLabel } from "../memory/label.js";
 import { HygieneFinding, checkHygiene } from "./hygiene.js";
-import { decimalSites } from "./decimal.js";
+import { decimalSites } from "./flags.js";
 import type { DecimalMode } from "../il/lift.js";
 import { LoadedProject } from "../project/loader.js";
 import { parseProjectAddress } from "../project/project.js";
