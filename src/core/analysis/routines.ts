@@ -116,7 +116,24 @@ export interface Effects {
 
 export interface ReturnBehaviour {
   at: number;
-  /** How many extra call frames it pops. 0 means it leaves without returning normally. */
+  /**
+   * Which of three genuinely different things this is.
+   *
+   * `skipsFrames` alone could not say: it was 0 both for a routine that resets
+   * the stack and never comes back, and for one whose depth the analysis simply
+   * could not determine. Those are opposite kinds of statement — one is a fact
+   * about the program, the other an admission about the analysis — and folding
+   * them together made `follow: "returning"` cut a KERNAL entry point's whole
+   * body because two paths reached one block at different depths.
+   */
+  kind:
+    /** Abandons its call chain outright. Control does not come back. */
+    | "abandons"
+    /** Returns, but further up than its caller. */
+    | "skips"
+    /** The analysis cannot tell where it returns to. Says nothing about the code. */
+    | "ambiguous";
+  /** How many extra call frames it pops. Meaningful for `skips`. */
   skipsFrames: number;
   why: string;
 }
@@ -178,6 +195,7 @@ function describeReturns(entry: number, body: readonly BasicBlock[]): ReturnBeha
         conflicted.add(next);
         found.push({
           at: next,
+          kind: "ambiguous",
           skipsFrames: 0,
           why:
             `${hex(next)} is reached with the stack at two different depths, so ` +
@@ -189,6 +207,7 @@ function describeReturns(entry: number, body: readonly BasicBlock[]): ReturnBeha
     if (block.stackDelta === undefined) {
       found.push({
         at: block.start,
+        kind: "abandons",
         skipsFrames: 0,
         why:
           `${hex(block.start)} sets the stack pointer outright, abandoning whatever ` +
@@ -209,6 +228,7 @@ function describeReturns(entry: number, body: readonly BasicBlock[]): ReturnBeha
       Number.isInteger(frames) && frames > 0
         ? {
             at: block.start,
+            kind: "skips",
             skipsFrames: frames,
             why:
               `${hex(block.start)} reaches its ${last?.mnemonic ?? "return"} with ` +
@@ -218,6 +238,7 @@ function describeReturns(entry: number, body: readonly BasicBlock[]): ReturnBeha
           }
         : {
             at: block.start,
+            kind: "ambiguous",
             skipsFrames: 0,
             why:
               `${hex(block.start)} reaches its ${last?.mnemonic ?? "return"} with the ` +
@@ -473,13 +494,26 @@ export function analyzeRoutines(
   // separately rather than as a flag on the first, because a bounded answer
   // has to be built out of bounded answers: folding a callee's unbounded
   // `total` in here would leak the whole program back through one hop.
-  const comesBack = (at: number) => {
-    const callee = routines.get(at);
-    return callee !== undefined && callee.returns.length === 0;
-  };
+  // Cut where the program *provably* leaves, never because the analysis is
+  // unsure. `abandons` is a fact about the code — it reset the stack pointer, so
+  // nothing that reached it gets control back. `ambiguous` is an admission about
+  // this pass, and cutting on it silently threw away a routine's whole body:
+  // three KERNAL entry points have two paths reaching one block at different
+  // depths, and SCNKEY reported touching nothing at all.
+  const abandons = (at: number) =>
+    routines.get(at)?.returns.some((r) => r.kind === "abandons") ?? false;
+  // Only *calls* are cut, never a tail jump. The rule is about a caller not
+  // getting control back, so the code after its `JSR` is not reached through
+  // that call — and a tail jump has no "after": it is this routine continuing,
+  // and its target's effects are this routine's effects. Cutting those made a
+  // KERNAL entry point, which is a bare `JMP` to its implementation, report
+  // that it touches nothing at all.
+  // Both calls and tail jumps, because a program leaves by whichever it likes:
+  // Gridrunner's top level is a JMP chain, so its death path is reached by a
+  // tail jump and cutting only calls would have caught none of it.
   for (const routine of routines.values()) {
     routine.cut = [...routine.calls, ...routine.continuesInto]
-      .filter((t) => routines.has(t) && !comesBack(t))
+      .filter(abandons)
       .sort((a, b) => a - b);
   }
   for (let pass = 0; pass < entries.length + 1; pass++) {
@@ -488,8 +522,9 @@ export function analyzeRoutines(
       const before = routine.returning.reads.length + routine.returning.writes.length;
       const flags = [routine.returning.readsComputedMemory, routine.returning.writesComputedMemory];
       for (const target of [...routine.calls, ...routine.continuesInto]) {
-        if (!comesBack(target)) continue;
-        add(routine.returning, routines.get(target)!.returning);
+        const into = routines.get(target);
+        if (!into || abandons(target)) continue;
+        add(routine.returning, into.returning);
       }
       const after = routine.returning.reads.length + routine.returning.writes.length;
       if (

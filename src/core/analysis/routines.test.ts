@@ -142,4 +142,31 @@ describe("how a routine leaves", () => {
     const { routines: r } = routines([0x20, 0x04, 0x10, 0x60, 0x68, 0x68, 0x60]);
     expect(r.get(ORG)!.incomplete.join(" ")).toMatch(/returns past whoever called it/);
   });
+
+  it("keeps abandoning the chain apart from not knowing", () => {
+    // LDX #$F6 / TXS / RTS — sets the pointer outright. A fact about the code.
+    const abandons = routines([0xa2, 0xf6, 0x9a, 0x60]);
+    expect(abandons.routines.get(ORG)!.returns[0].kind).toBe("abandons");
+
+    // Both were `skipsFrames: 0`, so a cut keyed on that threw away a routine's
+    // whole body whenever this pass merely could not tell — which is an
+    // admission about the analysis, not a statement about the program.
+    const kinds = new Set(abandons.routines.get(ORG)!.returns.map((r) => r.kind));
+    expect(kinds.has("ambiguous")).toBe(false);
+  });
+
+  it("stops at a routine that abandons the chain, and names it", () => {
+    // $1000: JSR $1006 / JSR $100A / RTS
+    // $1006: LDA #$01 / STA $10 / RTS     — ordinary, folded in
+    // $100A: LDX #$F6 / TXS / STA $20 / RTS — abandons, cut
+    const { routines: r } = routines([
+      0x20, 0x06, 0x10, 0x20, 0x0a, 0x10, 0x60,
+      0xa9, 0x01, 0x85, 0x10, 0x60,
+      0xa2, 0xf6, 0x9a, 0x85, 0x20, 0x60,
+    ]);
+    const caller = r.get(ORG)!;
+    const slots = (e: { reads: unknown[]; writes: unknown[] }) => e.reads.length + e.writes.length;
+    expect(caller.cut).toEqual([0x100a]);
+    expect(slots(caller.returning)).toBeLessThan(slots(caller.total));
+  });
 });

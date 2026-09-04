@@ -1763,10 +1763,20 @@ Three things this needed that were not obvious:
   control ends there — and asking about one of those addresses directly gives the
   rest. Truncating in silence would be the confident wrong answer this project
   refuses everywhere else.
-- **The cut is `returns.length === 0`**, which reads off `describeReturns` and so
-  costs nothing new. Five of Gridrunner's routines fail it, and they are the
-  right five: two that set the stack pointer outright, two that return to their
-  caller's caller, and the `RTI` handler.
+- **It cuts where the program provably leaves, never where the analysis is
+  unsure**, and getting that wrong is the most instructive part. `ReturnBehaviour`
+  reported `skipsFrames: 0` both for a routine that resets the stack pointer and
+  for one whose depth two paths disagreed about — opposite kinds of statement,
+  one a fact about the code and one an admission about the pass. A cut keyed on
+  that threw away whole routine bodies: **SCNKEY reported touching nothing at
+  all**, because two paths reach one block at different depths. So the behaviour
+  now says which of three it is — `abandons`, `skips`, `ambiguous` — and only
+  `abandons` cuts.
+- **Calls and tail jumps both**, because a program leaves by whichever it likes.
+  Gridrunner's top level is a `JMP` chain, so its death path is reached by a tail
+  jump and cutting only calls catches none of it. Cutting only tail jumps is
+  equally wrong the other way: a KERNAL entry point *is* a bare `JMP` to its
+  implementation, so that would report the effects of a three-byte stub.
 
 The scopes differ in **standing**, not only in width, so the answer says which
 one it is: `block` is exact, and everything above it is a union over paths — what
