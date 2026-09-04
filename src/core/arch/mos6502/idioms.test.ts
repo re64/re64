@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { InstructionIndex, describeWarning, disassemble } from "./disassembler.js";
+import { ByteReader } from "./decoder.js";
 import { MemoryMap } from "../../memory/memory-map.js";
 import { BytesLayer } from "../../memory/layer.js";
 import { buildBlocks } from "../../analysis/blocks.js";

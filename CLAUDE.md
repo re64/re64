@@ -2988,8 +2988,21 @@ without being told them, and it was working by luck.
 ### Shipping what the KERNAL does, to people with no ROM
 
 `npm run gen:kernal` derives `src/core/c64/kernal-effects.ts` — what each of the
-39 documented entry points reads and writes — and that file is committed while
-the ROM never is. re64 has always shipped *names* for those addresses; this is
+39 documented entry points reads and writes, and what calling any of the ROM's
+202 routines clobbers — and that file is committed while the ROM never is.
+
+**Kept beside `symbols.ts` rather than inside it**, because the two are different
+in kind: one is *curated* — names and prose somebody chose — and the other is
+*derived*, machine output that must never be hand-edited. The dependency runs one
+way, since the generator reads `C64_SYMBOLS` for its names and a test asserts
+they still agree, so merging them would be circular.
+
+**A committed generated file goes stale in silence**, and this one stopped being
+inert the moment the clobber sets began feeding the value analysis: a drift
+between the ROM and the table would surface as a wrong flag proof somewhere else
+entirely, with nothing pointing back here. So the generation is split from the
+writing — `kernal-effects-source.ts` returns the text — and a test regenerates
+and compares whenever the ROM is present. re64 has always shipped *names* for those addresses; this is
 what they **do**, computed by its own lifter and call graph rather than
 transcribed from a book.
 

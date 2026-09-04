@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { existsSync, readFileSync } from "node:fs";
+import { generateKernalEffects } from "../../tools/kernal-effects-source.js";
 import { KERNAL_EFFECTS } from "./kernal-effects.js";
 import { C64_SYMBOLS } from "./symbols.js";
 
@@ -40,5 +42,35 @@ describe("the shipped KERNAL effects", () => {
       expect(entry.ownMemory.length).toBeLessThanOrEqual(entry.memory.length);
       expect(entry.ownRegisters.length).toBeLessThanOrEqual(entry.registers.length);
     }
+  });
+});
+
+/**
+ * That the committed file still says what the ROM says.
+ *
+ * A generated file that is committed goes stale in silence, and this one stopped
+ * being inert data the moment the clobber sets began feeding the value analysis:
+ * a drift between the ROM and the table would surface as a wrong flag proof
+ * somewhere else entirely, with nothing pointing back here.
+ *
+ * Opt-in on the ROM being present, like `kernal-vectors.test.ts`. Regeneration
+ * takes a few seconds, which is the price of the answer being checkable at all.
+ */
+const ROM = "3party/roms/kernal.901227-03.bin";
+const GENERATED = "src/core/c64/kernal-effects.ts";
+
+describe.runIf(existsSync(ROM))("the committed table against the ROM", () => {
+  it("is what the generator produces today", () => {
+    const fresh = generateKernalEffects(ROM);
+    expect(fresh.source).toBe(readFileSync(GENERATED, "utf8"));
+  });
+
+  it("covers every routine the ROM analysis finds", () => {
+    // A silent drop would be the dangerous direction: an absent row reads as
+    // "assume anything", which is safe, and an absent row that used to be there
+    // is a precision loss nobody would notice.
+    const fresh = generateKernalEffects(ROM);
+    expect(fresh.routines).toBe(202);
+    expect(fresh.entries).toBe(39);
   });
 });
