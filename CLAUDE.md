@@ -1905,6 +1905,37 @@ needs to see. It also means the log must be **append-only** — the old
 `DELETE`-and-reinsert renumbered every entry on each undo, so a held cursor
 silently came to mean something else.
 
+### Where complexity belongs: not in the write
+
+A governing rule, and one that arrived after a day of edits drifting the other
+way.
+
+> The basic operations that edit the document should be **simple, and have little
+> reason to fail**. All complexity belongs in the **analysis** or in the
+> **presentation**. Conflict-free merge means a non-ideal state is *reported by
+> hygiene* and corrected by whoever is there — not prevented at the point of
+> writing.
+
+Three consequences worth stating, because each contradicts an instinct that keeps
+resurfacing:
+
+- **A write that refuses is a write that has taken a decision it was not
+  entitled to.** There are exceptions — a request that names nothing real, or
+  that would destroy data outright — but "this looks wrong" is not one of them.
+  The state is allowed to be wrong; that is what hygiene is for.
+- **Anything computed to keep the *display* steady belongs in the display.**
+  Writing document state so a listing does not change under somebody is
+  compensating in the wrong layer, and it makes an edit that could not fail into
+  one that has opinions.
+- **Two writers producing an untidy document is the expected outcome, not a bug
+  to be engineered out.** It converges, it is visible, and somebody tidies it.
+  The alternative — every writer checking what every other writer has done — is
+  the coordination this project has deliberately not built.
+
+The test to apply: *could this operation fail, and is the reason a fact about the
+request or a judgement about the result?* A judgement about the result belongs
+somewhere else.
+
 ### Convergence is not atomicity
 
 Yjs guarantees that replicas which have seen the same updates hold the same
