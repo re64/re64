@@ -1855,8 +1855,13 @@ describe("finding things across the whole program", () => {
     workspace.setPrimaryLabel(agent, 0x8cb5, "levelTable");
     workspace.setPrimaryLabel(agent, 0x8cd5, "levelTable");
 
-    const [finding] = workspace.describe().hygiene ?? [];
-    expect(finding?.kind).toBe("label.nameShared");
+    // By kind rather than by position: hygiene reports several kinds and this
+    // workspace is shared with the tests around it, so the first finding is not
+    // reliably the one this test is about.
+    const finding = (workspace.describe().hygiene ?? []).find(
+      (f) => f.kind === "label.nameShared" && f.message.includes("levelTable")
+    );
+    expect(finding).toBeDefined();
     expect(finding?.subjects).toHaveLength(2);
 
     // Where it actually bites: `levelTable-1` means one address against one
