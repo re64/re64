@@ -3244,20 +3244,24 @@ at a different moment. That is the *overlay* problem, and it is answered: a leve
 is a target. Banking is not, and stays open, because it is runtime alternation
 inside one moment rather than a sequence of them.
 
-Two things the model cannot say yet, and neither is urgent:
+So a target carries **`order`** and **`description`**: where it sits in the
+program's life, and what the phase is in prose. Two fields rather than one packed
+string — the `view: "char:8"` precedent packs because a format, a stride and a
+column count are one rendering choice, and an ordinal and a paragraph are not one
+thing.
 
-- **Order.** `ProjectTarget` is `{name, layers, entryPoints}` and the list order
-  is incidental. A loader precedes the image it expands, which precedes the
-  levels; nothing records that.
-- **Succession.** The decrunched target is not merely *another* view, it is what
-  the loader *produces* — and re64 knows, because `run_program` with `capture`
-  is what made it. A target could carry that provenance the way a value now
-  carries an identity: this image is what you get by running `$080D` in that one.
+**Adding them made `target.set` a partial write, which is the more important
+change.** It replaced the whole target, so describing one would have silently
+reverted somebody else's layer list — an edit that works alone and fails
+together. Every field but the name is optional now and an omitted one is left
+alone, so two people revising different parts of one target both survive. The
+CRDT path already held a `Y.Map` per target and needed only to stop writing keys
+the operation does not carry.
 
-Left as an observation rather than built, because the run that would supply
-evidence about whether it matters is exactly the one now going on: a project
-built from a disk image, by somebody who has to name these things as they find
-them.
+**Succession is still not built**, deliberately: the decrunched target is what
+the loader *produces*, and re64 knows because `run_program` with `capture` is
+what made it. That is provenance rather than presentation, and it should wait for
+somebody to want it.
 
 ### Building a project, rather than annotating one
 

@@ -833,18 +833,46 @@ export function removeLayer(raw: string, id: string): string {
  */
 export function upsertTarget(
   raw: string,
-  target: { name: string; layers: string[]; entryPoints?: number[] }
+  target: {
+    name: string;
+    layers?: string[];
+    entryPoints?: number[];
+    order?: number;
+    description?: string;
+  }
 ): string {
   const project = parseProject(raw);
   const targets = (project.targets ??= []);
+  const at = targets.findIndex((t) => t.name === target.name);
+  const before = at >= 0 ? targets[at] : undefined;
+
+  // Merged, not replaced: a field the caller did not mention keeps what it had.
+  // Writing the whole object would make revising a description revert somebody
+  // else's layer list, which is the same edit working alone and failing
+  // together.
   const entry = {
     name: target.name,
-    layers: target.layers,
-    ...(target.entryPoints?.length
-      ? { entryPoints: target.entryPoints.map((a) => "$" + a.toString(16).toUpperCase().padStart(4, "0")) }
-      : {}),
+    layers: target.layers ?? before?.layers ?? [],
+    ...(target.entryPoints !== undefined
+      ? {
+          entryPoints: target.entryPoints.map(
+            (a) => "$" + a.toString(16).toUpperCase().padStart(4, "0")
+          ),
+        }
+      : before?.entryPoints !== undefined
+        ? { entryPoints: before.entryPoints }
+        : {}),
+    ...(target.order !== undefined
+      ? { order: target.order }
+      : before?.order !== undefined
+        ? { order: before.order }
+        : {}),
+    ...(target.description !== undefined
+      ? { description: target.description }
+      : before?.description !== undefined
+        ? { description: before.description }
+        : {}),
   };
-  const at = targets.findIndex((t) => t.name === target.name);
   if (at >= 0) targets[at] = entry;
   else targets.push(entry);
   return formatProject(project);

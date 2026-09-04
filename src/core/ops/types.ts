@@ -127,11 +127,25 @@ export interface ConstantSetOp {
  * allowed.
  */
 /** Declare or revise a named view over the layer stack. */
+/**
+ * Declare or revise a named view over the layer stack.
+ *
+ * Every field but the name is optional, and an omitted one is *left alone*
+ * rather than cleared. That is what makes two people revising one target
+ * survive each other: writing the whole object would mean somebody changing a
+ * description silently reverted somebody else's layer list, which fails the
+ * rule that an edit made offline has to work when it lands.
+ *
+ * A target that does not exist yet needs `layers`, since a view over nothing is
+ * not a view.
+ */
 export interface TargetSetOp {
   op: "target.set";
   name: string;
-  layers: string[];
+  layers?: string[];
   entryPoints?: number[];
+  order?: number;
+  description?: string;
 }
 
 export interface TargetRemoveOp {
@@ -328,7 +342,12 @@ export function describeOp(op: Op): string {
       return `delete constant ${op.id}`;
 
     case "target.set":
-      return `define target ${op.name} over ${op.layers.length} layer(s)`;
+      // Says what the write actually changed, since it need not change layers.
+      return `define target ${op.name}${
+        op.layers ? ` over ${op.layers.length} layer(s)` : ""
+      }${op.description !== undefined ? ", described" : ""}${
+        op.order !== undefined ? `, order ${op.order}` : ""
+      }`;
     case "target.remove":
       return `remove target ${op.name}`;
 

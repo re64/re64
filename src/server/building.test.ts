@@ -242,6 +242,48 @@ describe("building a project from a disk image", () => {
     expect(found?.extent).toBe(4);
   });
 
+  it("orders and describes a target without restating its layers", () => {
+    // A target list is a history — loader, then the image it expands into — so
+    // order and description are what say that. Every field but the name is
+    // optional and an omitted one is left alone: describing a target must not
+    // restate its layers, or two people revising one revert each other, which
+    // is the same edit working alone and failing together.
+    ws.createProject("camels");
+    const camels = upload("camels", "packed.prg", new Uint8Array([0x00, 0x08, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "packed.prg", name: "packed" });
+    const packed = camels.targets().layers.find((l) => l.name === "packed")!.id;
+
+    camels.setTarget(builder, "loader", [packed]);
+    camels.setTarget(builder, "loader", undefined, undefined, 1, "The file as the disk loads it");
+
+    const [loader] = camels.targets().targets;
+    expect(loader.layers).toEqual([packed]);
+    expect(loader.order).toBe(1);
+    expect(loader.description).toBe("The file as the disk loads it");
+  });
+
+  it("lists targets in the order the program lives them", () => {
+    ws.createProject("camels");
+    const camels = upload("camels", "packed.prg", new Uint8Array([0x00, 0x08, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "packed.prg", name: "packed" });
+    const packed = camels.targets().layers.find((l) => l.name === "packed")!.id;
+
+    camels.setTarget(builder, "runtime", [packed], undefined, 2);
+    camels.setTarget(builder, "loader", [packed], undefined, 1);
+
+    expect(camels.targets().targets.map((t) => t.name)).toEqual(["loader", "runtime"]);
+  });
+
+  it("needs layers only when the target is new", () => {
+    ws.createProject("camels");
+    const camels = upload("camels", "packed.prg", new Uint8Array([0x00, 0x08, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "packed.prg" });
+
+    expect(() => camels.setTarget(builder, "nothing", undefined, undefined, 1)).toThrow(
+      /needs its layers/
+    );
+  });
+
   it("does not hide the symbols layer a name had to create", () => {
     // A target is an allowlist of layer ids, so a layer made *after* one exists
     // falls outside it — and naming a byteless address makes exactly that layer,

@@ -217,6 +217,23 @@ export interface ProjectTarget {
    * already layer-owned and follow activation for free.
    */
   entryPoints?: (number | string)[];
+  /**
+   * Where this sits in the program's life.
+   *
+   * A target list is a history: the loader, the runtime image it expands into,
+   * and on a larger game the levels it pulls in later. The order is the point,
+   * and the position in the array was incidental. A plain number, like a
+   * comment's, so saying where something goes does not depend on what anybody
+   * believed the order was.
+   */
+  order?: number;
+  /**
+   * What this phase *is*, in prose.
+   *
+   * A name carries none of it, and the audience is whoever opens the project
+   * next and has to work out why there are three views of the same addresses.
+   */
+  description?: string;
 }
 
 export interface Project {

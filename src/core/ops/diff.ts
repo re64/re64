@@ -185,6 +185,8 @@ export function diffProjects(from: Project, to: Project): Op[] {
       ...(target.entryPoints === undefined
         ? {}
         : { entryPoints: target.entryPoints.map((a) => parseProjectAddress(a)) }),
+      ...(target.order === undefined ? {} : { order: target.order }),
+      ...(target.description === undefined ? {} : { description: target.description }),
     });
   }
   for (const name of fromTargets.keys()) {

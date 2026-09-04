@@ -164,10 +164,18 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
           entry = new Y.Map<unknown>();
           targets.set(op.name, entry);
         }
+        // Only the fields this operation carries. `assign` deletes on
+        // undefined, and an omitted field means "leave it alone" — so two
+        // people revising different parts of one target both survive, which
+        // whole-object writes would not allow.
         assign(entry, {
           name: op.name,
-          layers: op.layers,
-          entryPoints: op.entryPoints?.length ? op.entryPoints.map(hex4) : undefined,
+          ...(op.layers !== undefined ? { layers: op.layers } : {}),
+          ...(op.entryPoints !== undefined
+            ? { entryPoints: op.entryPoints.length ? op.entryPoints.map(hex4) : undefined }
+            : {}),
+          ...(op.order !== undefined ? { order: op.order } : {}),
+          ...(op.description !== undefined ? { description: op.description } : {}),
         });
         break;
       }

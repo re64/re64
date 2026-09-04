@@ -770,19 +770,38 @@ export class Workspace {
   targets(): {
     active?: string;
     total: number;
-    targets: { name: string; layers: string[]; entryPoints?: string[]; active: boolean }[];
+    targets: {
+      name: string;
+      layers: string[];
+      entryPoints?: string[];
+      order?: number;
+      description?: string;
+      active: boolean;
+    }[];
     layers: { id: string; name: string; type: string }[];
   } {
     const project = projectFromDoc(this.room.store.document());
     return {
       ...(project.activeTarget ? { active: project.activeTarget } : {}),
       total: (project.targets ?? []).length,
-      targets: (project.targets ?? []).map((t) => ({
-        name: t.name,
-        layers: t.layers,
-        ...(t.entryPoints ? { entryPoints: t.entryPoints.map((a) => hex4(parseProjectAddress(a))) } : {}),
-        active: t.name === project.activeTarget,
-      })),
+      // In the order the program lives them, where anybody has said: a loader
+      // precedes the image it expands, which precedes the levels. Unordered
+      // targets keep their declared order after the ones that are placed.
+      targets: [...(project.targets ?? [])]
+        .sort(
+          (a, b) =>
+            (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER)
+        )
+        .map((t) => ({
+          name: t.name,
+          layers: t.layers,
+          ...(t.entryPoints
+            ? { entryPoints: t.entryPoints.map((a) => hex4(parseProjectAddress(a))) }
+            : {}),
+          ...(t.order === undefined ? {} : { order: t.order }),
+          ...(t.description === undefined ? {} : { description: t.description }),
+          active: t.name === project.activeTarget,
+        })),
       // Every layer, including ones the selection hides, with the ids a target
       // is defined in terms of.
       layers: project.layers
@@ -795,29 +814,46 @@ export class Workspace {
   setTarget(
     caller: Caller,
     name: string,
-    layers: readonly string[],
-    entryPoints?: readonly number[]
+    layers?: readonly string[],
+    entryPoints?: readonly number[],
+    order?: number,
+    description?: string
   ): EditResult {
     const known = new Set(
       projectFromDoc(this.room.store.document())
         .layers.filter((l) => l.id)
         .map((l) => l.id!)
     );
-    const unknown = layers.filter((id) => !known.has(id));
+    const unknown = (layers ?? []).filter((id) => !known.has(id));
     if (unknown.length) {
       throw new Error(
         `No layer ${unknown.join(", ")} in this project. list_targets shows the ` +
           `ids a target is defined in terms of.`
       );
     }
-    if (layers.length === 0) throw new Error("A target with no layers shows nothing.");
+    // Only when the caller is saying what the layers are. Revising a target's
+    // description must not have to restate its layers, or two people editing
+    // one target would revert each other.
+    const held = projectFromDoc(this.room.store.document()).targets ?? [];
+    const exists = held.some((t) => t.name === name);
+    if (layers !== undefined && layers.length === 0) {
+      throw new Error("A target with no layers shows nothing.");
+    }
+    if (!exists && layers === undefined) {
+      throw new Error(
+        `"${name}" does not exist yet, so it needs its layers. list_targets shows ` +
+          `the ids a target is defined in terms of.`
+      );
+    }
 
     return this.edit(caller, () => [
       {
         op: "target.set",
         name,
-        layers: [...layers],
-        ...(entryPoints?.length ? { entryPoints: [...entryPoints] } : {}),
+        ...(layers === undefined ? {} : { layers: [...layers] }),
+        ...(entryPoints === undefined ? {} : { entryPoints: [...entryPoints] }),
+        ...(order === undefined ? {} : { order }),
+        ...(description === undefined ? {} : { description }),
       } as Op,
     ]);
   }

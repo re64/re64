@@ -1155,25 +1155,49 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "starts beyond what those layers contribute. A project holding a packed " +
       "file and the image it unpacks to can be read as the bytes load or as the " +
       "program runs — one target each — because the second must shadow the " +
-      "first. Annotations belong to layers, so they follow activation.",
+      "first. Annotations belong to layers, so they follow activation. " +
+      "The list is a history of the program's life — loader, then the image it " +
+      "expands into, then whatever it loads later — so `order` says where this " +
+      "sits and `description` says what the phase is. " +
+      "Every field but the name is optional and an omitted one is left alone, " +
+      "so describing a target does not restate its layers and two people " +
+      "revising one do not revert each other.",
     {
       project,
       name: z.string().min(1),
-      layers: z.array(z.string()).min(1).describe("Layer ids, from list_targets"),
+      layers: z.array(z.string()).min(1).optional().describe("Layer ids, from list_targets; omit to leave them as they are"),
       entryPoints: z.array(address).optional(),
+      order: z
+        .number()
+        .int()
+        .optional()
+        .describe("Where this sits in the program's life: the loader before the image it expands, before the levels"),
+      description: z
+        .string()
+        .optional()
+        .describe("What this phase is, in prose — a name carries none of it"),
       expectVersion: z.string().optional(),
     },
     (args: {
       project?: string;
       name: string;
-      layers: string[];
+      layers?: string[];
       entryPoints?: number[];
+      order?: number;
+      description?: string;
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.setTarget(caller, args.name, args.layers, args.entryPoints);
+      return space.setTarget(
+        caller,
+        args.name,
+        args.layers,
+        args.entryPoints,
+        args.order,
+        args.description
+      );
     }
   );
 
