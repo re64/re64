@@ -275,3 +275,32 @@ describe("proving that a routine gives something back", () => {
     expect(preservedAt(decided, ORG + 3, REG.D)).toBe(false);
   });
 });
+
+describe("a handler the bytes name rather than the project", () => {
+  it("is treated as a BRK entry even though it is only a decode root", () => {
+    // The ordinary way to get a handler decoded is to mark it a routine, which
+    // makes it a *decode root* and not an origin. Keyed on origins alone it was
+    // seeded with nothing known — so the one bit that says how it was entered
+    // was lost exactly where it matters.
+    //
+    //   $1000  BRK / RTS          the program
+    //   $1005  PLA / AND #$10     the handler, reached through $FFFE
+    const map = new MemoryMap();
+    map.addLayer(new BytesLayer("code", ORG, new Uint8Array([0x00, 0x60, 0xea, 0xea, 0xea, 0x68, 0x29, 0x10, 0x60])));
+    map.addLayer(new BytesLayer("vector", 0xfffe, new Uint8Array([ORG + 5, 0x10])));
+
+    const roots = [ORG, ORG + 5];
+    const index = new InstructionIndex(disassemble(map, { entryPoints: roots }).instructions);
+    const blocks = buildBlocks(index, roots);
+
+    // Only $1000 is an origin; the handler is merely decoded.
+    const v = proveValues(blocks, [ORG], {
+      cover: roots,
+      kinds: new Map([[ORG + 5, "brk" as const]]),
+    });
+
+    const extracted = valueBefore(v, ORG + 8, REG.A);
+    expect(isExact(extracted, 1)).toBe(true);
+    expect(extracted.value).toBe(0x10);
+  });
+});

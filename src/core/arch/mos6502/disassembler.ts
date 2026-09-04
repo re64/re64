@@ -25,6 +25,14 @@ export type DisassemblyWarning =
   | { type: "oddJumptable"; address: number; bytes: number }
   | { type: "flowIntoData"; address: number; kind: RegionKind }
   | {
+      type: "breakVector";
+      address: number;
+      /** `$FFFE`, which is where the processor goes. */
+      vector: number;
+      /** What the memory map holds there now, if anything supplies those bytes. */
+      target?: number;
+    }
+  | {
       type: "indirectJump";
       address: number;
       /** The two-byte cell the jump reads its destination from. */
@@ -47,6 +55,16 @@ export function describeWarning(w: DisassemblyWarning): string {
       return (
         `${hex(w.address)}: jumptable covers ${w.bytes} bytes, which is odd — ` +
         `the last byte is not part of any entry and is being ignored`
+      );
+    case "breakVector":
+      return (
+        `${hex(w.address)}: BRK goes through ${hex(w.vector)}, which this walk does ` +
+        `not follow — a program may install its own handler there. ` +
+        (w.target === undefined
+          ? `Nothing in this project supplies ${hex(w.vector)}, so there is nothing to read.`
+          : `It currently reads ${hex(w.target)}; mark_function there if that is the ` +
+            `handler you mean. It runs with B set, which is how it tells a BRK from an ` +
+            `interrupt.`)
       );
     case "indirectJump":
       return (
@@ -329,6 +347,24 @@ export function disassemble(
     const instrRefs = extractReferences(instr);
     for (const ref of instrRefs) {
       addReference(references, ref.target, ref.type, address);
+    }
+
+    // `BRK` is a jump through `$FFFE` and gets the same treatment as an indirect
+    // one, for the same reason: a program may install its own handler, and on
+    // this machine the KERNAL's own handler reads `B` and dispatches again
+    // through `$0316`. Saying nothing was the inconsistency — an indirect `JMP`
+    // named the cell it would have read while `BRK`, which is the same shape of
+    // problem, stopped in silence.
+    if (instr.mnemonic.toUpperCase() === "BRK") {
+      const vector = 0xfffe;
+      const lo = reader.readByte(vector);
+      const hi = reader.readByte(vector + 1);
+      warnings.push({
+        type: "breakVector",
+        address,
+        vector,
+        ...(lo !== undefined && hi !== undefined ? { target: lo | (hi << 8) } : {}),
+      });
     }
 
     // An indirect jump names no target and the walk does not follow one: a

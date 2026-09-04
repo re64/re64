@@ -243,7 +243,18 @@ export function proveValues(
     queue.push(at);
   };
   const kindOf = (at: number): OriginKind => options.kinds?.get(at) ?? "external";
-  const reentrant = origins.filter((at) => byStart.has(at) && kindOf(at) !== "external");
+
+  // Anything the *bytes* name as a handler, however it came to be declared.
+  //
+  // Drawn from the kinds rather than from `origins`, because a handler found by
+  // reading `$FFFE` or `$0316` is an address the machine enters whether or not
+  // somebody typed it into `entryPoints`. Marking it a routine is the ordinary
+  // way to get it decoded at all, and that makes it a decode root rather than an
+  // origin — so keying on origins alone left every such handler seeded with
+  // nothing known, which is the case this was built for.
+  const reentrant = [
+    ...new Set([...origins, ...(options.kinds?.keys() ?? [])]),
+  ].filter((at) => byStart.has(at) && kindOf(at) !== "external");
 
   // An external origin that something in the program already reaches does not
   // need seeding: it gets its state from whatever reaches it, and that is

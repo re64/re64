@@ -196,3 +196,39 @@ describe("addressing that does not do the obvious thing", () => {
     expect(effects.writesComputedMemory).toBe(false);
   });
 });
+
+describe("BRK, which is a jump through a vector", () => {
+  // Seen: any program with its own BRK handler, and the KERNAL's own at $FE66.
+  // Naive reading: execution stops. It does not — it goes wherever $FFFE points,
+  // with B set in the byte it pushes so the handler can tell a BRK from an
+  // interrupt, and comes back to BRK+2.
+  function flat(cells: Record<number, number[]>): ByteReader {
+    const memory = new Map<number, number>();
+    for (const [base, bytes] of Object.entries(cells))
+      bytes.forEach((b, i) => memory.set(Number(base) + i, b));
+    return { readByte: (a) => memory.get(a) };
+  }
+
+  it("is not followed, and names the vector and what is in it", () => {
+    const reader = flat({ 0x1000: [0x00, 0x60], 0x2000: [0xa9, 0x01, 0x40], 0xfffe: [0x00, 0x20] });
+    const { instructions, warnings } = disassemble(reader, { entryPoints: [0x1000] });
+
+    // Not followed: a program may install its own handler, exactly as it may
+    // rehook an indirect jump's vector.
+    expect(instructions.has(0x2000)).toBe(false);
+
+    const warning = warnings.find((w) => w.type === "breakVector");
+    expect(warning).toMatchObject({ address: 0x1000, vector: 0xfffe, target: 0x2000 });
+    expect(describeWarning(warning!)).toContain("mark_function");
+    expect(describeWarning(warning!)).toContain("B set");
+  });
+
+  it("says so plainly when nothing supplies the vector", () => {
+    const reader = flat({ 0x1000: [0x00, 0x60] });
+    const warning = disassemble(reader, { entryPoints: [0x1000] }).warnings.find(
+      (w) => w.type === "breakVector"
+    );
+    expect(warning && "target" in warning).toBe(false);
+    expect(describeWarning(warning!)).toContain("nothing to read");
+  });
+});

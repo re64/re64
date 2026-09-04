@@ -2458,6 +2458,29 @@ unreachable. Claiming a depth of three is not a claim that nothing is underneath
 It converges because the handler's own instructions become states to join over,
 and joining only ever loses precision.
 
+### `BRK` is a jump through a vector, and now says so
+
+`BRK`'s flow type is `halt`, so the walk stopped dead at one — no target, and,
+unlike an indirect `JMP`, **no warning either**. That was an inconsistency rather
+than a decision: the two are the same shape of problem, a transfer through a cell
+a program may rehook, and one of them named what it would have reached while the
+other said nothing at all.
+
+It gets the same treatment and for the same reasons. Not followed — a program
+installs its own handler, and on this machine the KERNAL's own reads `B` and
+dispatches again through `$0316` — but the warning names `$FFFE`, what the map
+holds there, and `mark_function` as the remedy. It also says the handler runs
+with `B` set, since that is how a handler tells a `BRK` from an interrupt and it
+is the one thing about the entry that is knowable without looking at anything.
+
+The second half was that **a handler is usually a decode root rather than an
+origin**. Marking it a routine is how anybody gets it decoded, and that makes it
+a `function` label — so keying the re-entrant treatment on `origins` alone left
+every such handler seeded with nothing known, which is exactly the case the
+machinery was built for. The kinds are read from the *bytes*, so an address
+`$FFFE` or `$0316` points at is one the machine enters whoever declared it, and
+that is now what decides it.
+
 ### An origin is not a decode root
 
 The pass needed seeding, and seeding it with `entryPoints` was wrong in a way
