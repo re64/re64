@@ -21,6 +21,7 @@ import { Instruction } from "../arch/mos6502/instruction.js";
 import { DecimalMode, lift } from "./lift.js";
 import {
   FLAGS,
+  Opcode,
   PcodeOp,
   REG,
   Varnode,
@@ -100,8 +101,12 @@ export function blockEffects(
     .map((instr) => ({ address: instr.address, mnemonic: instr.mnemonic }));
 
   // A dynamic address arrives as a LOAD or STORE; a static one is a `ram`
-  // varnode and never becomes either.
-  const all = sequences.flat();
+  // varnode and never becomes either. Checked per instruction, because `unique`
+  // offsets restart at each one and a flattened list would confuse two temporaries.
+  const anyAccess = (op: Opcode) =>
+    sequences.some((ops) =>
+      ops.some((o) => o.op === op && !fromStackPointer(ops, o.inputs[1]))
+    );
 
   return {
     inputs,
@@ -109,10 +114,45 @@ export function blockEffects(
     flags: outputs
       .filter((v) => v.space === "register" && (FLAGS as readonly number[]).includes(v.offset))
       .map((v) => v.offset),
-    readsComputedMemory: all.some((op) => op.op === "LOAD"),
-    writesComputedMemory: all.some((op) => op.op === "STORE"),
+    readsComputedMemory: anyAccess("LOAD"),
+    writesComputedMemory: anyAccess("STORE"),
     unmodelled,
   };
+}
+
+/**
+ * Whether a `LOAD`/`STORE` address was computed from the stack pointer.
+ *
+ * The stack is not an address the analysis failed to name — it is the stack,
+ * and every `RTS`, `JSR`, `PHA` and `PLP` goes through it. Counting those made
+ * `readsComputedMemory` true for all 42 KERNAL entry points, `IOBASE` included,
+ * which touches no memory whatsoever. A signal that is on everywhere carries
+ * nothing, so the one flag meaning "indexed access I cannot resolve" has to
+ * exclude the one computed address that is always understood.
+ *
+ * A backward walk over the instruction's own operations: an address is a
+ * temporary, defined by earlier ops in the same sequence, and `stackAddress`
+ * builds it out of `SP`. `TSX`/`TXS` do not make this lie — they move the
+ * pointer between registers rather than dereferencing it, and emit no access.
+ */
+function fromStackPointer(ops: readonly PcodeOp[], address: Varnode | undefined): boolean {
+  if (!address) return false;
+  const pending: Varnode[] = [address];
+  const seen = new Set<string>();
+
+  while (pending.length > 0) {
+    const node = pending.pop()!;
+    if (node.space === "register" && node.offset === REG.SP) return true;
+    if (node.space !== "unique") continue;
+    const key = `${node.offset}/${node.size}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    for (const op of ops) {
+      if (op.output && sameVarnode(op.output, node)) pending.push(...op.inputs);
+    }
+  }
+
+  return false;
 }
 
 /** The effects as short readable lists, for a listing or a tool result. */

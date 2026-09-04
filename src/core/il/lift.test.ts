@@ -229,6 +229,28 @@ describe("what a whole block touches", () => {
       true
     );
   });
+
+  it("does not call the stack a computed address", () => {
+    // PHA / PLA / RTS — all through SP, and none of it is an address we failed
+    // to name. Counting these fired the flag on all 42 KERNAL entry points,
+    // IOBASE included, which touches no memory at all.
+    const effects = blockEffects(blockOf([0x48, 0x68, 0x60]).instructions);
+    expect(effects.readsComputedMemory).toBe(false);
+    expect(effects.writesComputedMemory).toBe(false);
+  });
+
+  it("still reports a real indexed access", () => {
+    // LDA $2000,X / STA $CFFF,X — the KERNAL's own VIC-register copy loop.
+    const effects = blockEffects(blockOf([0xbd, 0x00, 0x20, 0x9d, 0xff, 0xcf]).instructions);
+    expect(effects.readsComputedMemory).toBe(true);
+    expect(effects.writesComputedMemory).toBe(true);
+  });
+
+  it("reports an indexed access sitting beside stack traffic", () => {
+    // PHA / LDA $2000,X / PLA — the stack must not mask the one real access.
+    const effects = blockEffects(blockOf([0x48, 0xbd, 0x00, 0x20, 0x68]).instructions);
+    expect(effects.readsComputedMemory).toBe(true);
+  });
 });
 
 describe("what a block does to the stack", () => {
