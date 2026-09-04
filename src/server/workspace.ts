@@ -186,6 +186,41 @@ function describeExit(
   }
 }
 
+/**
+ * How far an effects query looks.
+ *
+ * One axis rather than two tools: `block` is the straight-line block and is
+ * exact; `routine` is the routine's own blocks; `calls` adds everything its
+ * callees reach; `returning` is `calls` refusing to enter anything that never
+ * comes back.
+ */
+export type EffectScope = "block" | "routine" | "calls" | "returning";
+
+/**
+ * One answer shape for all four scopes.
+ *
+ * `covers` is what was actually looked at and reads differently per scope — a
+ * block has a start and an end, a routine has spans — which is the one place
+ * the scopes genuinely differ rather than merely being wider.
+ */
+export interface EffectsAnswer {
+  scope: EffectScope;
+  /** Absent for `block`: there is no routine being named. */
+  routine?: string;
+  covers: Record<string, unknown>;
+  reads: string[];
+  writes: string[];
+  flags: string[];
+  /** `block` only: instructions with no modelled semantics. */
+  unmodelled?: { at: string; mnemonic: string }[];
+  calls?: string[];
+  /** `returning` only: the callees it refused to enter. */
+  stoppedAt?: string[];
+  returns?: string[];
+  incomplete?: string[];
+  note?: string;
+}
+
 export class Workspace {
   private cached?: { key: string; loaded: LoadedProject; program: ProgramAnalysis };
   private cachedRows?: { key: string; rows: AnalysisResult };
@@ -1573,21 +1608,28 @@ export class Workspace {
    * paths is often unanswerable, and a "must" that is quietly sometimes a "may"
    * is worse than not offering one.
    */
-  routineEffects(address: number): Record<string, unknown> {
+  /**
+   * What the code at an address touches, over a scope the caller names.
+   *
+   * How far to look is a property of the *question*, not of the program, and it
+   * used to be baked into two tool names and two result fields — so an agent had
+   * to discover by trial that `block_effects` at a routine head answers about one
+   * instruction and that the whole-routine answer lived somewhere else. One axis
+   * instead, and the tool that used to apologise for its own scope does not have
+   * to.
+   *
+   * The four points differ in what they assume, which is why the answer says
+   * which one it is rather than only the numbers:
+   *
+   * - `block` is exact. A block is straight-line, so every instruction in it
+   *   runs and there is no path to have chosen.
+   * - `routine` and beyond are unions over paths — what the code *can* touch,
+   *   never what it must.
+   * - `returning` is the same union, refusing to enter a callee that never comes
+   *   back, and naming every place it stopped.
+   */
+  effects(address: number, follow: EffectScope = "calls"): EffectsAnswer {
     const program = this.program();
-    const routines = this.routines();
-
-    // The address of any block in a routine is a fair way to ask about it — a
-    // reader has a line, not necessarily an entry point.
-    const found = routines.get(address) ?? routineAt(routines, program.blocks, address);
-
-    if (!found) {
-      throw new Error(
-        `${hex4(address)} is not in a routine this can see. A routine starts where ` +
-          `something calls it, or where mark_function says one starts — and this ` +
-          `address is in neither.`
-      );
-    }
 
     const name = (at: number) => {
       const label = program.labels.resolve(at);
@@ -1603,97 +1645,85 @@ export class Workspace {
         ? `${label.label.name} (${hex4(node.offset)})`
         : hex4(node.offset);
     };
+    const flagNames = (offsets: number[]) =>
+      offsets.map((offset) => REGISTER_NAMES[offset] ?? String(offset));
 
-    const show = (effects: Effects) => ({
-      reads: [
-        ...effects.reads.map(slot),
-        ...(effects.readsComputedMemory ? ["memory at a computed address"] : []),
-      ],
-      writes: [
-        ...effects.writes.map(slot),
-        ...(effects.writesComputedMemory ? ["memory at a computed address"] : []),
-      ],
-    });
+    if (follow === "block") {
+      const block = this.blockCovering(address);
+      const effects = blockEffects(block.instructions);
+      const described = describeEffects(effects);
+      return {
+        scope: "block",
+        covers: {
+          start: hex4(block.start),
+          end: hex4(block.end),
+          instructions: block.instructions.length,
+          exit: block.exit,
+        },
+        reads: described.reads,
+        writes: described.writes,
+        flags: flagNames(effects.flags),
+        unmodelled: effects.unmodelled.map((u) => ({ at: hex4(u.address), mnemonic: u.mnemonic })),
+        note:
+          effects.unmodelled.length > 0
+            ? "An instruction here has no modelled semantics, so these lists are " +
+              "incomplete by an unknown amount."
+            : "Exact: a block is straight-line, so this holds for every input.",
+      };
+    }
+
+    const routines = this.routines();
+    // The address of any block in a routine is a fair way to ask about it — a
+    // reader has a line, not necessarily an entry point.
+    const found = routines.get(address) ?? routineAt(routines, program.blocks, address);
+    if (!found) {
+      throw new Error(
+        `${hex4(address)} is not in a routine this can see. A routine starts where ` +
+          `something calls it, or where mark_function says one starts — and this ` +
+          `address is in neither. For the straight-line block at this address, ` +
+          `ask with follow: "block".`
+      );
+    }
+
+    const chosen =
+      follow === "routine" ? found.own : follow === "returning" ? found.returning : found.total;
 
     return {
+      scope: follow,
       routine: name(found.entry),
-      blocks: found.blocks,
-      // More than one whenever it tail-jumps away, which is why no single
-      // declared span could have described it.
-      spans: found.spans.map((s) => `${hex4(s.start)}-${hex4(s.end - 1)}`),
-      itself: show(found.own),
-      including_what_it_calls: show(found.total),
+      covers: {
+        blocks: found.blocks,
+        // More than one whenever it tail-jumps away, which is why no single
+        // declared span could have described it.
+        spans: found.spans.map((sp) => `${hex4(sp.start)}-${hex4(sp.end - 1)}`),
+      },
+      reads: [
+        ...chosen.reads.map(slot),
+        ...(chosen.readsComputedMemory ? ["memory at a computed address"] : []),
+      ],
+      writes: [
+        ...chosen.writes.map(slot),
+        ...(chosen.writesComputedMemory ? ["memory at a computed address"] : []),
+      ],
+      flags: flagNames(chosen.flags),
       calls: found.calls.map(name),
+      // Only under `returning`, where it is the whole point: these are the
+      // places the walk stopped, and asking about one of them gives the rest.
+      ...(follow === "returning" && found.cut.length > 0
+        ? { stoppedAt: found.cut.map(name) }
+        : {}),
       // Derived from the stack delta, which knows exactly: a block is
       // straight-line, so how far the stack moved needs no guessing.
       returns: found.returns.length > 0 ? found.returns.map((r) => r.why) : undefined,
-      incomplete:
-        found.incomplete.length > 0
-          ? found.incomplete
-          : undefined,
+      incomplete: found.incomplete.length > 0 ? found.incomplete : undefined,
       note:
-        "Everything this routine *can* touch, not what it must. Reachability is " +
-        "static, so a computed jump or an RTS-dispatch leads somewhere this " +
-        "cannot follow — see list_warnings.",
-    };
-  }
-
-  /**
-   * What the block at an address reads and writes, without running it.
-   *
-   * The first question about a routine nobody has named: not what it is called,
-   * but what it depends on and what it leaves behind. Both are unions over the
-   * block's lifted operations, which is sound only because a block is
-   * straight-line — every instruction in it runs, so nothing has to be assumed
-   * about a path.
-   *
-   * Says which of the two questions it cannot answer rather than guessing:
-   * `readsComputedMemory` means an address depended on a register, and an
-   * `unmodelled` instruction means both lists are incomplete by an unknown
-   * amount.
-   */
-  blockEffects(address: number): {
-    block: { start: string; end: string; instructions: number; exit: string };
-    reads: string[];
-    writes: string[];
-    flags: string[];
-    unmodelled: { at: string; mnemonic: string }[];
-    note?: string;
-  } {
-    const program = this.program();
-    const block = this.blockCovering(address);
-    const effects = blockEffects(block.instructions);
-    const described = describeEffects(effects);
-
-    return {
-      block: {
-        start: hex4(block.start),
-        end: hex4(block.end),
-        instructions: block.instructions.length,
-        exit: block.exit,
-      },
-      reads: described.reads,
-      writes: described.writes,
-      flags: effects.flags.map((offset) => REGISTER_NAMES[offset] ?? String(offset)),
-      unmodelled: effects.unmodelled.map((u) => ({ at: hex4(u.address), mnemonic: u.mnemonic })),
-      // A block ends at the first call, so asking about a routine that opens
-      // with `JSR` returns one instruction. That is right and unhelpful, and
-      // saying which tool answers the question costs a line.
-      ...(block.instructions.length <= 2 && block.exit === "call"
-        ? {
-            note:
-              "This block is the instructions up to its first JSR, which is all " +
-              "a block is. For what the whole routine touches, including what it " +
-              "calls, ask routine_effects about the same address.",
-          }
-        : {}),
-      ...(effects.unmodelled.length
-        ? {
-            note:
-              "An instruction here has no modelled semantics, so these lists are " +
-              "incomplete by an unknown amount.",
-          }
-        : {}),
+        follow === "returning"
+          ? "What it can touch without entering anything that never comes back. " +
+            "Not a claim that control stops there — stoppedAt names every place " +
+            "it did, and asking about one gives the rest."
+          : "Everything this routine *can* touch, not what it must. Reachability " +
+            "is static, so a computed jump or an RTS-dispatch leads somewhere " +
+            "this cannot follow — see list_warnings.",
     };
   }
 

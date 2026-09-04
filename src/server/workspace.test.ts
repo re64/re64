@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Caller, Workspace } from "./workspace.js";
+import { Caller, EffectsAnswer, Workspace } from "./workspace.js";
 import { ProjectStore, SqliteStorage, importProject } from "../store/index.js";
 
 /**
@@ -1369,7 +1369,7 @@ describe("the rest of trial 3's list", () => {
 describe("understanding a block", () => {
   it("says what it reads and writes without being run", () => {
     // $8030: AND #$1F / CMP #$18 / branch.
-    const effects = workspace.blockEffects(0x8030);
+    const effects = workspace.effects(0x8030, "block") as EffectsAnswer;
     expect(effects.reads).toEqual(["A"]);
     expect(effects.writes).toEqual(expect.arrayContaining(["A", "Z", "N", "C"]));
     expect(effects.unmodelled).toEqual([]);
@@ -1377,7 +1377,7 @@ describe("understanding a block", () => {
 
   it("admits to an address that depends on a register", () => {
     // $8040 indexes explosionXPosArray by X, so no static answer names a cell.
-    const effects = workspace.blockEffects(0x8040);
+    const effects = workspace.effects(0x8040, "block") as EffectsAnswer;
     expect(effects.reads).toContain("memory at a computed address");
     expect(effects.reads).toContain("X");
   });
@@ -1434,7 +1434,7 @@ describe("understanding a block", () => {
   });
 
   it("refuses an address no block covers rather than inventing one", () => {
-    expect(() => workspace.blockEffects(0xffff)).toThrow(/No decoded block/);
+    expect(() => workspace.effects(0xffff, "block")).toThrow(/No decoded block/);
   });
 });
 
@@ -1984,18 +1984,37 @@ describe("saying which tool answers", () => {
     expect(workspace.references(0x0c, "in").incomplete).toContain("find_instructions");
   });
 
-  it("says when a block is just the run up to its first call", () => {
-    // A routine that opens with JSR gives a one-instruction block: correct, and
-    // almost never the question being asked.
+  it("widens as the scope widens, and says which one it answered", () => {
+    // The axis is the point: one address, four questions. A routine that opens
+    // with JSR gives a one-instruction block — correct, and almost never what
+    // was being asked, which used to need a note pointing at a second tool.
     const at = workspace.program().blocks.find((b) => b.exit === "call" && b.instructions.length <= 2);
     if (!at) return;
-    expect((workspace.blockEffects(at.start) as { note?: string }).note).toContain("routine_effects");
+    const size = (r: EffectsAnswer) => r.reads.length + r.writes.length;
+    const block = workspace.effects(at.start, "block") as EffectsAnswer;
+    const routine = workspace.effects(at.start, "routine") as EffectsAnswer;
+    const calls = workspace.effects(at.start, "calls") as EffectsAnswer;
+
+    expect(block.scope).toBe("block");
+    expect(routine.scope).toBe("routine");
+    expect(size(block)).toBeLessThanOrEqual(size(routine));
+    expect(size(routine)).toBeLessThanOrEqual(size(calls));
+  });
+
+  it("stops at a callee that never comes back, and names where", () => {
+    // Sound and useless is still useless: $8753 reaches most of the program
+    // through a routine that resets the stack and jumps into the death path.
+    const calls = workspace.effects(0x8753, "calls") as EffectsAnswer;
+    const bounded = workspace.effects(0x8753, "returning") as EffectsAnswer;
+    const size = (r: EffectsAnswer) => r.reads.length + r.writes.length;
+    expect(size(bounded)).toBeLessThan(size(calls));
+    expect(bounded.note).toContain("never comes back");
   });
 
   it("names a memory slot rather than printing IL notation", () => {
     // `$(0xD)` is the IL's own spelling and appears nowhere else a reader looks.
-    const effects = workspace.routineEffects(0x8172) as { itself: { reads: string[] } };
-    expect(effects.itself.reads.some((r) => /^\w+ \(\$[0-9A-F]{4}\)$/.test(r))).toBe(true);
-    expect(effects.itself.reads.some((r) => r.startsWith("$(0x"))).toBe(false);
+    const effects = workspace.effects(0x8172, "routine") as EffectsAnswer;
+    expect(effects.reads.some((r) => /^\w+ \(\$[0-9A-F]{4}\)$/.test(r))).toBe(true);
+    expect(effects.reads.some((r) => r.startsWith("$(0x"))).toBe(false);
   });
 });

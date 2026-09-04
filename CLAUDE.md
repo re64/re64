@@ -1327,8 +1327,8 @@ Orient, read, decide, act, catch up:
 | `list_projects`, `describe_project` | what is here, and how far along it is |
 | `read_disassembly`, `list_labels` | structured rows, never rendered text — an agent cannot use character offsets into a text column |
 | `find_references`, `find_unnamed`, `find_instructions`, `call_graph` | who calls this, what touches the SID, and the shape of the whole |
-| `routine_effects` | what a whole routine touches, its own code and its callees |
-| `block_effects`, `run_block` | what a routine *does*, statically and by running it |
+| `effects` | what code at an address touches, over a scope the caller names |
+| `run_block` | what a routine *does*, by running it |
 | `set_label`, `remove_label`, `mark_function`, `unmark_function` | naming |
 | `set_region`, `remove_region` | exposed to agents **before** the web UI; the ops and the CLI already did this, so it was wiring rather than new capability |
 | `list_decoders`, `set_decoder`, `remove_decoder` | decoders the project carries |
@@ -1356,10 +1356,10 @@ The read tools answered what code *is* — rows, labels, references. None answer
 what a routine *does*, which is what naming it requires. Two tools, deliberately
 kept apart, because they answer different questions with different standing:
 
-- **`block_effects`** is static: what the block at an address reads and writes,
-  unioned over its lifted operations. True for every input. Sound only because a
-  block is straight-line, which is the analysis dividend of splitting strictly —
-  at calls and at every jump target — rather than loosely.
+- **`effects` at `follow: "block"`** is static: what the block at an address
+  reads and writes, unioned over its lifted operations. True for every input.
+  Sound only because a block is straight-line, which is the analysis dividend of
+  splitting strictly — at calls and at every jump target — rather than loosely.
 - **`run_block`** is concrete: execute it with values the caller chose. It
   reports the address a computed operand *actually reached* — with `X=2` the read
   was `$1502` — which is the question no static reading can answer, and it
@@ -1412,7 +1412,7 @@ that let these ship.
 ### What belongs in the vocabulary, and what does not
 
 A tool earns its place by being **reusable**, not by being cheap. The analysis
-behind one may be arbitrarily expensive — `routine_effects` walks a call graph to
+behind one may be arbitrarily expensive — `effects` walks a call graph to
 a fixpoint — and that is fine. What disqualifies a tool is answering *one
 project's question*: `do_the_work_for_me()` wearing a specific name.
 
@@ -1691,13 +1691,62 @@ Two claims did **not** reproduce, and are recorded rather than fixed:
   the model; the duplication is an artifact of the agent's own paging loop
   concatenating overlapping pages.
 
-Still open, and a **design question rather than a defect**: `routine_effects` is
-sound and useless on four of Gridrunner's six main-loop subsystems, because all
-four can reach a routine that resets the stack and jumps into the death path, so
-the may-analysis unions the whole program. The proposals on the table are to
-report effects up to the first non-returning transfer separately from those
-beyond it, or to let a caller mark a node as not returning. Neither is obviously
-right and neither should be guessed at.
+### How far to look is the caller's question, not the tool's
+
+`block_effects` and `routine_effects` were two fixed points on one axis, and the
+axis was never named. The tell was in `block_effects`'s own description, which
+apologised for its scope and pointed at the other tool: *"at a routine head that
+begins `JSR` this answers about a single instruction — correct, and almost never
+what you wanted."* An agent had to discover that by trying it.
+
+So one tool, `effects`, with `follow`:
+
+| | |
+|---|---|
+| `block` | the straight-line block here — **exact**, because there is one path |
+| `routine` | its own blocks, not entering what it calls |
+| `calls` | plus everything its callees reach, transitively — the default |
+| `returning` | `calls`, refusing to enter a callee that never comes back |
+
+`returning` is the answer to what this file previously parked as a design
+question: `routine_effects` was sound and useless on Gridrunner's main-loop
+subsystems, because all of them can reach a routine that resets the stack and
+jumps into the death path, so the may-analysis unioned most of the program. Of
+the two proposals — report effects up to the first non-returning transfer
+separately, or let a caller mark a node as not returning — the first turned out
+not to need a second report at all. It is a **scope**, which is the axis that was
+already there.
+
+Measured on the reference project, as a share of every slot the program touches:
+
+| routine | `calls` | `returning` |
+|---|---|---|
+| `sub_8753` | 47% | 13% |
+| `sub_8635` | 55% | 26% |
+| `sub_88C9` | 53% | 28% |
+| `ReenterMainGameLoop` | 86% | 71% |
+
+The last row is not a failure. It is the main loop, and a main loop does touch
+most of the program — which is the check that the cut is bounding the right
+thing rather than just making numbers smaller.
+
+Three things this needed that were not obvious:
+
+- **A bounded answer has to be built out of bounded answers.** It is a second
+  fixpoint, not a flag on the first: folding a callee's unbounded `total` in here
+  would leak the whole program back through one hop.
+- **`stoppedAt` names every place it stopped**, so this is never a claim that
+  control ends there — and asking about one of those addresses directly gives the
+  rest. Truncating in silence would be the confident wrong answer this project
+  refuses everywhere else.
+- **The cut is `returns.length === 0`**, which reads off `describeReturns` and so
+  costs nothing new. Five of Gridrunner's routines fail it, and they are the
+  right five: two that set the stack pointer outright, two that return to their
+  caller's caller, and the `RTI` handler.
+
+The scopes differ in **standing**, not only in width, so the answer says which
+one it is: `block` is exact, and everything above it is a union over paths — what
+the code *can* touch, never what it must.
 
 ### The tools agents invented
 

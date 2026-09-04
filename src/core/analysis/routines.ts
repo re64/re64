@@ -64,6 +64,19 @@ export interface RoutineEffects {
    * reach, transitively. The question a caller is actually asking.
    */
   total: Effects;
+  /**
+   * `total`, but not entering a callee that does not come back.
+   *
+   * Sound and useless is still useless. Four of Gridrunner's six main-loop
+   * subsystems can reach a routine that resets the stack and jumps into the
+   * death path, so `total` unions most of the program and says nothing about
+   * what playing the game does. Stopping there is not a claim that control does
+   * not go on — `cut` names every place it stopped, and asking about one of
+   * those directly gives the rest.
+   */
+  returning: Effects;
+  /** Callees left out of `returning`, because they do not return ordinarily. */
+  cut: number[];
   /** Subroutines it calls, directly. */
   calls: number[];
   /**
@@ -424,6 +437,8 @@ export function analyzeRoutines(
       spans: spansOf(body),
       own,
       total: add(empty(), own),
+      returning: add(empty(), own),
+      cut: [],
       calls: [...calls].sort((a, b) => a - b),
       continuesInto,
       returns,
@@ -447,6 +462,40 @@ export function analyzeRoutines(
         after !== before ||
         flags[0] !== routine.total.readsComputedMemory ||
         flags[1] !== routine.total.writesComputedMemory
+      ) {
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+
+  // The same fold, refusing to enter anything that does not come back. Run
+  // separately rather than as a flag on the first, because a bounded answer
+  // has to be built out of bounded answers: folding a callee's unbounded
+  // `total` in here would leak the whole program back through one hop.
+  const comesBack = (at: number) => {
+    const callee = routines.get(at);
+    return callee !== undefined && callee.returns.length === 0;
+  };
+  for (const routine of routines.values()) {
+    routine.cut = [...routine.calls, ...routine.continuesInto]
+      .filter((t) => routines.has(t) && !comesBack(t))
+      .sort((a, b) => a - b);
+  }
+  for (let pass = 0; pass < entries.length + 1; pass++) {
+    let changed = false;
+    for (const routine of routines.values()) {
+      const before = routine.returning.reads.length + routine.returning.writes.length;
+      const flags = [routine.returning.readsComputedMemory, routine.returning.writesComputedMemory];
+      for (const target of [...routine.calls, ...routine.continuesInto]) {
+        if (!comesBack(target)) continue;
+        add(routine.returning, routines.get(target)!.returning);
+      }
+      const after = routine.returning.reads.length + routine.returning.writes.length;
+      if (
+        after !== before ||
+        flags[0] !== routine.returning.readsComputedMemory ||
+        flags[1] !== routine.returning.writesComputedMemory
       ) {
         changed = true;
       }

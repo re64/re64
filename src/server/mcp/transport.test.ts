@@ -218,17 +218,36 @@ describe("talking to whoever else is here", () => {
 
 describe("asking what a routine does", () => {
   it("says what a block touches without running it", async () => {
-    const { value } = await callTool("block_effects", { address: "$8015" });
+    const { value } = await callTool("effects", { address: "$8015", follow: "block" });
     const effects = value as { reads: string[]; writes: string[]; unmodelled: unknown[] };
     expect(effects.reads).toContain("X");
     expect(effects.writes).toContain("Z");
     expect(effects.unmodelled).toEqual([]);
   });
 
+  it("takes every value of follow, and defaults to calls", async () => {
+    // The schema in front of a tool is the one layer neither the Workspace
+    // tests nor the analysis tests can reach — both run_block bugs got through
+    // a green suite exactly here.
+    const sizes: Record<string, number> = {};
+    for (const follow of ["block", "routine", "calls", "returning"]) {
+      const { isError, value } = await callTool("effects", { address: "$8172", follow });
+      expect(isError).toBeFalsy();
+      const answer = value as { scope: string; reads: string[]; writes: string[] };
+      expect(answer.scope).toBe(follow);
+      sizes[follow] = answer.reads.length + answer.writes.length;
+    }
+    expect(sizes.block).toBeLessThanOrEqual(sizes.routine);
+    expect(sizes.returning).toBeLessThanOrEqual(sizes.calls);
+
+    const { value } = await callTool("effects", { address: "$8172" });
+    expect((value as { scope: string }).scope).toBe("calls");
+  });
+
   it("points somewhere useful when no block covers the address", async () => {
     // "No decoded block covers $8000" is true and a dead end. The nearest block
     // start is the next call.
-    const { isError, text } = await callTool("block_effects", { address: "$8000" });
+    const { isError, text } = await callTool("effects", { address: "$8000", follow: "block" });
     expect(isError).toBe(true);
     expect(text).toMatch(/nearest starts at \$[0-9A-F]{4}/);
   });

@@ -340,24 +340,6 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
-    "routine_effects",
-    "What a routine touches — registers, flags and memory — both its own code " +
-      "and everything it calls. The question naming one requires: `writes " +
-      "$(0xD418) and $(0xD40F)` says it makes a noise whatever it is called. " +
-      "Give any address inside it, not only its first. " +
-      "Its extent is worked out from control flow, not declared, because a " +
-      "routine that tail-jumps away is in two places and no single span " +
-      "describes it. " +
-      "This is what it *can* touch, never what it must: an intersection over " +
-      "paths is often unanswerable, and a maybe dressed as a certainty is worse " +
-      "than neither. Reachability is static, so a computed jump leads somewhere " +
-      "this cannot follow.",
-    { project, address },
-    ({ project: id, address: at }: { project?: string; address: number }) =>
-      context().workspace(id).routineEffects(at)
-  );
-
-  tool(
     "find_instructions",
     "Every instruction matching a mnemonic, an operand range, or both — each " +
       "with the routine it sits in. " +
@@ -486,19 +468,47 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
-    "block_effects",
-    "What one straight-line block reads and writes, without running it. " +
-      "A block ends at the first branch, jump or call, so at a routine head " +
-      "that begins `JSR` this answers about a single instruction — correct, and " +
-      "almost never what you wanted. **For what a whole routine touches, use " +
-      "routine_effects.** This is for reasoning about one step at a time, " +
-      "usually beside run_block. " +
-      "Holds for every input. Says so where it cannot answer — an address that " +
-      "depends on a register cannot be named, and an instruction with no " +
-      "modelled semantics makes both lists incomplete.",
-    { project, address },
-    ({ project: id, address: at }: { project?: string; address: number }) =>
-      context().workspace(id).blockEffects(at)
+    "effects",
+    "What the code at an address touches — registers, flags and memory — over " +
+      "a scope you choose. The question naming a routine requires: `writes " +
+      "$(0xD418) and $(0xD40F)` says it makes a noise whatever it is called. " +
+      "Give any address inside a routine, not only its first.\n" +
+      "`follow` says how far to look, and the four points differ in what they " +
+      "assume:\n" +
+      "- `block` — the straight-line block here. **Exact**: a block has no " +
+      "branch inside it, so this holds for every input. A block ends at the " +
+      "first branch, jump or call, so at a routine head that begins `JSR` this " +
+      "is one instruction. Use it beside run_block.\n" +
+      "- `routine` — the routine's own blocks, not entering what it calls.\n" +
+      "- `calls` — plus everything its callees reach, transitively. The default, " +
+      "and what a caller usually means.\n" +
+      "- `returning` — `calls`, refusing to enter a callee that never comes " +
+      "back. Use it when `calls` unions most of the program: on this reference " +
+      "project it takes a subsystem from 47% of every slot touched to 13%. " +
+      "`stoppedAt` names every place it stopped, so nothing is hidden.\n" +
+      "Everything but `block` is what the code *can* touch, never what it must: " +
+      "an intersection over paths is often unanswerable, and a maybe dressed as " +
+      "a certainty is worse than neither. A routine's extent is worked out from " +
+      "control flow, not declared, because one that tail-jumps away is in two " +
+      "places and no single span describes it. Reachability is static, so a " +
+      "computed jump leads somewhere this cannot follow.",
+    {
+      project,
+      address,
+      follow: z
+        .enum(["block", "routine", "calls", "returning"])
+        .optional()
+        .describe("How far to look. Default `calls`."),
+    },
+    ({
+      project: id,
+      address: at,
+      follow,
+    }: {
+      project?: string;
+      address: number;
+      follow?: "block" | "routine" | "calls" | "returning";
+    }) => context().workspace(id).effects(at, follow ?? "calls")
   );
 
   tool(
