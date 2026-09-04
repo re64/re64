@@ -37,6 +37,8 @@ import { runProgram } from "../core/il/program.js";
 import { InstructionIndex, disassemble } from "../core/arch/mos6502/disassembler.js";
 import { buildBlocks } from "../core/analysis/blocks.js";
 import { analyzeRoutines, describeGap } from "../core/analysis/routines.js";
+import { preservedAt, proveValues } from "../core/analysis/values.js";
+import { REG } from "../core/il/pcode.js";
 import { C64_SYMBOLS } from "../core/c64/symbols.js";
 import { REGISTER_NAMES } from "../core/il/run.js";
 
@@ -166,6 +168,84 @@ for (const address of TABLE) {
 // and SP are left out for the reason the effect sets leave them out: every JSR
 // and RTS moves both, so including them would put the same two entries on every
 // row.
+/**
+ * Which registers and flags each routine gives back unchanged.
+ *
+ * **Proved, not sampled.** Each value at the routine's entry carries an
+ * identity that survives only operations which provably *move* a bit rather
+ * than compute one, so a register still holding the identity it started with
+ * was restored. An earlier version ran the routine with distinct seeds and
+ * checked what came back matching; that finds the same things and is a check
+ * rather than a proof — `if C then D := 0` passes complementary seeds while
+ * preserving nothing — so it was not shipped.
+ *
+ * Worth the trouble because "writes D" is true of nearly every KERNAL routine
+ * and costs a caller nothing: every write to `D` in this ROM is a `PLP` putting
+ * back a byte the routine pushed itself.
+ */
+function preservedRegisters(known: Map<number, Set<number>>): Map<number, Set<number>> {
+  const TRACKED = [REG.A, REG.X, REG.Y, REG.C, REG.Z, REG.I, REG.D, REG.V, REG.N];
+  const byStart = new Map(blocks.filter((b) => !b.alternate).map((b) => [b.start, b]));
+  const preserved = new Map<number, Set<number>>();
+
+  // Where a routine actually returns from, following tail jumps: a routine's
+  // own blocks stop at a `JMP`, so 93 of these 202 have no `ret` block of their
+  // own and looking only at their own blocks proves nothing about any of them.
+  const returnsOf = (entry: number): number[] => {
+    const found: number[] = [];
+    const seen = new Set<number>();
+    const pending = [entry];
+    while (pending.length > 0) {
+      const at = pending.pop()!;
+      if (seen.has(at)) continue;
+      seen.add(at);
+      const routine = routines.get(at);
+      if (!routine) continue;
+      for (const start of routine.blockStarts) {
+        const block = byStart.get(start);
+        if (block?.exit === "ret") {
+          found.push(block.instructions[block.instructions.length - 1].address);
+        }
+      }
+      pending.push(...routine.continuesInto);
+    }
+    return found;
+  };
+
+  for (const [entry] of routines) {
+    const exits = returnsOf(entry);
+    if (exits.length === 0) continue;
+
+    // Analysed alone, as its own origin: what arrives at a routine's entry when
+    // the whole ROM is analysed at once is whatever its callers held, so a
+    // caller that had already lost a flag makes the callee look as though it
+    // destroyed one.
+    const analysis = proveValues(blocks, [entry], {
+      identity: true,
+      // Last round's answer, because a routine cannot be shown to preserve a
+      // flag while the pass assumes every callee containing a `PLP` destroys it.
+      preserves: (address) => [...(known.get(address) ?? [])],
+    });
+
+    const kept = new Set(
+      TRACKED.filter((offset) => exits.every((at) => preservedAt(analysis, at, offset)))
+    );
+    if (kept.size > 0) preserved.set(entry, kept);
+  }
+
+  return preserved;
+}
+
+// Iterated: knowing a callee preserves something never makes a caller preserve
+// less, so each round can only find more and it settles quickly.
+let preserved = new Map<number, Set<number>>();
+for (let round = 0; round < 6; round++) {
+  const next = preservedRegisters(preserved);
+  const grew = [...next].some(([at, flags]) => flags.size !== (preserved.get(at)?.size ?? 0));
+  preserved = next;
+  if (!grew) break;
+}
+
 const vectorTargets = new Map([...vectoredBy.values()].map((v) => [v.pointer, v.target]));
 const impliedBy = new Map<number, number>();
 for (const [site, v] of vectoredBy) impliedBy.set(site, v.target);
@@ -182,6 +262,15 @@ const clobbers = [...routines.entries()]
   })
   .map(([address, routine]) => ({
     address,
+    // A vectored entry's preservation is its implementation's.
+    preserves: [
+      ...new Set([
+        ...(preserved.get(address) ?? []),
+        ...(preserved.get(impliedBy.get(address) ?? -1) ?? []),
+      ]),
+    ]
+      .map((offset) => REGISTER_NAMES[offset] as string)
+      .sort(),
     writes: [
       ...new Set(
         // A vectored entry point is a three-byte jump this walk does not
@@ -301,8 +390,18 @@ export const KERNAL_CLOBBERS: readonly {
   address: number;
   /** Registers and flags it can write. */
   writes: string[];
+  /**
+   * What it gives back unchanged, whatever it wrote on the way — **proved**, by
+   * giving each value an identity that only survives operations which move a
+   * bit rather than compute one.
+   *
+   * Every write to \`D\` in this ROM is a \`PLP\` putting back a byte the routine
+   * pushed itself, so without this "writes D" is true of nearly everything and
+   * one \`JSR $FFD2\` costs a program its decimal proof for good.
+   */
+  preserves: string[];
 }[] = [
-${clobbers.map((c) => `  { address: ${hex(c.address)}, writes: ${list(c.writes)} },`).join("\n")}
+${clobbers.map((c) => `  { address: ${hex(c.address)}, writes: ${list(c.writes)}, preserves: ${list(c.preserves)} },`).join("\n")}
 ];
 `;
 

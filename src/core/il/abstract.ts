@@ -22,7 +22,7 @@
  */
 
 import { Machine, executeOne } from "./interpret.js";
-import { PcodeOp, REG, Varnode } from "./pcode.js";
+import { FLAGS, PcodeOp, REG, Varnode } from "./pcode.js";
 import {
   Bits,
   add,
@@ -39,6 +39,8 @@ import {
   or,
   same,
   shiftLeft,
+  tagged,
+  taggedBit,
   shiftRight,
   signExtend,
   signedLessThan,
@@ -87,13 +89,32 @@ export interface AbstractState {
   stack: Bits[] | undefined;
 }
 
-export function initialState(): AbstractState {
+/**
+ * The identity given to bit `bit` of the register at `offset`.
+ *
+ * Non-zero and unique, so "still whatever it was" is decidable by comparison.
+ * Sixteen registers of eight bits fit in a byte with room to spare.
+ */
+export const identityOf = (offset: number, bit: number): number => offset * 8 + bit + 1;
+
+export function initialState(identity = false): AbstractState {
   const registers = Array.from({ length: 16 }, opaque);
+  if (identity) {
+    const isFlag = new Set<number>(FLAGS);
+    for (let offset = 0; offset < registers.length; offset++) {
+      // A flag holds nought or one, and saying so is what lets `PHP` merge the
+      // seven of them into a byte without losing which is which.
+      const bits = isFlag.has(offset)
+        ? taggedBit(identityOf(offset, 0))
+        : tagged(identityOf(offset, 0), 1);
+      registers[offset] = { bits, fromStack: false };
+    }
+  }
   // The stack pointer's *value* is unknown — nothing says where it started — but
   // it is the origin of the taint, so an address built on it is recognisable as
   // a stack slot. That is the whole trick: the cell is anonymous, the position
   // is not.
-  registers[REG.SP] = { bits: unknown(), fromStack: true };
+  registers[REG.SP] = { bits: registers[REG.SP].bits, fromStack: true };
   return { registers, memory: new Map(), stack: [] };
 }
 

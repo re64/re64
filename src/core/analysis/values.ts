@@ -22,8 +22,16 @@
  */
 
 import { BasicBlock } from "./blocks.js";
-import { AbstractState, cloneState, initialState, joinStates, sameState, stepAbstract } from "../il/abstract.js";
-import { Bits, and, exact, or, shiftLeft, unknown } from "../il/known-bits.js";
+import {
+  AbstractState,
+  cloneState,
+  identityOf,
+  initialState,
+  joinStates,
+  sameState,
+  stepAbstract,
+} from "../il/abstract.js";
+import { Bits, and, exact, or, originOf, shiftLeft, unknown } from "../il/known-bits.js";
 import { lift } from "../il/lift.js";
 import { PcodeOp, REG, Varnode, writes } from "../il/pcode.js";
 
@@ -190,6 +198,15 @@ export function proveValues(
      * this iterates, feeding each round's answer back in.
      */
     preserves?: (address: number) => readonly number[] | undefined;
+    /**
+     * Give every register an identity at each origin, so preservation can be
+     * *proved* rather than sampled.
+     *
+     * Off by default because it allocates a tag array per tracked value, and
+     * nothing needs it until somebody asks whether a routine gives something
+     * back.
+     */
+    identity?: boolean;
   } = {}
 ): ValueAnalysis {
   const real = blocks.filter((b) => !b.alternate);
@@ -216,7 +233,7 @@ export function proveValues(
   // instruction here does.
   const seed = (at: number) => {
     if (!byStart.has(at) || entering.has(at)) return;
-    const state = initialState();
+    const state = initialState(options.identity);
     const pushed = options.stackAt?.get(at);
     if (pushed) state.stack = [...pushed];
     for (const [offset, bits] of options.seedRegisters ?? []) {
@@ -448,6 +465,23 @@ export function flagBefore(analysis: ValueAnalysis, address: number, flag: numbe
 /** A register's bits before an instruction runs, for anything wanting more than a flag. */
 export function valueBefore(analysis: ValueAnalysis, address: number, register: number): Bits {
   return analysis.before.get(address)?.registers[register]?.bits ?? unknown();
+}
+
+/**
+ * Whether a register still holds the value it was given at the origin.
+ *
+ * A **proof**, not a check: the identity only survives operations that provably
+ * move a bit rather than compute one, so a flag carrying the identity it started
+ * with was restored rather than decided. Which is what settles `PHP … PLP`, and
+ * with it the fact that every write to `D` in the whole KERNAL is a `PLP` and
+ * costs a caller nothing.
+ *
+ * Requires `identity` on the analysis; without it nothing carries one and this
+ * answers `false`, which is the safe direction.
+ */
+export function preservedAt(analysis: ValueAnalysis, address: number, register: number): boolean {
+  const bits = analysis.before.get(address)?.registers[register]?.bits;
+  return bits !== undefined && originOf(bits, 0) === identityOf(register, 0);
 }
 
 /** What is on the stack before an instruction, deepest first, or undefined if abandoned. */

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { proveValues, flagBefore, stackBefore, valueBefore } from "./values.js";
+import { proveValues, flagBefore, preservedAt, stackBefore, valueBefore } from "./values.js";
 import { buildBlocks } from "./blocks.js";
 import { InstructionIndex, disassemble } from "../arch/mos6502/disassembler.js";
 import { MemoryMap } from "../memory/memory-map.js";
@@ -206,5 +206,72 @@ describe("an origin that is re-entered from inside the program", () => {
     expect(valueBefore(both, ORG + 8, REG.A).value).not.toBe(
       valueBefore(other, ORG + 8, REG.A).value
     );
+  });
+});
+
+describe("proving that a routine gives something back", () => {
+  function withIdentity(bytes: number[]) {
+    const map = new MemoryMap();
+    map.addLayer(new BytesLayer("test", ORG, new Uint8Array(bytes)));
+    const index = new InstructionIndex(disassemble(map, { entryPoints: [ORG] }).instructions);
+    return proveValues(buildBlocks(index, [ORG]), [ORG], { identity: true });
+  }
+
+  it("carries a flag through PHP and PLP", () => {
+    // PHP / SED / PLP / RTS. D is set in the middle and restored at the end, so
+    // it is preserved — and no amount of knowing *bits* can say that, because
+    // the value is unknown at both ends. This is the case the whole KERNAL turns
+    // on: every write to D in that ROM is a PLP.
+    const v = withIdentity([0x08, 0xf8, 0x28, 0x60]);
+    expect(preservedAt(v, ORG + 3, REG.D)).toBe(true);
+    expect(flagBefore(v, ORG + 3, REG.D)).toBe("unknown");
+  });
+
+  it("does not claim preservation when the flag is really decided", () => {
+    // PHP / PLP / SED / RTS — restored, then set. Not preserved.
+    const v = withIdentity([0x08, 0x28, 0xf8, 0x60]);
+    expect(preservedAt(v, ORG + 3, REG.D)).toBe(false);
+    expect(flagBefore(v, ORG + 3, REG.D)).toBe("set");
+  });
+
+  it("sees TXA / TAX give X back", () => {
+    // The idiom the reviewing agent noticed in the KERNAL by hand: both
+    // registers are written, and X ends up exactly as it began.
+    const v = withIdentity([0x8a, 0xaa, 0x60]);
+    expect(preservedAt(v, ORG + 2, REG.X)).toBe(true);
+    // A is not: it holds X's value now, which is a different thing.
+    expect(preservedAt(v, ORG + 2, REG.A)).toBe(false);
+  });
+
+  it("carries a register through the stack", () => {
+    // PHA / LDA #$00 / PLA / RTS
+    const v = withIdentity([0x48, 0xa9, 0x00, 0x68, 0x60]);
+    expect(preservedAt(v, ORG + 4, REG.A)).toBe(true);
+  });
+
+  it("loses the identity at anything that computes", () => {
+    // PHP / CLC / ADC #$00 / PLP / RTS — the ADC decides C, so restoring the
+    // pushed byte afterwards puts back a *different* carry than the one this
+    // routine was entered with... no: PLP restores what PHP pushed, so C is
+    // preserved. What is not preserved is A, which the ADC computed.
+    const v = withIdentity([0x08, 0x18, 0x69, 0x00, 0x28, 0x60]);
+    expect(preservedAt(v, ORG + 5, REG.C)).toBe(true);
+    expect(preservedAt(v, ORG + 5, REG.A)).toBe(false);
+  });
+
+  it("needs both paths to agree", () => {
+    //   $1000 08        PHP
+    //   $1001 F0 01     BEQ $1004
+    //   $1003 F8        SED
+    //   $1004 28        PLP        <- restores whatever was pushed, either way
+    //   $1005 60        RTS
+    const restored = withIdentity([0x08, 0xf0, 0x01, 0xf8, 0x28, 0x60]);
+    expect(preservedAt(restored, ORG + 5, REG.D)).toBe(true);
+
+    //   $1000 F0 01     BEQ $1003
+    //   $1002 F8        SED
+    //   $1003 60        RTS        <- one path set D, the other did not
+    const decided = withIdentity([0xf0, 0x01, 0xf8, 0x60]);
+    expect(preservedAt(decided, ORG + 3, REG.D)).toBe(false);
   });
 });

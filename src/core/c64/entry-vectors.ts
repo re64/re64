@@ -84,7 +84,13 @@ export function classifyOrigins(map: MemoryMap): Map<number, OriginKind> {
 export function kernalClobbers(map: MemoryMap): (address: number) => readonly number[] | undefined {
   const byAddress = new Map(
     KERNAL_CLOBBERS.map((c) => {
+      // What it writes, minus what it provably gives back. Every write to `D` in
+      // this ROM is a `PLP` restoring a byte the routine pushed itself, so
+      // without the subtraction nearly every KERNAL call looks as though it
+      // destroys the decimal flag.
+      const kept = new Set(c.preserves);
       const offsets = c.writes
+        .filter((name) => !kept.has(name))
         .map((name) => REGISTER_OFFSETS[name])
         .filter((offset): offset is number => offset !== undefined);
       return [c.address, offsets] as const;

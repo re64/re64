@@ -2288,14 +2288,42 @@ matching was built and does find it — 142 of 202 routines look like they prese
 seeds while preserving nothing. A sampled result presented as an analysis result
 is exactly the confident wrong answer refused everywhere else here.
 
-The proof needs an **identity** rather than a sample: give each opaque value at an
-origin a fresh identifier and carry it through operations that only *move* a
-value, dropping it at anything that computes. A flag holding the identifier it
-started with was preserved. Per bit rather than per value, for the same reason
-the value domain is per bit — `PHP` assembles seven flags into a byte and `PLP`
-takes them apart, and a byte-level identifier does not survive the assembly.
-That also settles `TXA / TAX` preserving `X`, which the reviewing agent spotted
-in the KERNAL by hand.
+**So the proof is an identity rather than a sample, and it is built.** Each value
+at an origin carries an identifier that survives only operations which provably
+*move* a bit — `COPY`, a push and its matching pull, a shift, `AND` against a
+known one, `OR` against a known zero — and is dropped by anything that computes.
+A register still holding the identifier it started with was restored, and that is
+a proof: no arithmetic can manufacture an identity.
+
+Per bit rather than per value, and `PHP` is why, exactly as it is for the value
+domain itself: seven flags are shifted into one byte and `PLP` takes them apart
+again, so a whole-value identifier dies at the assembly while a per-bit one rides
+through. It settles `TXA / TAX` preserving `X` for free — the idiom the reviewing
+agent noticed by hand.
+
+Three things it needed, none of them obvious in advance:
+
+- **A flag register holds nought or one**, and must be seeded saying so. Modelled
+  as a whole opaque byte, `PHP`'s `OR` has no known zeros to merge into and every
+  identity is lost at the first flag.
+- **`bitOf` had to stop comparing.** It lifted `PLP`'s bit extraction as
+  `(v & mask) != 0`, and a comparison *computes* a value. Against a single-bit
+  mask a shift is identical and only moves one, so that is what it emits now.
+  Klaus Dormann's suite passes unchanged, which is the bar for touching a lift.
+- **A routine has to be analysed alone.** Read out of a whole-ROM analysis, what
+  arrives at a routine's entry is whatever its callers held, so a caller that had
+  already lost a flag makes the callee look as though it destroyed one.
+
+It costs nothing measurable — 27ms with and without on the reference project —
+because an identity is dropped at the first computation, so the arrays are hardly
+ever allocated.
+
+**Result: 142 of the ROM's 202 routines provably give `D` back**, and four of the
+five KERNAL routines Gridrunner calls. The fifth is `CHROUT`, and it is a **true
+negative rather than a limitation**: its screen path pops a status byte at
+`$E7B4` and `$E7C1` that it never pushed — no `PHP` anywhere in that routine — so
+what it restores depends on a caller this analysis is not looking at. One
+`JSR $FFD2` therefore still costs Gridrunner its decimal proof, honestly.
 
 The general lesson is worth more than the instance, and this file has now been
 caught by it twice: **a check that cannot see something must say so, not skip

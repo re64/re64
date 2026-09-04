@@ -187,7 +187,15 @@ function setZN(seq: Sequence, value: Varnode): void {
 /** A single bit of a byte, as a flag-shaped 0 or 1. */
 function bitOf(seq: Sequence, value: Varnode, mask: number): Varnode {
   const masked = seq.into("INT_AND", 1, value, constant(mask));
-  return seq.into("INT_NOTEQUAL", 1, masked, constant(0));
+  // Shifted down rather than compared against zero. Identical for a single-bit
+  // mask, which is every use here, and it keeps the *identity* of the bit: a
+  // comparison computes a new value, where a mask and a shift only move an
+  // existing one. That is what lets `PLP` put back the very flag `PHP` pushed,
+  // rather than an equal-looking one — and on this machine every write to `D`
+  // in the whole KERNAL is exactly that round trip.
+  const shift = Math.log2(mask);
+  if (!Number.isInteger(shift)) return seq.into("INT_NOTEQUAL", 1, masked, constant(0));
+  return shift === 0 ? masked : seq.into("INT_RIGHT", 1, masked, constant(shift));
 }
 
 const STACK_PAGE = constant(0x0100, 2);

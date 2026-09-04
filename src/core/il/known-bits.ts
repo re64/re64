@@ -19,6 +19,79 @@
 export interface Bits {
   known: number;
   value: number;
+  /**
+   * Where each bit came from, for bits that are still whatever they started as.
+   *
+   * A **relational** fact, which the rest of this domain cannot express: "known"
+   * and "unknown" can never say that two values are the same one. `D_out ==
+   * D_in` is exactly that shape, and it is what "this routine preserves the
+   * decimal flag" means — worth having because on this machine *every* write to
+   * `D` in the entire KERNAL is a `PLP` putting back a byte the routine pushed
+   * itself, so a summary of what a routine writes says a caller loses a flag
+   * that in fact survives.
+   *
+   * Establishing it by running with sample inputs and seeing what comes back
+   * matching is a check and not a proof: `if C then D := 0` passes complementary
+   * seeds while preserving nothing. An identifier is a proof, because it only
+   * survives operations that provably *move* a bit rather than compute one.
+   *
+   * Per bit rather than per value, and `PHP` is why — the same reason the domain
+   * itself is per bit. `PHP` assembles seven flags into one byte and `PLP` takes
+   * them apart; a whole-value identifier is destroyed by the assembly, while a
+   * per-bit one rides through the shift and the `OR` and comes back out.
+   *
+   * Index 0 is bit 0. `0` means "no identity" — either the bit is known, or it
+   * was computed from something. Absent entirely when no bit carries one, which
+   * is nearly always, so nothing is allocated for the common case.
+   */
+  origin?: Uint8Array;
+}
+
+/** Whether any bit still carries the identity it started with. */
+const hasOrigin = (bits: Bits): boolean => bits.origin !== undefined;
+
+/**
+ * Bit `i` of a value's identity, or 0 for none.
+ *
+ * A bit that is *known* has no identity by construction: it is that value, not
+ * whatever it started as, so nothing is preserved by carrying a tag on it.
+ */
+export const originOf = (bits: Bits, i: number): number =>
+  (bits.known >>> i) & 1 ? 0 : (bits.origin?.[i] ?? 0);
+
+/**
+ * A one-bit value: bit zero opaque and identified, the rest known zero.
+ *
+ * What a flag register actually holds. Modelling it as a whole opaque byte
+ * breaks `PHP`, which assembles the seven flags by shifting each into place and
+ * OR-ing them together — an OR only carries an identity through where the other
+ * side is a known zero, and a byte of unknown offers none.
+ */
+export function taggedBit(tag: number): Bits {
+  const origin = new Uint8Array(8);
+  origin[0] = tag;
+  return { known: 0xfe, value: 0, origin };
+}
+
+/** An opaque value of this width, every bit tagged from `first` upwards. */
+export function tagged(first: number, size: number): Bits {
+  const origin = new Uint8Array(8 * size);
+  for (let i = 0; i < origin.length; i++) origin[i] = first + i;
+  return { known: 0, value: 0, origin };
+}
+
+/** Build an identity array from a function of bit position, or nothing. */
+function origins(size: number, at: (i: number) => number): Uint8Array | undefined {
+  let any = false;
+  const out = new Uint8Array(8 * size);
+  for (let i = 0; i < out.length; i++) {
+    const tag = at(i);
+    if (tag !== 0) {
+      out[i] = tag;
+      any = true;
+    }
+  }
+  return any ? out : undefined;
 }
 
 /** All ones for a value of this many bytes. */
@@ -39,32 +112,67 @@ export const isExact = (bits: Bits, size: number): boolean =>
   (bits.known >>> 0) === widthMask(size);
 
 /** Force the invariant that undetermined bits read as zero. */
-const normalise = (known: number, value: number, size: number): Bits => {
+const normalise = (
+  known: number,
+  value: number,
+  size: number,
+  origin?: Uint8Array | undefined
+): Bits => {
   const mask = widthMask(size);
   const k = (known & mask) >>> 0;
-  return { known: k, value: (value & k) >>> 0 };
+  const result: Bits = { known: k, value: (value & k) >>> 0 };
+  // A bit that ended up known has no identity: it is that value now, whatever
+  // it used to be.
+  const kept = origin && origins(size, (i) => ((k >>> i) & 1 ? 0 : (origin[i] ?? 0)));
+  if (kept) result.origin = kept;
+  return result;
 };
 
 /** Narrow or widen to a width, keeping what is known and zeroing above. */
 export const truncate = (bits: Bits, size: number): Bits =>
-  normalise(bits.known, bits.value, size);
+  normalise(bits.known, bits.value, size, bits.origin);
 
 export function and(a: Bits, b: Bits, size: number): Bits {
   // A zero anywhere forces the result bit to zero, even if the other side is a
   // mystery — which is the whole reason `AND #$10` can answer about one flag.
   const zeroA = (a.known & ~a.value) >>> 0;
   const zeroB = (b.known & ~b.value) >>> 0;
-  return normalise((a.known & b.known) | zeroA | zeroB, a.value & b.value, size);
+  // Where one side is a known one, the result bit *is* the other side's bit —
+  // which is how `AND #$10` pulls `B` out of a status byte with its identity
+  // still attached.
+  const one = (x: Bits, i: number) => ((x.known >>> i) & 1) === 1 && ((x.value >>> i) & 1) === 1;
+  return normalise(
+    (a.known & b.known) | zeroA | zeroB,
+    a.value & b.value,
+    size,
+    origins(size, (i) => (one(b, i) ? originOf(a, i) : one(a, i) ? originOf(b, i) : 0))
+  );
 }
 
 export function or(a: Bits, b: Bits, size: number): Bits {
   const oneA = (a.known & a.value) >>> 0;
   const oneB = (b.known & b.value) >>> 0;
-  return normalise((a.known & b.known) | oneA | oneB, a.value | b.value, size);
+  // Where one side is a known zero the result is the other side's bit, which is
+  // how `PHP` assembles seven flags into a byte without losing any of them.
+  const zero = (x: Bits, i: number) => ((x.known >>> i) & 1) === 1 && ((x.value >>> i) & 1) === 0;
+  return normalise(
+    (a.known & b.known) | oneA | oneB,
+    a.value | b.value,
+    size,
+    origins(size, (i) => (zero(b, i) ? originOf(a, i) : zero(a, i) ? originOf(b, i) : 0))
+  );
 }
 
 export function xor(a: Bits, b: Bits, size: number): Bits {
-  return normalise(a.known & b.known, a.value ^ b.value, size);
+  // Only against a known zero: against a known one the bit is inverted, which is
+  // a different bit even though it is derived from this one.
+  const zero = (x: Bits, i: number) => ((x.known >>> i) & 1) === 1 && ((x.value >>> i) & 1) === 0;
+  return normalise(
+    a.known & b.known,
+    a.value ^ b.value,
+    size,
+    origins(size, (i) => (zero(b, i) ? originOf(a, i) : zero(a, i) ? originOf(b, i) : 0))
+  );
 }
 
 export function not(a: Bits, size: number): Bits {
@@ -81,7 +189,12 @@ export function shiftLeft(a: Bits, by: Bits, size: number): Bits {
   if (n >= 8 * size) return exact(0, size);
   // Bits shifted in at the bottom are known zeros.
   const low = ((1 << n) - 1) >>> 0;
-  return normalise(((a.known << n) | low) >>> 0, a.value << n, size);
+  return normalise(
+    ((a.known << n) | low) >>> 0,
+    a.value << n,
+    size,
+    origins(size, (i) => (i >= n ? originOf(a, i - n) : 0))
+  );
 }
 
 export function shiftRight(a: Bits, by: Bits, size: number): Bits {
@@ -92,7 +205,12 @@ export function shiftRight(a: Bits, by: Bits, size: number): Bits {
   const mask = widthMask(size);
   // Bits shifted in at the top are known zeros.
   const high = (mask & ~(mask >>> n)) >>> 0;
-  return normalise((((a.known & mask) >>> n) | high) >>> 0, (a.value & mask) >>> n, size);
+  return normalise(
+    (((a.known & mask) >>> n) | high) >>> 0,
+    (a.value & mask) >>> n,
+    size,
+    origins(size, (i) => originOf(a, i + n))
+  );
 }
 
 /**
@@ -188,7 +306,7 @@ export const subtract = (a: Bits, b: Bits, size: number): Bits =>
 export const zeroExtend = (a: Bits, from: number, to: number): Bits => {
   const inner = truncate(a, from);
   const added = (widthMask(to) & ~widthMask(from)) >>> 0;
-  return normalise((inner.known | added) >>> 0, inner.value, to);
+  return normalise((inner.known | added) >>> 0, inner.value, to, inner.origin);
 };
 
 /** Sign extension: the bits above copy the top bit, when that bit is known. */
@@ -203,14 +321,22 @@ export function signExtend(a: Bits, from: number, to: number): Bits {
 
 /** The high `size` bytes of `a` after dropping `offset` low bytes. */
 export const subpiece = (a: Bits, offset: number, size: number): Bits =>
-  normalise(a.known >>> (8 * offset), a.value >>> (8 * offset), size);
+  normalise(
+    a.known >>> (8 * offset),
+    a.value >>> (8 * offset),
+    size,
+    origins(size, (i) => originOf(a, i + 8 * offset))
+  );
 
 /** `high` above `low`, where `low` is `lowSize` bytes wide. */
 export const concat = (high: Bits, low: Bits, lowSize: number, size: number): Bits =>
   normalise(
     ((high.known << (8 * lowSize)) | truncate(low, lowSize).known) >>> 0,
     ((high.value << (8 * lowSize)) | truncate(low, lowSize).value) >>> 0,
-    size
+    size,
+    origins(size, (i) =>
+      i < 8 * lowSize ? originOf(low, i) : originOf(high, i - 8 * lowSize)
+    )
   );
 
 /**
@@ -278,8 +404,23 @@ export function signedLessThan(a: Bits, b: Bits, size: number): Bits {
 export function join(a: Bits, b: Bits, size: number): Bits {
   const both = (a.known & b.known) >>> 0;
   const agree = (both & ~(a.value ^ b.value)) >>> 0;
-  return normalise(agree, a.value, size);
+  // An identity survives a join only where both paths carry the *same* one —
+  // "still whatever it was" has to hold however you arrived.
+  return normalise(
+    agree,
+    a.value,
+    size,
+    origins(size, (i) => {
+      const tag = originOf(a, i);
+      return tag !== 0 && tag === originOf(b, i) ? tag : 0;
+    })
+  );
 }
 
-export const same = (a: Bits, b: Bits): boolean =>
-  a.known >>> 0 === b.known >>> 0 && a.value >>> 0 === b.value >>> 0;
+export function same(a: Bits, b: Bits): boolean {
+  if (a.known >>> 0 !== b.known >>> 0 || a.value >>> 0 !== b.value >>> 0) return false;
+  if (a.origin === undefined && b.origin === undefined) return true;
+  const length = Math.max(a.origin?.length ?? 0, b.origin?.length ?? 0);
+  for (let i = 0; i < length; i++) if (originOf(a, i) !== originOf(b, i)) return false;
+  return true;
+}
