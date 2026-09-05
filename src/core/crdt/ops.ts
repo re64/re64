@@ -296,6 +296,17 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
       case "primary.clear":
         doc.getMap<string>("primaryLabels").delete(hex4(op.address));
         break;
+
+      // The switch returns `void`, so until this existed a missing case
+      // compiled cleanly: the op was accepted, `runOps` reported success, and
+      // nothing reached the document. That is the worst failure shape in this
+      // codebase — indistinguishable from working — and it sits on the one
+      // switch the compiler was not already guarding. Same idiom as
+      // `rowStrategy` and `decodeText`.
+      default: {
+        const unhandled: never = op;
+        throw new Error(`unhandled operation: ${JSON.stringify(unhandled)}`);
+      }
     }
   }
 }
@@ -313,9 +324,15 @@ export function undoManagerFor(doc: Y.Doc, origin: unknown = "local"): Y.UndoMan
       doc.getArray("layers"),
       doc.getMap("primaryLabels"),
       doc.getMap("meta"),
-      // Without this a decoder edit is invisible to undo — the same gap
-      // `constants` still has, and worth not repeating.
+      // Every root, because the alternative is a whitelist that silently drops
+      // one. `decoders` was added when a decoder edit turned out to be
+      // invisible to undo, with a note that `constants` still had the same gap
+      // — and it still did, three roots later. A list that has to be extended
+      // by hand is one that will be short again.
       doc.getMap("decoders"),
+      doc.getMap("constants"),
+      doc.getMap("files"),
+      doc.getMap("targets"),
     ],
     {
       trackedOrigins: new Set([origin]),

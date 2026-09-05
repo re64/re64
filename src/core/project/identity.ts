@@ -94,6 +94,17 @@ export function withIds(project: Project, mint: (prefix: IdPrefix) => string = n
   });
 
   const constants = project.constants?.map((c) => give(c, "cst"));
+  // Decoders were skipped here, so an id-less one never got one — and
+  // `diffProjects` drops entries without ids, which means such a decoder was
+  // silently absent from every export.
+  const decoders = project.decoders?.map((d) => give(d, "dec"));
 
-  return minted ? { ...project, layers, ...(constants ? { constants } : {}) } : project;
+  return minted
+    ? {
+        ...project,
+        layers,
+        ...(constants ? { constants } : {}),
+        ...(decoders ? { decoders } : {}),
+      }
+    : project;
 }
