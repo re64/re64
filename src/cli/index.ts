@@ -31,6 +31,7 @@ import {
   migrateIds,
   newId,
 } from "../core/index.js";
+import { migrateToClaims, needsMigration } from "../core/claims/migrate.js";
 import { loadProjectFile, nodeFileBytes } from "../node-files.js";
 import { hexDump } from "./hex.js";
 import { formatSummary, readTranscript, summarise } from "../server/mcp/report.js";
@@ -375,9 +376,10 @@ program
 
 program
   .command("migrate")
-  .description("Write stable ids into a project file")
+  .description("Write stable ids into a project file, and convert it to claims")
   .argument("<file>", "Project file (.re64)")
-  .action((file: string) => {
+  .option("--ids-only", "Write ids but leave labels and regions as they are")
+  .action((file: string, options: { idsOnly?: boolean }) => {
     const raw = readFileSync(file, "utf-8");
     // Line-based, so a hand-authored layout survives — which is the point of
     // doing it here rather than by reserialising.
@@ -391,13 +393,36 @@ program
     const complete = withIds(parsed);
     if (complete !== parsed) migrated = formatProject(complete);
 
+    // Ids first, then claims, because the conversion carries ids across verbatim
+    // and can only carry what is there. A claim minted with a fresh id would
+    // dangle every primaryLabels entry and every labelUses binding pointing at
+    // the label it came from.
+    let converted = 0;
+    if (!options.idsOnly) {
+      const project = parseProject(migrated);
+      if (needsMigration(project)) {
+        const { project: withClaims, stats } = migrateToClaims(project);
+        migrated = formatProject(withClaims);
+        converted = stats.fromLabels + stats.fromRegions;
+        console.log(
+          `Converted ${stats.fromLabels} labels and ${stats.fromRegions} regions ` +
+            `into ${converted} claims ` +
+            `(${stats.codeRegionsRooted} code regions became roots, ` +
+            `${stats.autoRooted} rooted so they still render, ` +
+            `${stats.unknownRegionsDropped} unknown dropped, ` +
+            `${stats.commentsMoved} comments moved).`
+        );
+      }
+    }
+
     if (migrated === raw) {
       console.log("Already migrated; nothing to write.");
       return;
     }
     writeFileSync(file, migrated, "utf-8");
     const count = (text: string) => (text.match(/"id"\s*:/g) ?? []).length;
-    console.log(`Wrote ${count(migrated) - count(raw)} ids to ${file}.`);
+    const ids = count(migrated) - count(raw) - converted;
+    console.log(`Wrote ${file}${ids > 0 ? ` (${ids} new ids)` : ""}.`);
   });
 
 program
