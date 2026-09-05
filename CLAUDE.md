@@ -36,28 +36,47 @@ Keep core/ free of Node.js-specific APIs where possible to maintain web compatib
 
 ### Conceptual Model
 
-The system has three layers of abstraction:
+Two layers of abstraction, where there used to be three.
 
-**1. Memory Map & Layers** - The "physical" layer
+**1. Memory Map & Layers** — the "physical" layer
 - `MemoryMap` contains stacked `Layer` objects (FileLayer, BytesLayer)
 - Layers provide actual bytes, stack and shadow each other (top wins)
-- This is the raw data being analyzed
+- A layer knows what its bytes are *by default* — a PRG holds a program, a raw
+  file holds data, a symbols layer holds nothing. Nobody decided these; they
+  follow from what the file is.
 
-**2. Regions** - Semantic "what is this?"
-- Define what a range of memory *means* (code, data, text, jumptable, unknown)
-- Not backed by bytes - they overlay the memory map
-- Sources:
-  - Auto-generated from layers via `defaultRegionKind` (PRG→code, raw→data)
-  - User-defined in project file (finer granularity, overrides auto)
-- Guide the disassembler on how to interpret bytes
+**2. Claims** — everything anybody says about an address
 
-**3. Labels** - Semantic "what is this called?"
-- Mark individual addresses with names
-- Sources:
-  - Layer-generated (PRG entry points)
-  - Region-generated (named region start addresses)
-  - User-defined in project file
-- Resolved in instruction operands (e.g., `JSR ROM_CHROUT` instead of `JSR $FFD2`)
+One noun. A claim carries any of these, and at least one:
+
+| | |
+|---|---|
+| `name` | what to call it |
+| `says` | what the bytes are: `data`, `text`, `bitmap`, `jumptable` |
+| `extent` | how many bytes it covers — absent means a point |
+| `root` | decode from here regardless of what reaches it |
+
+**Labels and regions were the same object wearing two schemas.** An assembler
+source file has symbols and directives, so a model built to render one had a
+`Label` for "what is this called" and a `Region` for "what is this" — with two
+spellings for a span, two ways to be refused, and a rank invented so a region's
+name could lose to a user's. The machine has neither. `src/core/claims/` is the
+model; `Label` and `Region` no longer exist as types.
+
+Three consequences worth knowing before reading any of it:
+
+- **There is no `code` interpretation, and no `unknown`.** Code is what bytes
+  are when nobody has said otherwise, so a claim never says it — "decode from
+  here" is a `root`. And `unknown` was the absence of a claim wearing the name
+  of a kind: not saying is how you do not say.
+- **Several claims cover any interesting address, and that is the design.** The
+  reference disassembly calls `$08` a scratch byte in most of a program and
+  something specific in one routine, and both are true. So an address cannot
+  identify a claim, every write is additive, and correcting one is by id.
+- **Nothing resolves at rest.** Which name an operand shows, which reading a row
+  uses, what nests inside what — all of it is derived when something asks.
+  `disagreements()` reports where the project contradicts itself rather than
+  picking a winner.
 
 ### Key Types
 
@@ -67,8 +86,16 @@ src/core/
 │   ├── layer.ts         # Layer interface, BytesLayer
 │   ├── file-layer.ts    # FileLayer (PRG/raw files)
 │   ├── memory-map.ts    # MemoryMap (layer stack)
-│   ├── label.ts         # Label, LabelIndex, label factories
-│   └── region.ts        # Region, RegionKind, RegionIndex
+│   ├── label-type.ts    # LabelType: what a root means to the disassembler
+│   └── region.ts        # LayerDefault, ByteReading, RegionIndex (holds claims)
+├── claims/
+│   ├── model.ts         # Claim, Interpretation, RootKind, compareClaims
+│   ├── names.ts         # NameIndex: resolving a name for an address
+│   ├── set.ts           # ClaimSet, disagreements
+│   ├── graph.ts         # DecodeGraph: every address decoded exhaustively
+│   ├── reach.ts         # Reachability as a query over that graph
+│   ├── listing.ts       # One address-sorted emission
+│   └── migrate.ts       # A legacy file's labels and regions, as claims
 ├── arch/
 │   └── mos6502/
 │       ├── opcodes.ts       # Complete 6502 opcode table (legal + illegal)
