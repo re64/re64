@@ -353,6 +353,49 @@ never see a CRDT type. Persisting a claim is a CRDT concern, so it moved — whi
 is where it would have had to live anyway. An allowlist asserted by a test
 earning its keep on the first new root in a year.
 
+## What a row does with two live interpretations
+
+The parked question, and it had an answer already — one object along.
+Overlapping *instructions* were settled by refusing to choose:
+
+> Which reading is "primary" turned out not to be a question… It dissolves
+> instead: emit **every** block in order of where it starts, and mark any whose
+> start the walk has already passed.
+
+`src/core/claims/layout.ts` applies the same rule to claims, and needs one
+distinction on top — the same one the disagreement report already draws:
+
+- **Containment is refinement**, and renders in place: the inner claim owns its
+  bytes, the outer renders either side. Marking that would fire 43 times on one
+  real project.
+- **Anything else is a second reading**: emitted whole, in start order, marked as
+  sharing bytes with what came before.
+
+On experiment 7's real six-byte conflict:
+
+```
+$5870-$5900  devSourceResidue      (data)
+$5870-$5906  srcResidueSpriteSet   (text)   [second reading]
+$5900-$594C  tuneVoice1            (data)
+$594C-$5950  tunePadding1          (data)
+```
+
+Both readings survive, neither writer is privileged, and the layout is identical
+whatever order the claims arrived in — ties go to the lower id, so every peer
+computes the same thing without coordinating.
+
+Two things it needed that were not obvious:
+
+- **A claim that renders nowhere is two different situations.** Fully refined by
+  claims inside it, or contradicted by one that is not. They look identical in
+  the layout pass — the claim owns no byte either way — and conflating them marks
+  an 8K table fully covered by its own entries as a second reading of *itself*.
+  The test is whose claim took each byte.
+- **The layout is two passes, and forcing it into one is what would create the
+  need for a tie-break rule.** Which claim renders an address is a question about
+  addresses; whether a claim rendered at all is a question about claims. Asked
+  separately, nothing has to be arbitrated.
+
 ## Layers demoted, targets promoted
 
 Claims stop belonging to layers. The recorded justification — reordering the
@@ -476,12 +519,15 @@ Steps 1 and 2 are separable from the rest and carry most of the benefit.
   with evidence rather than symmetry — this project has been burned once by
   `set_comment`'s slot upsert being justified for a single author and never
   revisited.
-- **Whether `narrowest()` is the right default pick** for a listing, or whether a
-  listing should render an overlap the way it renders overlapping basic blocks —
-  emit both, in position order, marked. The precedent argues for the second.
 - **Banking**, as above.
-- **What a row means when two interpretations are live.** The block precedent
-  says: emit both, mark the second. That has not been built for claims.
+- **What a `bitmap` claim draws inside a second reading.** The layout below says
+  which claim owns which bytes; what each one *renders* is still the row
+  builder's business, and a marked alternate that is a picture has no established
+  shape.
+
+Answered since this was written: how a listing lays out two live interpretations
+— see the section above. `narrowest()` is the right pick *per address*, and the
+claims that lose are emitted after it, marked.
 
 ---
 
