@@ -66,7 +66,10 @@ describe("what an agent can now ask", () => {
     expect(program.instructions.has(0x8011)).toBe(true);
     // Deliberately the decoded set, not the queue's visited set — that includes
     // addresses reached and then rejected.
-    expect(program.instructions.size).toBe(1449);
+    // 1481, not 1449: a data claim used to stop the walk at an address an
+    // explicit `JMP` targets, losing `PlayNewLevelSounds` and its two
+    // subroutines. See the note in golden.test.ts.
+    expect(program.instructions.size).toBe(1481);
   });
 
   it("where disassembly started", () => {

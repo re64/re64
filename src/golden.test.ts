@@ -42,7 +42,23 @@ const PROJECT = "assets/gridrunner/gridrunner.re64";
 // `JSR ROM_INIT_EDITOR` — which is the point worth pinning. A platform label
 // only renders where an operand reaches it, so 221 new names for KERNAL zero
 // page and ROM internals are invisible to a game that calls the KERNAL once.
-const OUTPUT_SHA1 = "ffb52ef7d2c6d6ebf045f2b639e7f2e027311ba5";
+// Moved a fourth time, and this one is a bug fix rather than a feature.
+//
+// A claim about what bytes *mean* could stop control flow: `shouldDisassemble`
+// refused any address inside a non-code region, including one an explicit `JMP`
+// targets. `laserFrameRateForLevel` is declared $8CF6-$8D18 and the routine at
+// $8D16 begins two bytes inside it, so `$8D75: 4c 16 8d` — an unconditional jump
+// — was refused, and 32 instructions vanished: `PlayNewLevelSounds` with
+// `Waste20Cycles` and `SoundEffect`, all three in the human reference,
+// instruction for instruction.
+//
+// It hid behind its own damage. The label `PlayNewLevelSounds` sits at $8D18,
+// two bytes late, placed where the bad boundary left room — so the *name* was in
+// the listing at an address with no routine under it, and the missing 32
+// instructions read as ordinary undecoded space. The listing now shows both
+// `loc_8D16` and `PlayNewLevelSounds:` two bytes apart, which is what makes the
+// misplaced label visible at last.
+const OUTPUT_SHA1 = "9a3059eab85474b17da4222dfd40eb3cd9683da5";
 
 describe("gridrunner disassembly", () => {
   const result = analyze(loadProjectFile(PROJECT), { annotations: false });
@@ -54,15 +70,15 @@ describe("gridrunner disassembly", () => {
 
   it("holds its shape", () => {
     expect(result.stats).toMatchObject({
-      instructions: 1449,
-      rows: 1846,
-      arrows: 206,
+      instructions: 1481,
+      rows: 1872,
+      arrows: 208,
       regions: 16,
       // 495, not the 597 this asserted before: the merged index counted every
       // user label twice, once through the memory map and once directly. The
       // rendered text never showed it because label rows dedupe by name, which
       // is why the hash above is unchanged.
-      labels: 716,
+      labels: 723,
     });
   });
 
@@ -72,15 +88,15 @@ describe("gridrunner disassembly", () => {
     // stopped resolving — except the last one, which is a genuine finding about
     // this project and not a defect in the loader.
     expect([...result.warnings].sort()).toEqual([
-      // This analysis arrives two bytes before the end of
-      // laserFrameRateForLevel. Which of the three explanations applies is not
-      // known: the span may not be all data, the code leading there may be read
-      // wrongly, or a forty-year-old game may do something here that no static
-      // walk can follow. It has always been true and was never surfaced,
-      // because the walk dropped the address in silence.
-      "$8D16: this analysis arrives here and it is declared data, so decoding " +
-        "stops. It may not be data; the code leading here may be read wrongly; " +
-        "or the program may do something here that a static walk cannot follow",
+      // Not one of three unknowable explanations, which is what this asserted
+      // before and what CLAUDE.md still recorded: `$8D75` holds `4c 16 8d`, so
+      // the program says plainly that $8D16 is code and the region is two bytes
+      // too long. The walk decodes it and reports the disagreement rather than
+      // resolving it, because only the author knows which end to move.
+      "$8D16: $8D75 transfers here, and it is declared data. A claim about what " +
+        "bytes mean cannot stop control flow, so this decodes anyway — but one " +
+        "of the two is wrong, and an explicit transfer is usually the better " +
+        "witness",
       "$E518: undefined bytes",
       "$FD15: undefined bytes",
       "$FD50: undefined bytes",

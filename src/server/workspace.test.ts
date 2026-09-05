@@ -68,7 +68,7 @@ describe("orienting in a project never seen before", () => {
 
     expect(described.entryPoints).toContain("$8011");
     expect(described.layers.map((l) => l.name)).toContain("gridrunner");
-    expect(described.counts.instructions).toBe(1449);
+    expect(described.counts.instructions).toBe(1481);
     // The distinction that matters: chosen names mean something was understood.
     expect(described.counts.namedByHand).toBeGreaterThan(0);
     expect(described.counts.namedAutomatically).toBeGreaterThan(0);
@@ -180,6 +180,27 @@ describe("editing", () => {
     // $801B is in a code region, undecoded, and reached by nothing.
     const result = workspace.markFunction(agent, 0x801b);
     expect(result.instructions.delta).toBeGreaterThan(0);
+  });
+
+  it("tells a writer when a region they declared swallows code something jumps to", () => {
+    // The feedback that was missing while `laserFrameRateForLevel` overran
+    // `PlayNewLevelSounds` by two bytes: the write returned `ok`, and 32
+    // instructions of a named routine reachable by an unconditional JMP stopped
+    // being decoded. The claim still stands — only the author knows which end to
+    // move — but the disagreement comes back on the write that caused it.
+    // $8D52 is `Waste20Cycles`, reached by `JSR $8D52` at $8D24.
+    const result = workspace.setRegion(agent, 0x8d52, 0x8d60, "data", "swallowsARoutine");
+
+    expect(result.ok).toBe(true);
+    expect(result.warnings?.join(" ")).toContain("$8D52");
+    expect(result.warnings?.join(" ")).toContain("transfers here");
+    // And the routine is still decoded, because a claim does not stop a jump.
+    // And the routine is still decoded *and* still rendered as code: the row
+    // builder prefers a decoded instruction, so a claim over jumped-to bytes
+    // does not hide them. Declaring it was not silently destructive; it was not
+    // silently anything.
+    const lines = workspace.disassembly(0x8d52, 6).lines.map((l) => l.text);
+    expect(lines.join(" ")).toContain("LDA #$20");
   });
 
   it("reports no gain where the guess was wasted", () => {
@@ -769,6 +790,21 @@ describe("naming a value", () => {
     expect(workspace.disassembly(address, 1).lines[0].text).toContain("#$08");
     // The declaration survives; only the use went.
     expect(workspace.constants().constants.map((c) => c.name)).toContain("ORANGE");
+  });
+
+  it("declaring a constant twice under one name destroys the first value", () => {
+    // Upsert by inference, the same shape as set_region: the write matches an
+    // existing constant *by name* and reuses its id, so a second reader who has
+    // synced silently replaces the first's conclusion. Unsynced they would both
+    // stand, and `hygiene` would report `constant.nameShared` — which is the tell,
+    // because that check can only ever fire on work done apart. The model
+    // tolerates the state the write path refuses.
+    workspace.setConstant(agent, "SHIELD_FLAG", 0x04);
+    workspace.setConstant(agent, "SHIELD_FLAG", 0x08);
+
+    const held = workspace.constants().constants.filter((c) => c.name === "SHIELD_FLAG");
+    expect(held).toHaveLength(1);
+    expect(held[0].value).toBe("$08");
   });
 
   it("lets two names share one value", () => {

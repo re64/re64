@@ -1553,15 +1553,18 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
 
   tool(
     "set_region",
-    "Say what a span of memory holds. Marking data stops it being disassembled " +
-      "as garbage, marking code starts decoding at its first address, and " +
-      "marking a jumptable decodes the code it points at, which no control-flow " +
-      "walk can reach on its own, and marking a bitmap draws the bytes as a " +
-      "picture instead of a hex column. " +
-      "walk can reach on its own. Give start with either end (exclusive) or " +
-      "length; the reply says which bytes it actually took. The span must lie " +
-      "in a layer that supplies bytes — a region says how to read bytes, so " +
-      "there has to be something there to read.",
+    "Say what a span of memory holds. Marking code starts decoding at its first " +
+      "address, marking a jumptable decodes the code it points at — which no " +
+      "control-flow walk reaches on its own — and marking a bitmap draws the " +
+      "bytes as a picture instead of a hex column. " +
+      "Marking data stops the walk falling into the span, but it does not stop a " +
+      "JMP, JSR or branch that names an address inside it: a claim says what " +
+      "bytes mean and the program says where control goes, so the program wins " +
+      "and the disagreement is reported instead. " +
+      "Give start with either end (exclusive) or length; the reply says which " +
+      "bytes it actually took. The span must lie in a layer that supplies bytes " +
+      "— a region says how to read bytes, so there has to be something there to " +
+      "read.",
     {
       project,
       start: address,

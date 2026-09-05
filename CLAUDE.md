@@ -2117,6 +2117,50 @@ claude mcp add --transport http re64 http://127.0.0.1:5164/mcp \
 
 The user id is one from `list_users`; the server does not verify it.
 
+## The claims redesign, in progress
+
+**`docs/redesign-claims.md` is the live design document. Read it before changing
+labels, regions, or the walk.** It is written after a prototype rather than
+before one, so every number in it is something the code measured.
+
+The one-line version: **labels and regions are two halves of one noun, and the
+line between them was drawn by an assembler source file rather than by the
+machine.** Both carry an id, both nest, both resolve innermost-first, and the
+pair is implemented twice. A `code` region is not an interpretation at all —
+for the walk it is indistinguishable from `unknown` and from silence — so it
+becomes a *root*, and what a person declares is either a root (decode from here)
+or an interpretation (these bytes are not instructions).
+
+What is prototyped, in `src/core/claims/` and `src/core/crdt/claims.ts`, all of
+it parallel to the live model and reaching nothing:
+
+- `model.ts` — one `Claim`: an id, a position, an optional extent, an optional
+  name, an optional interpretation, an optional root, and **who made it**.
+- `graph.ts` / `reach.ts` — the decode as a fact about bytes, computed once for
+  all 64K (2.6ms on Gridrunner, 4.1ms on Camels), with reachability a 0.8ms query
+  from a root set. Decode once, ask many times.
+- `set.ts` — nothing resolves at rest; picking is a named function a consumer
+  calls.
+- `layout.ts` — two live interpretations render the way overlapping blocks do:
+  both, in start order, the later marked.
+- `crdt/claims.ts` — two peers who never met, merged, with nobody's work lost.
+
+What has **landed** on this branch, because it was a real bug rather than a
+design: a claim can no longer stop control flow. See the section above.
+
+Three things it is worth knowing before touching any of this:
+
+- **Containment is refinement, partial overlap is contradiction.** Reporting
+  nesting as a conflict fires 43 times on one real project.
+- **Report at the coarsest unit that explains the finding.** This was got wrong
+  three times in one evening — per address instead of per overlap (1,832 findings
+  instead of 46), per instruction instead of per run, and per nested claim
+  instead of per outermost.
+- **The measured cost of the current design is six.** Cross-agent region
+  overwrites inside a shared project across all nine experiment runs, from
+  `npm run experiments:collisions`. Small, and every one destroyed a conclusion
+  somebody reached.
+
 ## Where the algebra is incomplete
 
 Written down because it is the kind of thing that is obvious while building and
@@ -2765,25 +2809,76 @@ an instruction but not one that starts a new instruction over claimed bytes, so
 two main blocks can share a byte. Emitting by position rather than by provenance
 covers that case too, without knowing it was there.
 
-### Flow into a non-code region stops, and says so
+### A claim about bytes cannot stop control flow
 
 A region says how to *read* bytes. Whether execution passes through it is a
-different question, and the walk cannot answer it — so it does not try.
+different question — and for years this file answered it the wrong way round,
+letting the first veto the second.
 
-Resuming after the region was implemented and reverted. It assumes execution
-runs through the bytes, which is true of `NOP` filler and false of the lookup
-table the same rule would apply to. On the reference project it decoded
-`PlayNewLevelSounds` — a routine nothing in the analysis reaches — purely
-because a routine is what usually follows a table. A correct-looking answer from
-a false premise is the worst kind to produce silently, and "usually right" is
-exactly how it would have stayed invisible.
+Resuming after the region was implemented and reverted, correctly: it assumes
+execution runs through the bytes, which is true of `NOP` filler and false of the
+lookup table the same rule would apply to. **The reason recorded for the revert
+was wrong, and the error hid a real bug for months.** It said the resume decoded
+"`PlayNewLevelSounds` — a routine nothing in the analysis reaches — purely
+because a routine is what usually follows a table". The routine *is* reached:
+`$8D75` holds `4c 16 8d`, an unconditional `JMP $8D16`.
 
-So the walk stops, and warns, naming the address. That disagreement is the
-useful output: either the span is not really data, or the decode that led there
-is wrong, and only a person or an agent can say which. On Gridrunner it reports
-`$8D16` — execution arriving two bytes before the end of `laserFrameRateForLevel`
-— which has always been true of this project and was never surfaced, because the
-walk dropped the address in silence.
+What was actually happening on the reference project:
+
+```
+laserFrameRateForLevel   declared $8CF6-$8D18   data
+PlayNewLevelSounds       actually starts $8D16
+$8D75                    JMP $8D16
+```
+
+The region overruns the routine's entry by **two bytes**, `shouldDisassemble`
+refused the address, and the jump was refused with it — losing 32 instructions:
+`PlayNewLevelSounds` with `Waste20Cycles` and `SoundEffect`, all three in the
+human reference, instruction for instruction. It hid behind its own damage,
+because the label `PlayNewLevelSounds` sits at `$8D18`, two bytes late, placed
+where the bad boundary left room. The *name* was in the listing at an address
+with no routine under it, and the 32 missing instructions read as ordinary
+undecoded space. The golden test pinned all of it.
+
+So **the arrival decides whether a claim may refuse an address**, and only the
+program itself outranks a claim:
+
+| | claim wins? | |
+|---|---|---|
+| `declared` | yes | an entry point or a jumptable entry |
+| `fallthrough` | yes | control ran off the end of the previous instruction |
+| `transferred` | no | a decoded `JMP`, `JSR` or branch names this address |
+| `continued` | no | fall-through from an instruction that already overrode |
+
+Two of the four were wrong first, and both corrections are the interesting part.
+
+**A declared root is not evidence.** `declared` was `transferred` at first, on the
+reasoning that an entry point is somebody saying "this is code". But entry points
+are mostly *derived* — a PRG load address, every `function` and `code` label,
+every code region's start — so that let a root overrule an explicit `bitmap`
+claim at the same address and render a picture as instructions. Two declarations
+disagreeing is a disagreement; only the program breaks the tie.
+
+**The veto is over the arrival, not over the run.** `continued` was missing, so a
+contested routine decoded exactly one instruction deep. Once a transfer has
+justified decoding an address inside a claim, the next instruction executes if
+that one does — which is the machine rather than an assumption. It does not
+reopen the resume-after-a-table mistake, because fall-through from code that
+overrode nothing is still `fallthrough` and still stops.
+
+`flowIntoData` keeps its meaning and gains a sibling. `codeInClaim` names the
+transferring instruction, because the two have opposite likely causes: falling
+into a table usually means the decode leading there is wrong; an explicit jump
+usually means the claim is wrong. A single warning conflating them is what let
+this read as an unknowable three-way ambiguity for so long.
+
+The general lesson, and this file has now been caught by it twice: **a warning
+that offers explanations it has not checked will be believed.** The original text
+offered three and named no evidence, when the evidence — one `JMP` — was in the
+xref index the whole time.
+
+This is the first landed piece of the claims redesign; `docs/redesign-claims.md`
+carries the rest, with the measurements behind it.
 
 **NOP filler between routines is code**, and should be declared `code`. A
 listing showing `.BYTE $EA` is making a rendering choice, not claiming that

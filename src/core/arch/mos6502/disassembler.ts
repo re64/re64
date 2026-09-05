@@ -25,6 +25,22 @@ export type DisassemblyWarning =
   | { type: "oddJumptable"; address: number; bytes: number }
   | { type: "flowIntoData"; address: number; kind: RegionKind }
   | {
+      /**
+       * Something transfers here, and a claim says these bytes are not code.
+       *
+       * Kept apart from `flowIntoData` because the two have opposite likely
+       * causes. Falling into a table usually means the decode leading here is
+       * wrong; an explicit `JMP` means the *claim* is wrong, and the program is
+       * the better witness — so this one decodes and reports, where the other
+       * stops and reports.
+       */
+      type: "codeInClaim";
+      address: number;
+      kind: RegionKind;
+      /** Where the transfer came from. */
+      from: number;
+    }
+  | {
       type: "breakVector";
       address: number;
       /** `$FFFE`, which is where the processor goes. */
@@ -74,6 +90,13 @@ export function describeWarning(w: DisassemblyWarning): string {
           ? `Nothing in this project supplies ${hex(w.pointer)}, so there is nothing to read.`
           : `It currently reads ${hex(w.target)}; mark_function there if that is the ` +
             `routine you mean.`)
+      );
+    case "codeInClaim":
+      return (
+        `${hex(w.address)}: ${hex(w.from)} transfers here, and it is declared ` +
+        `${w.kind}. A claim about what bytes mean cannot stop control flow, so ` +
+        `this decodes anyway — but one of the two is wrong, and an explicit ` +
+        `transfer is usually the better witness`
       );
     case "flowIntoData":
       return (
@@ -269,23 +292,66 @@ export function disassemble(
   const contested: number[] = [];
   const regions = options.regions;
 
-  // Build initial queue from explicit entry points plus jumptable entries
-  const queue: number[] = [...options.entryPoints];
-  if (regions) {
-    const jumptableEntries = extractJumptableEntries(reader, regions, warnings, references);
-    queue.push(...jumptableEntries);
+  /**
+   * How an address got into the queue, which decides whether a claim may refuse
+   * it.
+   *
+   * | | claim wins? | |
+   * |---|---|---|
+   * | `declared` | yes | an entry point or a jumptable entry |
+   * | `fallthrough` | yes | control ran off the end of the previous instruction |
+   * | `transferred` | no | a decoded `JMP`, `JSR` or branch names this address |
+   * | `continued` | no | fall-through from an instruction that already overrode |
+   *
+   * `declared` deliberately does not outrank a claim, and getting that wrong
+   * first is what showed why. Entry points are mostly derived — a PRG load
+   * address, every `function` and `code` label, every code region's start — so
+   * treating them as evidence let a declared root silently overrule an explicit
+   * `jumptable` or `bitmap` claim at the same address, and rendered a picture as
+   * instructions. Two declarations disagreeing is a disagreement; only the
+   * program breaks that tie.
+   *
+   * `continued` exists because a claim's veto is over the *arrival*, not over
+   * the run. Once an explicit transfer has justified decoding an address inside
+   * a claim, the next instruction executes if that one does — which is the
+   * machine rather than an assumption, and is what stops a contested routine
+   * being decoded one instruction deep. It does not reopen the resume-after-a-
+   * table mistake: fall-through from code that never overrode anything is still
+   * `fallthrough`, and still stops.
+   */
+  type Arrival = "declared" | "fallthrough" | "transferred" | "continued";
+
+  interface Pending {
+    address: number;
+    arrival: Arrival;
+    /** Which instruction transferred here, when one did. */
+    from?: number;
   }
 
+  const queue: Pending[] = options.entryPoints.map((address) => ({
+    address,
+    arrival: "declared" as Arrival,
+  }));
+  if (regions) {
+    const jumptableEntries = extractJumptableEntries(reader, regions, warnings, references);
+    queue.push(
+      ...jumptableEntries.map((address) => ({ address, arrival: "declared" as Arrival }))
+    );
+  }
+  /** Addresses decoded despite a claim, so their fall-through inherits that. */
+  const overrodeClaim = new Set<number>();
+
   const visited = new Set<number>();
+  /** Fall-throughs already stopped at a claim, so one is not reported twice. */
+  const stoppedAtClaim = new Set<number>();
 
   while (queue.length > 0) {
-    const address = queue.shift()!;
+    const { address, arrival, from } = queue.shift()!;
 
     // Skip if already processed
     if (visited.has(address)) {
       continue;
     }
-    visited.add(address);
 
     // Flow arrived somewhere declared not to be code. Stop, and say so.
     //
@@ -304,9 +370,28 @@ export function disassemble(
     // which. Claiming to know is not this warning's job.
     if (!shouldDisassemble(regions, address)) {
       const kind = regions?.getKindAt(address);
-      if (kind) warnings.push({ type: "flowIntoData", address, kind });
-      continue;
+      if (arrival === "declared" || arrival === "fallthrough") {
+        if (!stoppedAtClaim.has(address)) {
+          stoppedAtClaim.add(address);
+          if (kind) warnings.push({ type: "flowIntoData", address, kind });
+        }
+        continue;
+      }
+      // Something jumps here. A claim says what bytes *mean*; it does not get to
+      // say where control goes, and letting it silently deleted a named routine
+      // from the reference project for months — `laserFrameRateForLevel` is
+      // declared two bytes too long and swallowed `PlayNewLevelSounds`, which
+      // `$8D75` reaches by an unconditional `JMP`. Decode, and report both.
+      //
+      // Only the arrival is reported. A contested routine is one disagreement,
+      // not one per instruction in it.
+      if (kind && arrival === "transferred") {
+        warnings.push({ type: "codeInClaim", address, kind, from: from ?? address });
+      }
+      overrodeClaim.add(address);
     }
+
+    visited.add(address);
 
     // Check for overlap with existing instruction
     const overlap = occupied.covering(address);
@@ -399,9 +484,20 @@ export function disassemble(
     // that is not code, and it now continues past it rather than dropping it.
     // Filtering in both places meant a fall-through into data never reached the
     // one that knew how to carry on.
-    const targets = getTargets(instr);
-    for (const target of targets) {
-      if (!visited.has(target)) queue.push(target);
+    const next = address + instr.bytes.length;
+    for (const target of getTargets(instr)) {
+      if (visited.has(target)) continue;
+      // A `jump` has no fall-through to recognise, so every target it names is a
+      // transfer — including one that happens to land on the following address.
+      const isFallThrough = target === next && instr.flow !== "jump";
+      if (!isFallThrough) {
+        queue.push({ address: target, arrival: "transferred", from: address });
+      } else {
+        queue.push({
+          address: target,
+          arrival: overrodeClaim.has(address) ? "continued" : "fallthrough",
+        });
+      }
     }
   }
 
