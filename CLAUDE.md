@@ -3618,6 +3618,25 @@ than a reason to fabricate a layer to hold it; and the documented promise that
 reordering the stack moves annotations with the bytes they describe stops being
 a promise and becomes arithmetic.
 
+**Settled by reasoning, and open to evidence, which is not the same as
+undecided.** Two rules here were justified for a single author and survived the
+arrival of a second unrevisited — `set_comment` keyed by slot, `set_label` keyed
+by address — and both times an experiment had to find it. So the specific things
+to watch, named now so they are not rationalised later:
+
+- **An agent inventing a `scope` argument** is the signal the derivation is
+  wrong, not that the argument should exist. Inventing a tool name is an
+  unguarded statement about what the API should have had, and the finding is
+  usually that the *general* thing is missing something.
+- **Agents checking scope before writing** would mean the derivation surprises
+  them, which is the same shape as the extent nobody could see.
+- **`target:` going unused while agents complain about the wrong layer** would
+  mean the escape hatch is in the wrong place.
+
+Read the log for whether it happened and the reports for what to look for; where
+they disagree the log wins, because an agent works silently around whatever
+actually hurt.
+
 **Succession is still not built**, deliberately: the decrunched target is what
 the loader *produces*, and re64 knows because `run_program` with `capture` is
 what made it. That is provenance rather than presentation, and it should wait for
