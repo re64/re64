@@ -651,6 +651,16 @@ export function setPrimaryLabel(
     if (depth === 0) { close = i; break; }
   }
 
+  // The whole block on one line — `{"$8000": "lbl_1"}` — which `formatProject`
+  // never writes and ordinary JSON may. Every splice below addresses lines
+  // *between* `open` and `close`, so with the two equal it writes into whatever
+  // precedes the block and produces a corrupt file.
+  //
+  // The same escape hatch the label and region writers already take, and the
+  // same lesson: a `.re64` is ordinary JSON, anything may write one, and a line
+  // editor that assumes its own output will meet a file it did not produce.
+  if (close === open) return setPrimaryLabel(reformatted(raw), address, labelId);
+
   const at = lines.findIndex(
     (l, i) => i > open && i < close && l.includes(JSON.stringify(key) + ":")
   );
