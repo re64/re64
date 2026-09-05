@@ -292,6 +292,67 @@ not.
 Migration must root every existing interpretation claim, so nothing disappears
 from a project that already exists; the discipline applies to new work.
 
+## How often this actually destroyed somebody's work
+
+The label vocabulary was rewritten because experiment 7 destroyed 123 names
+across 74 addresses and told nobody. The region write has never been counted, so
+here it is, from the request logs of all nine experiment runs.
+
+**Six.** Cross-agent overwrites of a region inside a single shared project: one
+in experiment 3, five in experiment 7, none anywhere else. Against 172 region
+declarations in those two runs, which is about 3.5%.
+
+Each is a disagreement rather than a duplicate, which is what makes it a loss:
+
+| | |
+|---|---|
+| `$5E00-$5ED0` | amber `data/highScoreTable` → basalt `text/highScoreTable` |
+| `$6700-$87D0` | beryl `data/waveTable` → amber `data/zoneDataTable` |
+| `$6320-$64B4` | amber `tuneVoice2` → basalt `introTuneVoice2` |
+| `$9D21-$9D29` | basalt `messageColourCycle` → amber `messageFlashColours` |
+| `$C112-$C11F` | basalt `filenamePad` → amber `highScoreNamePad` |
+| `$8080-$80A0` | amber `text/TitleCopyrightLine` → agate `data/txtCopyrightPressFire` (exp 3) |
+
+`messageColourCycle` against `messageFlashColours` is two readers concluding
+different things about eight bytes. `waveTable` against `zoneDataTable` is the
+same about 8,400. Both losers were told `ok`.
+
+**The first count was 90, and it was wrong by 15×.** Experiments 2 and 5 put
+agents on *independent clones* — that is the whole design of the convergence run,
+so that agreement is not measured by contagion — but the request log is per
+server, not per project, so a naive pass reads three projects as one and every
+agent's independent naming of `$8000` as a collision. Grouping by the `project`
+argument takes it to six.
+
+Recorded because the inflated number was more persuasive and the small one is the
+true one. It is also, on its own, an argument for the redesign that the redesign
+did not need: six is small, and each is a conclusion somebody reached and lost.
+
+## Merge, exercised rather than argued
+
+`src/core/crdt/claims.test.ts` runs two peers through a real `Y.Doc`: build a
+base, split, edit both copies with no communication, exchange updates in *both*
+directions. Six properties hold.
+
+| | |
+|---|---|
+| each declares the same span offline | both claims survive; the contradiction is reportable |
+| each revises a *different* field of one claim | both land — `claim.set` is partial by construction |
+| each revises the *same* field | converge, on one of the two values |
+| a delete races a revision | a whole claim or none, never one field of a deleted one |
+| undo scoped to an origin | takes one peer's work, leaves the other's |
+| round trip through the document | unchanged, including frames, encodings and confidence |
+
+The second row is the one `set_region` cannot do. It replaces the whole region,
+which is the same shape as the `target.set` bug this project already found and
+fixed — describing a target silently reverted somebody's layer list.
+
+**The boundary test caught the prototype in the wrong directory, and was right
+to.** `yjs` belongs only in `src/core/crdt`; `src/core/claims/` is domain and must
+never see a CRDT type. Persisting a claim is a CRDT concern, so it moved — which
+is where it would have had to live anyway. An allowlist asserted by a test
+earning its keep on the first new root in a year.
+
 ## Layers demoted, targets promoted
 
 Claims stop belonging to layers. The recorded justification — reordering the
