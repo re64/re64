@@ -214,6 +214,31 @@ table is usually the *decode* being wrong; something jumping here is usually the
 - `$87F0 is an entry root inside padBeforeCode declared data` — the `$8D16` shape
   again, produced by agents, in the same run.
 
+## Checked against the human disassembly
+
+`gridrunner.asm` is 65KB of somebody's reverse engineering, and its
+auto-generated labels encode their own address — `b8D1A` is a branch target at
+`$8D1A`. So every one is an address a *person's* disassembler called an
+instruction start, which makes the oracle usable for the decode and not only for
+the names.
+
+**141 of 141 agree.** Two of them did not before the fix: `$8D1A` and `$8D24`,
+both inside `PlayNewLevelSounds`. That is the independent evidence that the 32
+recovered instructions are real code and not a decode this analysis talked itself
+into — which matters, because "the walk found more" is exactly the claim that
+needs a witness other than the walk.
+
+Three apparent disagreements were the extraction being naive, and one of them
+found something worth keeping. The reference uses `=*+$01` **exactly twice in
+65KB**, and both times to name an address *inside* an instruction: `b8737` is the
+operand byte of `BNE` at `$8736`, `b8D5A` the operand byte of `STA` at `$8D59`.
+An equate is what an assembler makes you reach for when a label cannot be placed
+inline — which is the same gap CLAUDE.md records from the other side, where
+`add_label` on a mid-instruction address succeeds and renders nowhere.
+
+So that gap now has a measured size and a known-good rendering: it cost the human
+twice in one program, and an equate line is how they paid it.
+
 ## Three reporting corrections, and they are one lesson
 
 Every finding must be reported at the coarsest unit that explains it. This bit
