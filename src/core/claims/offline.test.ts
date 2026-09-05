@@ -3,6 +3,7 @@ import { regionSetOp } from "../ops/edits.js";
 import { loadProjectFile } from "../../node-files.js";
 import { ClaimSet, disagreements, describeDisagreement } from "./set.js";
 import { Claim } from "./model.js";
+import { readFileSync } from "node:fs";
 
 /**
  * *What works offline — locally, ignorant of every other edit — must also work
@@ -138,3 +139,27 @@ describe("two readers declaring the same span, offline", () => {
     expect(disagreements(merged).filter((d) => d.kind === "interpretation")).toHaveLength(0);
   });
 });
+
+
+/**
+ * The same defect, twice more, found by looking rather than by assuming.
+ *
+ * `set_region` was called the last surviving instance of upsert-by-inference.
+ * That was an assumption, and auditing the write surface found two others —
+ * `set_constant` and `set_decoder`, both keying on a name. Their behaviour is
+ * pinned in `src/server/workspace.test.ts`, where a `Workspace` exists to
+ * exercise it.
+ *
+ * The distinction that separates them from the writes that are *fine* is worth
+ * stating here, because it is checkable by reading a single line of any write:
+ *
+ * - **Keyed by name in the document** — targets, tags. Offline and online behave
+ *   identically: two writers converge field by field, and nothing is destroyed
+ *   that was not overwritten on purpose.
+ * - **Keyed by id, with the id inferred at write time** — regions by span,
+ *   constants by name, decoders by name. The identity of the write depends on
+ *   what the writer had synced, so the same call has two outcomes.
+ *
+ * The rule that falls out: *if a write infers identity from anything other than
+ * an id it was given, it is offline/online asymmetric.*
+ */

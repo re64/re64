@@ -496,6 +496,40 @@ Changed in definition rather than in shape:
 - `describe_project` reports disagreements, which is the fog lifting: what a
   person watching agents wants to see is where two of them disagree.
 
+## `set_region` was not the last one
+
+Calling it the last surviving instance of upsert-by-inference was an assumption.
+Auditing the write surface found two more, and the audit produced a rule that is
+checkable by reading one line of any write:
+
+| write | identity from | offline == online? |
+|---|---|---|
+| `set_target`, `tag_project` | a **name, keyed as such in the document** | yes — two writers converge field by field |
+| `set_region` | the **span**, matched against what the writer can see | no |
+| `set_constant` | the **name**, matched against what the writer can see | no |
+| `set_decoder` | the **name**, matched against what the writer can see | no |
+
+> If a write infers identity from anything other than an id it was given, it is
+> offline/online asymmetric.
+
+Name-keying in the *document* is fine, and the distinction matters: a target is
+its name, both peers write the same key, and a merge resolves field by field with
+nothing destroyed that was not overwritten on purpose. Inferring an id at write
+time is different, because the inference reads state that a disconnected writer
+does not have.
+
+**The constant case has a tell the region case lacks.** `hygiene` reports
+`constant.nameShared` — "several constants hold one name with different values" —
+and connected writers *cannot produce that state*, because the second write
+reuses the first's id. So the check can only ever fire on a merge of work done
+apart. The model plainly tolerates the state the write path unilaterally refuses,
+which is the contradiction in one sentence.
+
+Under claims this cannot recur for regions and labels. Constants and decoders are
+separate objects and would need the same treatment — mint an id at the writer, let
+duplicates stand, report them — which is a small, independent change that does not
+wait for any of the rest of this.
+
 ## What it would cost
 
 Counted rather than estimated, because "how big is this" is the question that
@@ -595,7 +629,7 @@ built on blocks, the lifter and the value domain, which this does not move.
 | `add_layer` | *gone* | it exists only to make `symbols` layers, which exist only to own annotations |
 
 `set_region`'s three-case identity heuristic goes with it, and that is the single
-most valuable deletion: it is the last surviving instance of upsert-by-inference,
+most valuable deletion: it is the worst instance of upsert-by-inference,
 and `src/core/claims/offline.test.ts` shows it failing this project's own
 offline/online rule outright — the same call reuses an id when you have synced
 and mints one when you have not.

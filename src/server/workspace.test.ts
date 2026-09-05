@@ -792,6 +792,21 @@ describe("naming a value", () => {
     expect(workspace.constants().constants.map((c) => c.name)).toContain("ORANGE");
   });
 
+  it("declaring a constant twice under one name destroys the first value", () => {
+    // Upsert by inference, the same shape as set_region: the write matches an
+    // existing constant *by name* and reuses its id, so a second reader who has
+    // synced silently replaces the first's conclusion. Unsynced they would both
+    // stand, and `hygiene` would report `constant.nameShared` — which is the tell,
+    // because that check can only ever fire on work done apart. The model
+    // tolerates the state the write path refuses.
+    workspace.setConstant(agent, "SHIELD_FLAG", 0x04);
+    workspace.setConstant(agent, "SHIELD_FLAG", 0x08);
+
+    const held = workspace.constants().constants.filter((c) => c.name === "SHIELD_FLAG");
+    expect(held).toHaveLength(1);
+    expect(held[0].value).toBe("$08");
+  });
+
   it("lets two names share one value", () => {
     // LEFT_ZAPPER = $01 and WHITE = $01 in the reference. Both must be
     // declarable, and each site picks which it meant.
