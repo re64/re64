@@ -2141,12 +2141,22 @@ it parallel to the live model and reaching nothing:
   from a root set. Decode once, ask many times.
 - `set.ts` — nothing resolves at rest; picking is a named function a consumer
   calls.
-- `layout.ts` — two live interpretations render the way overlapping blocks do:
-  both, in start order, the later marked.
+- `listing.ts` — one address-sorted emission where blocks and claims are peers,
+  hex dump for what nothing covers. Two live interpretations render the way
+  overlapping blocks do: both, in start order, the later marked. Nothing splits,
+  including a claim inside another — that rule was tried and is unsound, because
+  it assumes an interpretation is byte-local, which is false for `bitmap` and
+  `snippet:<id>`.
 - `crdt/claims.ts` — two peers who never met, merged, with nobody's work lost.
 
-What has **landed** on this branch, because it was a real bug rather than a
-design: a claim can no longer stop control flow. See the section above.
+What has **landed**, because it was a real bug rather than a design: a claim can
+no longer stop control flow. See the section above.
+
+The implementation order is planned and the design document carries nine
+corrections found while planning it. Four are blocking and are recorded there:
+the `LABEL_RANK`/`Provenance` rank collision, that `adapt.ts` is a measurement
+adapter and not the migration, that migration must preserve ids verbatim, and
+that `claim.set` cannot yet express "clear this field".
 
 Three things it is worth knowing before touching any of this:
 

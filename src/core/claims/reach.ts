@@ -18,17 +18,23 @@
 import { DecodeGraph, ADDRESS_SPACE } from "./graph.js";
 
 /**
- * Why an address is being decoded from.
+ * How a root seeds this walk.
  *
  * `code` seeds the control-flow walk; `data` seeds nothing and marks an address
  * whose *bytes* somebody wants surfaced. Entry points and "show me this sprite
  * sheet" are the same kind of statement, which is why they belong in one list.
+ *
+ * Deliberately not `RootKind`, which `model.ts` exports from the same directory
+ * with different members: a claim's `root` says what somebody *declared*
+ * (`entry`, `routine`, `location`, `data`), and this says what a walk *does*
+ * with it. Two concepts sharing one name in one directory is a collision
+ * waiting for the first consumer that imports the wrong one.
  */
-export type RootKind = "code" | "data";
+export type SeedKind = "code" | "data";
 
 export interface Root {
   readonly address: number;
-  readonly kind: RootKind;
+  readonly kind: SeedKind;
   /** Where the root came from, for reporting. Never used in the walk. */
   readonly why: string;
 }

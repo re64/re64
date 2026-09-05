@@ -465,110 +465,6 @@ nothing, and seeding with the window makes the same listing read differently
 depending on where you started reading — the viewport-dependent classification the
 arrow gutter rules already forbid, arriving by a different door.
 
-## How often this actually destroyed somebody's work
-
-The label vocabulary was rewritten because experiment 7 destroyed 123 names
-across 74 addresses and told nobody. The region write has never been counted, so
-here it is, from the request logs of all nine experiment runs.
-
-**Six.** Cross-agent overwrites of a region inside a single shared project: one
-in experiment 3, five in experiment 7, none anywhere else. Against 172 region
-declarations in those two runs, which is about 3.5%.
-
-Each is a disagreement rather than a duplicate, which is what makes it a loss:
-
-| | |
-|---|---|
-| `$5E00-$5ED0` | amber `data/highScoreTable` → basalt `text/highScoreTable` |
-| `$6700-$87D0` | beryl `data/waveTable` → amber `data/zoneDataTable` |
-| `$6320-$64B4` | amber `tuneVoice2` → basalt `introTuneVoice2` |
-| `$9D21-$9D29` | basalt `messageColourCycle` → amber `messageFlashColours` |
-| `$C112-$C11F` | basalt `filenamePad` → amber `highScoreNamePad` |
-| `$8080-$80A0` | amber `text/TitleCopyrightLine` → agate `data/txtCopyrightPressFire` (exp 3) |
-
-`messageColourCycle` against `messageFlashColours` is two readers concluding
-different things about eight bytes. `waveTable` against `zoneDataTable` is the
-same about 8,400. Both losers were told `ok`.
-
-**The first count was 90, and it was wrong by 15×.** Experiments 2 and 5 put
-agents on *independent clones* — that is the whole design of the convergence run,
-so that agreement is not measured by contagion — but the request log is per
-server, not per project, so a naive pass reads three projects as one and every
-agent's independent naming of `$8000` as a collision. Grouping by the `project`
-argument takes it to six.
-
-Recorded because the inflated number was more persuasive and the small one is the
-true one. It is also, on its own, an argument for the redesign that the redesign
-did not need: six is small, and each is a conclusion somebody reached and lost.
-
-## Merge, exercised rather than argued
-
-`src/core/crdt/claims.test.ts` runs two peers through a real `Y.Doc`: build a
-base, split, edit both copies with no communication, exchange updates in *both*
-directions. Six properties hold.
-
-| | |
-|---|---|
-| each declares the same span offline | both claims survive; the contradiction is reportable |
-| each revises a *different* field of one claim | both land — `claim.set` is partial by construction |
-| each revises the *same* field | converge, on one of the two values |
-| a delete races a revision | a whole claim or none, never one field of a deleted one |
-| undo scoped to an origin | takes one peer's work, leaves the other's |
-| round trip through the document | unchanged, including frames, encodings and confidence |
-
-The second row is the one `set_region` cannot do. It replaces the whole region,
-which is the same shape as the `target.set` bug this project already found and
-fixed — describing a target silently reverted somebody's layer list.
-
-**The boundary test caught the prototype in the wrong directory, and was right
-to.** `yjs` belongs only in `src/core/crdt`; `src/core/claims/` is domain and must
-never see a CRDT type. Persisting a claim is a CRDT concern, so it moved — which
-is where it would have had to live anyway. An allowlist asserted by a test
-earning its keep on the first new root in a year.
-
-## What a row does with two live interpretations
-
-The parked question, and it had an answer already — one object along.
-Overlapping *instructions* were settled by refusing to choose:
-
-> Which reading is "primary" turned out not to be a question… It dissolves
-> instead: emit **every** block in order of where it starts, and mark any whose
-> start the walk has already passed.
-
-`src/core/claims/layout.ts` applies the same rule to claims, and needs one
-distinction on top — the same one the disagreement report already draws:
-
-- **Containment is refinement**, and renders in place: the inner claim owns its
-  bytes, the outer renders either side. Marking that would fire 43 times on one
-  real project.
-- **Anything else is a second reading**: emitted whole, in start order, marked as
-  sharing bytes with what came before.
-
-On experiment 7's real six-byte conflict:
-
-```
-$5870-$5900  devSourceResidue      (data)
-$5870-$5906  srcResidueSpriteSet   (text)   [second reading]
-$5900-$594C  tuneVoice1            (data)
-$594C-$5950  tunePadding1          (data)
-```
-
-Both readings survive, neither writer is privileged, and the layout is identical
-whatever order the claims arrived in — ties go to the lower id, so every peer
-computes the same thing without coordinating.
-
-Two things it needed that were not obvious:
-
-- **A claim that renders nowhere is two different situations.** Fully refined by
-  claims inside it, or contradicted by one that is not. They look identical in
-  the layout pass — the claim owns no byte either way — and conflating them marks
-  an 8K table fully covered by its own entries as a second reading of *itself*.
-  The test is whose claim took each byte.
-- **The layout is two passes, and forcing it into one is what would create the
-  need for a tie-break rule.** Which claim renders an address is a question about
-  addresses; whether a claim rendered at all is a question about claims. Asked
-  separately, nothing has to be arbitrated.
-
 ## Layers demoted, targets promoted
 
 Claims stop belonging to layers. The recorded justification — reordering the
@@ -741,6 +637,82 @@ is not a corner case — every project with regions has them. That nothing is
 `unknown` is worth noting too: the kind exists, and in four years of real use
 nobody has written one, which is what "the absence of a claim" being the honest
 spelling looks like from the data side.
+
+## Corrections found while planning the implementation
+
+The design above was written from a prototype. Planning the landing sequence
+against the real codebase found nine things wrong with it. **The first four block
+implementation.**
+
+**1. The rank collision, which nothing in the model can express.** `LABEL_RANK`
+is `user:4, region:3, layer:2, platform:1, auto:0`, so a user label beats a
+same-address region name. `Provenance.source` is
+`user | layer | platform | auto | analysis` — **`region` is gone**, and there is
+no member where it ranked.
+
+Eight addresses in `gridrunner.re64` carry both a region name and a user label,
+and three of them disagree:
+
+| | region | label |
+|---|---|---|
+| `$8000` | `initJumpTable` | `initializeDataJumpAddress` |
+| `$8BC0` | `explosionControlArrays` | `explosionYPosArrayControl` |
+| `$871F` | `podDecaySequence` | `PodDecaySequence` |
+
+`adapt.ts` gives both `source: "user"`, so the tie falls to `compareClaims`' id
+tiebreak — which is to say, at random. The listing silently renames three rows
+and the golden hash moves for a reason with nothing to do with the redesign.
+Either add a `Provenance` member ranking between `layer` and `user`, or have
+migration pin the previously-winning label in `primaryLabels`. **Settle before
+the projection step.**
+
+**2. `adapt.ts` is not the migration.** It says so — *"a translation rather than
+a migration… Nothing writes back through it"* — and it does **not** auto-root
+interpretation claims, which migration must do or a project loses every span
+nothing references. Using it as the migration quietly reintroduces the loss this
+document warns about two sections earlier.
+
+**3. Id preservation is never stated, and everything depends on it.** A migration
+that mints fresh ids dangles every `primaryLabels` entry, every `labelUses`
+binding and every inverse in the `ops` history, and two peers migrating the same
+file independently produce disjoint claim sets. Ids carry across verbatim, prefix
+and all: `rgn_1jmk1o` becomes claim `rgn_1jmk1o`. `clm_` is only for claims minted
+afterwards, and `isId`'s regex — hardcoded `/^(lbl|rgn|lay)_/` — needs it.
+
+**4. `claim.set` cannot clear a field.** `Partial<Omit<Claim, "id">>` cannot
+distinguish "not mentioned" from "clear this", and `applyClaimOp` skips
+`undefined`. So `clear_root`, removing an extent and un-saying an interpretation
+are all unexpressible — and the *inverse* of "set a root on a claim that had
+none" cannot be written, which `runOps` requires on every write. Note `assign()`
+in the same file uses the opposite convention, so two writers there would
+disagree. Needs an explicit spelling.
+
+The remaining five are smaller and three are already fixed:
+
+- **`RootKind` was exported twice with different members** from one directory —
+  `model.ts` (`entry|routine|location|data`) and `reach.ts` (`code|data`). The
+  second is now `SeedKind`: a claim's `root` says what somebody *declared*, and
+  a seed kind says what a walk *does* with it. **Fixed.**
+- **`ClaimOp` lives behind the CRDT boundary** in `crdt/claims.ts`, and
+  `boundary.test.ts` asserts `src/core/ops/**` never mentions yjs. The op
+  vocabulary must move to `ops/types.ts`; only the encoding belongs where it is.
+- **Region `comment` versus claim `description`.** `adapt.ts` maps one to the
+  other, but `description` is documented as *what a name means on this machine*
+  and is deliberately not a comment — while `rows.ts` renders a region's comment
+  as comment rows at its start. There are 168 region comments across nine
+  experiment projects and **none in Gridrunner**, so the golden test will not
+  catch this. Either `Claim` keeps both fields, or migration makes real `Comment`
+  objects.
+- **Three sections appeared twice**, from a scripted insertion that ran against a
+  matching anchor more than once. **Fixed.**
+- **`src/core/claims/layout.ts` was cited by this document and by CLAUDE.md after
+  being deleted.** `listing.ts` supersedes it. **Fixed.**
+
+The general shape, since this document is now the fourth artifact here to be
+caught by it: **a design written from a prototype describes what the prototype
+does, not what the codebase requires.** Every one of the four blocking items is a
+place where the prototype was free to be silent — it had no ranks to reconcile, no
+ids to preserve, no inverses to compute — and the real thing is not.
 
 ## Ordering
 
