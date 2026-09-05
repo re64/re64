@@ -3555,6 +3555,69 @@ alone, so two people revising different parts of one target both survive. The
 CRDT path already held a `Y.Map` per target and needed only to stop writing keys
 the operation does not carry.
 
+### Where a claim lives, and who decides (settled, not yet built)
+
+A claim is never global. It belongs to a **layer** or to a **target**, and
+nothing else — `platform` is the built-in C64 table and only that. An agent
+naming `$D020` `borderDuringExplosion` is not amending the machine definition,
+it is saying what this program does with the register, which is a fact about the
+arrangement. So a third of the decision disappears before it starts.
+
+**Layer-scoped claims are stored relative to the layer's bytes**, offset 0 being
+the first byte after the PRG header. Absolute is `link.loadAddress + at`.
+
+The alternative — absolute against a default load address, relocated when the
+link deviates — fails the offline/online test, which is the check that has
+caught things here that reasoning did not. It makes every claim's meaning depend
+on a field living on *another object*: A edits the layer's default address while
+B, offline, names `$8010`, and after the merge B's claim points at bytes B never
+looked at, with no conflict and nothing reported. One field silently reindexes a
+whole body of annotation. It also stores a derived fact — the true position
+becomes `stored + (actual − default)`, two numbers that can drift — and it needs
+a relocation step that every consumer can forget, which is a class of bug that
+looks like success. Relative has no step to forget: relinking moves the claims
+by arithmetic rather than by promise.
+
+**Offsets never cross the wire.** Every tool stays absolute — `add_claim at:
+"$8010"`, `claims_at`, `list_claims`, the listing — and the offset is computed
+from `map.layerAt`, the same lookup that already decides annotation ownership.
+No agent ever calculates one, and the stored form is invisible the way "nothing
+resolves at rest" makes every other derived answer invisible.
+
+**Scope is derived, not chosen, and there is no `scope` argument.** The topmost
+layer in the current target supplying that byte, else the target. It is total,
+so no write can fail on it. An override was considered and rejected because its
+only *reachable* power is the wrong answer: layer-scoping a byte no layer
+supplies is not expressible, so the one thing a `scope:` argument could do is
+bind a claim to a layer that does not supply those bytes — which is exactly the
+bug layer ownership exists to prevent, and would turn a write that cannot fail
+into one that has to be validated.
+
+**The escape hatch is `target:` on the write, matching `read_bytes`.** The real
+case behind wanting an override is "I mean the loader's bytes at `$0810`, not
+the runtime image's", and the natural way to say that is to name the *view* —
+which the agent already has a concept for, and from which the scope still
+derives by the same rule. Experiment 7 is the reason it must not require
+`select_target`: a whole target went unread for a run because moving the shared
+selection changes it for everybody and nobody was willing.
+
+**It is reported on the write and on the reads** — `scope: {layer: "revenge
+fixed"}` or `scope: {target: "runtime"}` — not because the agent chooses it, but
+because it decides whether a claim travels when the stack is reordered, and a
+property only the writer can observe is one that gets fought over. That is what
+the invisible extent cost two readers in the same run.
+
+**Scope follows the start address**, so a claim whose extent runs past its
+layer's end is layer-scoped with a tail hanging off it. Representable and
+occasionally right — a table that genuinely continues into the next layer — so
+it is a hygiene finding rather than a refusal.
+
+Two things this buys that are worth having on their own: the **symbols-layer
+invention disappears**, since naming a byteless address is a target claim rather
+than a reason to fabricate a layer to hold it; and the documented promise that
+reordering the stack moves annotations with the bytes they describe stops being
+a promise and becomes arithmetic.
+
 **Succession is still not built**, deliberately: the decrunched target is what
 the loader *produces*, and re64 knows because `run_program` with `capture` is
 what made it. That is provenance rather than presentation, and it should wait for
