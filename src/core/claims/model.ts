@@ -1,0 +1,151 @@
+/**
+ * A claim: the one noun that labels and regions were two halves of.
+ *
+ * The old pair had the same identity rule, the same containment semantics and
+ * the same resolution — innermost wins — implemented twice, and the split ran
+ * along a line the file format drew rather than one the machine does. A label
+ * was a claim with no extent; a region was a claim with one. Nothing else
+ * distinguished them.
+ *
+ * Three rules govern this file, and each is a thing the old model could not do:
+ *
+ * - **Code is never claimed.** A `code` region did three jobs — seed the decode,
+ *   not be one of the other kinds, and pick a row strategy — and for the walk it
+ *   was indistinguishable from `unknown` and from silence. Code is the default
+ *   reading of bytes; what a person declares is a *root* (decode from here) or an
+ *   *interpretation* (these bytes are not instructions). Those are separate
+ *   fields because they are separate statements, and a claim carrying both would
+ *   be the contradiction this model exists to represent rather than to hold.
+ * - **Nothing resolves at rest.** `at()` returns every claim, in a stable order,
+ *   and picking one is something a *consumer* does with a named function. The old
+ *   `getRegionAt` returning the smallest cover was a view decision that had
+ *   migrated into the data structure, which is why two agents disagreeing about
+ *   a span produced one silent winner.
+ * - **Every claim carries who made it.** The reason a collaborator's lens is
+ *   foggy and the reason agents overwrite each other are the same reason: the
+ *   document recorded conclusions and not who reached them.
+ */
+
+import { TextEncoding } from "../c64/text.js";
+
+/**
+ * What a claim says the bytes are.
+ *
+ * There is no `code` member and no `unknown` member, and both absences are the
+ * point. Code is what bytes are when nobody has said otherwise, and `unknown` is
+ * the absence of a claim rather than a claim of absence — which is what makes
+ * "unexplained" a question about the claim set instead of a kind to filter for.
+ */
+export type Interpretation =
+  | { readonly is: "data" }
+  | { readonly is: "text"; readonly encoding?: TextEncoding }
+  | { readonly is: "bitmap"; readonly view?: string }
+  | { readonly is: "jumptable" };
+
+/**
+ * Why an address is surfaced regardless of what reaches it.
+ *
+ * The code roles are the old `LabelType` minus `address`, kept apart on the
+ * grounds this project already wrote down: they behave alike only because the
+ * disassembler queues all three, and they diverge the moment anything reasons
+ * about call graphs.
+ *
+ * `data` is the new one and it is what an unreferenced sprite sheet needs. Under
+ * operand reachability a claim is surfaced because something reaches it, so
+ * bytes nothing names have to be rooted explicitly — which makes entry points
+ * and "show me this sprite sheet" one list instead of two mechanisms.
+ */
+export type RootKind = "entry" | "routine" | "location" | "data";
+
+/** Who made a claim, and how much weight it carries. */
+export interface Provenance {
+  /** A user id, an agent codename, or `cli`. Never resolved on read. */
+  readonly author: string;
+  /**
+   * How the claim arose.
+   *
+   * `user` is somebody's judgement. The rest are machinery, and the distinction
+   * decides hygiene: warning that two invented `dat_XXXX` names collide would be
+   * noise on the first day of every project.
+   */
+  readonly source: "user" | "layer" | "platform" | "auto" | "analysis";
+  /** Milliseconds since the epoch, supplied by the caller. */
+  readonly when?: number;
+  /**
+   * How strongly it is meant.
+   *
+   * A weak commitment is the thing the old model had no way to spell: an agent
+   * that thinks a span is probably a sprite sheet had to either assert it and
+   * overwrite somebody, or say nothing. Absent means asserted.
+   */
+  readonly confidence?: "asserted" | "inferred" | "guess";
+}
+
+/**
+ * Where a claim's position is measured from.
+ *
+ * Absolute is the ordinary case. A layer-relative claim is a symbol at a section
+ * offset: it resolves wherever a target places that layer, so a decruncher that
+ * copies itself to the stack page can be annotated once and appear at both
+ * addresses — which the address-keyed model cannot express at all.
+ */
+export type Frame =
+  | { readonly space: "address" }
+  | { readonly space: "layer"; readonly layer: string };
+
+export interface Claim {
+  /**
+   * Stable identity, independent of position, name and extent.
+   *
+   * An address cannot identify a claim, for the reason it could never identify a
+   * label: several sit at one address and the whole design depends on that.
+   */
+  readonly id: string;
+  /** Absolute address, or an offset into a layer — see `frame`. */
+  readonly at: number;
+  /** Absolute unless a layer frame says otherwise. */
+  readonly frame?: Frame;
+  /**
+   * How many bytes this claim covers. Absent means a point.
+   *
+   * A point claim is a name or a root; an extent claim is what used to be a
+   * region. The word "region" survives as shorthand for the second shape, which
+   * is all it ever was.
+   */
+  readonly extent?: number;
+  /** What to call it. A claim may be anonymous — an unnamed span of sprite data. */
+  readonly name?: string;
+  /** What the bytes are. Absent says nothing about them. */
+  readonly says?: Interpretation;
+  /** Surface this regardless of reachability. */
+  readonly root?: RootKind;
+  /** What the name means on this machine, where somebody else decided. */
+  readonly description?: string;
+  readonly by: Provenance;
+}
+
+/** One past the last byte a claim covers. A point claim covers one address. */
+export function claimEnd(claim: Claim): number {
+  return claim.at + (claim.extent ?? 1);
+}
+
+/** Does the claim cover this address? */
+export function covers(claim: Claim, address: number): boolean {
+  return address >= claim.at && address < claimEnd(claim);
+}
+
+/**
+ * A stable total order over claims.
+ *
+ * Position, then narrowest first, then id. Every peer sorts identically without
+ * coordinating, which is what a merged document needs — and unlike the old
+ * resolution it *orders* rather than *chooses*, so nothing is discarded by
+ * having been sorted.
+ */
+export function compareClaims(a: Claim, b: Claim): number {
+  if (a.at !== b.at) return a.at - b.at;
+  const spanA = a.extent ?? 1;
+  const spanB = b.extent ?? 1;
+  if (spanA !== spanB) return spanA - spanB;
+  return a.id.localeCompare(b.id);
+}
