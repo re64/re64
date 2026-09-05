@@ -396,3 +396,143 @@ Steps 1 and 2 are separable from the rest and carry most of the benefit.
 - **Banking**, as above.
 - **What a row means when two interpretations are live.** The block precedent
   says: emit both, mark the second. That has not been built for claims.
+
+---
+
+# Appendix: the document model and the API, tool by tool
+
+Reviewed against the 67 tools, 24 operations and 9 CRDT roots as they stand at
+`re64-v0.1`.
+
+## The write vocabulary collapses; the read vocabulary mostly does not
+
+That asymmetry is the finding. The redesign is about what the document *holds*,
+so it lands almost entirely on writes — 12 tools become 6 — while the analysis
+tools (`effects`, `call_graph`, `run_block`, `find_instructions`) are untouched,
+because they were never about labels and regions in the first place. They were
+built on blocks, the lifter and the value domain, which this does not move.
+
+### Collapses
+
+| now | becomes | why |
+|---|---|---|
+| `add_label`, `add_labels` | `add_claim`, `add_claims` | a label is a claim with no extent |
+| `set_region`, `set_regions` | same two | a region is a claim with one |
+| `rename_label` | `rename_claim` | by id, unchanged in spirit |
+| `remove_label`, `remove_region` | `remove_claim` | one id space |
+| `mark_function`, `unmark_function` | `set_root`, `clear_root` | rootness is a field, not a label type |
+| `add_layer` | *gone* | it exists only to make `symbols` layers, which exist only to own annotations |
+
+`set_region`'s three-case identity heuristic goes with it, and that is the single
+most valuable deletion: it is the last surviving instance of upsert-by-inference,
+and `src/core/claims/offline.test.ts` shows it failing this project's own
+offline/online rule outright — the same call reuses an id when you have synced
+and mints one when you have not.
+
+### Changes definition, not shape
+
+- **`find_undecoded`** becomes "no claim covers it, and no root reaches it". One
+  predicate replaces a whitelist of explained kinds, and it stops needing to know
+  that `unknown` means "not really a kind".
+- **`list_warnings`** already carries the new findings — `describeWarning` is
+  called generically, so `codeInClaim` reached `list_warnings` and every write
+  result with no wiring at all.
+- **`describe_project`** should report disagreements. This is the fog lifting:
+  what somebody watching agents wants is where two of them disagree, and today
+  that has no home in the document at all.
+- **`set_region`'s description** was already wrong before any of this: it
+  promised that marking data stops disassembly, and carried a copy-paste artifact
+  leaving a broken sentence. Both fixed.
+
+### New, and each answers something nothing can answer today
+
+- **`claims_at(address)`** — *all* of them. This is the read that makes an
+  additive write safe, and its absence is why `set_region` had to guess.
+- **`disagreements()`** — currently unrepresentable.
+- **`list_roots` / `add_root` / `remove_root`** — the registry. Entry points and
+  "surface this sprite sheet regardless" become one list, which is what operand
+  reachability requires.
+
+### Untouched
+
+`set_primary_label`, `bind_label`, `unbind_label` all survive exactly as they
+are. An operand substitutes one name, and an operand is one token in a graph view
+as much as in a row — so this is not a linearisation artefact and does not
+dissolve. Same for constants, decoders, comments, targets, files, chat, tags,
+`undo` and `changes_since`.
+
+## Operations
+
+```
+label.set  label.delete  region.set  region.delete   →   claim.add  claim.set  claim.remove
+```
+
+24 ops become 23, which understates it: `region.set` was the only op whose
+*identity* was inferred rather than given, and every other op in the vocabulary
+already names its target by id. This removes the exception rather than a member.
+
+`layer.set` is still missing and still wanted — the stack cannot be reordered,
+which is the property CLAUDE.md cites as the reason annotations belong to layers.
+Under this redesign that justification is gone, so `layer.set` becomes an
+ordinary missing feature rather than a hole under a documented behaviour.
+
+## CRDT roots
+
+Claims become a **top-level root**, not a field on layers and not nested inside
+targets:
+
+```
+claims        NEW — flat, id-keyed, each with a frame, an extent and provenance
+layers        byte stores only: file, bytes, or nothing
+targets       named views: which layers, placed where, plus the root set
+```
+
+Flat is what merges. A claim is one map entry edited independently; moving one
+between targets is a field write rather than a move between containers, and Yjs
+handles a map of maps far better than nested arrays. It is also what lets a claim
+name an address no layer supplies, which deletes the entire symbols-layer
+apparatus.
+
+`primaryLabels` stays as it is and keeps its name — it indexes claims now, and
+the reasoning is unchanged: concurrent promotions must write one map key and
+converge.
+
+## The `.re64`
+
+The export flattens, which is the only step that breaks the file shape:
+
+```jsonc
+{
+  "layers":   [ /* path, address, name — no labels, no regions, no comments */ ],
+  "targets":  [ /* name, layers, placements, roots, order, description */ ],
+  "claims":   [ /* id, at, frame?, extent?, name?, says?, root?, by */ ],
+  "constants": [], "decoders": [], "files": []
+}
+```
+
+`re64 migrate` does the conversion, and two rules make it lossless:
+
+- **Every `code` region becomes a root at its start, with no extent.** Its span
+  never meant anything: for the walk, `code` was indistinguishable from `unknown`
+  and from silence.
+- **Every interpretation claim is auto-rooted.** Under operand reachability a
+  claim is surfaced because something reaches it, so an existing project would
+  otherwise lose exactly the 2 claims Gridrunner and 24 claims Camels have that
+  nothing names. Rooting them preserves today's output; the discipline applies to
+  new work.
+
+`unknown` regions convert to nothing, which is the one deliberate loss and is not
+a loss: absence of a claim is what `unknown` always meant.
+
+## What this review changed about the plan
+
+Two things, both from reading the code rather than from the argument:
+
+1. **The read side barely moves.** An earlier draft assumed the redesign would
+   ripple through the analysis tools. It does not: they were built on blocks and
+   the lifter, which are already claim-independent. That makes the change smaller
+   and more separable than it looked.
+2. **The warning path needed no work.** `edit()` already diffs the warning set
+   across a write, so the disagreement lands on the call that caused it. That was
+   the mechanism missing when a region could overrun a routine and return `ok` —
+   except it was not missing, only starved of anything to report.
