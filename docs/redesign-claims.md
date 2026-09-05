@@ -914,3 +914,317 @@ Two things, both from reading the code rather than from the argument:
    across a write, so the disagreement lands on the call that caused it. That was
    the mechanism missing when a region could overrun a routine and return `ok` —
    except it was not missing, only starved of anything to report.
+
+---
+
+# Part two: types
+
+*Reached by conversation on 2026-09-05, after the claims work landed. Nothing
+here is built. It is written down because it was arrived at in one session and
+would otherwise exist only there.*
+
+## Why this stopped being optional
+
+`zoneDataTable` is the case. 8,400 bytes, and what the reader actually
+established was:
+
+> 42 records of exactly 200 bytes, 152 bytes of template plus 8 scalars plus a
+> 40-character name. **Verified** three ways — the banner lands on `+$A0` in all
+> 42, the code does `ADC #$C8`, and the credits say "THE GAME CONSISTS OF FORTY
+> TWO DIFFERENT ATTACK WAVES."
+
+…with nineteen template fields per creature type, proved from the copy routine at
+`sub_9772`. The model could hold **one field per record** — the name — and the
+rest became a `data` blob with the finding living in prose.
+
+The same binary carries three blocks of the author's own BASIC-assembler source,
+stored as a genuine linked list: `[link lo][link hi][line# lo][line# hi] text
+$00`. The identification was certain **because the links resolve** — a structural
+invariant over the data, which a model that cannot express the structure cannot
+express the proof of either.
+
+So "handwritten assembler is too much of a mess for structs to matter" does not
+survive the second real program.
+
+## The machine argues for a layout C cannot name
+
+The dominant array layout on a 6502 is **struct-of-arrays**, and it is forced
+rather than chosen. From the reference project:
+
+```
+podLoPtrArray   / podHiPtrArray
+droidXPositionArray / droidYPositionArray
+explosionXPosArray  / explosionYPosArray
+screenLineLoPtr / screenLineHiPtr
+```
+
+Two ISA facts do it: **there is no multiply**, and **the index register is 8
+bits**. Array-of-structs indexing is `base + i × stride`, so any stride but 1
+costs a shift-add sequence or a table. Struct-of-arrays makes the stride 1 for
+every field, so the entity index *is* the addressing index:
+
+```
+b873D   LDA podScreenLoPtr
+        STA podLoPtrArray,X      ; one index, X = pod slot
+        LDA podScreenHiPtr
+        STA podHiPtrArray,X      ; same index, other array
+```
+
+`podLoPtrArray`/`podHiPtrArray` is one 16-bit value whose two bytes live in
+different arrays. C's model has array-of-structs as its natural case, cannot name
+struct-of-arrays, and cannot represent a split value at all. **Adopting C syntax
+would import defaults that are wrong for this machine.**
+
+It also explains something already measured. A record stride of 200 cannot be
+reached by `abs,X` at all, so the code must compute a pointer and use `($3E),Y` —
+which is why "8400 bytes, 21% of the program, were invisible to every reference
+tool". There is a real relationship here:
+
+| layout | access | visible to static xrefs |
+|---|---|---|
+| stride 1 (split arrays) | `LDA field,X` | yes |
+| stride > 1, or > 256 bytes | `($zp),Y` | no |
+
+**A declared stride is the missing input that makes the invisible half
+resolvable.** That is what makes this analysis rather than documentation.
+
+## Where the boundary with decoders is
+
+A decoder cannot do this, and the reason is the property that makes decoders
+safe:
+
+> A decoder is a pure function from bytes to **data** … a function that can only
+> return numbers cannot inject anything.
+
+A decoder over `podLoPtrArray`/`podHiPtrArray` produces 25 correct addresses that
+**the analysis never sees as addresses**. No xrefs, no reachability, no operand
+resolution. So:
+
+> **Built in if the analysis must compute with it** — addresses it must follow,
+> strides it must index by. **A decoder if the result is only ever looked at.**
+
+| | | |
+|---|---|---|
+| split pointer array | produces addresses | built in |
+| record stride | makes `($3E),Y` resolvable | built in |
+| text, charsets, sprites | only ever looked at | claim fields, already there |
+| RLE title screen | assembler logic | decoder |
+
+**The sandbox does not need loosening for any of this**, and an earlier draft of
+this conversation wrongly implied it did. Two rules are bundled in that sentence:
+SES and no ambient authority is about what a decoder may *do*, and
+`validateDecoded` is about what it may *produce*. Widening the return shape to a
+**closed** structured vocabulary keeps the check as strong as it is — closed for
+the same reason `src/core/ops/` is closed — and touches the sandbox not at all.
+
+**And the better use of a decoder here is search, not decoding.** Sandboxed code
+that scans 47K and proposes "42 records of 200 bytes, fields here and here" is
+inferring structure, and its output should be *claims* carrying
+`by: {author: "decoder:zoneRecords", source: "analysis", confidence: "inferred"}`.
+Proposals are claims like any other — attributed, additive, rejectable in bulk by
+author — which is the weak commitment this redesign wanted, now with a mechanical
+author. The escape hatch stops being where unmodellable things go and becomes
+where *finding instances* happens.
+
+## The model
+
+**Atomic types absorb the interpretation union rather than extending it.** Look
+at what `Interpretation` already is:
+
+| current | as a type |
+|---|---|
+| `data` | `u8[]` |
+| `text` + `encoding` | `char(petscii)[]` |
+| `jumptable` | `addr[]` |
+| `bitmap` + `view` | `u8[]` **and a view** |
+
+Three of four are types wearing enum clothing, and the fourth is the tell:
+`bitmap` is `u8[]` plus a `view`, which the region already carried as a separate
+field. So `bitmap` was never an interpretation — it is a rendering that got into
+the interpretation slot for want of anywhere else, exactly as `code` was a root
+that got into it. Two of six region kinds turn out to be other things.
+
+The primitives, and they are few because the evidence is:
+
+```
+u8 | i8 | u16 | i16      the 16-bit ones carry the stride between their bytes
+addr                     NOT u16 — an addr generates a reference
+char(encoding)           the encoding claims already carry
+T[n]                     fixed array
+record                   named fields at offsets
+```
+
+**Endianness is the stride between the bytes, which unifies it with split
+arrays.** They are the same question at different distances:
+
+| | hi − lo |
+|---|---|
+| little-endian, contiguous | `+1` |
+| big-endian, contiguous | `−1` |
+| split arrays | `+N` |
+
+The projection still prints `u16le`; "stride −1" is not what a reader wants to
+see. Honest caveat: there is evidence for little-endian and for split, **none**
+for big-endian on this machine — the value of the unification is that it makes
+*split* first-class and big-endian falls out free. The one real big-endian case
+known here is BASIC's 5-byte float, exponent first then mantissa MSB first.
+
+`u16le` must mean what `lift.ts` already means by it, including the page-wrap
+quirk where `JMP ($10FF)` takes its high byte from `$1000`. Two notions of "how
+two bytes make a word" would drift.
+
+## Where a type lives
+
+A **new root**, `types`, beside `constants` and `decoders` — the same shape, not
+the same table. A constant is `{id, name, value}`; a type is
+`{id, name, size, fields}`. One map holding both means a discriminator and two
+shapes behind one name, which is how `code` became a region kind.
+
+The shape is borrowed because the justification is verbatim, now for the third
+time:
+
+> a way of reading bytes describes none of its own, so there is no layer for it
+> to move with when the stack is reordered
+
+| | declaration | use |
+|---|---|---|
+| constant | `{id, name, value}` at project level | `{id, address, constantId}` in the layer |
+| decoder | `{id, name, source}` at project level | `view: "snippet:<id>"` on the region |
+| **type** | `{id, name, size, fields}` at project level | `says: {is: "record", typeId}` on the claim |
+
+**Fields are keyed by offset, and carry no ids.** This was the correction that
+mattered, and it came from asking whether the identity rule's *justification*
+transfers rather than whether the rule applies:
+
+> An address cannot identify a label — several share one, and a rename changes
+> the field you would key on.
+
+Several fields **cannot** share an offset in a record. Without unions — for which
+there is no evidence — the offset is unique by construction. So:
+
+```
+types/<typeId>            { name, size }
+types/<typeId>/fields/12  { name: "lifetime", type: "u8" }
+types/<typeId>/fields/13  { name: "nextType", type: "u8" }
+```
+
+Two agents adding different fields touch different keys, which is the whole merge
+property ids were for, and "one field per offset" becomes structural rather than
+checked. `Y.Map` is not ordered and does not need to be: **order is derived from
+offset**, like the region tree and the equate block and the blocks.
+
+It costs one race — renaming a field while somebody else moves it loses the
+rename — which is narrow, last-writer-wins is defensible for it, and whether
+fields get moved at all is the sort of thing to learn from a run.
+
+**Size is stored, count is derived.** `Zone` is 200 bytes; the claim at `$6700`
+has extent 8,400; 42 follows. Storing the count too would be a third fact that
+can disagree with the other two, and an extent that is not a multiple of the size
+becomes a hygiene finding — the same shape as `oddJumptable`.
+
+## Holes are first class
+
+A type that accounts for 60% of its own size is a placeholder in exactly the way
+`zoneDataTable` was, and the same rule applies one level down:
+
+> A claim should cover exactly what it explains. One covering bytes it does not
+> explain is a placeholder, and a placeholder belongs in the gap list rather than
+> over it.
+
+So the field list shows what nothing explains:
+
+```
++0C     lifetime     u8
++0D     ???          3 bytes nothing explains
++10     nextType     u8
+```
+
+Which is the same thing the listing does with gaps, for the same reason and with
+the same meaning.
+
+## Rendering
+
+**A `TYPE` block at the head of a listing, derived and never stored**, holding
+only the types actually used within the span — the rule `ConstantIndex.used()`
+already follows, with the same consequence: a declared but unused type does not
+appear, and `list_types` is how you see them all. Dependencies first, so
+`Creature` precedes `Zone`.
+
+Unlike an equate, a record definition is not real assembler on any 6502 assembler
+of the period. ca65 and 64tass have `.struct` if assemblability ever matters;
+re64's listing is a reading artifact, so this is a free choice.
+
+**The header block is the small half.** The payoff is that a typed claim
+structures the *rows*:
+
+```
+6700  ; Zone[0]  "CAREFUL WITH THAT AXE, EUGENE"
+6700  ..            creatures[0]  type=$03 lifetime=$0C nextType=$FF
+...
+67A0  ..            name
+67C8  ; Zone[1]  "RAINDROPS KEEP FALLING ON MY BEAST"
+```
+
+That is where the 80% comes back. It gives the row builder a fourth strategy
+beside instruction, data and comment — **field rows**, one address per line like
+everything else — and it is one more reason the type must be in the document
+rather than in a decoder: `analyze()` walks it synchronously.
+
+## The UI, which is the same argument one level down
+
+Not a textarea holding JSON. That is the alternative this project already
+rejected:
+
+> Users never type assembler; they edit specific fields. **Rejected
+> alternative:** holding generated text in an editor buffer and parsing edits
+> back.
+
+Field rows with a type picker, an offset, delete and add — the same shape as the
+inline label editor.
+
+**Offsets are entered; auto-fill is a default, not a derivation.** In C you
+author a layout so offsets follow from order and sizes. Here you are *recording*
+one: `nextType` is at `+12` because Jeff Minter put it there. Adding a `u8` after
+`+12` should suggest `+13` and let you overwrite it, because real layouts have
+padding and fields nobody has found yet. It also means **reordering is not an
+operation** — you cannot reorder fields in a struct that already exists in
+memory; you can correct an offset, which is a field edit. So offset stays the key
+and the ordering problem never returns.
+
+Two things that panel wants: **where the type is used** ("1 claim at `$6700`, 42
+records" — the read that verifies the write), and **live repaint**, since
+changing a field's type re-renders 42 records with no round trip. That is the
+first thing since the arrow gutter that is genuinely better in a browser than
+through a tool call.
+
+## Deliberately out
+
+- **Variable length and pointer-chasing.** The BASIC fragments need both, they
+  are the only instance, and they are dev residue rather than game data. "Links
+  resolve" is an *invariant over a structure* rather than a shape, and inventing
+  a syntax for invariants off one example is how you get a mechanism per oddity.
+- **Unions, enums, bitfields, alignment.** No evidence. Bitfields will feel
+  obviously necessary because C64 code tests flags with `AND #$10` constantly, and
+  there is not one instance in what has been examined of a *declared* bitfield
+  being the thing that was lost — the value analysis already tracks bits with
+  nobody declaring anything.
+
+**Enums are the one place types and constants would meet**, and worth recording
+as the reason the two roots might one day join. `enum Colour { WHITE = 1 }` scopes
+a value's name, which answers what the constant design records as unanswerable:
+
+> The same number carries two names in the same program, so there is no
+> value-to-name map to be had and nothing infers one.
+
+`LEFT_ZAPPER = $01` and `WHITE = $01` stop competing once each belongs to a
+different enum, because the use site says which. No evidence yet, and the current
+refusal to guess is working.
+
+## Split arrays: the one piece that does not land cleanly
+
+The stride covers the *reading* — a claim at `podLoPtrArray` of `addr` with a
+stride equal to the distance to `podHiPtrArray` — but it leaves the second array
+with no claim of its own, when the reference project quite reasonably names it.
+Either the hi array's claim is redundant, or a split is two claims plus a
+relation, and this model has no relations. **Wants a second real instance before
+being decided.**
