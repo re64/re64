@@ -28,13 +28,12 @@ const PROJECT = `{
       "type": "bytes",
       "address": "$8000",
       "bytes": "ea",
-      "length": 16,
-      "labels": [
-        { "id": "lbl_1", "address": "$8000", "name": "Start", "type": "function" },
-
-        { "id": "lbl_2", "address": "$8004", "name": "Loop" }
-      ]
+      "length": 16
     }
+  ],
+  "claims": [
+    { "id": "lbl_1", "at": "$8000", "name": "Start", "root": "routine", "author": "m", "source": "user" },
+    { "id": "lbl_2", "at": "$8004", "name": "Loop", "author": "m", "source": "user" }
   ]
 }
 `;
@@ -47,7 +46,7 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const labelNames = (s: ProjectStore) =>
-  (projectFromDoc(s.document()).layers[0].labels ?? []).map((l) => l.name);
+  (projectFromDoc(s.document()).claims ?? []).map((l) => l.name);
 
 /**
  * Wait for something to become true rather than for a fixed time.
@@ -95,7 +94,7 @@ describe("a database, which two processes may hold at once", () => {
     s.watchFile();
 
     asSomeoneElse((text) =>
-      applyOps(text, [{ op: "label.delete", id: "lbl_2", layerId: "lay_a" }])
+      applyOps(text, [{ op: "claim.remove", id: "lbl_2" }])
     );
     await until(() => !labelNames(s).includes("Loop"), "the deletion to arrive");
     s.stopWatching();
@@ -104,8 +103,7 @@ describe("a database, which two processes may hold at once", () => {
   it("does not react to its own writes", async () => {
     const s = store();
     s.runOps(
-      [{ op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "Mine",
-         type: "function" }],
+      [{ op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Mine", root: "routine", by: { author: "test", source: "user" } } }],
       "me",
       1
     );
@@ -173,15 +171,14 @@ describe("a project file, which has one writer", () => {
     // This is what makes not watching affordable: latency, not correctness.
     const s = store();
     s.runOps(
-      [{ op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "Mine",
-         type: "function" }],
+      [{ op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Mine", root: "routine", by: { author: "test", source: "user" } } }],
       "me",
       1
     );
 
     open().writeText(open().readText().replace('"Loop"', '"Elsewhere"'));
     s.runOps(
-      [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Later" }],
+      [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Later", by: { author: "test", source: "user" } } }],
       "me",
       2
     );

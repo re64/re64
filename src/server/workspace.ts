@@ -2137,30 +2137,18 @@ export class Workspace {
     // label — one action, two operations, so undo takes both back together.
     let beside: { address: number; from: string }[] = [];
     const result = this.edit(caller, (loaded) => {
-      const { layerId, create } = ensureOwningLayer(loaded, address, this.room.projectId);
-      const built = create
-        ? { ops: [{ op: "label.set", id: newId("lbl"), layerId, address, name, type, extent } as Op] }
-        : labelSetOps(loaded, address, name, type, extent);
+      const built = labelSetOps(loaded, address, name, type, extent);
       if (built.addedBeside) beside = [{ address, from: built.addedBeside }];
-      const label: Op[] = built.ops;
+
+      // A comment still needs a layer to hold it; a name no longer does. That
+      // asymmetry is temporary — comments move up next — and it is why the
+      // symbols layer is created here rather than for the name.
+      const owning = comment ? ensureOwningLayer(loaded, address, this.room.projectId) : undefined;
 
       return [
-        ...(create ? [create] : []),
-        ...label,
-        ...(comment
-          ? [
-              create
-                ? ({
-                    op: "comment.set",
-                    id: newId("cmt"),
-                    layerId,
-                    address,
-                    placement: "before",
-                    text: comment,
-                  } as Op)
-                : commentAddOp(loaded, address, "before", comment),
-            ]
-          : []),
+        ...(owning?.create ? [owning.create] : []),
+        ...built.ops,
+        ...(comment ? [commentAddOp(loaded, address, "before", comment)] : []),
       ];
     });
     // A label inside an instruction resolves in operands and renders no row —
@@ -2227,45 +2215,19 @@ export class Workspace {
       let madeLayer: string | undefined;
 
       for (const entry of labels) {
-        let layerId: string;
-        if (madeLayer !== undefined && !ownsAddress(loaded, entry.address)) {
-          layerId = madeLayer;
-        } else {
+        // No layer at all for the name: a claim names an address whether or not
+        // anything supplies its bytes, which is what the symbols layer existed
+        // to fake.
+        ops.push(...labelSetOps(loaded, entry.address, entry.name, entry.type, entry.extent).ops);
+
+        // A comment still needs one, so it is created here and only here.
+        if (entry.comment) {
           const owning = ensureOwningLayer(loaded, entry.address, this.room.projectId);
-          layerId = owning.layerId;
-          if (owning.create) {
+          if (owning.create && owning.layerId !== madeLayer) {
             ops.push(owning.create);
             madeLayer = owning.layerId;
           }
-        }
-
-        if (madeLayer === layerId) {
-          ops.push({
-            op: "label.set",
-            id: newId("lbl"),
-            layerId,
-            address: entry.address,
-            name: entry.name,
-            type: entry.type,
-            extent: entry.extent,
-          });
-        } else {
-          ops.push(...labelSetOps(loaded, entry.address, entry.name, entry.type, entry.extent).ops);
-        }
-
-        if (entry.comment) {
-          ops.push(
-            madeLayer === layerId
-              ? ({
-                  op: "comment.set",
-                  id: newId("cmt"),
-                  layerId,
-                  address: entry.address,
-                  placement: "before",
-                  text: entry.comment,
-                } as Op)
-              : commentAddOp(loaded, entry.address, "before", entry.comment)
-          );
+          ops.push(commentAddOp(loaded, entry.address, "before", entry.comment));
         }
       }
 
@@ -3249,11 +3211,15 @@ export class Workspace {
 
     const address = target;
     return this.edit(caller, (loaded) => {
-      const here = projectLabelsAt(loaded, owningLayerId(loaded, address), address);
+      // Claims, not layer labels: a claim has no owning layer to look it up in,
+      // and asking for one threw on every address outside the loaded bytes.
+      const here = loaded.claims.filter(
+        (c) => c.at === address && c.name !== undefined && c.says === undefined
+      );
       if (here.length > 1) {
         throw new Error(
           `${hex4(address)} carries ${here.length} labels — ` +
-            here.map((l) => `${l.name} (${l.id})`).join(", ") +
+            here.map((c) => `${c.name} (${c.id})`).join(", ") +
             `. Give the id of the one to remove.`
         );
       }
@@ -3433,13 +3399,30 @@ export class Workspace {
       enclosing.start <= start &&
       end < enclosing.end;
 
+    // Captured so the caller gets it back. `set_decoder` returned no id and two
+    // agents collided over it in experiment 3: a write whose result cannot be
+    // named again is one the caller has to go looking for — and with declaring
+    // now additive, the id is the only way to revise what you just wrote.
+    let claimId = id;
     const result = this.edit(
       caller,
-      (loaded) => [regionSetOp(loaded, start, end, kind, name, comment, encoding, viewOrCleared, id)],
+      (loaded) => [
+        ...(() => {
+          const op = regionSetOp(loaded, start, end, kind, name, comment, encoding, viewOrCleared, id);
+          if (op.op === "claim.add") claimId = op.claim.id;
+          return [op];
+        })(),
+        // A comment given here is a comment *about the address*, not a field on
+        // the claim. A claim's `description` is what a name means on this
+        // machine; this is what somebody wrote about these bytes in this
+        // project, and the two are deliberately different objects.
+        ...(comment ? [commentAddOp(loaded, start, "before", comment)] : []),
+      ],
       { start, end }
     );
     return {
       ...result,
+      ...(claimId ? { claim: claimId } : {}),
       covers: `${hex4(start)}-${hex4(end - 1)} (${end - start} bytes)`,
       // Said out loud, because "I declared 32 bytes and something else changed"
       // is exactly the kind of thing a caller should not have to discover.

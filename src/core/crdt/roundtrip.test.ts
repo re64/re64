@@ -45,18 +45,11 @@ const BASE = `{
       "type": "prg",
       "path": "game.prg",
       "address": "$8000",
-      "labels": [
-        { "id": "lbl_1", "address": "$8000", "name": "Start", "type": "function" },
-        { "id": "lbl_2", "address": "$8100", "name": "Loop" }
-      ],
-      "regions": [
-        { "id": "rgn_1", "start": "$8080", "end": "$80A0", "kind": "text", "name": "copyright" }
-      ],
       "comments": [
         { "id": "cmt_1", "address": "$8000", "text": "the entry point" }
       ],
       "labelUses": [
-        { "id": "lbl_u1", "address": "$8100", "label": "lbl_2" }
+        { "id": "lbl_u1", "address": "$8100", "label": "clm_3" }
       ],
       "constantUses": [
         { "id": "cst_u1", "address": "$8000", "constant": "cst_1" }
@@ -64,14 +57,16 @@ const BASE = `{
     },
     { "id": "lay_b", "type": "symbols", "name": "zp" }
   ],
+  "claims": [
+    { "id": "clm_1", "at": "$8000", "name": "Start", "root": "routine", "author": "marcus", "source": "user" },
+    { "id": "clm_2", "at": "$8080", "extent": 32, "name": "copyright", "is": "text", "encoding": "petscii", "root": "data", "author": "marcus", "source": "user" },
+    { "id": "clm_3", "at": "$8100", "name": "Loop", "author": "marcus", "source": "user" }
+  ],
   "constants": [{ "id": "cst_1", "name": "WHITE", "value": "$01" }],
   "decoders": [{ "id": "dec_1", "name": "plain", "source": "return [...bytes];" }],
   "files": [{ "name": "game.prg", "hash": "abc123", "size": 16 }],
   "targets": [{ "name": "loader", "layers": ["lay_a"] }],
-  "primaryLabels": { "$8000": "lbl_1" },
-  "claims": [
-    { "id": "clm_1", "at": "$8080", "extent": 32, "name": "copyright", "is": "text", "encoding": "petscii", "author": "marcus", "source": "user" }
-  ]
+  "primaryLabels": { "$8000": "clm_1" }
 }
 `;
 
@@ -117,14 +112,6 @@ const CASES: { [K in Op["op"]]: Case } = {
     },
   },
   "claim.remove": { op: { op: "claim.remove", id: "clm_1" } },
-  "label.set": {
-    op: { op: "label.set", id: "lbl_3", layerId: "lay_a", address: 0x8200, name: "Added" },
-  },
-  "label.delete": { op: { op: "label.delete", id: "lbl_2", layerId: "lay_a" } },
-  "region.set": {
-    op: { op: "region.set", id: "rgn_2", layerId: "lay_a", start: 0x8300, end: 0x8320, kind: "data" },
-  },
-  "region.delete": { op: { op: "region.delete", id: "rgn_1", layerId: "lay_a" } },
   "comment.set": {
     op: {
       op: "comment.set",
@@ -138,7 +125,7 @@ const CASES: { [K in Op["op"]]: Case } = {
   "comment.delete": { op: { op: "comment.delete", id: "cmt_1", layerId: "lay_a" } },
   "meta.set": { op: { op: "meta.set", key: "description", value: "a harness project" } },
   "label.bind": {
-    op: { op: "label.bind", id: "lbl_u2", layerId: "lay_a", address: 0x8000, labelId: "lbl_1" },
+    op: { op: "label.bind", id: "lbl_u2", layerId: "lay_a", address: 0x8000, labelId: "clm_1" },
   },
   "label.unbind": { op: { op: "label.unbind", id: "lbl_u1", layerId: "lay_a" } },
   "constant.set": { op: { op: "constant.set", id: "cst_2", name: "RED", value: 0x02 } },
@@ -235,7 +222,7 @@ describe("every operation reaches every path", () => {
   it("covers the whole vocabulary", () => {
     // The table is exhaustive by type; this only reports the count, so a
     // vocabulary that grows is visible in the output rather than only in a diff.
-    expect(kinds.length).toBe(26);
+    expect(kinds.length).toBe(22);
   });
 
   for (const kind of kinds) {

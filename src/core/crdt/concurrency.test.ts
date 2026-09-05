@@ -9,6 +9,7 @@ import {
 import { applyOpToDoc } from "./ops.js";
 import { Project } from "../project/project.js";
 import { Op } from "../ops/types.js";
+import { newId } from "../project/identity.js";
 
 /**
  * What happens when edits genuinely overlap.
@@ -20,17 +21,11 @@ import { Op } from "../ops/types.js";
  */
 
 const PROJECT: Project = {
-  layers: [
-    {
-      id: "lay_a",
-      type: "prg",
-      path: "game.prg",
-      labels: [
-        { id: "lbl_1", address: "$8000", name: "Start", type: "function" },
-        { id: "lbl_2", address: "$8100", name: "Loop" },
-      ],
-      regions: [{ id: "rgn_1", start: "$8200", end: "$8210", kind: "data" }],
-    },
+  layers: [{ id: "lay_a", type: "prg", path: "game.prg" }],
+  claims: [
+    { id: "lbl_1", at: "$8000", name: "Start", root: "routine", author: "m", source: "user" },
+    { id: "lbl_2", at: "$8100", name: "Loop", author: "m", source: "user" },
+    { id: "rgn_1", at: "$8200", extent: 16, is: "data", root: "data", author: "m", source: "user" },
   ],
 };
 
@@ -49,16 +44,11 @@ function syncAll(...docs: CrdtDoc[]): void {
   }
 }
 
-const labelsOf = (doc: CrdtDoc) => projectFromDoc(doc).layers[0].labels!;
+const labelsOf = (doc: CrdtDoc) => projectFromDoc(doc).claims!;
 const labelById = (doc: CrdtDoc, id: string) => labelsOf(doc).find((l) => l.id === id);
 
-const rename = (id: string, name: string): Op => ({
-  op: "label.set",
-  id,
-  layerId: "lay_a",
-  address: id === "lbl_1" ? 0x8000 : 0x8100,
-  name,
-});
+/** Renaming an existing claim, which is a revision rather than a second name. */
+const rename = (id: string, name: string): Op => ({ op: "claim.set", id, fields: { name } });
 
 describe("two people editing the same label", () => {
   it("converges on one name rather than duplicating the label", () => {
@@ -67,7 +57,7 @@ describe("two people editing the same label", () => {
     applyOpToDoc(b, rename("lbl_2", "InnerLoop"));
     syncAll(a, b);
 
-    expect(labelsOf(a)).toHaveLength(2);
+    expect(labelsOf(a)).toHaveLength(3);
     expect(labelById(a, "lbl_2")!.name).toBe(labelById(b, "lbl_2")!.name);
     expect(["MainLoop", "InnerLoop"]).toContain(labelById(a, "lbl_2")!.name);
   });
@@ -76,18 +66,16 @@ describe("two people editing the same label", () => {
     // The reason a label is a nested map rather than a single value: renaming
     // and retyping are different edits and should not clobber each other.
     const [a, b] = [participant(1), participant(2)];
-    applyOpToDoc(a, {
-      op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "Begin", type: "function",
-    });
-    applyOpToDoc(b, {
-      op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "Start", type: "code",
-    });
+    // Different fields of one claim: both must survive, which is the property
+    // partial revision exists for.
+    applyOpToDoc(a, { op: "claim.set", id: "lbl_1", fields: { name: "Begin" } });
+    applyOpToDoc(b, { op: "claim.set", id: "lbl_1", fields: { root: "location" } });
     syncAll(a, b);
 
     const merged = labelById(a, "lbl_1")!;
     expect(labelById(b, "lbl_1")).toEqual(merged);
     // Whichever name won, the type edit is not lost to it.
-    expect(merged.type).toBeDefined();
+    expect(merged.root).toBeDefined();
   });
 });
 
@@ -136,16 +124,14 @@ describe("three participants", () => {
     const [a, b, c] = [participant(1), participant(2), participant(3)];
     applyOpToDoc(a, rename("lbl_1", "FromA"));
     applyOpToDoc(b, rename("lbl_2", "FromB"));
-    applyOpToDoc(c, {
-      op: "region.set", id: "rgn_1", layerId: "lay_a", start: 0x8200, end: 0x8210, kind: "text",
-    });
+    applyOpToDoc(c, { op: "claim.set", id: "rgn_1", fields: { says: { is: "text" } } });
     syncAll(a, b, c);
 
     expect(projectFromDoc(a)).toEqual(projectFromDoc(b));
     expect(projectFromDoc(b)).toEqual(projectFromDoc(c));
     expect(labelById(a, "lbl_1")!.name).toBe("FromA");
     expect(labelById(a, "lbl_2")!.name).toBe("FromB");
-    expect(projectFromDoc(a).layers[0].regions![0].kind).toBe("text");
+    expect(projectFromDoc(a).claims!.find((c) => c.id === "rgn_1")!.is).toBe("text");
   });
 
   it("converges even when they sync in a chain rather than all at once", () => {
@@ -175,9 +161,7 @@ describe("working apart and rejoining", () => {
     for (const name of ["One", "Two", "Three"]) {
       applyOpToDoc(offline, rename("lbl_2", name));
     }
-    applyOpToDoc(offline, {
-      op: "label.set", id: "lbl_new", layerId: "lay_a", address: 0x8300, name: "AddedOffline",
-    });
+    applyOpToDoc(offline, { op: "claim.add", claim: { id: "lbl_new", at: 0x8300, name: "AddedOffline", by: { author: "test", source: "user" } } });
 
     syncAll(online, offline);
 
@@ -192,7 +176,7 @@ describe("working apart and rejoining", () => {
     const present = participant(1);
     const away = participant(2);
 
-    applyOpToDoc(present, { op: "label.delete", id: "lbl_2", layerId: "lay_a" });
+    applyOpToDoc(present, { op: "claim.remove", id: "lbl_2" });
     // The away client is still editing what has already gone.
     applyOpToDoc(away, rename("lbl_2", "StillHere"));
 

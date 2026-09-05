@@ -33,12 +33,12 @@ const PROJECT = `{
       "type": "bytes",
       "address": "$8000",
       "bytes": "ea",
-      "length": 32,
-      "labels": [
-        { "id": "lbl_1", "address": "$8000", "name": "Start" },
-        { "id": "lbl_2", "address": "$8004", "name": "Loop" }
-      ]
+      "length": 32
     }
+  ],
+  "claims": [
+    { "id": "lbl_1", "at": "$8000", "name": "Start", "author": "m", "source": "user" },
+    { "id": "lbl_2", "at": "$8004", "name": "Loop", "author": "m", "source": "user" }
   ]
 }
 `;
@@ -122,9 +122,7 @@ describe("an HTTP write racing a live session", () => {
 
     const alice = await connect("alice");
     await settle();
-    applyOpToDoc(alice.doc, {
-      op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "FromSocket",
-    });
+    applyOpToDoc(alice.doc, { op: "claim.set", id: "lbl_1", fields: { name: "FromSocket" } });
     await settle();
 
     // An agent sends the document as it looked before Alice's edit. It cannot
@@ -137,7 +135,7 @@ describe("an HTTP write racing a live session", () => {
     expect(body.error).toMatch(/someone else edited it/);
     // Alice's edit is intact in the shared document.
     expect(
-      projectFromDoc(alice.doc).layers[0].labels!.find((l) => l.id === "lbl_1")!.name
+      projectFromDoc(alice.doc).claims!.find((l) => l.id === "lbl_1")!.name
     ).toBe("FromSocket");
 
     await alice.close();
@@ -146,9 +144,7 @@ describe("an HTTP write racing a live session", () => {
   it("accepts a write based on the current state and merges it in", async () => {
     const alice = await connect("alice");
     await settle();
-    applyOpToDoc(alice.doc, {
-      op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "FromSocket",
-    });
+    applyOpToDoc(alice.doc, { op: "claim.set", id: "lbl_1", fields: { name: "FromSocket" } });
     await settle();
 
     // Re-read: the version now reflects Alice's edit, not the file on disk.
@@ -175,9 +171,7 @@ describe("an HTTP write racing a live session", () => {
 
     const alice = await connect("alice");
     await settle();
-    applyOpToDoc(alice.doc, {
-      op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Changed",
-    });
+    applyOpToDoc(alice.doc, { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Changed", by: { author: "test", source: "user" } } });
     await settle();
 
     const after = (await fetchProject()).version;
@@ -198,7 +192,7 @@ describe("an HTTP write racing a live session", () => {
     });
     await settle();
 
-    const seen = projectFromDoc(alice.doc).layers[0].labels!.find((l) => l.id === "lbl_2");
+    const seen = projectFromDoc(alice.doc).claims!.find((l) => l.id === "lbl_2");
     expect(seen?.name).toBe("PushedIn");
 
     await alice.close();
@@ -221,19 +215,13 @@ describe("three clients over sockets", () => {
     const [a, b, c] = await Promise.all([connect("alice"), connect("bob"), connect("agent-1")]);
     await settle();
 
-    applyOpToDoc(a.doc, {
-      op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "A",
-    });
-    applyOpToDoc(b.doc, {
-      op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "B",
-    });
-    applyOpToDoc(c.doc, {
-      op: "label.set", id: "lbl_3", layerId: "lay_a", address: 0x8008, name: "C",
-    });
+    applyOpToDoc(a.doc, { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "A", by: { author: "test", source: "user" } } });
+    applyOpToDoc(b.doc, { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "B", by: { author: "test", source: "user" } } });
+    applyOpToDoc(c.doc, { op: "claim.add", claim: { id: "lbl_3", at: 0x8008, name: "C", by: { author: "test", source: "user" } } });
     await settle();
 
     for (const client of [a, b, c]) {
-      const names = projectFromDoc(client.doc).layers[0].labels!.map((l) => l.name);
+      const names = projectFromDoc(client.doc).claims!.map((l) => l.name);
       expect(names).toEqual(["A", "B", "C"]);
     }
 

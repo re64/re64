@@ -226,12 +226,6 @@ export function diffProjects(from: Project, to: Project): Op[] {
   const beforeDecoders = new Map((from.decoders ?? []).filter((d) => d.id).map((d) => [d.id!, d]));
   const afterDecoders = new Map((to.decoders ?? []).filter((d) => d.id).map((d) => [d.id!, d]));
 
-  for (const [id, owned] of beforeLabels) {
-    if (!afterLabels.has(id)) ops.push({ op: "label.delete", id, layerId: owned.layerId });
-  }
-  for (const [id, owned] of beforeRegions) {
-    if (!afterRegions.has(id)) ops.push({ op: "region.delete", id, layerId: owned.layerId });
-  }
   for (const [id, owned] of beforeComments) {
     if (!afterComments.has(id)) ops.push({ op: "comment.delete", id, layerId: owned.layerId });
   }
@@ -250,19 +244,6 @@ export function diffProjects(from: Project, to: Project): Op[] {
     if (!afterClaims.has(id)) ops.push({ op: "claim.remove", id });
   }
 
-  for (const [id, owned] of afterLabels) {
-    const before = beforeLabels.get(id);
-    if (before && before.layerId === owned.layerId && sameLabel(before.entry, owned.entry)) continue;
-    ops.push({
-      op: "label.set",
-      id,
-      layerId: owned.layerId,
-      address: parseProjectAddress(owned.entry.address),
-      name: owned.entry.name,
-      type: owned.entry.type,
-      extent: owned.entry.extent,
-    });
-  }
 
   // Removals before additions, as everywhere else here.
   for (const id of beforeDecoders.keys()) {
@@ -352,22 +333,6 @@ export function diffProjects(from: Project, to: Project): Op[] {
     });
   }
 
-  for (const [id, owned] of afterRegions) {
-    const before = beforeRegions.get(id);
-    if (before && before.layerId === owned.layerId && sameRegion(before.entry, owned.entry)) continue;
-    ops.push({
-      op: "region.set",
-      id,
-      layerId: owned.layerId,
-      start: parseProjectAddress(owned.entry.start),
-      end: parseProjectAddress(owned.entry.end),
-      kind: owned.entry.kind,
-      name: owned.entry.name,
-      comment: owned.entry.comment,
-      encoding: owned.entry.encoding,
-      view: owned.entry.view,
-    });
-  }
 
   const beforePrimary = from.primaryLabels ?? {};
   const afterPrimary = to.primaryLabels ?? {};

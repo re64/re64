@@ -14,13 +14,12 @@ const PROJECT = `{
       "type": "bytes",
       "address": "$8000",
       "bytes": "ea",
-      "length": 16,
-      "labels": [
-        { "id": "lbl_1", "address": "$8000", "name": "Start", "type": "function" },
-
-        { "id": "lbl_2", "address": "$8004", "name": "Loop" }
-      ]
+      "length": 16
     }
+  ],
+  "claims": [
+    { "id": "lbl_1", "at": "$8000", "name": "Start", "root": "routine", "author": "marcus", "source": "user" },
+    { "id": "lbl_2", "at": "$8004", "name": "Loop", "author": "marcus", "source": "user" }
   ]
 }
 `;
@@ -75,12 +74,8 @@ describe.each(BACKENDS)("$name", (b) => {
     it("writes the file and records one entry, not one per edit", () => {
       const s = store();
       s.addAuthor("alice");
-      applyOpToDoc(s.document(), {
-        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "MainLoop",
-      });
-      applyOpToDoc(s.document(), {
-        op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "Begin",
-      });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "MainLoop", by: { author: "test", source: "user" } } });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Begin", by: { author: "test", source: "user" } } });
 
       const entry = s.flatten(1000);
 
@@ -94,9 +89,7 @@ describe.each(BACKENDS)("$name", (b) => {
       // The reason flatten diffs rather than writing the document out: the
       // document knows the content, not how the file was laid out.
       const s = store();
-      applyOpToDoc(s.document(), {
-        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "MainLoop",
-      });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "MainLoop", by: { author: "test", source: "user" } } });
       s.flatten(1000);
 
       const after = currentText();
@@ -123,19 +116,17 @@ describe.each(BACKENDS)("$name", (b) => {
       s.addAuthor("bob");
       s.addAuthor("agent-1");
       s.addAuthor("bob");
-      applyOpToDoc(s.document(), {
-        op: "label.delete", id: "lbl_2", layerId: "lay_a",
-      });
+      applyOpToDoc(s.document(), { op: "claim.remove", id: "lbl_2" });
 
       expect(s.flatten(1000)?.authors).toEqual(["agent-1", "bob"]);
     });
 
     it("accumulates history across sessions", () => {
+      // Distinct edits, or the second is an idempotent no-op and there is
+      // nothing for the second session to record.
       for (const name of ["A", "B"]) {
         const s = store();
-        applyOpToDoc(s.document(), {
-          op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name,
-        });
+        applyOpToDoc(s.document(), { op: "claim.set", id: "lbl_2", fields: { name } });
         s.flatten(1000);
       }
 
@@ -147,9 +138,7 @@ describe.each(BACKENDS)("$name", (b) => {
     it("recovers edits from the update log", () => {
       // A killed browser or server must not lose work that was never flattened.
       const first = store();
-      applyOpToDoc(first.document(), {
-        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Survived",
-      });
+      applyOpToDoc(first.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Survived", by: { author: "test", source: "user" } } });
       // No flatten: simulate the process dying here.
 
       expect(storage().hasUpdates()).toBe(true);
@@ -166,13 +155,11 @@ describe.each(BACKENDS)("$name", (b) => {
       // flatten meant the log had served its purpose; now discarding it would
       // discard the work itself.
       const s = store();
-      applyOpToDoc(s.document(), {
-        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Done",
-      });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Done", by: { author: "test", source: "user" } } });
       s.flatten(1000);
 
       expect(storage().hasUpdates()).toBe(true);
-      const names = (projectFromDoc(store().document()).layers[0].labels ?? []).map(
+      const names = (projectFromDoc(store().document()).claims ?? []).map(
         (l) => l.name
       );
       expect(names).toContain("Done");
@@ -185,13 +172,11 @@ describe.each(BACKENDS)("$name", (b) => {
       // it had served its purpose and could go. Now the log *is* the project
       // and the text is the export, so clearing it here deletes everything.
       const s = store();
-      applyOpToDoc(s.document(), {
-        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Kept",
-      });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Kept", by: { author: "test", source: "user" } } });
       s.writeFile();
 
       expect(storage().hasUpdates()).toBe(true);
-      const names = (projectFromDoc(store().document()).layers[0].labels ?? []).map(
+      const names = (projectFromDoc(store().document()).claims ?? []).map(
         (l) => l.name
       );
       expect(names).toContain("Kept");
@@ -199,13 +184,11 @@ describe.each(BACKENDS)("$name", (b) => {
 
     it("comes back after the process dies mid-edit", () => {
       const s = store();
-      applyOpToDoc(s.document(), {
-        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Survived",
-      });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Survived", by: { author: "test", source: "user" } } });
       // No write, no flatten, no clean exit — just gone.
 
       const reopened = store();
-      const names = (projectFromDoc(reopened.document()).layers[0].labels ?? []).map(
+      const names = (projectFromDoc(reopened.document()).claims ?? []).map(
         (l) => l.name
       );
       expect(names).toContain("Survived");
@@ -213,13 +196,8 @@ describe.each(BACKENDS)("$name", (b) => {
 
     it("reaches the same state however many times it is reopened", () => {
       const s = store();
-      applyOpToDoc(s.document(), {
-        op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "One",
-        type: "function",
-      });
-      applyOpToDoc(s.document(), {
-        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Two",
-      });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "One", root: "routine", by: { author: "test", source: "user" } } });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Two", by: { author: "test", source: "user" } } });
 
       const first = JSON.stringify(projectFromDoc(store().document()));
       const second = JSON.stringify(projectFromDoc(store().document()));
@@ -242,35 +220,32 @@ describe.each(BACKENDS)("$name", (b) => {
       // human renames a label, an agent touches it moments later, and undo
       // restores something neither of them ever chose.
       const s = store();
-      applyOpToDoc(s.document(), {
-        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "ByAHuman",
-      });
+      applyOpToDoc(s.document(), { op: "claim.set", id: "lbl_2", fields: { name: "ByAHuman" } });
       // Deliberately no writeFile(): this is the window the debounce leaves open.
       expect(currentText()).not.toContain("ByAHuman");
 
-      s.runOps(
-        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "ByAnAgent" }],
-        "agent",
-        1
-      );
+      s.runOps([{ op: "claim.set", id: "lbl_2", fields: { name: "ByAnAgent" } }], "agent", 1);
 
+      // The document's value, not the export's stale one.
       const recorded = storage().readOps().at(-1)!;
-      expect(recorded.inverse).toMatchObject({ op: "label.set", name: "ByAHuman" });
+      expect(recorded.inverse).toMatchObject({
+        op: "claim.set",
+        id: "lbl_2",
+        fields: { name: "ByAHuman" },
+      });
     });
 
     it("restores that value when undone", () => {
       const s = store();
-      applyOpToDoc(s.document(), {
-        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "ByAHuman",
-      });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "ByAHuman", by: { author: "test", source: "user" } } });
       s.runOps(
-        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "ByAnAgent" }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "ByAnAgent", by: { author: "test", source: "user" } } }],
         "agent",
         1
       );
 
       s.undo("agent");
-      const names = (projectFromDoc(s.document()).layers[0].labels ?? []).map((l) => l.name);
+      const names = (projectFromDoc(s.document()).claims ?? []).map((l) => l.name);
       expect(names).toContain("ByAHuman");
     });
   });
@@ -281,9 +256,7 @@ describe.each(BACKENDS)("$name", (b) => {
       // every write finds a difference and writes again. It would look like a
       // phantom collaborator editing in a loop rather than like a bug here.
       const s = store();
-      applyOpToDoc(s.document(), {
-        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Renamed",
-      });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Renamed", by: { author: "test", source: "user" } } });
 
       s.writeFile();
       expect(diffProjects(parseProject(currentText()), projectFromDoc(s.document()))).toEqual([]);
@@ -291,10 +264,7 @@ describe.each(BACKENDS)("$name", (b) => {
 
     it("stops writing once there is nothing left to say", () => {
       const s = store();
-      applyOpToDoc(s.document(), {
-        op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "Once",
-        type: "function",
-      });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Once", root: "routine", by: { author: "test", source: "user" } } });
 
       expect(s.writeFile().length).toBeGreaterThan(0);
       expect(s.writeFile()).toEqual([]);
@@ -303,10 +273,7 @@ describe.each(BACKENDS)("$name", (b) => {
 
     it("holds for regions and the primary index too, not just labels", () => {
       const s = store();
-      applyOpToDoc(s.document(), {
-        op: "region.set", id: "rgn_x", layerId: "lay_a", start: 0x8008, end: 0x800c,
-        kind: "text", name: "blurb",
-      });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "rgn_x", at: 0x8008, extent: 0x800c - 0x8008, name: "blurb", says: { is: "text" }, root: "data", by: { author: "test", source: "user" } } });
       applyOpToDoc(s.document(), { op: "primary.set", address: 0x8000, labelId: "lbl_1" });
 
       s.writeFile();
@@ -321,13 +288,10 @@ describe.each(BACKENDS)("$name", (b) => {
 
     it("does not revert an edit the other made", () => {
       const [server, cli] = two();
-      applyOpToDoc(server.document(), {
-        op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "FromWeb",
-        type: "function",
-      });
+      applyOpToDoc(server.document(), { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "FromWeb", root: "routine", by: { author: "test", source: "user" } } });
 
       cli.runOps(
-        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "FromCli" }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "FromCli", by: { author: "test", source: "user" } } }],
         "cli",
         1
       );
@@ -346,14 +310,11 @@ describe.each(BACKENDS)("$name", (b) => {
       // CLI is about to read — so the CLI replays it rather than writing a text
       // that silently drops it.
       const [server, cli] = two();
-      applyOpToDoc(server.document(), {
-        op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "NotYetWritten",
-        type: "function",
-      });
+      applyOpToDoc(server.document(), { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "NotYetWritten", root: "routine", by: { author: "test", source: "user" } } });
       expect(currentText()).not.toContain("NotYetWritten");
 
       cli.runOps(
-        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Cli" }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Cli", by: { author: "test", source: "user" } } }],
         "cli",
         1
       );
@@ -366,7 +327,7 @@ describe.each(BACKENDS)("$name", (b) => {
     it("restores the exact bytes it started from", () => {
       const s = store();
       s.runOps(
-        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Renamed" }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Renamed", by: { author: "test", source: "user" } } }],
         "cli",
         1
       );
@@ -381,18 +342,17 @@ describe.each(BACKENDS)("$name", (b) => {
       // silently revert what a browser user just did.
       const s = store();
       s.runOps(
-        [{ op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "ByAlice",
-           type: "function" }],
+        [{ op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "ByAlice", root: "routine", by: { author: "test", source: "user" } } }],
         "alice",
         1
       );
       s.runOps(
-        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "ByBob" }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "ByBob", by: { author: "test", source: "user" } } }],
         "bob",
         2
       );
 
-      expect(s.undo("alice").undone).toBe("set $8000 to ByAlice (function)");
+      expect(s.undo("alice").undone).toBe("mark $8000 a routine (ByAlice)");
       expect(currentText()).toContain("ByBob");
       expect(currentText()).not.toContain("ByAlice");
     });
@@ -400,17 +360,17 @@ describe.each(BACKENDS)("$name", (b) => {
     it("reaches anyone's edit when asked to", () => {
       const s = store();
       s.runOps(
-        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "ByBob" }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "ByBob", by: { author: "test", source: "user" } } }],
         "bob",
         1
       );
-      expect(s.undo().undone).toBe("set $8004 to ByBob");
+      expect(s.undo().undone).toBe("name $8004 ByBob");
     });
 
     it("has nothing to undo when the author did nothing", () => {
       const s = store();
       s.runOps(
-        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "ByBob" }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "ByBob", by: { author: "test", source: "user" } } }],
         "bob",
         1
       );
@@ -424,8 +384,8 @@ describe.each(BACKENDS)("$name", (b) => {
       const s = store();
       s.runOps(
         [
-          { op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "First" },
-          { op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Second" },
+          { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "First", by: { author: "test", source: "user" } } },
+          { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Second", by: { author: "test", source: "user" } } },
         ],
         "cli",
         1
@@ -443,19 +403,19 @@ describe.each(BACKENDS)("$name", (b) => {
       // browser tabs are, and neither may take back the other's work.
       const s = store();
       s.runOps(
-        [{ op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "ByOne" }],
+        [{ op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "ByOne", by: { author: "test", source: "user" } } }],
         "usr_agent",
         1,
         "ses_one"
       );
       s.runOps(
-        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "ByTwo" }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "ByTwo", by: { author: "test", source: "user" } } }],
         "usr_agent",
         2,
         "ses_two"
       );
 
-      expect(s.undo("usr_agent", "ses_one").undone).toBe("set $8000 to ByOne");
+      expect(s.undo("usr_agent", "ses_one").undone).toBe("name $8000 ByOne");
       expect(currentText()).toContain("ByTwo");
       expect(currentText()).not.toContain("ByOne");
     });
@@ -467,14 +427,14 @@ describe.each(BACKENDS)("$name", (b) => {
       const s = store();
       s.runOps(
         [
-          { op: "label.set", id: "lbl_1", layerId: "lay_a", address: 0x8000, name: "Mine" },
-          { op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "AlsoMine" },
+          { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Mine", by: { author: "test", source: "user" } } },
+          { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "AlsoMine", by: { author: "test", source: "user" } } },
         ],
         "alice",
         1
       );
       s.runOps(
-        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "BobWasHere" }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "BobWasHere", by: { author: "test", source: "user" } } }],
         "bob",
         2
       );
@@ -482,7 +442,7 @@ describe.each(BACKENDS)("$name", (b) => {
       const outcome = s.undo("alice");
       expect(outcome.applied).toBe(1);
       expect(outcome.skipped).toEqual([
-        { description: "set $8004 to AlsoMine", reason: "changed by someone else since" },
+        { description: "name $8004 AlsoMine", reason: "changed by someone else since" },
       ]);
       // Alice's own untouched edit came back; Bob's survived.
       expect(currentText()).not.toContain("Mine\"");
@@ -492,12 +452,12 @@ describe.each(BACKENDS)("$name", (b) => {
     it("redoes what it undid, and stops there", () => {
       const s = store();
       s.runOps(
-        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Renamed" }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Renamed", by: { author: "test", source: "user" } } }],
         "cli",
         1
       );
       s.undo("cli");
-      expect(s.redo("cli").undone).toBe("set $8004 to Renamed");
+      expect(s.redo("cli").undone).toBe("name $8004 Renamed");
       expect(currentText()).toContain("Renamed");
       expect(s.redo("cli").undone).toBeNull();
     });
@@ -516,7 +476,7 @@ describe.each(BACKENDS)("$name", (b) => {
       const s = store();
       s.addAuthor("alice");
       s.runOps(
-        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Renamed" }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Renamed", by: { author: "test", source: "user" } } }],
         "alice",
         1
       );
@@ -531,7 +491,7 @@ describe.each(BACKENDS)("$name", (b) => {
     it("distinguishes an undone operation from a missing one", () => {
       const s = store();
       s.runOps(
-        [{ op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Renamed" }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Renamed", by: { author: "test", source: "user" } } }],
         "alice",
         1
       );
@@ -543,9 +503,7 @@ describe.each(BACKENDS)("$name", (b) => {
     it("says where the snapshot reaches, so a long log is visible", () => {
       const s = store();
       s.document();
-      applyOpToDoc(s.document(), {
-        op: "label.set", id: "lbl_2", layerId: "lay_a", address: 0x8004, name: "Edited",
-      });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Edited", by: { author: "test", source: "user" } } });
       expect(s.debug().updates.count).toBeGreaterThan(0);
       expect(s.debug().updates.snapshotAt).toBe(0);
     });
@@ -554,9 +512,7 @@ describe.each(BACKENDS)("$name", (b) => {
   describe("joining", () => {
     it("hands a newcomer the state it is missing", () => {
       const s = store();
-      applyOpToDoc(s.document(), {
-        op: "label.set", id: "lbl_new", layerId: "lay_a", address: 0x8008, name: "Added",
-      });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_new", at: 0x8008, name: "Added", by: { author: "test", source: "user" } } });
 
       expect(s.snapshot().length).toBeGreaterThan(0);
       expect(Buffer.from(s.snapshot())).toEqual(Buffer.from(encodeDoc(s.document())));

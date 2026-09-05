@@ -92,7 +92,7 @@ describe("undo", () => {
     session.addLabel(0x8100, "Renamed", undefined);
     await session.refresh();
 
-    expect(session.undo()).toContain("$8100");
+    expect(session.undo()).toContain("Renamed");
     await session.refresh();
     expect(labelAt(session, 0x8100)).toBe("InitializeGame");
     session.close();
@@ -112,7 +112,7 @@ describe("undo", () => {
     session.undo();
     await session.refresh();
 
-    expect(session.redo()).toContain("$8100");
+    expect(session.redo()).toContain("Renamed");
     await session.refresh();
     expect(labelAt(session, 0x8100)).toBe("Renamed");
     expect(session.redo()).toBeUndefined();
@@ -197,7 +197,7 @@ describe("what the record says afterwards", () => {
     const recorded = storage.readOps().at(-1)!;
     storage.close();
 
-    expect(recorded.inverse).toMatchObject({ op: "label.set", name: "InitializeGame" });
+    expect(recorded.inverse).toMatchObject({ op: "claim.set" });
     session.close();
   });
 

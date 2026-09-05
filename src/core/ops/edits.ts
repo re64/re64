@@ -21,7 +21,8 @@ import { LoadedProject } from "../project/loader.js";
 import { newId } from "../project/identity.js";
 import { parseProjectAddress } from "../project/project.js";
 import { resolveOwningLayer } from "../project/ownership.js";
-import { Op } from "./types.js";
+import { ClaimEdit, Op } from "./types.js";
+import { Claim, Interpretation, Provenance, RootKind } from "../claims/model.js";
 
 /**
  * Make sure some layer can own an annotation at this address.
@@ -118,13 +119,55 @@ export function projectLabelsAt(
 
 /** Delete a label by id, wherever it lives. */
 export function labelDeleteByIdOp(loaded: LoadedProject, id: string): Op | undefined {
-  for (const layer of loaded.project.layers) {
-    if (layer.id && layer.labels?.some((l) => l.id === id)) {
-      return { op: "label.delete", id, layerId: layer.id };
-    }
-  }
-  return undefined;
+  return claimById(loaded, id) ? { op: "claim.remove", id } : undefined;
 }
+
+/**
+ * The root a label type declares.
+ *
+ * `address` maps to nothing: it was only ever "just a name", which is a claim
+ * with no root at all.
+ */
+const ROOT_FOR_TYPE: Partial<Record<LabelType, RootKind>> = {
+  entry: "entry",
+  function: "routine",
+  code: "location",
+};
+const TYPE_FOR_ROOT: Partial<Record<RootKind, LabelType>> = {
+  entry: "entry",
+  routine: "function",
+  location: "code",
+};
+
+const SAYS_FOR_KIND: Partial<Record<RegionKind, Interpretation["is"]>> = {
+  data: "data",
+  text: "text",
+  bitmap: "bitmap",
+  jumptable: "jumptable",
+};
+
+/**
+ * Who a claim records as its author.
+ *
+ * A placeholder, and knowingly so: the op builders are not handed the caller,
+ * while `runOps` is — so an edit *is* attributed, in the ops log, and the claim
+ * itself is not yet. Threading the caller through every builder is a mechanical
+ * change across some thirty call sites and is deliberately not in this step.
+ */
+const AUTHOR: Provenance = { author: "project", source: "user" };
+
+const claimById = (loaded: LoadedProject, id: string): Claim | undefined =>
+  loaded.claims.find((c) => c.id === id);
+
+/** Claims that name an address without saying what its bytes are. */
+const namesAt = (loaded: LoadedProject, address: number): Claim[] =>
+  loaded.claims.filter((c) => c.at === address && c.name !== undefined && c.says === undefined);
+
+/** Every field of a claim, for a revision that keeps what it does not name. */
+const editOf = (claim: Claim): ClaimEdit => {
+  const { id: _id, ...rest } = claim;
+  return rest as ClaimEdit;
+};
 
 /**
  * Name an address. Never replace a name.
@@ -151,7 +194,6 @@ export function labelSetOps(
   type?: LabelType,
   extent?: number
 ): { ops: Op[]; addedBeside?: string } {
-  const layerId = owningLayerId(loaded, address);
   const index = loaded.map.getLabels();
   // Only a name a *person* chose is somebody's judgement to be joined rather
   // than quietly doubled. An invented `dat_XXXX`, a PRG layer's entry label
@@ -174,7 +216,17 @@ export function labelSetOps(
       ...(chosenHere.length > 0 && showing && !chosen
         ? [{ op: "primary.set", address, labelId: showing.id } as Op]
         : []),
-      { op: "label.set", id: newId("lbl"), layerId, address, name, type, extent },
+      {
+        op: "claim.add",
+        claim: {
+          id: newId("clm"),
+          at: address,
+          name,
+          ...(type && ROOT_FOR_TYPE[type] ? { root: ROOT_FOR_TYPE[type] } : {}),
+          ...(extent !== undefined ? { extent } : {}),
+          by: AUTHOR,
+        },
+      } as Op,
     ],
     ...(chosenHere.length > 0 ? { addedBeside: chosenHere[0].name } : {}),
   };
@@ -188,19 +240,19 @@ export function renameLabelOp(
   type?: LabelType,
   extent?: number
 ): Op {
-  for (const layer of loaded.project.layers) {
-    const found = layer.labels?.find((l) => l.id === id);
-    if (found && layer.id) {
-      return {
-        op: "label.set",
-        id,
-        layerId: layer.id,
-        address: parseProjectAddress(found.address),
+  const found = claimById(loaded, id);
+  if (found) {
+    return {
+      op: "claim.set",
+      id,
+      fields: {
         name,
-        ...(type === undefined ? { type: found.type } : { type }),
-        ...(extent === undefined ? { extent: found.extent } : { extent }),
-      };
-    }
+        // Named fields only, so a revision leaves alone what it does not
+        // mention — and `null` is how it clears, which an omitted key cannot.
+        ...(type === undefined ? {} : { root: ROOT_FOR_TYPE[type] ?? null }),
+        ...(extent === undefined ? {} : { extent }),
+      },
+    };
   }
   throw new Error(
     `No label has id ${id}. list_labels reports the id of every label a project ` +
@@ -215,17 +267,21 @@ export function labelSetOp(
   type?: LabelType,
   extent?: number
 ): Op {
-  const layerId = owningLayerId(loaded, address);
-  const existing = projectLabelAt(loaded, layerId, address);
-  return {
-    op: "label.set",
-    id: existing?.id ?? newId("lbl"),
-    layerId,
-    address,
-    name,
-    type,
-    extent,
-  };
+  const here = namesAt(loaded, address);
+  // One name here: revise it. None, or several: add, because an address cannot
+  // identify a claim and picking one of two would be the upsert this replaced.
+  if (here.length === 1) {
+    return {
+      op: "claim.set",
+      id: here[0].id,
+      fields: {
+        name,
+        ...(type === undefined ? {} : { root: ROOT_FOR_TYPE[type] ?? null }),
+        ...(extent === undefined ? {} : { extent }),
+      },
+    };
+  }
+  return labelAddOp(loaded, address, name, type, extent);
 }
 
 /**
@@ -243,8 +299,17 @@ export function labelAddOp(
   type?: LabelType,
   extent?: number
 ): Op {
-  const layerId = owningLayerId(loaded, address);
-  return { op: "label.set", id: newId("lbl"), layerId, address, name, type, extent };
+  return {
+    op: "claim.add",
+    claim: {
+      id: newId("clm"),
+      at: address,
+      name,
+      ...(type && ROOT_FOR_TYPE[type] ? { root: ROOT_FOR_TYPE[type] } : {}),
+      ...(extent !== undefined ? { extent } : {}),
+      by: AUTHOR,
+    },
+  };
 }
 
 /**
@@ -332,9 +397,8 @@ export function commentDeleteOp(
 
 /** Undefined when there is no project label to delete; a built-in is not one. */
 export function labelDeleteOp(loaded: LoadedProject, address: number): Op | undefined {
-  const layerId = owningLayerId(loaded, address);
-  const existing = projectLabelAt(loaded, layerId, address);
-  return existing ? { op: "label.delete", id: existing.id, layerId } : undefined;
+  const here = namesAt(loaded, address);
+  return here.length === 1 ? { op: "claim.remove", id: here[0].id } : undefined;
 }
 
 /**
@@ -365,114 +429,138 @@ export function regionSetOp(
    */
   id?: string
 ): Op {
-  const owner = loaded.map.layerAt(start);
-  if (!owner || !owner.hasBytes) {
+  // No inference at all, which is the whole change.
+  //
+  // This used to guess which region a declaration *revised* from its span, in
+  // three cases: the same span exactly, the only region starting here, or a new
+  // nested one. That made a write's identity depend on what the caller had
+  // synced — a reader who had seen somebody else's region silently replaced it,
+  // one who had not produced a second — and the same call therefore had two
+  // outcomes. It is this project's own offline/online test failing, and the last
+  // of the four instances of upsert-by-inference, after `set_comment` keyed by
+  // slot, `set_label` keyed by address, and `set_constant` keyed by name.
+  //
+  // An id revises. No id adds. Two people declaring the same span now both
+  // stand, and `disagreements()` reports it rather than one of them losing.
+  if (id !== undefined) {
+    const found = claimById(loaded, id);
+    if (!found) {
+      throw new Error(
+        `No claim ${id} in this project. ` +
+          `describe_project lists what is declared, with ids.`
+      );
+    }
+    return {
+      op: "claim.set",
+      id,
+      fields: {
+        at: start,
+        extent: end - start,
+        says: interpretationOf(kind, encoding, view),
+        ...(name === undefined ? {} : { name }),
+      },
+    };
+  }
+
+  // `code` is not an interpretation, it is a decode root — the whole of what a
+  // code region ever did was seed the queue at its start, since for the walk it
+  // was indistinguishable from `unknown` and from silence. So declaring one
+  // makes a root rather than refusing, and the span it came with is dropped
+  // because it never meant anything.
+  if (kind === "code") {
+    return {
+      op: "claim.add",
+      claim: {
+        id: newId("clm"),
+        at: start,
+        ...(name === undefined ? {} : { name }),
+        root: "entry",
+        by: AUTHOR,
+      },
+    };
+  }
+
+  // A span still needs bytes to interpret. Unlike a *name*, which may reach an
+  // address nothing supplies, saying "these bytes are text" about bytes that do
+  // not exist describes nothing.
+  // Bytes, not ownership. `ownsAddress` asks which layer an annotation would
+  // belong to, and a symbols layer owns zero page while supplying nothing — so
+  // it answered yes for addresses with nothing to read. What matters here is
+  // whether any layer actually puts a byte there.
+  if (loaded.map.layerAt(start) === undefined) {
     throw new Error(
       `No loaded bytes at $${hex4(start)}, so there is nothing there to ` +
-        `interpret. A region says how to read bytes a layer supplies; to name ` +
-        `an address outside the loaded ranges, use a label instead.`
+        `interpret. A claim about bytes says how to read them; to name an ` +
+        `address outside the loaded ranges, add a label instead.`
     );
   }
-
-  const layerId = owningLayerId(loaded, start);
-  const layer = loaded.project.layers.find((l) => l.id === layerId);
-  const regions = layer?.regions ?? [];
-  const startsHere = regions.filter((r) => parseProjectAddress(r.start) === start);
-
-  // Which region — if any — this declaration is a *revision of*, rather than a
-  // new statement alongside it. Three cases, strongest signal first:
-  //
-  // 1. The same span exactly. One statement being corrected: reuse its id, so
-  //    saying it twice does not stack up two regions.
-  // 2. Exactly one region starts here and the new span is not strictly inside
-  //    it. That is an extend or a move of the obvious candidate.
-  // 3. Anything else — strictly inside, or ambiguous because several regions
-  //    already start here — is a new region, which *nests*.
-  //
-  // Nesting matters because the model has always allowed it: regions may
-  // overlap and `getRegionAt` resolves innermost-first, so the inner one
-  // renders inside its span and the outer one either side, with nothing left
-  // unexplained. Reusing an id whenever the starts matched made this a silent
-  // *replacement* — declaring 32 bytes of a 512-byte `characterSetData` region
-  // a bitmap shrank it to 32 bytes and left the other 480 explained by nothing.
-  //
-  // Case 1 has to be checked before case 2, and that is not a detail: without
-  // it, re-declaring the same span inside a larger region nests again on every
-  // call, and two identical spans then race to be the innermost.
-  // Named outright: no inference, and it works however far the region has moved.
-  const named = id === undefined ? undefined : regions.find((r) => r.id === id);
-  if (id !== undefined && !named) {
-    throw new Error(
-      `No region ${id} in the layer holding $${hex4(start)}. ` +
-        `describe_project lists the regions there with their ids.`
-    );
-  }
-
-  const exact = startsHere.find((r) => parseProjectAddress(r.end) === end);
-  const extending =
-    startsHere.length === 1 && end >= parseProjectAddress(startsHere[0].end)
-      ? startsHere[0]
-      : undefined;
-  const existing = named ?? exact ?? extending;
 
   return {
-    op: "region.set",
-    id: existing?.id ?? newId("rgn"),
-    layerId,
-    start,
-    end,
-    kind,
-    name,
-    comment,
-    encoding,
-    view,
+    op: "claim.add",
+    claim: {
+      id: newId("clm"),
+      at: start,
+      extent: end - start,
+      says: interpretationOf(kind, encoding, view),
+      ...(name === undefined ? {} : { name }),
+      // Rooted, because inclusion is reachability: a span nothing names would
+      // otherwise be declared and never rendered.
+      root: "data",
+      by: AUTHOR,
+    },
   };
 }
 
-/** Searches every layer, since a region's owner is not implied by its start. */
-/**
- * Remove a region, by id or by where it starts.
- *
- * A start address stopped being a unique handle the moment regions could nest:
- * declaring part of a span leaves two regions beginning at the same place, and
- * picking whichever the array happened to list first would delete the wrong one
- * silently. So an ambiguous start is refused, and it names the candidates —
- * which is also how a caller learns the ids it should have passed.
- */
+/** The interpretation a region kind and its rendering options project to. */
+function interpretationOf(
+  kind: RegionKind,
+  encoding?: TextEncoding,
+  view?: string
+): Interpretation {
+  const is = SAYS_FOR_KIND[kind];
+  if (!is) {
+    // `code` and `unknown` are not interpretations: code is what bytes are when
+    // nobody has said otherwise, and `unknown` is the absence of a claim.
+    throw new Error(
+      `"${kind}" is not something a claim can say about bytes. ` +
+        `Declare a root to have an address decoded, and remove a claim to leave ` +
+        `its bytes unexplained.`
+    );
+  }
+  if (is === "text") return { is, ...(encoding !== undefined ? { encoding } : {}) };
+  if (is === "bitmap") return { is, ...(view !== undefined ? { view } : {}) };
+  return { is };
+}
+
 export function regionDeleteOp(
   loaded: LoadedProject,
   start: number,
   id?: string
 ): Op | undefined {
-  for (const layer of loaded.project.layers) {
-    if (!layer.id) continue;
-
-    if (id !== undefined) {
-      const named = layer.regions?.find((r) => r.id === id);
-      if (named) return { op: "region.delete", id, layerId: layer.id };
-      continue;
-    }
-
-    const here = (layer.regions ?? []).filter((r) => parseProjectAddress(r.start) === start);
-    if (here.length === 0) continue;
-    if (here.length > 1) {
-      const shown = here
-        // `end` on a project region is already written as `$9120`, so prefixing
-        // it again produced `$$9120` in the one message whose whole job is to
-        // let a caller tell two regions apart.
-        .map(
-          (r) =>
-            `${r.id} (${r.kind}${r.name ? ` "${r.name}"` : ""} to $${hex4(parseProjectAddress(r.end))})`
-        )
-        .join(", ");
-      throw new Error(
-        `Several regions start at $${hex4(start)}, so that does not say which to ` +
-          `remove: ${shown}. Pass the id of the one you mean.`
-      );
-    }
-    if (here[0].id) return { op: "region.delete", id: here[0].id, layerId: layer.id };
+  if (id !== undefined) {
+    return claimById(loaded, id) ? { op: "claim.remove", id } : undefined;
   }
-  return undefined;
+
+  // Claims about bytes starting here. Several may, since one nesting inside
+  // another is the ordinary way of refining a span — so a start address does
+  // not identify one, and answering anyway would remove the wrong one silently.
+  const here = loaded.claims.filter((c) => c.at === start && c.says !== undefined);
+  if (here.length === 0) return undefined;
+  if (here.length > 1) {
+    const shown = here
+      .map(
+        (c) =>
+          `${c.id} (${c.says!.is}${c.name ? ` "${c.name}"` : ""} to $${hex4(
+            c.at + (c.extent ?? 1)
+          )})`
+      )
+      .join(", ");
+    throw new Error(
+      `Several claims start at $${hex4(start)}, so that does not say which to ` +
+        `remove: ${shown}. Pass the id of the one you mean.`
+    );
+  }
+  return { op: "claim.remove", id: here[0].id };
 }
 
 /**
@@ -492,9 +580,8 @@ export function isAutoGeneratedName(name: string): boolean {
  * single most consequential edit available.
  */
 export function markFunctionOps(loaded: LoadedProject, address: number, name?: string): Op[] {
-  const layerId = owningLayerId(loaded, address);
-  const existing = projectLabelAt(loaded, layerId, address);
-  const current = name ?? existing?.name ?? `sub_${hex4(address)}`;
+  const here = namesAt(loaded, address);
+  const current = name ?? here[0]?.name ?? `sub_${hex4(address)}`;
   const promoted = isAutoGeneratedName(current) ? `sub_${hex4(address)}` : current;
 
   return [labelSetOp(loaded, address, promoted, "function")];
@@ -508,14 +595,18 @@ export function markFunctionOps(loaded: LoadedProject, address: number, name?: s
  * chose is kept and only its type is cleared.
  */
 export function unmarkFunctionOps(loaded: LoadedProject, address: number): Op[] {
-  const layerId = owningLayerId(loaded, address);
-  const existing = projectLabelAt(loaded, layerId, address);
+  const here = namesAt(loaded, address);
+  const existing = here.find((c) => c.root === "routine") ?? here[0];
   if (!existing) return [];
 
-  if (isAutoGeneratedName(existing.name)) {
-    return [{ op: "label.delete", id: existing.id, layerId }];
+  // A name the analysis invented carries no judgement, so clearing the type
+  // leaves a redundant untyped entry rather than anything anybody wrote.
+  if (isAutoGeneratedName(existing.name!)) {
+    return [{ op: "claim.remove", id: existing.id }];
   }
-  return [labelSetOp(loaded, address, existing.name, "address")];
+  // A name somebody chose is kept; only its root is cleared, which is what
+  // `null` is for.
+  return [{ op: "claim.set", id: existing.id, fields: { root: null } }];
 }
 
 const hex4 = (address: number) => address.toString(16).toUpperCase().padStart(4, "0");

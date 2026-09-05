@@ -163,70 +163,7 @@ interface ArraySpan {
   close: number;
 }
 
-/**
- * Locate a top-level array's entry lines by bracket depth.
- *
- * Text-level rather than JSON-level because the file is hand-maintained: it
- * carries blank lines that group related labels, and those survive only if
- * edits touch individual lines instead of re-serializing the document.
- */
-function findArraySpan(lines: string[], key: string, from = 0, until = lines.length): ArraySpan | null {
-  const pattern = new RegExp(`"${key}"\\s*:\\s*\\[`);
-  let open = -1;
-  for (let i = from; i < until; i++) {
-    if (pattern.test(lines[i])) {
-      open = i;
-      break;
-    }
-  }
-  if (open === -1) return null;
 
-  let depth = 0;
-  for (let i = open; i < lines.length; i++) {
-    for (const ch of lines[i]) {
-      if (ch === "[") depth++;
-      else if (ch === "]") {
-        depth--;
-        if (depth === 0) return { open, close: i };
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * The line range of the Nth entry in the top-level "layers" array.
- *
- * Labels now nest inside their owning layer, so an edit has to be scoped to
- * that layer's block before its "labels" array can be found — otherwise a
- * write would land in whichever layer happens to declare one first.
- */
-function findLayerSpan(lines: string[], layerIndex: number): ArraySpan | null {
-  const layers = findArraySpan(lines, "layers");
-  if (!layers) return null;
-
-  let depth = 0;
-  let index = -1;
-  let open = -1;
-
-  for (let i = layers.open; i <= layers.close; i++) {
-    for (const ch of lines[i]) {
-      if (ch === "{") {
-        if (depth === 0) {
-          index++;
-          if (index === layerIndex) open = i;
-        }
-        depth++;
-      } else if (ch === "}") {
-        depth--;
-        if (depth === 0 && index === layerIndex) {
-          return { open, close: i };
-        }
-      }
-    }
-  }
-  return null;
-}
 
 const ADDRESS_IN_LINE = /"address"\s*:\s*(?:"(\$|0x)?([0-9A-Fa-f]+)"|(\d+))/;
 
@@ -302,48 +239,6 @@ function regionEntryLine(
   return `${indent}{ ${parts.join(", ")} }`;
 }
 
-/**
- * Insert an entry line into an array span, in ascending order of a sort key.
- *
- * Shared by labels and regions: both lists are kept roughly sorted by address,
- * and appending out of order would make diffs harder to read than they need to
- * be.
- */
-function insertEntry(
-  lines: string[],
-  span: ArraySpan,
-  line: string,
-  sortKey: number,
-  keyOf: (line: string) => number | null
-): void {
-  let insertAt = -1;
-  for (let i = span.open + 1; i < span.close; i++) {
-    const key = keyOf(lines[i]);
-    if (key !== null && key > sortKey) {
-      insertAt = i;
-      break;
-    }
-  }
-
-  if (insertAt !== -1) {
-    // Step back over blank lines so the entry joins the group above rather
-    // than jumping the separator. Without this, undoing the deletion of an
-    // entry that sat just above a blank line puts it back on the wrong side.
-    while (insertAt > span.open + 1 && !lines[insertAt - 1].trim()) insertAt--;
-    lines.splice(insertAt, 0, line + ",");
-    return;
-  }
-
-  const last = lastEntryLine(lines, span);
-  if (last === span.open) {
-    // The array is empty: appending a comma to its opening bracket would
-    // produce "[,". Insert straight after it instead.
-    lines.splice(span.open + 1, 0, line);
-    return;
-  }
-  lines[last] = lines[last].replace(/,?\s*$/, ",");
-  lines.splice(last + 1, 0, line);
-}
 
 /** Index of the last line in the span that is an actual entry, not blank. */
 function lastEntryLine(lines: string[], span: ArraySpan): number {
@@ -353,164 +248,8 @@ function lastEntryLine(lines: string[], span: ArraySpan): number {
   return span.open;
 }
 
-/**
- * Whether every entry in this span sits on exactly one line.
- *
- * The line editor's whole method is "find the entry's line, replace it", and on
- * a pretty-printed file that method silently produces invalid JSON: `keyOf`
- * matches the `"address"` line *inside* an object and the new entry is spliced
- * between that object's own fields. `upsertLabel`'s `parseProject` guard then
- * throws, `applyOps` abandons the batch, and — because the only writer of the
- * file is a detached timer — the caller is told `ok` while nothing reaches disk.
- * That cost experiment 4 a quarter of its run.
- *
- * A `.re64` need not be in this shape. It is ordinary JSON and anything may
- * write it, so the editor has to cope with a file it did not format rather than
- * assume its own output.
- */
-function isLineFormatted(lines: string[], span: ArraySpan): boolean {
-  for (let i = span.open + 1; i < span.close; i++) {
-    const text = lines[i].trim();
-    if (!text) continue;
-    if (!text.startsWith("{") || !/\},?$/.test(text)) return false;
-  }
-  return true;
-}
 
-/**
- * The same text, in the one-entry-per-line shape the line editor requires.
- *
- * Reformatting loses hand-authored layout, which is the cost the line editor
- * exists to avoid — so it happens once, on a file that was never in that shape,
- * and every edit after it is a one-line diff again. The alternative on offer is
- * a corrupt file, and the same escape hatch is already taken when a layer has no
- * array to edit at all.
- */
-const reformatted = (raw: string): string => formatProject(parseProject(raw));
 
-/**
- * Insert or rename a label, editing the raw text line-by-line.
- *
- * New labels go in address order where the surrounding list is sorted, which it
- * mostly is; otherwise they land at the end. Existing entries keep their
- * position so a rename produces a one-line diff.
- */
-export function upsertLabel(
-  raw: string,
-  id: string,
-  address: number,
-  name: string,
-  type: ProjectLabel["type"] | undefined,
-  layerIndex: number,
-  extent?: number
-): string {
-  const lines = raw.split("\n");
-  const layer = findLayerSpan(lines, layerIndex);
-  if (!layer) {
-    throw new Error(`No layer at index ${layerIndex} to own a label at ${address.toString(16)}`);
-  }
-  const span = findArraySpan(lines, "labels", layer.open, layer.close);
-
-  if (span && !isLineFormatted(lines, span)) {
-    return upsertLabel(reformatted(raw), id, address, name, type, layerIndex, extent);
-  }
-
-  // The layer has no labels array yet — a structural write adds one. This
-  // reformats the file, but only happens once per layer.
-  if (!span) {
-    const project = parseProject(raw);
-    const decl = project.layers[layerIndex];
-    (decl.labels ??= []).push({
-      id,
-      address: "$" + address.toString(16).toUpperCase().padStart(4, "0"),
-      name,
-      ...(type && type !== "address" ? { type } : {}),
-      ...(extent === undefined ? {} : { extent }),
-    });
-    return formatProject(project);
-  }
-
-  // Identify by id: a rename changes the name, and several labels can share an
-  // address, so neither identifies the line. An entry written before ids
-  // existed is matched by address instead, and gains an id here.
-  let target = findEntryById(lines, span, id);
-  if (target < 0) {
-    for (let i = span.open + 1; i < span.close; i++) {
-      if (idOfLine(lines[i]) === null && addressOfLine(lines[i]) === address) {
-        target = i;
-        break;
-      }
-    }
-  }
-
-  if (target >= 0) {
-    let line = lines[target].replace(
-      /"name"\s*:\s*"(?:[^"\\]|\\.)*"/,
-      `"name": ${JSON.stringify(name)}`
-    );
-    if (!/"id"\s*:/.test(line)) {
-      line = line.replace(/\{\s*/, `{ "id": ${JSON.stringify(id)}, `);
-    }
-    if (type === "address") {
-      // The default is recorded by absence, not written onto every label.
-      line = line.replace(/\s*,\s*"type"\s*:\s*"[^"]*"/, "");
-    } else if (type !== undefined) {
-      line = /"type"\s*:/.test(line)
-        ? line.replace(/"type"\s*:\s*"[^"]*"/, `"type": ${JSON.stringify(type)}`)
-        : line.replace(/\s*\}/, `, "type": ${JSON.stringify(type)} }`);
-    }
-    // Absent extent is absent from the line, the way an "address" type is.
-    if (extent === undefined) {
-      line = line.replace(/\s*,\s*"extent"\s*:\s*\d+/, "");
-    } else {
-      line = /"extent"\s*:/.test(line)
-        ? line.replace(/"extent"\s*:\s*\d+/, `"extent": ${extent}`)
-        : line.replace(/\s*\}/, `, "extent": ${extent} }`);
-    }
-    lines[target] = line;
-  } else {
-    const last = lastEntryLine(lines, span);
-    const indent = /^(\s*)/.exec(lines[last] === lines[span.open] ? "        {" : lines[last])![1];
-    insertEntry(
-      lines,
-      span,
-      labelEntryLine(indent, id, address, name, type, extent),
-      address,
-      addressOfLine
-    );
-  }
-
-  const updated = lines.join("\n");
-  parseProject(updated); // throws rather than returning something corrupt
-  return updated;
-}
-
-/** Remove the label at an address, if present. */
-export function deleteLabel(raw: string, id: string, layerIndex: number): string {
-  const lines = raw.split("\n");
-  const layer = findLayerSpan(lines, layerIndex);
-  if (!layer) return raw;
-  const span = findArraySpan(lines, "labels", layer.open, layer.close);
-  if (!span) return raw;
-  if (!isLineFormatted(lines, span)) return deleteLabel(reformatted(raw), id, layerIndex);
-
-  // By id only. An un-migrated entry has no id to match, and deleting "the
-  // first line without one" would remove an arbitrary label — the caller
-  // migrates first instead.
-  const at = findEntryById(lines, span, id);
-  if (at < 0) return raw;
-
-  const wasLast = at === lastEntryLine(lines, span);
-  lines.splice(at, 1);
-  if (wasLast) {
-    const newLast = lastEntryLine(lines, { open: span.open, close: span.close - 1 });
-    if (newLast > span.open) lines[newLast] = lines[newLast].replace(/,\s*$/, "");
-  }
-
-  const updated = lines.join("\n");
-  parseProject(updated);
-  return updated;
-}
 
 const START_IN_LINE = /"start"\s*:\s*(?:"(\$|0x)?([0-9A-Fa-f]+)"|(\d+))/;
 
@@ -522,254 +261,46 @@ function startOfLine(line: string): number | null {
   return parseInt(m[2], m[1] === undefined ? 10 : 16);
 }
 
-/** Create or replace a region, identified by id. */
-export function upsertRegion(
-  raw: string,
-  layerIndex: number,
-  region: {
-    id: string;
-    start: number;
-    end: number;
-    kind: string;
-    name?: string;
-    comment?: string;
-    encoding?: string;
-    view?: string;
-  }
-): string {
-  const lines = raw.split("\n");
-  const layer = findLayerSpan(lines, layerIndex);
-  if (!layer) throw new Error(`No layer at index ${layerIndex}`);
 
-  const span = findArraySpan(lines, "regions", layer.open, layer.close);
 
-  if (span && !isLineFormatted(lines, span)) {
-    return upsertRegion(reformatted(raw), layerIndex, region);
-  }
-
-  // No regions array yet: a structural write adds one. Reformats the file, but
-  // only ever once per layer.
-  if (!span) {
-    const project = parseProject(raw);
-    const decl = project.layers[layerIndex];
-    (decl.regions ??= []).push({
-      id: region.id,
-      start: "$" + region.start.toString(16).toUpperCase().padStart(4, "0"),
-      end: "$" + region.end.toString(16).toUpperCase().padStart(4, "0"),
-      kind: region.kind as never,
-      ...(region.name !== undefined ? { name: region.name } : {}),
-      ...(region.comment !== undefined ? { comment: region.comment } : {}),
-      // Dropped here, silently, until now: the *first* region ever written into
-      // a layer takes this branch, so declaring a text region and setting its
-      // encoding in one call lost the encoding and rendered as ASCII.
-      ...(region.encoding !== undefined ? { encoding: region.encoding as never } : {}),
-      ...(region.view !== undefined ? { view: region.view } : {}),
-    });
-    return formatProject(project);
-  }
-
-  // With no entries left, the bracket line's indent is the array's, not an
-  // entry's — nest one level in from it.
-  const last = lastEntryLine(lines, span);
-  const indent =
-    last === span.open
-      ? /^(\s*)/.exec(lines[span.open])![1] + "  "
-      : /^(\s*)/.exec(lines[last])![1];
-
-  const line = regionEntryLine(
-    indent,
-    region.id,
-    region.start,
-    region.end,
-    region.kind,
-    region.name,
-    region.comment,
-    region.encoding,
-    region.view
-  );
-
-  const at = findEntryById(lines, span, region.id);
-  if (at >= 0) {
-    // Keep whatever separator the line already carried.
-    lines[at] = line + (lines[at].trimEnd().endsWith(",") ? "," : "");
-  } else {
-    insertEntry(lines, span, line, region.start, startOfLine);
-  }
-
-  const updated = lines.join("\n");
-  parseProject(updated);
-  return updated;
-}
-
-/** Remove a region by id. */
-export function deleteRegion(raw: string, layerIndex: number, id: string): string {
-  const lines = raw.split("\n");
-  const layer = findLayerSpan(lines, layerIndex);
-  if (!layer) return raw;
-  const span = findArraySpan(lines, "regions", layer.open, layer.close);
-  if (!span) return raw;
-  if (!isLineFormatted(lines, span)) return deleteRegion(reformatted(raw), layerIndex, id);
-
-  const at = findEntryById(lines, span, id);
-  if (at < 0) return raw;
-
-  const wasLast = at === lastEntryLine(lines, span);
-  lines.splice(at, 1);
-  if (wasLast) {
-    const newLast = lastEntryLine(lines, { open: span.open, close: span.close - 1 });
-    if (newLast > span.open) lines[newLast] = lines[newLast].replace(/,\s*$/, "");
-  }
-
-  const updated = lines.join("\n");
-  parseProject(updated);
-  return updated;
-}
 
 const HEX4 = (n: number) => "$" + n.toString(16).toUpperCase().padStart(4, "0");
 
 /**
- * Promote a label at an address, or clear the choice by passing undefined.
+ * Promote a label at an address, or clear the choice.
  *
- * The block is created on first use and removed when it empties, so a project
- * that never promotes anything carries no trace of the feature.
+ * Reserialising, like every writer here now. It used to splice the
+ * `primaryLabels` block line by line to preserve a hand-authored layout, and
+ * assumed its own output while doing it: given the equally valid
+ * `"primaryLabels": { "$8000": "lbl_1" }` on one line, every splice addressed
+ * lines *between* two indices that were equal, so it wrote into whatever
+ * preceded the block and produced invalid JSON.
+ *
+ * That whole class of bug goes with the line editors, because the layout they
+ * protected is regenerated from the document on every write anyway.
  */
 export function setPrimaryLabel(
   raw: string,
   address: number,
   labelId: string | undefined
 ): string {
-  const lines = raw.split("\n");
+  const project = parseProject(raw);
   const key = HEX4(address);
-  const open = lines.findIndex((l) => /"primaryLabels"\s*:\s*\{/.test(l));
-
-  if (open === -1) {
-    if (labelId === undefined) return raw;
-    // No block yet: add one before the closing brace of the document.
-    const close = lines.length - 1 - [...lines].reverse().findIndex((l) => l.trim() === "}");
-    lines[close - 1] = lines[close - 1].replace(/,?\s*$/, ",");
-    lines.splice(close, 0,
-      `  "primaryLabels": {`,
-      `    ${JSON.stringify(key)}: ${JSON.stringify(labelId)}`,
-      `  }`);
-    const created = lines.join("\n");
-    parseProject(created);
-    return created;
-  }
-
-  let close = open;
-  let depth = 0;
-  for (let i = open; i < lines.length; i++) {
-    for (const ch of lines[i]) {
-      if (ch === "{") depth++;
-      else if (ch === "}") depth--;
-    }
-    if (depth === 0) { close = i; break; }
-  }
-
-  // The whole block on one line — `{"$8000": "lbl_1"}` — which `formatProject`
-  // never writes and ordinary JSON may. Every splice below addresses lines
-  // *between* `open` and `close`, so with the two equal it writes into whatever
-  // precedes the block and produces a corrupt file.
-  //
-  // The same escape hatch the label and region writers already take, and the
-  // same lesson: a `.re64` is ordinary JSON, anything may write one, and a line
-  // editor that assumes its own output will meet a file it did not produce.
-  if (close === open) return setPrimaryLabel(reformatted(raw), address, labelId);
-
-  const at = lines.findIndex(
-    (l, i) => i > open && i < close && l.includes(JSON.stringify(key) + ":")
-  );
+  const primary = { ...(project.primaryLabels ?? {}) };
 
   if (labelId === undefined) {
-    if (at === -1) return raw;
-    lines.splice(at, 1);
-    // An empty block is noise; drop it entirely.
-    const remaining = lines.slice(open + 1, close - 1).filter((l) => l.trim());
-    if (remaining.length === 0) {
-      lines.splice(open, 2);
-      const prev = open - 1;
-      if (prev >= 0) lines[prev] = lines[prev].replace(/,\s*$/, "");
-    } else {
-      const last = close - 2;
-      if (lines[last]) lines[last] = lines[last].replace(/,\s*$/, "");
-    }
-  } else if (at >= 0) {
-    lines[at] = lines[at].replace(
-      /:\s*"[^"]*"/,
-      `: ${JSON.stringify(labelId)}`
-    );
+    if (!(key in primary)) return raw;
+    delete primary[key];
   } else {
-    const last = close - 1;
-    lines[last] = lines[last].replace(/,?\s*$/, ",");
-    lines.splice(last + 1, 0, `    ${JSON.stringify(key)}: ${JSON.stringify(labelId)}`);
+    if (primary[key] === labelId) return raw;
+    primary[key] = labelId;
   }
 
-  const updated = lines.join("\n");
-  parseProject(updated);
-  return updated;
+  if (Object.keys(primary).length) project.primaryLabels = primary;
+  else delete project.primaryLabels;
+  return formatProject(project);
 }
 
-/**
- * Write ids onto every layer, label, and region that lacks one.
- *
- * Files stay loadable without ids — the loader derives them — but derived ids
- * depend on position and content, so they shift if a label is renamed or a
- * layer reordered. Persisting them makes identity permanent, which is what
- * edits and merge rely on.
- *
- * Line-level like every other write here, so a migration diff shows exactly one
- * insertion per entry and leaves grouping and formatting untouched.
- */
-export function migrateIds(
-  raw: string,
-  mint: (prefix: "lbl" | "rgn" | "lay") => string
-): string {
-  const lines = raw.split("\n");
-  const layers = findArraySpan(lines, "layers");
-  if (layers === null) return raw;
-
-  const hasId = (line: string) => /"id"\s*:/.test(line);
-  const indentOf = (line: string) => /^(\s*)/.exec(line)![1];
-
-  const out: string[] = [];
-  let depth = 0;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const inLayers = i >= layers.open && i <= layers.close;
-
-    if (inLayers && !hasId(line)) {
-      // A layer opens with a lone brace and its fields expanded one per line,
-      // so its id goes on a line of its own to match. Labels and regions are
-      // single-line objects, so theirs goes inline.
-      // A layer's id sits on the line *after* its brace, so look ahead rather
-      // than at the brace itself, or a second run would add a duplicate.
-      if (line.trim() === "{" && depth === 1 && !hasId(lines[i + 1] ?? "")) {
-        out.push(line);
-        out.push(`${indentOf(line)}  "id": ${JSON.stringify(mint("lay"))},`);
-        depth += 1;
-        continue;
-      }
-      if (/"address"\s*:/.test(line)) {
-        out.push(line.replace(/\{\s*/, `{ "id": ${JSON.stringify(mint("lbl"))}, `));
-        for (const ch of line) depth += ch === "{" ? 1 : ch === "}" ? -1 : 0;
-        continue;
-      }
-      if (/"start"\s*:/.test(line)) {
-        out.push(line.replace(/\{\s*/, `{ "id": ${JSON.stringify(mint("rgn"))}, `));
-        for (const ch of line) depth += ch === "{" ? 1 : ch === "}" ? -1 : 0;
-        continue;
-      }
-    }
-
-    out.push(line);
-    for (const ch of line) depth += ch === "{" ? 1 : ch === "}" ? -1 : 0;
-  }
-
-  const updated = out.join("\n");
-  parseProject(updated); // refuse to hand back something that will not load
-  return updated;
-}
 
 /** Normalise trailing whitespace the way a written file should look. */
 export function normalizeProjectText(raw: string): string {

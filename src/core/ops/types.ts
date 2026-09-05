@@ -20,23 +20,7 @@ import { TextEncoding } from "../c64/text.js";
 import { RegionKind } from "../memory/region.js";
 import { Claim } from "../claims/model.js";
 
-/** Set a label's fields, creating it if the id is new. */
-export interface LabelSetOp {
-  op: "label.set";
-  id: string;
-  layerId: string;
-  address: number;
-  name: string;
-  type?: LabelType;
-  /** Bytes this name covers, when it names an array rather than a spot. */
-  extent?: number;
-}
 
-export interface LabelDeleteOp {
-  op: "label.delete";
-  id: string;
-  layerId: string;
-}
 
 /**
  * A field of a claim, as an edit may name it.
@@ -77,27 +61,7 @@ export interface ClaimRemoveOp {
   id: string;
 }
 
-/** Set a region's extent and kind, creating it if the id is new. */
-export interface RegionSetOp {
-  op: "region.set";
-  id: string;
-  layerId: string;
-  start: number;
-  end: number;
-  kind: RegionKind;
-  name?: string;
-  comment?: string;
-  /** How to read a text region's bytes. */
-  encoding?: TextEncoding;
-  /** How to draw a `bitmap` region. */
-  view?: string;
-}
 
-export interface RegionDeleteOp {
-  op: "region.delete";
-  id: string;
-  layerId: string;
-}
 
 /** Set a comment's text or placement, creating it if the id is new. */
 export interface CommentSetOp {
@@ -288,10 +252,6 @@ export type Op =
   | ClaimAddOp
   | ClaimSetOp
   | ClaimRemoveOp
-  | LabelSetOp
-  | LabelDeleteOp
-  | RegionSetOp
-  | RegionDeleteOp
   | CommentSetOp
   | CommentDeleteOp
   | MetaSetOp
@@ -356,14 +316,6 @@ export interface Change {
 export function describeOp(op: Op): string {
   const hex = (n: number) => `$${n.toString(16).toUpperCase().padStart(4, "0")}`;
   switch (op.op) {
-    case "label.set":
-      return `set ${hex(op.address)} to ${op.name}${op.type ? ` (${op.type})` : ""}`;
-    case "label.delete":
-      return `delete label ${op.id}`;
-    case "region.set":
-      return `set ${hex(op.start)}-${hex(op.end)} to ${op.kind}${op.name ? ` (${op.name})` : ""}`;
-    case "region.delete":
-      return `delete region ${op.id}`;
     case "comment.set": {
       // The text, not its length: a history entry saying "commented $8870" is
       // no use when the question is which comment was lost.
@@ -379,18 +331,37 @@ export function describeOp(op: Op): string {
       return `read ${hex(op.address)} as one particular label`;
     case "label.unbind":
       return `read ${op.id} by the usual rule again`;
+    // Read as the action, because these become undo descriptions and history
+    // lines: "name $8004 ByBob" is what somebody did, where "claim ByBob at
+    // $8004" is what the data looks like afterwards.
     case "claim.add": {
-      const what = op.claim.name ?? op.claim.says?.is ?? "claim";
-      return `claim ${what} at ${hex(op.claim.at)}`;
+      const claim = op.claim;
+      const where = claim.extent
+        ? `${hex(claim.at)}-${hex(claim.at + claim.extent)}`
+        : hex(claim.at);
+      const named = claim.name ? ` (${claim.name})` : "";
+      if (claim.says) return `declare ${where} ${claim.says.is}${named}`;
+      if (claim.root === "routine") return `mark ${where} a routine${named}`;
+      if (claim.root === "entry") return `mark ${where} an entry point${named}`;
+      if (claim.root === "location") return `mark ${where} a code location${named}`;
+      return claim.name ? `name ${where} ${claim.name}` : `claim ${where}`;
     }
 
     case "claim.set": {
-      const named = Object.keys(op.fields);
-      return `revise claim ${op.id}: ${named.length ? named.join(", ") : "nothing"}`;
+      const fields = op.fields;
+      // The common single-field edits read as themselves; anything else lists
+      // what it touched, which is what a reader needs to judge an undo.
+      if (Object.keys(fields).length === 1) {
+        if (typeof fields.name === "string") return `rename ${op.id} to ${fields.name}`;
+        if (fields.root === null) return `unmark ${op.id}`;
+        if (fields.says) return `read ${op.id} as ${fields.says.is}`;
+      }
+      const named = Object.keys(fields);
+      return `revise ${op.id}: ${named.length ? named.join(", ") : "nothing"}`;
     }
 
     case "claim.remove":
-      return `remove claim ${op.id}`;
+      return `remove ${op.id}`;
 
     case "constant.set":
       return `define ${op.name} as $${op.value.toString(16).toUpperCase().padStart(2, "0")}`;

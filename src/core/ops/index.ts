@@ -1,9 +1,5 @@
 export {
   Op,
-  LabelSetOp,
-  LabelDeleteOp,
-  RegionSetOp,
-  RegionDeleteOp,
   PrimarySetOp,
   PrimaryClearOp,
   Change,

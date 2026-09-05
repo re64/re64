@@ -123,13 +123,7 @@ describe("a server given a database", () => {
     applyOpsToDoc(
       doc,
       [
-        {
-          op: "label.set",
-          id: prg.labels[0].id,
-          layerId: prg.id,
-          address: 0x8100,
-          name: "AttributedToMe",
-        },
+        { op: "claim.add", claim: { id: prg.labels[0].id, at: 0x8100, name: "AttributedToMe", by: { author: "test", source: "user" } } },
       ],
       "local"
     );

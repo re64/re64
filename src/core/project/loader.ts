@@ -31,6 +31,7 @@ import {
   projectClaims,
 } from "./project.js";
 import { derivedId } from "./identity.js";
+import { needsMigration, migrateToClaims } from "../claims/migrate.js";
 import { Claim, Interpretation, arrayExtent } from "../claims/model.js";
 
 /** How the loader gets at file bytes, so core stays free of node:fs. */
@@ -189,10 +190,20 @@ function labelFromClaim(claim: Claim): Label {
 }
 
 export function buildMemoryMap(
-  project: Project,
+  declared: Project,
   loadFile: FileLoader,
   options: { platform?: boolean } = {}
 ): LoadedProject {
+  // One form below, whatever the file holds. A project still written with labels
+  // and regions is converted here, exactly as `re64 migrate` converts it on disk
+  // — the precedent `identity.ts` already records for ids: "files without ids
+  // stay loadable; the next write persists real ones."
+  //
+  // This is what makes the write path's cutover visible. While the projection
+  // was additive, an edit to a legacy label produced a `claim.set` naming an id
+  // no claim had, and did nothing at all.
+  const project = needsMigration(declared) ? migrateToClaims(declared).project : declared;
+
   const map = new MemoryMap();
   const prgEntries: number[] = [];
   const userLabels = new LabelIndex();

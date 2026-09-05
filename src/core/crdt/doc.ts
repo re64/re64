@@ -23,6 +23,7 @@
  */
 
 import * as Y from "yjs";
+import { needsMigration, migrateToClaims } from "../claims/migrate.js";
 import {
   Project,
   ProjectComment,
@@ -98,7 +99,14 @@ function mapFrom(record: Record<string, unknown>): Y.Map<unknown> {
  *
  * Deterministic: same input, same bytes, on every client.
  */
-export function docFromProject(project: Project): Y.Doc {
+export function docFromProject(declared: Project): Y.Doc {
+  // Migrated here as well as in `buildMemoryMap`, and it has to be both: this is
+  // the other boundary where a `.re64` becomes live state. With only the loader
+  // converting, the document held legacy layers while the loaded view held
+  // claims, so an edit naming a migrated claim's id found nothing in the
+  // document and did nothing at all — accepted, reported, and lost.
+  const project = needsMigration(declared) ? migrateToClaims(declared).project : declared;
+
   const doc = new Y.Doc(DOC_OPTIONS);
   doc.clientID = BASE_CLIENT_ID;
 

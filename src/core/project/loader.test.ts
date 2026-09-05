@@ -11,7 +11,7 @@ const bytes = (start: number, values: number[]) => () => ({
 });
 
 describe("buildMemoryMap", () => {
-  it("gives each layer the labels and regions declared inside it", () => {
+  it("projects a legacy project's labels and regions onto claims", () => {
     const project: Project = {
       layers: [
         {
@@ -27,7 +27,12 @@ describe("buildMemoryMap", () => {
       platform: false,
     });
 
-    expect(layers[0].labels.map((l) => l.name)).toEqual(["Start"]);
+    // Layers no longer own annotations. A project still written the old way is
+    // migrated on load, so the name arrives as a claim and the interpretation is
+    // projected onto the layer that supplies the bytes — which is what
+    // `getKindAt` asks, and why regions still have to land there.
+    void layers;
+    expect(map.getLabels().getAllLabels().map((l) => l.name)).toContain("Start");
     expect(map.getRegionAt(0x1002)?.name).toBe("table");
     expect(map.getKindAt(0x1002)).toBe("data");
     // Outside the region, the layer default applies.
@@ -115,8 +120,12 @@ describe("buildMemoryMap", () => {
 });
 
 describe("project schema", () => {
-  it("carries comments through to labels and regions", () => {
-    // Both were declared in the schema but silently dropped by the converters.
+  it("turns a region's comment into a real comment", () => {
+    // A region's comment was a field on the region; a claim has no such field,
+    // deliberately, because a description is what a name means on this *machine*
+    // and this is what somebody wrote about an address *in this project*. So
+    // migration makes it a `Comment`, which is what the row builder already
+    // rendered it as.
     const project = parseProject(
       JSON.stringify({
         layers: [
@@ -130,12 +139,11 @@ describe("project schema", () => {
       })
     );
 
-    const { map, layers } = buildMemoryMap(project, bytes(0x1000, [1, 2]), {
+    const { comments } = buildMemoryMap(project, bytes(0x1000, [1, 2]), {
       platform: false,
     });
 
-    expect(layers[0].labels[0].comment).toBe("why it matters");
-    expect(map.getRegionAt(0x1000)?.comment).toBe("a table");
+    expect(comments.allAt(0x1000).map((c) => c.text)).toContain("a table");
   });
 
   it("rejects the old flat form instead of ignoring it", () => {

@@ -20,31 +20,48 @@ const GRIDRUNNER = "assets/gridrunner/gridrunner.re64";
 const SPAN = { start: 0x8e00, end: 0x8e20 };
 
 describe("two readers declaring the same span, offline", () => {
-  it("the region write's outcome depends on whether you had synced", () => {
+  it("declaring a span adds, whatever the writer had seen", () => {
     const loaded = loadProjectFile(GRIDRUNNER);
-    const existing = loaded.map.getAllRegions().find((r) => r.start === 0x8e00)!;
-    expect(existing.name).toBe("characterSetData");
+    const existing = loaded.claims.find((c) => c.name === "characterSetData")!;
+    expect(existing).toBeDefined();
 
-    // Online. This reader has synced, so `characterSetData` is in their project,
-    // and declaring its exact span is read as *revising* it: the op carries the
-    // existing id, so applying it replaces the kind and the name. The other
-    // reader's conclusion is gone, and both callers were told `ok`.
-    const synced = regionSetOp(loaded, existing.start, existing.end, "data", "levelTable");
-    if (synced.op !== "region.set") throw new Error("shape");
-    expect(synced.id).toBe(existing.id);
+    // The same declaration a synced reader makes and an unsynced one makes.
+    // It used to matter which: matching the exact span reused the existing id
+    // and replaced it, while a writer who had not seen it minted a second — the
+    // same call with two outcomes, which is this project's own offline/online
+    // test failing. Now there is one outcome, and it is additive.
+    const synced = regionSetOp(loaded, existing.at, existing.at + existing.extent!, "data", "levelTable");
+    const elsewhere = regionSetOp(loaded, 0x8a00, 0x8a20, "data", "levelTable");
 
-    // Offline. The same reader, the same intent, the same call — but their copy
-    // has not seen `characterSetData`, so nothing starts at that address as far
-    // as they know. A fresh id, and on merge both statements stand.
-    const unsynced = regionSetOp(loaded, 0x8a00, 0x8a20, "data", "levelTable");
-    if (unsynced.op !== "region.set") throw new Error("shape");
-    expect(unsynced.id).not.toBe(existing.id);
+    expect(synced.op).toBe("claim.add");
+    expect(elsewhere.op).toBe("claim.add");
+    if (synced.op !== "claim.add" || elsewhere.op !== "claim.add") throw new Error("shape");
 
-    // eslint-disable-next-line no-console
-    console.log(
-      `same declaration, two outcomes: synced -> ${synced.id} (overwrites ` +
-      `"${existing.name}"), unsynced -> ${unsynced.id} (stands alongside)`
+    // Neither touches what is already there, and the two are told apart by id.
+    expect(synced.claim.id).not.toBe(existing.id);
+    expect(elsewhere.claim.id).not.toBe(synced.claim.id);
+  });
+
+  it("revising a span requires saying which one, by id", () => {
+    const loaded = loadProjectFile(GRIDRUNNER);
+    const existing = loaded.claims.find((c) => c.name === "characterSetData")!;
+
+    const revised = regionSetOp(
+      loaded,
+      existing.at,
+      existing.at + 0x20,
+      "bitmap",
+      "charSet",
+      undefined,
+      undefined,
+      undefined,
+      existing.id
     );
+    expect(revised.op).toBe("claim.set");
+    if (revised.op !== "claim.set") throw new Error("shape");
+    expect(revised.id).toBe(existing.id);
+    // Partial: it names the fields it changes and leaves the rest alone.
+    expect(revised.fields.extent).toBe(0x20);
   });
 
   it("claims keep both, and the disagreement is the output", () => {

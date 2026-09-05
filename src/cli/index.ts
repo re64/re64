@@ -28,7 +28,6 @@ import {
   analyze,
   formatRows,
   formatWarnings,
-  migrateIds,
   newId,
 } from "../core/index.js";
 import { migrateToClaims, needsMigration } from "../core/claims/migrate.js";
@@ -381,17 +380,12 @@ program
   .option("--ids-only", "Write ids but leave labels and regions as they are")
   .action((file: string, options: { idsOnly?: boolean }) => {
     const raw = readFileSync(file, "utf-8");
-    // Line-based, so a hand-authored layout survives — which is the point of
-    // doing it here rather than by reserialising.
-    let migrated = migrateIds(raw, (prefix) => newId(prefix));
-
-    // It edits the raw JSON line by line, so a file written on one line has
-    // nothing for it to work with and it reports success having done nothing.
-    // Falling back to reserialising loses the layout, but a file in that shape
-    // had none to lose.
-    const parsed = parseProject(migrated);
+    // Reserialised, not line-edited. The line-based version existed to keep a
+    // hand-authored layout intact, which stopped meaning anything once the
+    // export became a full dump regenerated from the document.
+    const parsed = parseProject(raw);
     const complete = withIds(parsed);
-    if (complete !== parsed) migrated = formatProject(complete);
+    let migrated = complete === parsed ? raw : formatProject(complete);
 
     // Ids first, then claims, because the conversion carries ids across verbatim
     // and can only carry what is there. A claim minted with a fresh id would

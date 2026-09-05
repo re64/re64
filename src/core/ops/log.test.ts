@@ -2,14 +2,8 @@ import { describe, it, expect } from "vitest";
 import { encodeChanges, decodeChanges, undoable, redoable, change } from "./log.js";
 import { Change, Op } from "./types.js";
 
-const op: Op = {
-  op: "label.set",
-  id: "lbl_1",
-  layerId: "lay_a",
-  address: 0x8000,
-  name: "Start",
-};
-const inverse: Op = { op: "label.delete", id: "lbl_1", layerId: "lay_a" };
+const op: Op = { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Start", by: { author: "test", source: "user" } } };
+const inverse: Op = { op: "claim.remove", id: "lbl_1" };
 
 describe("the edit log", () => {
   it("round-trips changes", () => {

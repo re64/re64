@@ -22,6 +22,7 @@ import {
   pathsFor,
 } from "../store/index.js";
 import { diffProjects, parseProject } from "../core/index.js";
+import { needsMigration, migrateToClaims } from "../core/claims/migrate.js";
 import { SyncServer } from "./sync.js";
 import { Workspace } from "./workspace.js";
 import { McpEndpoint, createMcpEndpoint } from "./mcp/transport.js";
@@ -376,7 +377,13 @@ export function startServer(options: ServerOptions): RunningServer {
         // one write path, two front doors. A blind overwrite would discard
         // whatever a connected session had merged in the meantime.
         const doc = store.document();
-        const ops = diffProjects(projectFromDoc(doc), incoming);
+        // Migrated before diffing: the document holds claims, and a caller may
+        // PUT either form. Comparing claims against layer labels emits removals
+        // for everything and additions for nothing, which is a silent wipe.
+        const ops = diffProjects(
+          projectFromDoc(doc),
+          needsMigration(incoming) ? migrateToClaims(incoming).project : incoming
+        );
         for (const op of ops) applyOpToDoc(doc, op, "http");
         store.addAuthor("http");
 

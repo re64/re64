@@ -69,29 +69,6 @@ export function applyOpsToDoc(doc: Y.Doc, ops: readonly Op[], origin: unknown = 
 function applyOpInTransaction(doc: Y.Doc, op: Op): void {
   {
     switch (op.op) {
-      case "label.set": {
-        const labels = childMap(layerById(doc, op.layerId), "labels");
-        let entry = labels.get(op.id);
-        if (!entry) {
-          entry = new Y.Map<unknown>();
-          labels.set(op.id, entry);
-        }
-        assign(entry, {
-          id: op.id,
-          address: hex4(op.address),
-          name: op.name,
-          // "address" is the default and is recorded by absence, matching the
-          // project file so a flatten produces the same text.
-          type: op.type === "address" ? undefined : op.type,
-          extent: op.extent,
-        });
-        break;
-      }
-
-      case "label.delete":
-        childMap(layerById(doc, op.layerId), "labels").delete(op.id);
-        break;
-
       case "comment.set": {
         const comments = childMap(layerById(doc, op.layerId), "comments");
         let entry = comments.get(op.id);
@@ -266,30 +243,6 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         if (at >= 0) layers.delete(at, 1);
         break;
       }
-
-      case "region.set": {
-        const regions = childMap(layerById(doc, op.layerId), "regions");
-        let entry = regions.get(op.id);
-        if (!entry) {
-          entry = new Y.Map<unknown>();
-          regions.set(op.id, entry);
-        }
-        assign(entry, {
-          id: op.id,
-          start: hex4(op.start),
-          end: hex4(op.end),
-          kind: op.kind,
-          name: op.name,
-          comment: op.comment,
-          encoding: op.encoding,
-          view: op.view,
-        });
-        break;
-      }
-
-      case "region.delete":
-        childMap(layerById(doc, op.layerId), "regions").delete(op.id);
-        break;
 
       case "primary.set":
         doc.getMap<string>("primaryLabels").set(hex4(op.address), op.labelId);

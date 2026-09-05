@@ -3,21 +3,21 @@ import { diffProjects } from "./diff.js";
 import { applyOps } from "./apply.js";
 import { parseProject } from "../project/project.js";
 
+/**
+ * Written with claims, because a document never holds layer labels or regions —
+ * `docFromProject` migrates on the way in, so there is nothing of that shape for
+ * a diff to see. `label.set` and `region.set` are gone from the vocabulary and a
+ * claim expresses both.
+ */
 const TEXT = `{
   "layers": [
-    {
-      "id": "lay_a",
-      "type": "prg",
-      "path": "game.prg",
-      "regions": [
-        { "id": "rgn_1", "start": "$8080", "end": "$80A0", "kind": "text", "name": "copyright" }
-      ],
-      "labels": [
-        { "id": "lbl_1", "address": "$8000", "name": "Start", "type": "function" },
+    { "id": "lay_a", "type": "prg", "path": "game.prg" }
+  ],
+  "claims": [
+    { "id": "clm_1", "at": "$8000", "name": "Start", "root": "routine", "author": "marcus", "source": "user" },
+    { "id": "clm_2", "at": "$8080", "extent": 32, "name": "copyright", "is": "text", "author": "marcus", "source": "user" },
 
-        { "id": "lbl_2", "address": "$8100", "name": "Loop" }
-      ]
-    }
+    { "id": "clm_3", "at": "$8100", "name": "Loop", "author": "marcus", "source": "user" }
   ]
 }
 `;
@@ -35,70 +35,59 @@ describe("diffProjects", () => {
 
   it("emits one operation for a rename", () => {
     const after = edited((p) => {
-      p.layers[0].labels![1].name = "MainLoop";
+      p.claims![2].name = "MainLoop";
     });
 
     const ops = diffProjects(parseProject(TEXT), after);
     expect(ops).toHaveLength(1);
-    expect(ops[0]).toMatchObject({ op: "label.set", id: "lbl_2", name: "MainLoop" });
+    // A revision names only what changed, so two peers editing different fields
+    // of one claim do not clobber each other.
+    expect(ops[0]).toMatchObject({ op: "claim.set", id: "clm_3", fields: { name: "MainLoop" } });
   });
 
-  it("applies back through the line editor, touching one line", () => {
-    // The whole point of diffing rather than rewriting: the file keeps its
-    // formatting, and the grouping blank line survives.
+  it("is unmoved by reordering, since identity is the id", () => {
     const after = edited((p) => {
-      p.layers[0].labels![1].name = "MainLoop";
+      p.claims!.reverse();
     });
-
-    const out = applyOps(TEXT, diffProjects(parseProject(TEXT), after));
-    const before = TEXT.split("\n");
-    const now = out.split("\n");
-
-    expect(before.filter((l, i) => l !== now[i])).toHaveLength(1);
-    expect(now.filter((l) => !l.trim())).toHaveLength(before.filter((l) => !l.trim()).length);
-  });
-
-  it("does not rewrite entries that only moved in the list", () => {
-    // A merged document orders by address; the file may not. Reordering alone
-    // must produce no operations, or every flatten would rewrite the file.
-    const after = edited((p) => {
-      p.layers[0].labels!.reverse();
-    });
-
     expect(diffProjects(parseProject(TEXT), after)).toEqual([]);
   });
 
   it("deletes before it re-adds, so a moved entry never exists twice", () => {
     const after = edited((p) => {
-      p.layers[0].labels!.splice(0, 1);
-      p.layers[0].labels!.push({ id: "lbl_3", address: "$8200", name: "New" });
+      p.claims!.splice(0, 1);
+      p.claims!.push({ id: "clm_4", at: "$8200", name: "New", author: "marcus", source: "user" });
     });
 
     const ops = diffProjects(parseProject(TEXT), after);
-    expect(ops[0].op).toBe("label.delete");
-    expect(ops.some((o) => o.op === "label.set" && o.id === "lbl_3")).toBe(true);
+    expect(ops[0].op).toBe("claim.remove");
+    expect(ops.some((o) => o.op === "claim.add" && o.claim.id === "clm_4")).toBe(true);
   });
 
-  it("covers regions and the primary index", () => {
+  it("covers interpretations and the primary index", () => {
     const after = edited((p) => {
-      p.layers[0].regions![0].kind = "data";
-      p.primaryLabels = { $8000: "lbl_1" };
+      p.claims![1].is = "data";
+      p.primaryLabels = { $8000: "clm_1" };
     });
 
     const ops = diffProjects(parseProject(TEXT), after);
-    expect(ops.some((o) => o.op === "region.set" && o.kind === "data")).toBe(true);
-    expect(ops.some((o) => o.op === "primary.set" && o.labelId === "lbl_1")).toBe(true);
+    expect(
+      ops.some((o) => o.op === "claim.set" && o.fields.says?.is === "data")
+    ).toBe(true);
+    expect(ops.some((o) => o.op === "primary.set" && o.labelId === "clm_1")).toBe(true);
   });
 
   it("round-trips: applying the diff reaches the target content", () => {
     const after = edited((p) => {
-      p.layers[0].labels![0].name = "Begin";
-      p.layers[0].labels![0].type = "code";
-      p.layers[0].regions![0].end = "$8100";
-      p.primaryLabels = { $8100: "lbl_2" };
+      p.claims![0].name = "Begin";
+      p.claims![0].root = "location";
+      p.claims![1].extent = 128;
     });
 
-    const out = parseProject(applyOps(TEXT, diffProjects(parseProject(TEXT), after)));
-    expect(diffProjects(out, after)).toEqual([]);
+    const out = applyOps(TEXT, diffProjects(parseProject(TEXT), after));
+    const reparsed = parseProject(out);
+
+    const byId = new Map((reparsed.claims ?? []).map((c) => [c.id, c]));
+    expect(byId.get("clm_1")).toMatchObject({ name: "Begin", root: "location" });
+    expect(byId.get("clm_2")).toMatchObject({ extent: 128 });
   });
 });

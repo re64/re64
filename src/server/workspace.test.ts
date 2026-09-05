@@ -563,15 +563,23 @@ describe("writing about an address", () => {
 });
 
 describe("naming what holds no bytes", () => {
-  it("creates a layer to hold the name, rather than refusing", () => {
-    // The refusal this replaces named the fix and offered no way to do it:
-    // "add a layer of type symbols" with nothing that could. On a 6502 program
-    // every variable lives in zero page, so roughly half of what a person
-    // contributes to a listing could not be said at all.
+  it("needs no layer at all, because a claim has no owner", () => {
+    // Two answers to this, in order. First a refusal that named the fix and
+    // offered no way to do it — "add a layer of type symbols" with nothing that
+    // could — which made roughly half of what a person contributes unsayable,
+    // since every 6502 variable lives in zero page. Then a symbols layer
+    // created on the spot to hold the name.
+    //
+    // Both were working around the rule that an annotation belongs to the layer
+    // supplying its bytes. A claim does not, so neither is needed: the whole
+    // apparatus — ensureOwningLayer, ownership.ts, add_layer, the empty-layer
+    // exemption — goes with it.
     const blank = blankWorkspace();
+    const before = blank.describe().layers.length;
     const result = blank.addLabel(agent, 0x02, "currentXPosition");
 
-    expect(result.did.some((d) => d.includes("symbols layer"))).toBe(true);
+    expect(result.did.some((d) => d.includes("symbols layer"))).toBe(false);
+    expect(blank.describe().layers).toHaveLength(before);
     expect(blank.labels({ namePattern: "currentXPosition" }).total).toBe(1);
   });
 
@@ -586,14 +594,15 @@ describe("naming what holds no bytes", () => {
     expect(rows).toContain("previousYPosition");
   });
 
-  it("makes only one layer, however many addresses are named", () => {
+  it("makes no layer, however many addresses are named", () => {
     const blank = blankWorkspace();
     blank.addLabel(agent, 0x02, "currentXPosition");
     blank.addLabel(agent, 0x03, "currentYPosition");
     blank.addLabel(agent, 0x04, "currentCharacter");
 
     const symbols = blank.describe().layers.filter((l) => l.name.includes("symbols"));
-    expect(symbols).toHaveLength(1);
+    expect(symbols).toHaveLength(0);
+    expect(blank.labels({ namePattern: "current" }).total).toBe(3);
   });
 
   it("takes the layer back with the label that caused it", () => {
@@ -706,7 +715,8 @@ describe("naming many addresses at once", () => {
     ]);
 
     const symbols = blank.describe().layers.filter((l) => l.name.includes("symbols"));
-    expect(symbols).toHaveLength(1);
+    expect(symbols).toHaveLength(0);
+    expect(blank.labels({ namePattern: "current" }).total).toBe(3);
     expect(blank.labels({ source: "user" }).total).toBe(3);
   });
 
@@ -1038,7 +1048,7 @@ describe("two names for one address", () => {
 
     expect(() => blank.removeLabel(agent, 0x08)).toThrow(/carries 2 labels/);
     // The refusal is where the ids come from, as it is for remove_region.
-    expect(() => blank.removeLabel(agent, 0x08)).toThrow(/lbl_/);
+    expect(() => blank.removeLabel(agent, 0x08)).toThrow(/clm_/);
 
     const listed = blank.labels({ namePattern: "gridXPos" }, 10).labels[0];
     expect(listed.id).toBeDefined();
@@ -1163,8 +1173,18 @@ describe("saying how to read text", () => {
     // $8004 holds C3 C2 CD..., which differ between the two. $8080 would not:
     // screen codes and ASCII agree across $20-$3F, so a span of printable
     // punctuation cannot tell them apart.
+    // Declared once and revised by id, since declaring is additive now: two
+    // claims over one span would both stand and the listing would show whichever
+    // sorted first, which is the ambiguity the id exists to remove.
+    const declared = workspace.setRegion(agent, 0x8004, 0x800c, "text", "header", undefined, "screen");
+    const claim = (declared as { claim?: string }).claim!;
+    expect(claim).toBeDefined();
+
     const read = (encoding: "ascii" | "screen") => {
-      workspace.setRegion(agent, 0x8004, 0x800c, "text", "header", undefined, encoding);
+      workspace.setRegion(
+        agent, 0x8004, 0x800c, "text", "header",
+        undefined, encoding, undefined, claim
+      );
       return workspace.disassembly(0x8004, 2).lines.map((l) => l.text).join("\n");
     };
 
@@ -1613,37 +1633,56 @@ describe("declaring a picture", () => {
     expect(listing).toContain("8E20");
   });
 
-  it("does not stack up when the same span is declared twice inside a bigger one", () => {
-    // The case that broke this while it was being written. $8004-$8011 is
-    // already `initData`, so the first declaration nests — and the second one
-    // must recognise its *own* region rather than nesting inside `initData`
-    // again. Otherwise two identical spans race to be innermost and the listing
-    // shows whichever won.
+  it("declaring the same span twice makes two claims, and says which is which", () => {
+    // It used to guess: the same span exactly meant "revise the one there", and
+    // that made the write's identity depend on what the caller had synced. Now
+    // both stand and the second says how to revise the first instead.
     const before = workspace.describe().regions.length;
-    workspace.setRegion(agent, 0x8004, 0x800c, "text", "header", undefined, "screen");
+    const first = workspace.setRegion(agent, 0x8004, 0x800c, "text", "header", undefined, "screen");
     workspace.setRegion(agent, 0x8004, 0x800c, "text", "header", undefined, "ascii");
 
-    expect(workspace.describe().regions.length).toBe(before + 1);
-    // And the second declaration is the one in force, rather than whichever of
-    // two identical spans happened to win. `C3 C2 CD` reads as box-drawing in
-    // screen codes and as unprintable in ASCII, so the glyphs say which.
-    const listing = workspace.listing(0x8004, 3).text;
-    expect(listing).toContain('.TEXT "...80');
-    expect(listing).not.toContain("·│·");
+    expect(workspace.describe().regions.length).toBe(before + 2);
+
+    // Neither is "in force": two claims over one span is a disagreement, and
+    // which renders falls to a stable but arbitrary order. What the caller gets
+    // instead is the id of the one it just made, so it can revise that rather
+    // than declaring a third.
+    expect((first as { claim?: string }).claim).toBeDefined();
   });
 
-  it("still revises a region declared over the same span", () => {
-    // The unambiguous case: same start, same end. That is one statement being
-    // corrected, not a second one being made, so it must not stack up.
+  it("revises the one it is told to, by id", () => {
+    // Correcting a statement rather than making a second one. The id is what
+    // says which, and there is no longer any way to infer it: matching the span
+    // was the inference, and it depended on what the caller had synced.
+    const existing = workspace
+      .describe()
+      .regions.find((r) => r.name === "characterSetData")!;
     const before = workspace.describe().regions.length;
-    workspace.setRegion(agent, 0x8e00, 0x9000, "data", "RenamedOnce");
-    workspace.setRegion(agent, 0x8e00, 0x9000, "data", "RenamedTwice");
+
+    workspace.setRegion(
+      agent, 0x8e00, 0x9000, "data", "RenamedOnce",
+      undefined, undefined, undefined, existing.id
+    );
+    workspace.setRegion(
+      agent, 0x8e00, 0x9000, "data", "RenamedTwice",
+      undefined, undefined, undefined, existing.id
+    );
+
     expect(workspace.describe().regions.length).toBe(before);
+    expect(workspace.describe().regions.find((r) => r.id === existing.id)!.name)
+      .toBe("RenamedTwice");
   });
 
-  it("still extends a region declared wider than the one there", () => {
+  it("extends the one it is told to, by id", () => {
+    const existing = workspace
+      .describe()
+      .regions.find((r) => r.name === "characterSetData")!;
     const before = workspace.describe().regions.length;
-    workspace.setRegion(agent, 0x8e00, 0x9000, "data", "Wider");
+
+    workspace.setRegion(
+      agent, 0x8e00, 0x9100, "data", "Wider",
+      undefined, undefined, undefined, existing.id
+    );
     expect(workspace.describe().regions.length).toBe(before);
   });
 });
@@ -1672,14 +1711,14 @@ describe("naming a region rather than guessing which one", () => {
   it("says so when the id names nothing", () => {
     expect(() =>
       workspace.setRegion(agent, 0x8e00, 0x8e20, "data", "X", undefined, undefined, undefined, "rgn_nope")
-    ).toThrow(/No region rgn_nope/);
+    ).toThrow(/No claim rgn_nope/);
   });
 
   it("refuses an ambiguous removal instead of deleting the wrong one", () => {
     // Nesting made a start address stop being a unique handle, so picking
     // whichever the array listed first would silently delete the wrong region.
     workspace.setRegion(agent, 0x8004, 0x800c, "text", "inner", undefined, "screen");
-    expect(() => workspace.removeRegion(agent, 0x8004)).toThrow(/Several regions start/);
+    expect(() => workspace.removeRegion(agent, 0x8004)).toThrow(/Several claims start/);
   });
 
   it("removes the one you name", () => {
@@ -1915,8 +1954,8 @@ describe("finding things across the whole program", () => {
     // the label rows, which qualify through `displayName` whichever of the names
     // at that address is currently primary — the operand does too, but only
     // once this name is the one showing, and that is a different decision.
-    expect(workspace.listing(0x8cb5, 2).text).toMatch(/levelTable@lbl_/);
-    expect(workspace.listing(0x8cd5, 2).text).toMatch(/levelTable@lbl_/);
+    expect(workspace.listing(0x8cb5, 2).text).toMatch(/levelTable@clm_/);
+    expect(workspace.listing(0x8cd5, 2).text).toMatch(/levelTable@clm_/);
   });
 
   it("reports the same chosen name twice at one address", () => {

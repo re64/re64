@@ -12,12 +12,7 @@ export { FileLoader, LoadedProject, buildMemoryMap, projectForTarget } from "./l
 export { FileBytes, splitD64Path, blobPaths, makeFileLoader } from "./file-source.js";
 export {
   formatProject,
-  upsertLabel,
-  deleteLabel,
-  upsertRegion,
-  deleteRegion,
   setPrimaryLabel,
-  migrateIds,
   normalizeProjectText,
 } from "./serialize.js";
 export { resolveOwningLayer } from "./ownership.js";

@@ -20,6 +20,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { needsMigration, migrateToClaims } from "../core/claims/migrate.js";
 import { HistoryEntry, ProjectStorage, StoredChange, revOf } from "./storage.js";
 
 /**
@@ -58,6 +59,16 @@ import {
   encodeDoc,
   projectFromDoc,
 } from "../core/crdt/index.js";
+
+/**
+ * A project in the form the document holds.
+ *
+ * Text may arrive in either form — a file written before the migration, or one
+ * an older tool produced — and comparing claims against layer labels emits
+ * removals for everything and additions for nothing, which is a silent wipe.
+ */
+const asClaims = (project: Project): Project =>
+  needsMigration(project) ? migrateToClaims(project).project : project;
 
 export class ProjectStore {
   private doc: CrdtDoc | undefined;
@@ -349,11 +360,22 @@ export class ProjectStore {
     if (!this.storage.exists()) return [];
     const text = this.storage.readText();
     this.absorb(text);
-    const ops = diffProjects(parseProject(text), projectFromDoc(doc));
+
+    // The ops are the *record* of what this write carries — they feed
+    // `sessionOps`, which becomes the history entry. The file itself is a full
+    // dump regenerated from the document.
+    //
+    // It used to be produced by applying those ops to the text on disk, so a
+    // one-label rename stayed a one-line diff. That stopped being worth its
+    // weight once the export became something to hand somebody rather than
+    // something to maintain — and it was actively wrong here, because the ops
+    // are computed against the migrated text and were being applied to the raw
+    // one, so a write to a file still in the old shape landed nowhere at all.
+    const ops = diffProjects(asClaims(parseProject(text)), projectFromDoc(doc));
     if (ops.length > 0) {
       let updated: string;
       try {
-        updated = applyOps(text, ops);
+        updated = formatProject(projectFromDoc(doc));
       } catch (error) {
         // Recorded before rethrowing, because the only caller on the live path
         // is a detached timer that swallows this to keep the server up. Without
@@ -396,7 +418,10 @@ export class ProjectStore {
       return;
     }
 
-    const external = diffProjects(parseProject(this.lastWritten), parseProject(text));
+    const external = diffProjects(
+      asClaims(parseProject(this.lastWritten)),
+      asClaims(parseProject(text))
+    );
     for (const op of external) applyOpToDoc(this.document(), op, "external");
     this.lastWritten = text;
     if (external.length > 0) {

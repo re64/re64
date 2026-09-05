@@ -1,422 +1,180 @@
 import { describe, it, expect } from "vitest";
 import {
-  upsertLabel,
-  upsertRegion,
-  upsertDecoder,
-  deleteDecoder,
-  deleteLabel,
-  migrateIds,
-  normalizeProjectText,
+  formatProject,
+  setPrimaryLabel,
+  upsertClaim,
+  deleteClaim,
+  upsertConstant,
+  deleteConstant,
+  setProjectMeta,
 } from "./serialize.js";
 import { parseProject } from "./project.js";
 
 /**
- * A project in the house style: nested layers, one entry per line, and blank
- * lines grouping related labels. The grouping is the thing most at risk from a
- * careless write, so it appears in nearly every case below.
- */
-const PROJECT = `{
-  "name": "Test",
-  "layers": [
-    {
-      "id": "lay_aaa",
-      "type": "symbols",
-      "name": "syms",
-      "labels": [
-        { "id": "lbl_aaa001", "address": "$02", "name": "playerX" },
-        { "id": "lbl_aaa002", "address": "$03", "name": "playerY" },
-
-        { "id": "lbl_aaa003", "address": "$D020", "name": "BORDER" }
-      ]
-    },
-    {
-      "id": "lay_bbb",
-      "type": "prg",
-      "path": "game.prg",
-      "labels": [
-        { "id": "lbl_bbb001", "address": "$8000", "name": "Start", "type": "function" },
-        { "id": "lbl_bbb002", "address": "$8100", "name": "Loop" },
-        { "id": "lbl_bbb003", "address": "$8200", "name": "Done" }
-      ]
-    }
-  ],
-  "entryPoints": ["$8000"]
-}
-`;
-
-/** A file written before ids existed. */
-const LEGACY = `{
-  "layers": [
-    {
-      "type": "prg",
-      "path": "game.prg",
-      "labels": [
-        { "address": "$8000", "name": "Start" },
-
-        { "address": "$8100", "name": "Loop" }
-      ]
-    }
-  ]
-}
-`;
-
-const linesOf = (s: string) => s.split("\n");
-/**
- * Lines added and removed, ignoring position.
+ * Writing a project back out.
  *
- * Not a positional comparison: deleting one line shifts every line after it,
- * which would report the whole tail as changed.
+ * Every writer here now **reserialises**: parse, change, `formatProject`. The
+ * line-editing machinery this file used to test — splicing an entry into the
+ * right place, keeping the blank lines that grouped labels, adding an id to one
+ * line and leaving the rest — is gone.
+ *
+ * It existed so a one-label rename was a one-line diff in git. That stopped
+ * being true well before it was removed: `ProjectStore.runOps` regenerates its
+ * text from the document on every single write, with a comment saying "the
+ * layout does not matter here". Several hundred lines were maintaining a
+ * property nothing read, and one of them — `setPrimaryLabel` — was corrupting
+ * files that happened to write `primaryLabels` on one line.
+ *
+ * What is left is the shape of the output and the correctness of each writer.
  */
-const diffSize = (before: string, after: string) => {
-  const a = linesOf(before);
-  const b = linesOf(after);
-  return (
-    a.filter((l) => !b.includes(l)).length + b.filter((l) => !a.includes(l)).length
-  );
-};
 
-/** Blank lines survive an edit — the grouping the house style depends on. */
-const blankCount = (s: string) => linesOf(s).filter((l) => l.trim() === "").length;
+const TEXT = `{
+  "name": "harness",
+  "layers": [{ "id": "lay_a", "type": "prg", "path": "game.prg" }],
+  "claims": [
+    { "id": "clm_1", "at": "$8000", "name": "Start", "root": "routine", "author": "marcus", "source": "user" }
+  ],
+  "constants": [{ "id": "cst_1", "name": "WHITE", "value": "$01" }]
+}
+`;
 
-describe("upsertLabel", () => {
-  it("renames in place, changing exactly one line", () => {
-    const out = upsertLabel(PROJECT, "lbl_bbb002", 0x8100, "MainLoop", undefined, 1);
-
-    // One line out, one line in: a rename, not a reformat.
-    expect(diffSize(PROJECT, out)).toBe(2);
-    expect(out).toContain(`{ "id": "lbl_bbb002", "address": "$8100", "name": "MainLoop" }`);
-    expect(out).not.toContain(`"name": "Loop"`);
+describe("formatProject", () => {
+  it("round-trips through parse unchanged", () => {
+    const once = formatProject(parseProject(TEXT));
+    expect(formatProject(parseProject(once))).toBe(once);
   });
 
-  it("preserves the blank lines that group labels", () => {
-    // The whole reason this edits text rather than re-serialising JSON.
-    const out = upsertLabel(PROJECT, "lbl_aaa001", 0x02, "shipX", undefined, 0);
-
-    expect(blankCount(out)).toBe(blankCount(PROJECT));
+  it("writes one claim per line, so a diff stays readable", () => {
+    const out = formatProject(parseProject(TEXT));
+    const claimLines = out.split("\n").filter((l) => l.includes('"clm_'));
+    expect(claimLines).toHaveLength(1);
   });
 
-  it("writes into the layer it is told to, not the first one found", () => {
-    // Both layers have a "labels" array; a naive scan would hit the symbol one.
-    const out = upsertLabel(PROJECT, "lbl_t8300", 0x8300, "Extra", undefined, 1);
-    const prgStart = out.indexOf(`"path": "game.prg"`);
-
-    expect(out.indexOf(`"name": "Extra"`)).toBeGreaterThan(prgStart);
-  });
-
-  it("inserts a new label in address order", () => {
-    const out = upsertLabel(PROJECT, "lbl_t8150", 0x8150, "Middle", undefined, 1);
-    const names = [...out.matchAll(/"name": "(\w+)"/g)].map((m) => m[1]);
-
-    expect(names.indexOf("Middle")).toBeGreaterThan(names.indexOf("Loop"));
-    expect(names.indexOf("Middle")).toBeLessThan(names.indexOf("Done"));
-  });
-
-  it("appends when the new address is past the end", () => {
-    const out = upsertLabel(PROJECT, "lbl_t8900", 0x8900, "Last", undefined, 1);
-
-    expect(parseProject(out).layers[1].labels!.at(-1)!.name).toBe("Last");
-  });
-
-  it("records the default type by absence rather than writing it out", () => {
-    const typed = upsertLabel(PROJECT, "lbl_bbb002", 0x8100, "Loop", "function", 1);
-    expect(typed).toContain(`"name": "Loop", "type": "function"`);
-
-    const cleared = upsertLabel(typed, "lbl_bbb002", 0x8100, "Loop", "address", 1);
-    expect(cleared).toContain(`{ "id": "lbl_bbb002", "address": "$8100", "name": "Loop" }`);
-    expect(cleared).not.toContain(`"type": "address"`);
-  });
-
-  it("round-trips a type change back to the original text", () => {
-    const there = upsertLabel(PROJECT, "lbl_bbb002", 0x8100, "Loop", "function", 1);
-    const back = upsertLabel(there, "lbl_bbb002", 0x8100, "Loop", "address", 1);
-
-    expect(back).toBe(PROJECT);
-  });
-
-  it("returns text that still parses", () => {
-    const out = upsertLabel(PROJECT, "lbl_t8400", 0x8400, "New", "code", 1);
-    expect(() => parseProject(out)).not.toThrow();
-  });
-
-  it("refuses a layer index that does not exist", () => {
-    expect(() => upsertLabel(PROJECT, "lbl_t8000", 0x8000, "X", undefined, 9)).toThrow(/No layer/);
-  });
-});
-
-describe("upsertLabel on a file without ids", () => {
-  it("adds an id to the line it touches, leaving the rest alone", () => {
-    const out = upsertLabel(LEGACY, "lbl_new", 0x8100, "MainLoop", undefined, 0);
-
-    expect(out).toContain(`{ "id": "lbl_new", "address": "$8100", "name": "MainLoop" }`);
-    // Untouched entries stay as they were: migration is per-edit, not wholesale.
-    expect(out).toContain(`{ "address": "$8000", "name": "Start" }`);
-    expect(blankCount(out)).toBe(blankCount(LEGACY));
-  });
-
-  it("still parses as a project", () => {
-    expect(() => parseProject(upsertLabel(LEGACY, "lbl_new", 0x8100, "X", undefined, 0))).not.toThrow();
-  });
-});
-
-describe("deleteLabel", () => {
-  it("removes one line and leaves the grouping intact", () => {
-    const out = deleteLabel(PROJECT, "lbl_bbb002", 1);
-
-    expect(diffSize(PROJECT, out)).toBe(1);
-    expect(linesOf(out).length).toBe(linesOf(PROJECT).length - 1);
-    expect(out).not.toContain(`"name": "Loop"`);
-    expect(blankCount(out)).toBe(blankCount(PROJECT));
-  });
-
-  it("fixes the trailing comma when the last entry goes", () => {
-    const out = deleteLabel(PROJECT, "lbl_bbb003", 1);
-
-    expect(() => parseProject(out)).not.toThrow();
-    expect(parseProject(out).layers[1].labels!.map((l) => l.name)).toEqual([
-      "Start",
-      "Loop",
-    ]);
-  });
-
-  it("leaves the text alone when the address is not there", () => {
-    expect(deleteLabel(PROJECT, "lbl_missing", 1)).toBe(PROJECT);
-  });
-
-  it("round-trips with upsert", () => {
-    const added = upsertLabel(PROJECT, "lbl_t8400", 0x8400, "Temp", undefined, 1);
-    expect(deleteLabel(added, "lbl_t8400", 1)).toBe(PROJECT);
-  });
-});
-
-describe("upsertLabel into a layer with no labels array", () => {
-  it("writes a well-formed address, not a bare number", () => {
-    // This path reformats the whole file, so it is exercised rarely - and it
-    // silently produced "8100" instead of "$8100" until a round-trip caught it.
-    const bare = JSON.stringify({ layers: [{ type: "prg", path: "game.prg" }] });
-    const out = upsertLabel(bare, "lbl_z", 0x8100, "New", "function", 0);
-
-    expect(out).toContain(`"address": "$8100"`);
-    expect(out).toContain(`"id": "lbl_z"`);
-    const parsed = parseProject(out);
-    expect(parsed.layers[0].labels).toEqual([
-      { id: "lbl_z", address: "$8100", name: "New", type: "function" },
-    ]);
-  });
-});
-
-describe("migrateIds", () => {
-  /** Deterministic minting, so assertions can name the ids. */
-  const mint = () => {
-    let n = 0;
-    return (prefix: "lbl" | "rgn" | "lay") => `${prefix}_m${++n}`;
-  };
-
-  it("gives every layer, label, and region an id", () => {
-    const project = parseProject(migrateIds(LEGACY, mint()));
-
-    expect(project.layers[0].id).toBeDefined();
-    expect(project.layers[0].labels!.every((l) => l.id !== undefined)).toBe(true);
-  });
-
-  it("preserves every line's content, adding only ids", () => {
-    const stripped = migrateIds(LEGACY, mint())
+  it("orders claims by address, then id, so two peers produce the same text", () => {
+    const project = parseProject(TEXT);
+    project.claims!.push(
+      { id: "clm_3", at: "$8100", name: "Later", author: "m", source: "user" },
+      { id: "clm_2", at: "$8100", name: "Also", author: "m", source: "user" }
+    );
+    const order = formatProject(project)
       .split("\n")
-      .filter((l) => !/^\s*"id": "[^"]*",$/.test(l))
-      .map((l) => l.replace(/"id": "[^"]*", /, ""))
-      .join("\n");
-
-    expect(stripped).toBe(LEGACY);
+      .filter((l) => l.includes('"clm_'))
+      .map((l) => /"(clm_\d)"/.exec(l)![1]);
+    expect(order).toEqual(["clm_1", "clm_2", "clm_3"]);
   });
 
-  it("keeps the blank lines that group labels", () => {
-    expect(blankCount(migrateIds(LEGACY, mint()))).toBe(blankCount(LEGACY));
-  });
-
-  it("is idempotent - a second run changes nothing", () => {
-    // A layer id lives on the line after its brace, so checking the brace
-    // alone would miss it and insert a duplicate.
-    const once = migrateIds(LEGACY, mint());
-    expect(migrateIds(once, mint())).toBe(once);
-  });
-
-  it("leaves an already-migrated file alone", () => {
-    expect(migrateIds(PROJECT, mint())).toBe(PROJECT);
+  it("drops an empty block rather than writing it out", () => {
+    const project = parseProject(TEXT);
+    project.claims = [];
+    expect(formatProject(project)).not.toContain('"claims"');
   });
 });
 
-describe("normalizeProjectText", () => {
-  it("ensures a trailing newline without doubling one", () => {
-    expect(normalizeProjectText("{}")).toBe("{}\n");
-    expect(normalizeProjectText("{}\n")).toBe("{}\n");
+describe("claim writers", () => {
+  it("adds one, and revising the same id replaces rather than stacking", () => {
+    const added = upsertClaim(TEXT, {
+      id: "clm_2",
+      at: "$8080",
+      extent: 32,
+      is: "text",
+      author: "m",
+      source: "user",
+    });
+    expect(parseProject(added).claims).toHaveLength(2);
+
+    const revised = upsertClaim(added, {
+      id: "clm_2",
+      at: "$8080",
+      extent: 64,
+      is: "text",
+      author: "m",
+      source: "user",
+    });
+    const claims = parseProject(revised).claims!;
+    expect(claims).toHaveLength(2);
+    expect(claims.find((c) => c.id === "clm_2")!.extent).toBe(64);
+  });
+
+  it("is idempotent, or undo could not replay it forward to check", () => {
+    const claim = { id: "clm_1", at: "$8000", name: "Start", root: "routine" as const, author: "marcus", source: "user" as const };
+    expect(upsertClaim(TEXT, claim)).toBe(TEXT);
+  });
+
+  it("removes one, and drops the block when the last goes", () => {
+    const out = deleteClaim(TEXT, "clm_1");
+    expect(out).not.toContain('"claims"');
+    expect(deleteClaim(out, "clm_1")).toBe(out);
   });
 });
 
-describe("writing a region into a layer that has none yet", () => {
-  /** A layer with bytes and no `regions` array, which is the branch in question. */
-  const bare = JSON.stringify(
-    {
-      name: "subject",
-      layers: [{ id: "lay_a", type: "bytes", address: "$8000", bytes: "48 45 4C 4C 4F" }],
-    },
-    null,
-    2
-  );
+describe("setPrimaryLabel", () => {
+  it("adds, replaces and clears", () => {
+    const set = setPrimaryLabel(TEXT, 0x8000, "clm_1");
+    expect(parseProject(set).primaryLabels).toEqual({ $8000: "clm_1" });
 
-  it("keeps the encoding", () => {
-    // The first region ever written into a layer takes a different path from
-    // every later one — it reformats rather than editing lines — and that path
-    // dropped `encoding` on the floor. So declaring a text region and saying how
-    // to read it in one call produced a region that rendered as ASCII, with
-    // nothing said anywhere.
-    const written = upsertRegion(bare, 0, {
-      id: "rgn_a",
-      start: 0x8000,
-      end: 0x8005,
-      kind: "text",
-      encoding: "petscii",
-    });
+    const again = setPrimaryLabel(set, 0x8000, "clm_2");
+    expect(parseProject(again).primaryLabels).toEqual({ $8000: "clm_2" });
 
-    expect(parseProject(written).layers[0].regions?.[0]).toMatchObject({
-      kind: "text",
-      encoding: "petscii",
-    });
+    const cleared = setPrimaryLabel(again, 0x8000, undefined);
+    expect(parseProject(cleared).primaryLabels).toBeUndefined();
   });
 
-  it("still keeps it on the second region, which takes the other path", () => {
-    const once = upsertRegion(bare, 0, {
-      id: "rgn_a",
-      start: 0x8000,
-      end: 0x8002,
-      kind: "text",
-      encoding: "petscii",
-    });
-    const twice = upsertRegion(once, 0, {
-      id: "rgn_b",
-      start: 0x8002,
-      end: 0x8005,
-      kind: "text",
-      encoding: "screen",
-    });
+  it("handles a block written on one line, which used to corrupt the file", () => {
+    // The bug the round-trip harness found: `formatProject` writes this block
+    // one key per line, the old splicer assumed that, and given the equally
+    // valid one-line form it wrote outside the block and produced invalid JSON.
+    const inline = `{
+  "layers": [{ "id": "lay_a", "type": "prg", "path": "g.prg" }],
+  "primaryLabels": { "$8000": "clm_1" }
+}
+`;
+    const out = setPrimaryLabel(inline, 0x8100, "clm_2");
+    expect(() => parseProject(out)).not.toThrow();
+    expect(parseProject(out).primaryLabels).toEqual({ $8000: "clm_1", $8100: "clm_2" });
+  });
 
-    const regions = parseProject(twice).layers[0].regions ?? [];
-    expect(regions.map((r) => r.encoding)).toEqual(["petscii", "screen"]);
+  it("changes nothing when the value is already there", () => {
+    const set = setPrimaryLabel(TEXT, 0x8000, "clm_1");
+    expect(setPrimaryLabel(set, 0x8000, "clm_1")).toBe(set);
   });
 });
 
-describe("refusing a text encoding nobody implements", () => {
-  it("names what it expected instead of rendering nonsense", () => {
-    // Accepted, persisted and silently read as ASCII until now.
-    const typo = JSON.stringify({
-      name: "subject",
-      layers: [
-        {
-          type: "bytes",
-          address: "$8000",
-          bytes: "48 49",
-          regions: [{ start: "$8000", end: "$8002", kind: "text", encoding: "petsci" }],
-        },
-      ],
-    });
-    expect(() => parseProject(typo)).toThrow(/Unknown text encoding "petsci"/);
+describe("constants and meta", () => {
+  it("writes a byte value as two digits, not four", () => {
+    const out = upsertConstant(TEXT, { id: "cst_2", name: "RED", value: "$02" });
+    expect(out).toContain('"value": "$02"');
+  });
+
+  it("removes a constant and drops the block when the last goes", () => {
+    expect(deleteConstant(TEXT, "cst_1")).not.toContain('"constants"');
+  });
+
+  it("sets and clears a meta field", () => {
+    const described = setProjectMeta(TEXT, "description", "a test project");
+    expect(parseProject(described).description).toBe("a test project");
+    expect(parseProject(setProjectMeta(described, "description", undefined)).description)
+      .toBeUndefined();
   });
 });
 
-describe("a decoder in a project file", () => {
-  const source = 'return { kind: "text", lines: ["ran"] };';
-
-  it("survives being written and read back", () => {
-    // The point of keeping one in the project: it travels with the file, so
-    // whoever opens it next gets the decoder too.
-    const written = upsertDecoder(
-      JSON.stringify({ name: "subject", layers: [] }, null, 2),
-      { id: "dec_a", name: "charset, reversed", source }
-    );
-    expect(parseProject(written).decoders?.[0]).toEqual({
-      id: "dec_a",
-      name: "charset, reversed",
-      source,
-    });
+describe("validation", () => {
+  it("names what it expected rather than rendering nonsense", () => {
+    // `encoding: "petsci"` was accepted, written back and rendered as ASCII for
+    // as long as nothing checked it.
+    expect(() =>
+      parseProject(`{
+        "layers": [{ "id": "lay_a", "type": "prg", "path": "g.prg" }],
+        "claims": [{ "id": "clm_1", "at": "$8080", "is": "text", "encoding": "petsci" }]
+      }`)
+    ).toThrow(/Unknown text encoding "petsci"/);
   });
 
-  it("replaces one with the same id instead of stacking", () => {
-    let raw = upsertDecoder(JSON.stringify({ name: "s", layers: [] }), {
-      id: "dec_a",
-      name: "first",
-      source,
-    });
-    raw = upsertDecoder(raw, { id: "dec_a", name: "second", source: "return null;" });
-    const decoders = parseProject(raw).decoders ?? [];
-    expect(decoders).toHaveLength(1);
-    expect(decoders[0].name).toBe("second");
-  });
-
-  it("removes the key entirely when the last one goes", () => {
-    const raw = upsertDecoder(JSON.stringify({ name: "s", layers: [] }), {
-      id: "dec_a",
-      name: "only",
-      source,
-    });
-    expect(parseProject(deleteDecoder(raw, "dec_a")).decoders).toBeUndefined();
-  });
-});
-
-describe("a project file this editor did not format", () => {
-  /**
-   * The same project, pretty-printed — every entry spanning five lines. A
-   * `.re64` is ordinary JSON and anything may write one, so the line editor has
-   * to cope with a shape it did not produce rather than assume its own output.
-   */
-  const pretty = () => JSON.stringify(parseProject(PROJECT), null, 2);
-
-  it("does not corrupt the file when inserting before an existing entry", () => {
-    // The failure this fixes: `insertEntry` matched the `"address"` line *inside*
-    // a multi-line object and spliced the new entry between that object's own
-    // fields, producing invalid JSON. `upsertLabel`'s own parse guard then threw,
-    // `applyOps` abandoned the whole batch, and the detached writer swallowed it
-    // — so every tool answered `ok` while nothing reached the file. A quarter of
-    // experiment 4's run was written into a document and never exported.
-    const updated = upsertLabel(pretty(), "lbl_new", 0x0001, "beforeEverything", "address", 0);
-    expect(() => parseProject(updated)).not.toThrow();
-
-    const labels = parseProject(updated).layers[0].labels ?? [];
-    expect(labels.some((l) => l.name === "beforeEverything")).toBe(true);
-  });
-
-  it("keeps every entry that was already there", () => {
-    const before = parseProject(PROJECT).layers[0].labels ?? [];
-    const updated = upsertLabel(pretty(), "lbl_new", 0x0001, "added", "address", 0);
-    const after = parseProject(updated).layers[0].labels ?? [];
-    expect(after).toHaveLength(before.length + 1);
-    for (const label of before) {
-      expect(after.some((l) => l.id === label.id && l.name === label.name)).toBe(true);
-    }
-  });
-
-  it("comes back in the one-per-line shape, so the next edit is a small diff", () => {
-    // Reformatting is the cost, and it is paid once: after this write the file
-    // is canonical and line editing works normally again.
-    const updated = upsertLabel(pretty(), "lbl_new", 0x0001, "added", "address", 0);
-    const entries = updated.split("\n").filter((l) => l.trim().startsWith('{ "id"'));
-    expect(entries.length).toBeGreaterThan(0);
-
-    const twice = upsertLabel(updated, "lbl_two", 0x0002, "second", "address", 0);
-    expect(() => parseProject(twice)).not.toThrow();
-  });
-
-  it("survives a region write and a delete just the same", () => {
-    const region = upsertRegion(pretty(), 1, {
-      id: "reg_new",
-      start: 0x8000,
-      end: 0x8010,
-      kind: "data",
-    });
-    expect(() => parseProject(region)).not.toThrow();
-
-    const first = (parseProject(PROJECT).layers[0].labels ?? [])[0];
-    const deleted = deleteLabel(pretty(), first.id!, 0);
-    expect(() => parseProject(deleted)).not.toThrow();
-    expect((parseProject(deleted).layers[0].labels ?? []).some((l) => l.id === first.id)).toBe(
-      false
-    );
+  it("refuses an interpretation of code, which is not one", () => {
+    expect(() =>
+      parseProject(`{
+        "layers": [{ "id": "lay_a", "type": "prg", "path": "g.prg" }],
+        "claims": [{ "id": "clm_1", "at": "$8080", "is": "code" }]
+      }`)
+    ).toThrow(/no "code"/);
   });
 });
