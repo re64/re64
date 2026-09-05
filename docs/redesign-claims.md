@@ -353,6 +353,138 @@ never see a CRDT type. Persisting a claim is a CRDT concern, so it moved — whi
 is where it would have had to live anyway. An allowlist asserted by a test
 earning its keep on the first new root in a year.
 
+## One address-sorted listing: blocks and claims as peers
+
+The parked question, answered by extending the rule that already settled
+overlapping *instructions* to the whole listing:
+
+> Emit **every** block in order of where it starts, and mark any whose start the
+> walk has already passed.
+
+`src/core/claims/listing.ts` collects all reachable basic blocks *and* all
+reachable-or-rooted claims into one list, sorts by address, and falls back to a
+hex dump for byte ranges nothing covers.
+
+**An earlier version of this section got it wrong**, and the correction is the
+point. `layoutClaims` decided per address which claim *owned* a byte, innermost
+first. That is a resolution: it moved `getRegionAt`'s decision out of the data
+structure and into a layout pass, where it is no more visible to the person the
+disagreement belongs to. Nothing owns a byte. Several things describe it, all of
+them are emitted, and "primary" means "starts first" and nothing else.
+
+Three consequences:
+
+- **A gap is a hex dump, not a kind.** Bytes nothing covers get no
+  interpretation — which is what makes the absence of a claim the honest spelling
+  of "nobody has explained this", and `find_undecoded` a question about gaps
+  rather than a whitelist of explained kinds.
+- **Inclusion is reachability, not annotation.** A claim appears because
+  something reaches it or because it is rooted. A sprite bank nobody rooted is
+  genuinely absent, which is a fact about the project rather than an oversight.
+- **A container splits around what is declared inside it.** This resolves nothing
+  — both render, in full — but without it the emission order is right and the
+  *reading* order is not: an 8,400-byte zone table dumps to completion and its own
+  forty strings appear after all of it, at addresses the reader passed thousands
+  of bytes ago.
+
+On Gridrunner's contested span:
+
+```
+$8CD5-$8CF6  data sizeOfDroidSquadsForLevels
+$8CF6-$8D18  data laserFrameRateForLevel
+$8D16-$8D1A  2 instruction(s)  [also decodes from here, sharing bytes above]
+$8D1A-$8D24  4 instruction(s)
+```
+
+On Camels' nesting, which is the ordinary way of working:
+
+```
+$6700-$67A0  data zoneDataTable
+$67A0-$67C8  text
+$67C8-$6868  data zoneDataTable
+$6868-$6890  text
+$6890-$87D0  data zoneDataTable
+```
+
+**Order matters and getting it wrong is invisible.** Splitting must happen
+*before* marking, or a nested item is marked as sharing bytes with the container
+that just yielded them to it — the listing still looks right and reports 45
+conflicts where there are 2. Across the whole Camels project: **1,155 items, one
+marked**, and it is the real six-byte overlap between a sprite set and a tune
+stream.
+
+Two smaller things the rule needed:
+
+- **Only containment splits.** A partial overlap is two people disagreeing about
+  where something ends, and fragmenting one around the other would present a
+  conflict as a structure.
+- **The high-water mark is not seeded with the window edge.** An item extending
+  into the view from before it has been passed by nothing, and seeding with the
+  window makes the same listing read differently depending on where you started
+  reading — the viewport-dependent classification the arrow gutter rules already
+  forbid, arriving by a different door.
+
+## How often this actually destroyed somebody's work
+
+The label vocabulary was rewritten because experiment 7 destroyed 123 names
+across 74 addresses and told nobody. The region write has never been counted, so
+here it is, from the request logs of all nine experiment runs.
+
+**Six.** Cross-agent overwrites of a region inside a single shared project: one
+in experiment 3, five in experiment 7, none anywhere else. Against 172 region
+declarations in those two runs, which is about 3.5%.
+
+Each is a disagreement rather than a duplicate, which is what makes it a loss:
+
+| | |
+|---|---|
+| `$5E00-$5ED0` | amber `data/highScoreTable` → basalt `text/highScoreTable` |
+| `$6700-$87D0` | beryl `data/waveTable` → amber `data/zoneDataTable` |
+| `$6320-$64B4` | amber `tuneVoice2` → basalt `introTuneVoice2` |
+| `$9D21-$9D29` | basalt `messageColourCycle` → amber `messageFlashColours` |
+| `$C112-$C11F` | basalt `filenamePad` → amber `highScoreNamePad` |
+| `$8080-$80A0` | amber `text/TitleCopyrightLine` → agate `data/txtCopyrightPressFire` (exp 3) |
+
+`messageColourCycle` against `messageFlashColours` is two readers concluding
+different things about eight bytes. `waveTable` against `zoneDataTable` is the
+same about 8,400. Both losers were told `ok`.
+
+**The first count was 90, and it was wrong by 15×.** Experiments 2 and 5 put
+agents on *independent clones* — that is the whole design of the convergence run,
+so that agreement is not measured by contagion — but the request log is per
+server, not per project, so a naive pass reads three projects as one and every
+agent's independent naming of `$8000` as a collision. Grouping by the `project`
+argument takes it to six.
+
+Recorded because the inflated number was more persuasive and the small one is the
+true one. It is also, on its own, an argument for the redesign that the redesign
+did not need: six is small, and each is a conclusion somebody reached and lost.
+
+## Merge, exercised rather than argued
+
+`src/core/crdt/claims.test.ts` runs two peers through a real `Y.Doc`: build a
+base, split, edit both copies with no communication, exchange updates in *both*
+directions. Six properties hold.
+
+| | |
+|---|---|
+| each declares the same span offline | both claims survive; the contradiction is reportable |
+| each revises a *different* field of one claim | both land — `claim.set` is partial by construction |
+| each revises the *same* field | converge, on one of the two values |
+| a delete races a revision | a whole claim or none, never one field of a deleted one |
+| undo scoped to an origin | takes one peer's work, leaves the other's |
+| round trip through the document | unchanged, including frames, encodings and confidence |
+
+The second row is the one `set_region` cannot do. It replaces the whole region,
+which is the same shape as the `target.set` bug this project already found and
+fixed — describing a target silently reverted somebody's layer list.
+
+**The boundary test caught the prototype in the wrong directory, and was right
+to.** `yjs` belongs only in `src/core/crdt`; `src/core/claims/` is domain and must
+never see a CRDT type. Persisting a claim is a CRDT concern, so it moved — which
+is where it would have had to live anyway. An allowlist asserted by a test
+earning its keep on the first new root in a year.
+
 ## What a row does with two live interpretations
 
 The parked question, and it had an answer already — one object along.
