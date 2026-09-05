@@ -496,6 +496,45 @@ Changed in definition rather than in shape:
 - `describe_project` reports disagreements, which is the fog lifting: what a
   person watching agents wants to see is where two of them disagree.
 
+## What it would cost
+
+Counted rather than estimated, because "how big is this" is the question that
+decides whether it happens.
+
+**Code.** 18 non-test files mention a region type, 24 mention a label type, and
+the work concentrates in six:
+
+| | mentions | what changes |
+|---|---|---|
+| `src/server/workspace.ts` | 16 | the tool surface, mostly deletion |
+| `src/core/view/rows.ts` | 15 | row strategy keys on an interpretation, plus the layout above |
+| `src/core/memory/region.ts` | 11 | becomes `claims/` |
+| `src/core/memory/label.ts` | 11 | merges into it |
+| `src/core/ops/edits.ts` | 10 | three ops replace four, and the heuristic goes |
+| `src/core/analysis/program.ts` | 9 | roots replace `entryPointsFor` |
+
+The rest is one or two call sites each. Nothing in `src/core/il/`, nothing in
+`src/core/analysis/values.ts`, nothing in the effects or call-graph work — which
+is the appendix's finding stated as a number.
+
+**Data.** 24 `.re64` files in the repository, 11 of which carry regions, 475
+regions in total:
+
+| kind | count | migration |
+|---|---|---|
+| `text` | 188 | claim with an extent |
+| `data` | 170 | claim with an extent |
+| `bitmap` | 19 | claim with an extent |
+| `jumptable` | 10 | claim with an extent |
+| `code` | 88 (18%) | **a root with no extent** |
+| `unknown` | 0 | would be dropped |
+
+The `code` row is the one that changes meaning rather than shape, and at 18% it
+is not a corner case — every project with regions has them. That nothing is
+`unknown` is worth noting too: the kind exists, and in four years of real use
+nobody has written one, which is what "the absence of a claim" being the honest
+spelling looks like from the data side.
+
 ## Ordering
 
 1. **Claims in core, behind the adapter**, with the existing model still
