@@ -16,7 +16,7 @@
 import { CommentPlacement } from "../memory/comment.js";
 import { LabelType } from "../memory/label-type.js";
 import { TextEncoding } from "../c64/text.js";
-import { RegionKind } from "../memory/region.js";
+import { LegacyRegionKind } from "../project/project.js";
 import { LoadedProject } from "../project/loader.js";
 import { newId } from "../project/identity.js";
 import { parseProjectAddress } from "../project/project.js";
@@ -139,7 +139,7 @@ const TYPE_FOR_ROOT: Partial<Record<RootKind, LabelType>> = {
   location: "code",
 };
 
-const SAYS_FOR_KIND: Partial<Record<RegionKind, Interpretation["is"]>> = {
+const SAYS_FOR_KIND: Partial<Record<LegacyRegionKind, Interpretation["is"]>> = {
   data: "data",
   text: "text",
   bitmap: "bitmap",
@@ -415,7 +415,7 @@ export function regionSetOp(
   loaded: LoadedProject,
   start: number,
   end: number,
-  kind: RegionKind,
+  kind: LegacyRegionKind,
   name?: string,
   comment?: string,
   encoding?: TextEncoding,
@@ -513,7 +513,7 @@ export function regionSetOp(
 
 /** The interpretation a region kind and its rendering options project to. */
 function interpretationOf(
-  kind: RegionKind,
+  kind: LegacyRegionKind,
   encoding?: TextEncoding,
   view?: string
 ): Interpretation {

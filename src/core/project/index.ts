@@ -1,4 +1,5 @@
 export {
+  LegacyRegionKind,
   ProjectLayer,
   ProjectLabel,
   ProjectRegion,

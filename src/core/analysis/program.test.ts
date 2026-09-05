@@ -78,13 +78,19 @@ describe("what an agent can now ask", () => {
     expect(gridrunner().entryPoints).toContain(0x8011);
   });
 
-  it("which regions are still unclassified", () => {
+  it("has no claim that declines to say anything about its bytes", () => {
+    // This used to ask which regions were declared `unknown`, and the answer was
+    // always none — because `unknown` was never something anybody declared. It
+    // was the absence of a statement wearing the name of a kind, and a claim has
+    // no word for it: not saying is how you do not say.
+    //
+    // What remains unexplained is a different question with its own answer,
+    // `find_undecoded`, which counts what is left to do rather than what is
+    // wrong.
     const program = gridrunner();
-    const unknown = program.loaded.map.getAllRegions().filter((r) => r.kind === "unknown");
-    // None here, but the query resolves. Note this finds only regions declared
-    // as unknown — an address covered only by a layer default is not a region
-    // at all, so there is no "unclassified extent" behind this.
-    expect(Array.isArray(unknown)).toBe(true);
+    for (const claim of program.loaded.map.getAllRegions()) {
+      expect(claim.says ?? claim.root).toBeDefined();
+    }
   });
 
   it("how much is named by a person rather than by the disassembler", () => {

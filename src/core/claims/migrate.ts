@@ -1,3 +1,4 @@
+import { Claim } from "../claims/model.js";
 /**
  * Converting a project written with labels and regions into one written with
  * claims.
@@ -33,7 +34,7 @@
 
 import { Project, ProjectClaim, parseProjectAddress } from "../project/project.js";
 import { LabelType } from "../memory/label-type.js";
-import { RegionKind } from "../memory/region.js";
+import { LayerDefault } from "../memory/region.js";
 import { RootKind } from "./model.js";
 import { derivedId } from "../project/identity.js";
 
@@ -44,7 +45,16 @@ const ROOT_FOR_LABEL: Partial<Record<LabelType, RootKind>> = {
   code: "location",
 };
 
-const IS_FOR_KIND: Partial<Record<RegionKind, ProjectClaim["is"]>> = {
+/**
+ * The old `RegionKind`, as read out of a file that still has one.
+ *
+ * The union is spelled here rather than imported because it no longer exists in
+ * the model: `code` became a root and `unknown` became nothing at all, so this
+ * is the shape of a *legacy file* and not of anything the code holds.
+ */
+type LegacyRegionKind = "code" | "data" | "text" | "jumptable" | "bitmap" | "unknown";
+
+const IS_FOR_KIND: Partial<Record<LegacyRegionKind, ProjectClaim["is"]>> = {
   data: "data",
   text: "text",
   bitmap: "bitmap",
@@ -60,7 +70,7 @@ export interface MigrationStats {
   readonly unknownRegionsDropped: number;
   /** Interpretation claims given a `data` root so they keep rendering. */
   readonly autoRooted: number;
-  /** Region comments turned into real comments. */
+  /** Claim comments turned into real comments. */
   readonly commentsMoved: number;
 }
 

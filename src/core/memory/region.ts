@@ -1,105 +1,64 @@
-import { TextEncoding } from "../c64/text.js";
-import { derivedId } from "../project/identity.js";
-
-/** What kind of data a memory region contains */
-export type RegionKind =
-  | "code"       // Disassemble as instructions
-  | "data"       // Raw bytes (display as hex)
-  | "text"       // ASCII/PETSCII text
-  | "jumptable"  // Array of addresses (each is an entry point)
-  | "bitmap"     // Graphics: a character set, sprites, a screen
-  | "unknown";   // Not yet analyzed
+import { Claim, Interpretation } from "../claims/model.js";
 
 /**
- * A region declares what a range of memory contains, overriding the
- * `defaultRegionKind` of the layer that owns it.
+ * What a layer assumes its bytes are, where no claim says otherwise.
  *
- * Regions belong to a layer rather than to the address space: reordering the
- * layer stack has to move annotations with the bytes they describe, not leave
- * them pointing at whatever ends up at that address.
+ * A property of the layer rather than a competing claim: a PRG holds a program,
+ * a raw file holds data, and a symbols layer holds nothing at all. Nobody
+ * decided these — they follow from what the file *is*.
+ *
+ * Deliberately not `Interpretation["is"]`, and the two members that cannot
+ * appear there are why this is its own type. `code` is what bytes are when
+ * nobody has said otherwise, so it is never something a claim says; `unknown`
+ * is the absence of any statement, which a claim cannot be. They shared a union
+ * with the interpretations for as long as regions were their own object, and
+ * separating them is what makes an exhaustive switch over an interpretation
+ * mean something.
  */
-export interface Region {
-  /**
-   * Stable identity, independent of extent.
-   *
-   * Regions move and grow, so keying on the start address would make "extend
-   * this region" indistinguishable from delete-plus-create.
-   */
-  readonly id: string;
-  /** Start address (inclusive) */
-  readonly start: number;
-  /** End address (exclusive) */
-  readonly end: number;
-  /** What kind of data this region contains */
-  readonly kind: RegionKind;
-  /** Optional name/label for the region */
-  readonly name?: string;
-  /** Optional comment */
-  readonly comment?: string;
-  /**
-   * How to read the bytes of a `text` region.
-   *
-   * Defaults to ASCII, which is what this always assumed and is wrong for most
-   * C64 text: neither PETSCII nor screen codes are ASCII, so reading either
-   * that way produces confident nonsense.
-   */
-  readonly encoding?: TextEncoding;
-  /**
-   * How to draw a `bitmap` region: `char:8`, `bits:3`, `sprite`.
-   *
-   * One string rather than a format, a stride and a column count, because each
-   * of those would need threading through the schema, the serializer, the CRDT
-   * assignment, the op, the diff, the inverse and four signatures. It also
-   * leaves room for `snippet:<id>` without doing that again.
-   */
-  readonly view?: string;
-}
-
-/** Create a user-defined region */
-export function createUserRegion(region: {
-  id: string;
-  start: number;
-  end: number;
-  kind: RegionKind;
-  name?: string;
-  comment?: string;
-  encoding?: TextEncoding;
-  view?: string;
-}): Region {
-  const { id, start, end, kind, name, comment, encoding, view } = region;
-  return { id, start, end, kind, name, comment, encoding, view };
-}
+export type LayerDefault = "code" | "data" | "unknown";
 
 /**
- * The regions declared inside a single layer.
+ * How to read the bytes at an address, all things considered.
  *
- * Nesting is resolved smallest-first, so carving a small `text` span out of a
- * larger `data` region works without deleting or splitting the outer one. There
- * is no source priority to arbitrate: a layer's default kind is a property of
- * the layer, not a competing region, so anything in here is user intent.
+ * The union of what a claim said and what the layer assumes — honest as an
+ * *answer*, where it was dishonest as a field type. That is the whole of the
+ * split: asking "how do I read this byte" may legitimately come back "as code,
+ * because nobody said otherwise", while a claim can never *say* `code`.
+ */
+export type ByteReading = Interpretation["is"] | LayerDefault;
+
+/**
+ * A layer's claims, indexed for lookup by address.
+ *
+ * This was `RegionIndex` over a parallel `Region` record, and the record went
+ * for the reason `Label`'s did: a claim carries an id, a position, an extent,
+ * an interpretation and a name, so a second structure holding the same fields
+ * had nothing to add but a chance to disagree.
+ *
+ * Nesting resolves smallest-first, so carving a small `text` span out of a
+ * larger `data` one works without deleting or splitting the outer. There is no
+ * source priority to arbitrate: a layer's default is a property of the layer,
+ * not a competing claim, so everything in here is somebody's statement.
  */
 export class RegionIndex {
-  private regions: Region[] = [];
+  private claims: Claim[] = [];
 
-  addRegion(region: Region): void {
-    this.regions.push(region);
+  addRegion(claim: Claim): void {
+    this.claims.push(claim);
   }
 
-  addRegions(regions: readonly Region[]): void {
-    for (const region of regions) {
-      this.addRegion(region);
-    }
+  addRegions(claims: readonly Claim[]): void {
+    for (const claim of claims) this.addRegion(claim);
   }
 
-  /** The innermost region containing an address, or undefined if none does. */
-  getRegionAt(address: number): Region | undefined {
-    let best: Region | undefined;
+  /** The innermost claim covering an address, or undefined if none does. */
+  getRegionAt(address: number): Claim | undefined {
+    let best: Claim | undefined;
 
-    for (const region of this.regions) {
-      if (address >= region.start && address < region.end) {
-        if (!best || region.end - region.start < best.end - best.start) {
-          best = region;
-        }
+    for (const claim of this.claims) {
+      const span = claim.extent ?? 1;
+      if (address >= claim.at && address < claim.at + span) {
+        if (!best || span < (best.extent ?? 1)) best = claim;
       }
     }
 
@@ -107,32 +66,31 @@ export class RegionIndex {
   }
 
   /**
-   * Kind at an address, or undefined if no region covers it.
+   * What a claim says these bytes are, or undefined if none covers the address.
    *
-   * Undefined genuinely means "not declared here" — a bare index has no layer
-   * default to fall back to. `MemoryMap.getKindAt` supplies that.
+   * Undefined genuinely means "nothing declared here" — a bare index has no
+   * layer default to fall back to. `MemoryMap.getKindAt` supplies that.
    */
-  getKindAt(address: number): RegionKind | undefined {
-    return this.getRegionAt(address)?.kind;
+  getKindAt(address: number): Interpretation["is"] | undefined {
+    return this.getRegionAt(address)?.says?.is;
   }
 
-  /** Get all regions sorted by start address */
-  getAllRegions(): readonly Region[] {
-    return [...this.regions].sort((a, b) => a.start - b.start);
+  /** Every claim in this layer, by position. */
+  getAllRegions(): readonly Claim[] {
+    return [...this.claims].sort((a, b) => a.at - b.at);
   }
 
-  /** Get all regions of a specific kind */
-  getRegionsByKind(kind: RegionKind): readonly Region[] {
-    return this.regions.filter((r) => r.kind === kind);
+  /** Every claim reading its bytes a particular way. */
+  getRegionsByKind(is: Interpretation["is"]): readonly Claim[] {
+    return this.claims.filter((c) => c.says?.is === is);
   }
 
-  /** Get all jumptable regions (for extracting entry points) */
-  getJumptables(): readonly Region[] {
+  /** Jump tables, whose entries are each an address the program reaches. */
+  getJumptables(): readonly Claim[] {
     return this.getRegionsByKind("jumptable");
   }
 
   get size(): number {
-    return this.regions.length;
+    return this.claims.length;
   }
-
 }

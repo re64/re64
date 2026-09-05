@@ -1,6 +1,7 @@
+import { Claim, claimSpan } from "../../claims/model.js";
 import { decode, ByteReader, DecodeResult } from "./decoder.js";
 import { Instruction, getTargets, continues } from "./instruction.js";
-import { Region, RegionKind } from "../../memory/region.js";
+import { ByteReading, LayerDefault } from "../../memory/region.js";
 
 /**
  * What the disassembler needs to know about memory semantics.
@@ -10,11 +11,11 @@ import { Region, RegionKind } from "../../memory/region.js";
  */
 export interface RegionLookup {
   /** Effective kind at an address, or undefined where nothing is mapped. */
-  getKindAt(address: number): RegionKind | undefined;
+  getKindAt(address: number): ByteReading | undefined;
   /** The region covering an address, for finding where non-code ends. */
-  getRegionAt(address: number): Region | undefined;
+  getRegionAt(address: number): Claim | undefined;
   /** Jumptable regions across the whole map, for entry point extraction. */
-  getJumptables(): readonly Region[];
+  getJumptables(): readonly Claim[];
 }
 
 /** Warning types that can occur during disassembly */
@@ -23,7 +24,7 @@ export type DisassemblyWarning =
   | { type: "truncated"; address: number; needed: number; available: number }
   | { type: "overlap"; address: number; existingAddress: number }
   | { type: "oddJumptable"; address: number; bytes: number }
-  | { type: "flowIntoData"; address: number; kind: RegionKind }
+  | { type: "flowIntoData"; address: number; kind: ByteReading }
   | {
       /**
        * Something transfers here, and a claim says these bytes are not code.
@@ -36,7 +37,7 @@ export type DisassemblyWarning =
        */
       type: "codeInClaim";
       address: number;
-      kind: RegionKind;
+      kind: ByteReading;
       /** Where the transfer came from. */
       from: number;
     }
@@ -197,13 +198,14 @@ function extractJumptableEntries(
     // A file can already hold one — the write path refuses new ones, but
     // refusing to *load* a project over it would make it unopenable. Say so
     // instead, since the dropped byte is otherwise invisible.
-    const span = table.end - table.start;
+    const { start, end } = claimSpan(table);
+    const span = end - start;
     if (span % 2 !== 0) {
-      warnings?.push({ type: "oddJumptable", address: table.start, bytes: span });
+      warnings?.push({ type: "oddJumptable", address: start, bytes: span });
     }
 
     // Read 16-bit addresses (little-endian) from the table
-    for (let addr = table.start; addr + 1 < table.end; addr += 2) {
+    for (let addr = start; addr + 1 < end; addr += 2) {
       const lo = reader.readByte(addr);
       const hi = reader.readByte(addr + 1);
       if (lo !== undefined && hi !== undefined) {

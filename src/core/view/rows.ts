@@ -19,7 +19,6 @@ import {
   LabelType,
   formatOperand,
   LoadedProject,
-  RegionKind,
   derivedId,
 } from "../index.js";
 import { ArrowSpan, allocateArrowLanes, renderArrowGutter } from "./arrows.js";
@@ -307,16 +306,6 @@ export function analyze(
    * duplication is visible enough that whoever sees it removes one.
    */
   const emitComments = (addr: number) => {
-    // A region's own comment, where the region begins. It is a description of
-    // the span — the same thing a header comment is — and it was rendered only
-    // in the memory map, so `set_region comment:` looked like it had worked and
-    // then appeared nowhere a reader would look.
-    const region = map.getRegionAt(addr);
-    if (region?.comment && region.start === addr) {
-      for (const line of wrapCommentText(region.comment, commentTextWidth)) {
-        push({ address: addr, kind: "comment", text: `${hex4(addr)}  ; ${line}`, tokens: [] });
-      }
-    }
 
     for (const comment of loaded.comments.at(addr, "before")) {
       for (const line of wrapCommentText(comment.text, commentTextWidth)) {
@@ -642,7 +631,7 @@ export function analyze(
     // panel, where you are choosing a format rather than reading code.
     if (strategy === "bitmap") {
       const region = map.getRegionAt(addr);
-      const options = parseBitmapView(region?.view) ?? { format: "char" as const, columns: 1 };
+      const options = parseBitmapView(viewOf(region)) ?? { format: "char" as const, columns: 1 };
       const cellBytes = bytesPerCell(options);
       const perRow = cellBytes * (options.columns ?? 1);
 
@@ -693,9 +682,8 @@ export function analyze(
      */
     const decodedString = (at: number, run: readonly number[]): string => {
       const region = map.getRegionAt(at);
-      const snippet = region?.view?.startsWith("snippet:")
-        ? region.view.slice("snippet:".length)
-        : undefined;
+      const view = viewOf(region);
+      const snippet = view?.startsWith("snippet:") ? view.slice("snippet:".length) : undefined;
 
       if (snippet && renderText) {
         const lines = renderText(snippet, run);
@@ -704,7 +692,8 @@ export function analyze(
         // dropping all but the first.
         if (lines) return lines.join("");
       }
-      return decodeText(run, region?.encoding ?? "ascii");
+      const says = region?.says;
+      return decodeText(run, (says?.is === "text" ? says.encoding : undefined) ?? "ascii");
     };
 
     const flush = () => {
@@ -807,6 +796,17 @@ export function analyze(
  * exactly how an unhandled kind used to leave the address un-advanced.
  */
 type RowStrategy = "word" | "text" | "bytes" | "bitmap";
+
+/**
+ * How a claim asks for its bytes to be drawn, where it asks at all.
+ *
+ * Only `text` and `bitmap` carry one — a decoder for a program's own character
+ * set, or a stride for a sprite sheet — so the narrowing is the check.
+ */
+function viewOf(claim: Claim | undefined): string | undefined {
+  const says = claim?.says;
+  return says && (says.is === "bitmap" || says.is === "text") ? says.view : undefined;
+}
 
 function rowStrategy(is: Interpretation["is"] | undefined): RowStrategy {
   // Nothing said what these bytes are, so they are shown as bytes. `undefined`

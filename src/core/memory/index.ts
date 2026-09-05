@@ -18,7 +18,7 @@ export {
   layerClaim,
   autoClaim,
 } from "../claims/names.js";
-export { Region, RegionKind, RegionIndex, createUserRegion } from "./region.js";
+export { LayerDefault, ByteReading, RegionIndex } from "./region.js";
 export {
   Comment,
   CommentPlacement,

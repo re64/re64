@@ -16,7 +16,7 @@ import {
   LoadedProject,
   Op,
   Project,
-  RegionKind,
+  LegacyRegionKind,
   labelDeleteOp,
   commentAddOp,
   commentEditOp,
@@ -86,7 +86,7 @@ export class ProjectEditor {
     _layerId: string,
     start: number,
     end: number,
-    kind: RegionKind,
+    kind: LegacyRegionKind,
     name?: string,
     view?: string
   ): Op {

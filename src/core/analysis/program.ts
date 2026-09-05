@@ -149,21 +149,12 @@ function entryPointsFor(loaded: LoadedProject, override?: number[]): number[] {
     .filter((l) => labelTypeOf(l) === "entry" || labelTypeOf(l) === "function" || labelTypeOf(l) === "code")
     .map((l) => l.at);
 
-  // Declaring a span "code" starts decoding at its first address.
+  // Declaring a span "code" used to seed the walk from its start, through a
+  // list of its own. It has no list now because it has no kind: a claim never
+  // says `code`, so "decode from here" is a *root*, and the roots below are the
+  // one place that is read. Which is the merge doing what it was for — one
+  // statement, in one place, rather than the same intent spelled two ways.
   //
-  // It used to do nothing unless the region also carried a name, because only
-  // a named region generated the entry-typed label that seeds the queue. So
-  // "this is code" was inert exactly when it was most needed — on a span
-  // nothing reaches — and the only way through was to declare it a subroutine,
-  // which forces a fabricated sub_ name onto an address nobody wanted to name.
-  //
-  // An entry point rather than a label, so nothing appears in the listing that
-  // a person did not put there.
-  const fromCodeRegions = loaded.map
-    .getAllRegions()
-    .filter((r) => r.kind === "code")
-    .map((r) => r.start);
-
   // Roots read from the claims directly, not through the labels they project
   // to. A named claim's root arrives as a label type and is already covered
   // above; an *unnamed* one produces no label at all, and would otherwise seed
@@ -180,10 +171,10 @@ function entryPointsFor(loaded: LoadedProject, override?: number[]): number[] {
   if (override?.length) return override;
 
   const declared = project.entryPoints?.map(parseProjectAddress) ?? [];
-  if (declared.length > 0) return [...declared, ...fromLabels, ...fromCodeRegions, ...fromRoots];
+  if (declared.length > 0) return [...declared, ...fromLabels, ...fromRoots];
   if (prgEntries.length > 0)
-    return [...prgEntries, ...fromLabels, ...fromCodeRegions, ...fromRoots];
-  return [...fromLabels, ...fromCodeRegions, ...fromRoots];
+    return [...prgEntries, ...fromLabels, ...fromRoots];
+  return [...fromLabels, ...fromRoots];
 }
 
 /**

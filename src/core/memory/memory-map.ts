@@ -1,7 +1,7 @@
 import { Layer, layerKindAt, layerRegionAt } from "./layer.js";
 import { Claim } from "../claims/model.js";
 import { NameIndex } from "../claims/names.js";
-import { Region, RegionKind } from "./region.js";
+import { ByteReading, LayerDefault } from "./region.js";
 import { Interpretation } from "../claims/model.js";
 
 export interface ReadResult {
@@ -136,7 +136,7 @@ export class MemoryMap {
    * therefore moves regions with their content, and there is no cross-layer
    * priority to arbitrate.
    */
-  getRegionAt(address: number): Region | undefined {
+  getRegionAt(address: number): Claim | undefined {
     const layer = this.readByteWithSource(address)?.layer;
     return layer ? layerRegionAt(layer, address) : undefined;
   }
@@ -154,7 +154,7 @@ export class MemoryMap {
    */
   readonly claimLabels: Claim[] = [];
 
-  getKindAt(address: number): RegionKind | undefined {
+  getKindAt(address: number): ByteReading | undefined {
     const layer = this.readByteWithSource(address)?.layer;
     return layer ? layerKindAt(layer, address) : undefined;
   }
@@ -170,7 +170,7 @@ export class MemoryMap {
    *
    * Collapsing both to `undefined` is what lets the row builder switch over
    * `Interpretation["is"]`, so declaring a new one is a compile error in every
-   * place that has to decide how to draw it — rather than a `RegionKind` with
+   * place that has to decide how to draw it — rather than a `LayerDefault` with
    * nine sites nothing checks.
    */
   interpretationAt(address: number): Interpretation["is"] | undefined {
@@ -179,7 +179,7 @@ export class MemoryMap {
   }
 
   /** Every jumptable region across all layers, for entry point extraction. */
-  getJumptables(): readonly Region[] {
+  getJumptables(): readonly Claim[] {
     return this.layers.flatMap((layer) => [...layer.regions.getJumptables()]);
   }
 
@@ -189,10 +189,10 @@ export class MemoryMap {
   }
 
   /** Every declared region across all layers, sorted by start address. */
-  getAllRegions(): readonly Region[] {
+  getAllRegions(): readonly Claim[] {
     return this.layers
       .flatMap((layer) => [...layer.regions.getAllRegions()])
-      .sort((a, b) => a.start - b.start);
+      .sort((a, b) => a.at - b.at);
   }
 
   /**
@@ -201,8 +201,8 @@ export class MemoryMap {
    * Returns the owning layer, or undefined when no layer covers the address —
    * a region declared over unmapped memory has nothing to annotate.
    */
-  attachRegion(region: Region): Layer | undefined {
-    const layer = this.readByteWithSource(region.start)?.layer;
+  attachRegion(region: Claim): Layer | undefined {
+    const layer = this.readByteWithSource(region.at)?.layer;
     layer?.regions.addRegion(region);
     return layer;
   }

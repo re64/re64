@@ -1,6 +1,6 @@
 import { Claim } from "../claims/model.js";
 import { newId } from "../project/identity.js";
-import { Region, RegionIndex, RegionKind } from "./region.js";
+import { ByteReading, LayerDefault, RegionIndex } from "./region.js";
 
 /**
  * A memory layer maps a contiguous address range to byte values.
@@ -15,7 +15,7 @@ export interface Layer {
   /** End address (exclusive) */
   readonly end: number;
   /** Default region kind for this layer's content */
-  readonly defaultRegionKind: RegionKind;
+  readonly defaultRegionKind: LayerDefault;
   /**
    * Whether this layer supplies bytes. False for symbol layers, which carry
    * names only and are excluded from the map's address range.
@@ -46,7 +46,7 @@ export interface Layer {
  * The innermost declared region at an address, or undefined when the address
  * falls outside the layer or no region overrides the layer default there.
  */
-export function layerRegionAt(layer: Layer, address: number): Region | undefined {
+export function layerRegionAt(layer: Layer, address: number): Claim | undefined {
   if (address < layer.start || address >= layer.end) {
     return undefined;
   }
@@ -57,11 +57,11 @@ export function layerRegionAt(layer: Layer, address: number): Region | undefined
  * The effective region kind at an address, falling back to the layer default.
  * Undefined outside the layer's range.
  */
-export function layerKindAt(layer: Layer, address: number): RegionKind | undefined {
+export function layerKindAt(layer: Layer, address: number): ByteReading | undefined {
   if (address < layer.start || address >= layer.end) {
     return undefined;
   }
-  return layer.regions.getRegionAt(address)?.kind ?? layer.defaultRegionKind;
+  return layer.regions.getKindAt(address) ?? layer.defaultRegionKind;
 }
 
 /**
@@ -71,7 +71,7 @@ export function layerKindAt(layer: Layer, address: number): RegionKind | undefin
  */
 export class BytesLayer implements Layer {
   public readonly length: number;
-  public readonly defaultRegionKind: RegionKind = "data";
+  public readonly defaultRegionKind: LayerDefault = "data";
   public readonly hasBytes = true;
   public readonly regions = new RegionIndex();
   public readonly labels: Claim[] = [];

@@ -15,7 +15,7 @@ import { SymbolLayer } from "../memory/symbol-layer.js";
 import { MemoryMap } from "../memory/memory-map.js";
 import { LabelType } from "../memory/label-type.js";
 import { NameIndex, LabelUse } from "../claims/names.js";
-import { Region, RegionKind, createUserRegion } from "../memory/region.js";
+import { LayerDefault } from "../memory/region.js";
 import { CommentIndex } from "../memory/comment.js";
 import { ConstantIndex } from "../memory/constant.js";
 import { createC64PlatformLayer } from "../c64/symbols.js";
@@ -132,32 +132,6 @@ export function projectForTarget(project: Project): Project {
   };
 }
 
-/**
- * The kind a claim's interpretation projects to.
- *
- * There is no `code` and no `unknown`, which is the redesign in one mapping:
- * code is what bytes are when nobody has said otherwise, and the absence of a
- * claim is what `unknown` always meant.
- */
-const KIND_FOR_SAYS: Record<Interpretation["is"], RegionKind> = {
-  data: "data",
-  text: "text",
-  bitmap: "bitmap",
-  jumptable: "jumptable",
-};
-
-function regionFromClaim(claim: Claim): Region {
-  const says = claim.says!;
-  return createUserRegion({
-    id: claim.id,
-    start: claim.at,
-    end: claim.at + (claim.extent ?? 1),
-    kind: KIND_FOR_SAYS[says.is],
-    ...(claim.name !== undefined ? { name: claim.name } : {}),
-    ...(says.is === "text" && says.encoding ? { encoding: says.encoding } : {}),
-    ...(says.is === "bitmap" && says.view ? { view: says.view } : {}),
-  });
-}
 
 /**
  * A claim, as the name index takes it.
@@ -257,7 +231,7 @@ export function buildMemoryMap(
 
   // Claims, projected onto the structures the analysis already reads.
   //
-  // A one-way derivation: claims are the stored form, `Region` and `Label` are
+  // A one-way derivation: claims are the stored form, `Claim` and `Label` are
   // views over them. **Additive for now**, alongside the layer-declared labels
   // and regions rather than instead of them, so a file written either way loads
   // identically and every existing write path keeps working. The legacy reads
@@ -281,7 +255,7 @@ export function buildMemoryMap(
       // No layer supplies these bytes in this target, so there is nothing here
       // to interpret. The claim is not lost — it simply says nothing about a
       // view that does not load what it describes.
-      if (owner) owner.regions.addRegion(regionFromClaim(claim));
+      if (owner) owner.regions.addRegion(claim);
     }
     if (claim.name === undefined) continue;
     const label = nameClaim(claim);

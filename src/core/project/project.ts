@@ -8,9 +8,18 @@ import {
 import { LabelType } from "../memory/label-type.js";
 import { LabelUse, createLabelUse } from "../claims/names.js";
 import { TEXT_ENCODINGS, TextEncoding } from "../c64/text.js";
-import { Region, RegionKind, createUserRegion } from "../memory/region.js";
+import { LayerDefault } from "../memory/region.js";
 import { derivedId } from "./identity.js";
 import { Claim, Interpretation, Provenance, RootKind } from "../claims/model.js";
+
+/**
+ * The old `RegionKind`, as it appears in a file that still has one.
+ *
+ * Spelled here rather than imported because it no longer exists in the model:
+ * `code` became a root and `unknown` became nothing at all. This is the shape
+ * of a legacy file, not of anything the code holds.
+ */
+export type LegacyRegionKind = "code" | "data" | "text" | "jumptable" | "bitmap" | "unknown";
 
 /**
  * Layer definition in a project file.
@@ -137,7 +146,7 @@ export interface ProjectLabel {
   comment?: string;
 }
 
-/** Region definition in a project file */
+/** Claim definition in a project file */
 export interface ProjectRegion {
   /** Stable identity; derived from content when the file omits it. */
   id?: string;
@@ -145,8 +154,8 @@ export interface ProjectRegion {
   start: number | string;
   /** End address (exclusive) or length with + prefix */
   end: number | string;
-  /** Region kind */
-  kind: RegionKind;
+  /** Claim kind */
+  kind: LayerDefault;
   /** How to read a `text` region's bytes. Default "ascii". */
   encoding?: TextEncoding;
   /** Optional name/label for the region */
@@ -385,7 +394,15 @@ export function projectClaims(claims: readonly ProjectClaim[] = []): Claim[] {
  * a typo should name the offending region, not surface as a crash inside the
  * render walk.
  */
-const REGION_KINDS: readonly RegionKind[] = [
+/** What a legacy region's kind says about its bytes, where it says anything. */
+const IS_FOR_LEGACY_KIND: Partial<Record<LegacyRegionKind, Interpretation["is"]>> = {
+  data: "data",
+  text: "text",
+  jumptable: "jumptable",
+  bitmap: "bitmap",
+};
+
+const REGION_KINDS: readonly LegacyRegionKind[] = [
   "code",
   "data",
   "text",
@@ -511,11 +528,11 @@ export function projectConstants(constants: readonly ProjectConstant[] = []): Co
   });
 }
 
-/** Convert project regions to Region objects */
+/** Convert project regions to Claim objects */
 export function projectRegionsToRegions(
   projectRegions: ProjectRegion[],
   layerId: string
-): Region[] {
+): Claim[] {
   return projectRegions.map((pr) => {
     const start = parseProjectAddress(pr.start);
     let end: number;
@@ -529,16 +546,29 @@ export function projectRegionsToRegions(
     }
 
     const id = pr.id ?? derivedId("rgn", layerId, start, pr.kind);
-    return createUserRegion({
+    const is = IS_FOR_LEGACY_KIND[pr.kind];
+    return {
       id,
-      start,
-      end,
-      kind: pr.kind,
-      name: pr.name,
-      comment: pr.comment,
-      encoding: pr.encoding,
-      view: pr.view,
-    });
+      at: start,
+      extent: end - start,
+      ...(pr.name === undefined ? {} : { name: pr.name }),
+      // `code` and `unknown` are not things a claim says. A `code` region asked
+      // for its bytes to be decoded, which is a root; `unknown` asked for
+      // nothing, which is a claim that says nothing at all.
+      ...(is === undefined
+        ? pr.kind === "code"
+          ? { root: "location" as const }
+          : {}
+        : {
+            says: {
+              is,
+              ...(is === "text" && pr.encoding ? { encoding: pr.encoding } : {}),
+              ...((is === "text" || is === "bitmap") && pr.view ? { view: pr.view } : {}),
+            } as Interpretation,
+            root: "data" as const,
+          }),
+      by: { author: "project", source: "user" as const },
+    };
   });
 }
 

@@ -178,3 +178,14 @@ export function compareClaims(a: Claim, b: Claim): number {
   if (spanA !== spanB) return spanA - spanB;
   return a.id.localeCompare(b.id);
 }
+
+/**
+ * The half-open range a claim covers.
+ *
+ * A claim carries a position and a count; almost everything that looks at a
+ * span wants the pair. Written once here rather than `at + (extent ?? 1)` at
+ * every site, which is how an off-by-one gets in.
+ */
+export function claimSpan(claim: Claim): { start: number; end: number } {
+  return { start: claim.at, end: claim.at + (claim.extent ?? 1) };
+}

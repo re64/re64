@@ -1,7 +1,7 @@
 import { Layer } from "./layer.js";
 import { Claim } from "../claims/model.js";
 import { layerClaim } from "../claims/names.js";
-import { RegionIndex, RegionKind } from "./region.js";
+import { RegionIndex, LayerDefault } from "./region.js";
 import { derivedId, newId } from "../project/identity.js";
 
 /**
@@ -15,7 +15,7 @@ export class FileLayer implements Layer {
   /** Whether to suppress auto-generated entry point label */
   public readonly suppressEntry: boolean;
   /** Default region kind - code for PRG, data otherwise */
-  public readonly defaultRegionKind: RegionKind;
+  public readonly defaultRegionKind: LayerDefault;
   public readonly hasBytes = true;
   public readonly regions = new RegionIndex();
   public readonly labels: Claim[] = [];

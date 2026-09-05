@@ -1,3 +1,4 @@
+import { spanClaim } from "../claims/test-claims.js";
 import { describe, it, expect } from "vitest";
 import { analyze, wrapCommentText } from "./rows.js";
 import { MemoryMap } from "../memory/memory-map.js";
@@ -18,7 +19,7 @@ const userClaim = (id: string, at: number, name: string, type: LabelType): Claim
 });
 import { CommentIndex } from "../memory/comment.js";
 import { ConstantIndex } from "../memory/constant.js";
-import { createUserRegion, RegionKind } from "../memory/region.js";
+import { LayerDefault } from "../memory/region.js";
 import { LoadedProject } from "../project/loader.js";
 
 /**
@@ -38,7 +39,13 @@ function project(
   bytes: number[],
   extra: {
     labels?: { address: number; name: string; type?: "function" | "code" | "address" }[];
-    regions?: { start: number; end: number; kind: RegionKind; name?: string; view?: string }[];
+    regions?: {
+      start: number;
+      end: number;
+      kind: "data" | "text" | "bitmap" | "jumptable" | "code" | "unknown";
+      name?: string;
+      view?: string;
+    }[];
   } = {}
 ): LoadedProject {
   const map = new MemoryMap();
@@ -47,7 +54,7 @@ function project(
   const claims: Claim[] = [];
   for (const r of extra.regions ?? []) {
     const id = `rgn_${r.start.toString(16)}`;
-    layer.regions.addRegion(createUserRegion({
+    layer.regions.addRegion(spanClaim({
       id,
       start: r.start,
       end: r.end,

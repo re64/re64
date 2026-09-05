@@ -25,7 +25,7 @@ import {
   labelDeleteOp,
   labelSetOp,
   makeFileLoader,
-  RegionKind,
+  LegacyRegionKind,
   regionDeleteOp,
   regionSetOp,
   resolveOwningLayer,
@@ -275,7 +275,7 @@ export class ProjectSession {
   setRegion(
     start: number,
     end: number,
-    kind: RegionKind,
+    kind: LegacyRegionKind,
     name?: string,
     view?: string
   ): void {

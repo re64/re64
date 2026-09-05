@@ -1,6 +1,6 @@
 import { Layer } from "./layer.js";
 import { Claim } from "../claims/model.js";
-import { RegionIndex, RegionKind } from "./region.js";
+import { RegionIndex, LayerDefault } from "./region.js";
 import { newId } from "../project/identity.js";
 
 /**
@@ -19,7 +19,7 @@ import { newId } from "../project/identity.js";
 export class SymbolLayer implements Layer {
   public readonly hasBytes = false;
   /** Never consulted: the layer supplies no bytes, so no address resolves to it. */
-  public readonly defaultRegionKind: RegionKind = "unknown";
+  public readonly defaultRegionKind: LayerDefault = "unknown";
   public readonly regions = new RegionIndex();
   /** Empty range — a symbol layer occupies no address space of its own. */
   public readonly start = 0;

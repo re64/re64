@@ -3759,13 +3759,31 @@ It brought the **first `EditorView.updateListener` in the codebase**, so the
 panel can follow the cursor; `currentAddress()` had only ever been polled on
 demand. Coalesced on a frame like every other repaint.
 
-**Adding a `RegionKind` has exactly one compile-time guard and nine silent
-sites.** `rowStrategy`'s `never` default is the guard. The rest — the runtime
-`REGION_KINDS` whitelist, the MCP `z.enum` *and* its hand-duplicated arg union,
-the CLI kind string, the explained-kinds list in `undecoded`, `shouldDisassemble`,
-`generateLabels`, the analysis filter, and a colour in `index.html` — must be
-found by hand. The runtime whitelist is the nastiest: miss it and every write
-throws `Unknown region kind`, so a missing case looks like a broken tool.
+**Adding an interpretation is a compile error everywhere it has to be, and that
+was not true of the union it replaced.** `RegionKind` had exactly one
+compile-time guard — `rowStrategy`'s `never` — and nine silent sites: the
+runtime `REGION_KINDS` whitelist, the MCP `z.enum` and its hand-duplicated arg
+union, the CLI kind string, the explained-kinds list in `undecoded`,
+`shouldDisassemble`, `generateLabels`, the analysis filter, and a colour in
+`index.html`. The runtime whitelist was the nastiest: miss it and every write
+threw `Unknown region kind`, so a missing case looked like a broken tool.
+
+Splitting the union is what fixed it, because the three things it conflated
+have different shapes:
+
+| | |
+|---|---|
+| `Interpretation["is"]` | what a **claim says** the bytes are |
+| `LayerDefault` | what a **layer assumes**, where nobody has said |
+| `ByteReading` | the **answer** to "how do I read this byte", which is either |
+
+`code` and `unknown` only ever belonged to the middle one. Code is what bytes
+are when nobody has said otherwise, so it is never something a claim says; the
+absence of a statement is not a kind of statement. With them gone,
+`rowStrategy`'s `never` covers an interpretation exhaustively, and the sites that
+used to need finding by hand either type-check now or read a *legacy file's*
+kind — which is spelled `LegacyRegionKind` where it survives, so it is obvious
+that it describes a file rather than the model.
 
 ### Declaring a region inside another nests; it does not replace it
 

@@ -18,7 +18,7 @@ import {
   ProgramAnalysis,
   Reference,
   Row,
-  RegionKind,
+  LegacyRegionKind,
   BasicBlock,
   BlockRun,
   analyze,
@@ -75,7 +75,7 @@ import { runDecoder } from "../sandbox/run.js";
 import { renderTextWith } from "../sandbox/sync.js";
 import { databaseFileBytes } from "../store/load.js";
 import { CommentPlacement, TextEncoding, describeWarning } from "../core/index.js";
-import { Claim, Interpretation, RootKind, compareClaims } from "../core/claims/model.js";
+import { Claim, Interpretation, RootKind, claimSpan, compareClaims } from "../core/claims/model.js";
 import { NamedClaim, labelTypeOf } from "../core/claims/names.js";
 import { ClaimEdit } from "../core/ops/types.js";
 import { ClaimSet, disagreements, describeDisagreement } from "../core/claims/set.js";
@@ -99,7 +99,14 @@ export interface ClaimInput {
   comment?: string;
 }
 
-const KIND_FOR_IS: Record<Interpretation["is"], RegionKind> = {
+/**
+ * The legacy region kind an interpretation writes as.
+ *
+ * The write path still speaks the old vocabulary internally — `regionSetOp`
+ * takes a kind — and this is the one place the two meet. There is no `code`
+ * and no `unknown` on the left, which is the whole redesign in one mapping.
+ */
+const KIND_FOR_IS: Record<Interpretation["is"], LegacyRegionKind> = {
   data: "data",
   text: "text",
   bitmap: "bitmap",
@@ -513,16 +520,22 @@ export class Workspace {
         end: hex4(layer.end),
         labels: layer.getLabels().length,
       })),
-      regions: loaded.map.getAllRegions().map((r) => ({
-        // Reported so a caller can name one. Without this, `set_region` and
-        // `remove_region` had to infer which region was meant from its start
-        // address — which stopped being unique the moment regions could nest.
-        id: r.id,
-        start: hex4(r.start),
-        end: hex4(r.end),
-        kind: r.kind,
-        name: r.name,
-      })),
+      regions: loaded.map.getAllRegions().map((r) => {
+        // Reported so a caller can name one. Without this, a write had to infer
+        // which claim was meant from its start address — which stopped being
+        // unique the moment they could nest, and an address could never
+        // identify one anyway.
+        const { start, end } = claimSpan(r);
+        return {
+          id: r.id,
+          start: hex4(start),
+          end: hex4(end),
+          // A claim with no interpretation and a root is a place to decode
+          // from, which is what a `code` region was.
+          kind: r.says?.is ?? "code",
+          name: r.name,
+        };
+      }),
       counts: {
         instructions: program.instructions.size,
         // The distinction that says how far along a project is: a name someone
@@ -2592,7 +2605,7 @@ export class Workspace {
     regions: readonly {
       start: number;
       end: number;
-      kind: RegionKind;
+      kind: LegacyRegionKind;
       name?: string;
       comment?: string;
       encoding?: TextEncoding;
@@ -3632,7 +3645,7 @@ export class Workspace {
   private checkedRegion(
     start: number,
     end: number,
-    kind: RegionKind,
+    kind: LegacyRegionKind,
     view?: string
   ): string | undefined {
     if (end <= start) {
@@ -3720,7 +3733,7 @@ export class Workspace {
     caller: Caller,
     start: number,
     end: number,
-    kind: RegionKind,
+    kind: LegacyRegionKind,
     name?: string,
     comment?: string,
     encoding?: TextEncoding,
@@ -3732,11 +3745,12 @@ export class Workspace {
     // Worked out before the edit, because afterwards the enclosing region is no
     // longer the one that was there first.
     const enclosing = this.program().loaded.map.getRegionAt(start);
+    const enclosingSpan = enclosing ? claimSpan(enclosing) : undefined;
     const nests =
       id === undefined &&
-      enclosing !== undefined &&
-      enclosing.start <= start &&
-      end < enclosing.end;
+      enclosingSpan !== undefined &&
+      enclosingSpan.start <= start &&
+      end < enclosingSpan.end;
 
     // Captured so the caller gets it back. `set_decoder` returned no id and two
     // agents collided over it in experiment 3: a write whose result cannot be
@@ -3765,13 +3779,13 @@ export class Workspace {
       covers: `${hex4(start)}-${hex4(end - 1)} (${end - start} bytes)`,
       // Said out loud, because "I declared 32 bytes and something else changed"
       // is exactly the kind of thing a caller should not have to discover.
-      ...(nests
+      ...(nests && enclosing && enclosingSpan
         ? {
             nestedInside:
-              `${enclosing.name ?? enclosing.kind} ` +
-              `(${hex4(enclosing.start)}-${hex4(enclosing.end - 1)}), which is unchanged and ` +
-              `still explains the bytes either side. To shrink it instead, ` +
-              `remove_claim ${enclosing.id ?? hex4(enclosing.start)} first.`,
+              `${enclosing.name ?? enclosing.says?.is ?? "code"} ` +
+              `(${hex4(enclosingSpan.start)}-${hex4(enclosingSpan.end - 1)}), which is ` +
+              `unchanged and still explains the bytes either side. To shrink it ` +
+              `instead, remove_claim ${enclosing.id} first.`,
           }
         : {}),
     };

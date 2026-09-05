@@ -1,7 +1,8 @@
+import { spanClaim } from "../../claims/test-claims.js";
 import { describe, it, expect } from "vitest";
 import { describeWarning, disassemble, InstructionIndex } from "./disassembler.js";
 import { ByteReader } from "./decoder.js";
-import { RegionIndex, createUserRegion } from "../../memory/region.js";
+import { RegionIndex } from "../../memory/region.js";
 
 /** Simple byte reader from an array at a base address */
 function arrayReader(base: number, bytes: number[]): ByteReader {
@@ -31,7 +32,7 @@ describe("a data claim and a transfer that contradicts it", () => {
   const contested = () => {
     const bytes = [0x4c, 0x06, 0x10, 0x00, 0x00, 0x00, 0xa9, 0x01, 0x60];
     const regions = new RegionIndex();
-    regions.addRegion(createUserRegion({ id: "r1", start: 0x1003, end: 0x1009, kind: "data" }));
+    regions.addRegion(spanClaim({ id: "r1", start: 0x1003, end: 0x1009, kind: "data" }));
     return disassemble(arrayReader(0x1000, bytes), { entryPoints: [0x1000], regions });
   };
 
@@ -56,7 +57,7 @@ describe("a data claim and a transfer that contradicts it", () => {
     // $1002  .BYTE ...
     const bytes = [0xa9, 0x01, 0xea, 0xea, 0xea];
     const regions = new RegionIndex();
-    regions.addRegion(createUserRegion({ id: "r1", start: 0x1002, end: 0x1005, kind: "data" }));
+    regions.addRegion(spanClaim({ id: "r1", start: 0x1002, end: 0x1005, kind: "data" }));
     const result = disassemble(arrayReader(0x1000, bytes), { entryPoints: [0x1000], regions });
 
     expect(result.instructions.has(0x1002)).toBe(false);
@@ -71,7 +72,7 @@ describe("a data claim and a transfer that contradicts it", () => {
     // claim they would be overruling. Only the program breaks that tie.
     const bytes = [0xa9, 0x01, 0x60];
     const regions = new RegionIndex();
-    regions.addRegion(createUserRegion({ id: "r1", start: 0x1000, end: 0x1003, kind: "bitmap" }));
+    regions.addRegion(spanClaim({ id: "r1", start: 0x1000, end: 0x1003, kind: "bitmap" }));
     const result = disassemble(arrayReader(0x1000, bytes), { entryPoints: [0x1000], regions });
 
     expect(result.instructions.size).toBe(0);
@@ -194,7 +195,7 @@ describe("disassemble", () => {
     // NOP, NOP, NOP - but second NOP is in a data region
     const reader = arrayReader(0x1000, [0xea, 0xea, 0xea]);
     const regions = new RegionIndex();
-    regions.addRegion(createUserRegion({ id: "rgn_1001", start: 0x1001, end: 0x1003, kind: "data" }));
+    regions.addRegion(spanClaim({ id: "rgn_1001", start: 0x1001, end: 0x1003, kind: "data" }));
 
     const result = disassemble(reader, {
       entryPoints: [0x1000],
