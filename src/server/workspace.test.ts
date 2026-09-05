@@ -68,7 +68,7 @@ describe("orienting in a project never seen before", () => {
 
     expect(described.entryPoints).toContain("$8011");
     expect(described.layers.map((l) => l.name)).toContain("gridrunner");
-    expect(described.counts.instructions).toBe(1449);
+    expect(described.counts.instructions).toBe(1481);
     // The distinction that matters: chosen names mean something was understood.
     expect(described.counts.namedByHand).toBeGreaterThan(0);
     expect(described.counts.namedAutomatically).toBeGreaterThan(0);

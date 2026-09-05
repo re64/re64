@@ -49,11 +49,15 @@ describe("what the claim model recovers", () => {
     // claim and the code now stand, and the report says which is suspect.
     expect(at8d16!.kind === "codeInClaim" && at8d16!.targeted).toBe(true);
 
+    // This used to be 32: the graph found `PlayNewLevelSounds` and the walk did
+    // not. The walk now refuses a claim's veto over an explicit transfer, so the
+    // two agree — which is the check that the fix landed in the shipping path and
+    // not only in the prototype.
     const walked = new Set(program.instructions.all().map((i) => i.address));
     const recovered = [...reach.code].filter((a) => !walked.has(a));
     // eslint-disable-next-line no-console
-    console.log(`recovered ${recovered.length} instructions the walk refused`);
-    expect(recovered.length).toBe(32);
+    console.log(`instructions the graph finds and the walk does not: ${recovered.length}`);
+    expect(recovered.length).toBe(0);
   });
 
   it("reduces the vocabulary: code regions lose their spans, unknown vanishes", () => {

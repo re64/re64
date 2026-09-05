@@ -14,6 +14,70 @@ function arrayReader(base: number, bytes: number[]): ByteReader {
   };
 }
 
+/**
+ * A claim says what bytes *mean*. It does not get to say where control goes.
+ *
+ * Reduced from Gridrunner, where it cost thirty-two instructions of a named
+ * routine for months: `laserFrameRateForLevel` is declared $8CF6-$8D18,
+ * `PlayNewLevelSounds` begins at $8D16, and `$8D75` holds `4c 16 8d`. The region
+ * overruns the routine's entry by two bytes, and the walk refused an
+ * unconditional jump.
+ */
+describe("a data claim and a transfer that contradicts it", () => {
+  // $1000  JMP $1006      the program says $1006 is code
+  // $1003  .BYTE $00 $00 $00
+  // $1006  LDA #$01       inside a region declared data
+  // $1008  RTS
+  const contested = () => {
+    const bytes = [0x4c, 0x06, 0x10, 0x00, 0x00, 0x00, 0xa9, 0x01, 0x60];
+    const regions = new RegionIndex();
+    regions.addRegion(createUserRegion({ id: "r1", start: 0x1003, end: 0x1009, kind: "data" }));
+    return disassemble(arrayReader(0x1000, bytes), { entryPoints: [0x1000], regions });
+  };
+
+  it("decodes what the program transfers to, claim or no claim", () => {
+    const result = contested();
+    expect(result.instructions.has(0x1006)).toBe(true);
+    expect(result.instructions.get(0x1006)!.mnemonic).toBe("LDA");
+    expect(result.instructions.has(0x1008)).toBe(true);
+  });
+
+  it("reports the contradiction rather than resolving it", () => {
+    const warning = contested().warnings.find((w) => w.type === "codeInClaim");
+    expect(warning).toMatchObject({ address: 0x1006, kind: "data", from: 0x1000 });
+    // Naming the source is what separates the two causes: something jumping here
+    // usually means the claim is wrong, where falling in usually means the decode
+    // leading here is.
+    expect(describeWarning(warning!)).toContain("$1000 transfers here");
+  });
+
+  it("still stops where control merely falls into a claim", () => {
+    // $1000  LDA #$01       falls through into the region below
+    // $1002  .BYTE ...
+    const bytes = [0xa9, 0x01, 0xea, 0xea, 0xea];
+    const regions = new RegionIndex();
+    regions.addRegion(createUserRegion({ id: "r1", start: 0x1002, end: 0x1005, kind: "data" }));
+    const result = disassemble(arrayReader(0x1000, bytes), { entryPoints: [0x1000], regions });
+
+    expect(result.instructions.has(0x1002)).toBe(false);
+    expect(result.warnings.find((w) => w.type === "flowIntoData")).toMatchObject({
+      address: 0x1002,
+    });
+  });
+
+  it("does not let a declared entry point overrule a claim", () => {
+    // Entry points are mostly derived — a PRG load address, every function and
+    // code label, every code region's start — so they are a declaration like the
+    // claim they would be overruling. Only the program breaks that tie.
+    const bytes = [0xa9, 0x01, 0x60];
+    const regions = new RegionIndex();
+    regions.addRegion(createUserRegion({ id: "r1", start: 0x1000, end: 0x1003, kind: "bitmap" }));
+    const result = disassemble(arrayReader(0x1000, bytes), { entryPoints: [0x1000], regions });
+
+    expect(result.instructions.size).toBe(0);
+  });
+});
+
 describe("disassemble", () => {
   it("disassembles a simple linear sequence", () => {
     // LDA #$01; LDX #$02; RTS
