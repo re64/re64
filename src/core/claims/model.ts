@@ -38,7 +38,12 @@ import { TextEncoding } from "../c64/text.js";
  */
 export type Interpretation =
   | { readonly is: "data" }
-  | { readonly is: "text"; readonly encoding?: TextEncoding }
+  // `view` on text as well as bitmap, because a program with its own character
+  // set is the ordinary case on this machine and none of the three built-in
+  // encodings can read one — so `snippet:<id>` is how such a span is made
+  // legible at all. One slot covers "draw these bytes" and "read these bytes",
+  // which is why it is one field rather than a decoder slot per kind.
+  | { readonly is: "text"; readonly encoding?: TextEncoding; readonly view?: string }
   | { readonly is: "bitmap"; readonly view?: string }
   | { readonly is: "jumptable" };
 

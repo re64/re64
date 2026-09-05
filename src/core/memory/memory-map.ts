@@ -1,6 +1,7 @@
 import { Layer, layerKindAt, layerRegionAt } from "./layer.js";
 import { Label, LabelIndex } from "./label.js";
 import { Region, RegionKind } from "./region.js";
+import { Interpretation } from "../claims/model.js";
 
 export interface ReadResult {
   value: number;
@@ -151,6 +152,25 @@ export class MemoryMap {
   getKindAt(address: number): RegionKind | undefined {
     const layer = this.readByteWithSource(address)?.layer;
     return layer ? layerKindAt(layer, address) : undefined;
+  }
+
+  /**
+   * What a claim says these bytes are, or nothing.
+   *
+   * The claim-native form of `getKindAt`, and the difference is the two kinds
+   * it *cannot* return. There is no `code`: code is what bytes are when nobody
+   * has said otherwise, so a caller asking "what is this" gets `undefined` and
+   * decides for itself. And `unknown` was never a claim anybody made — it is
+   * the absence of one, which `undefined` says without a word for it.
+   *
+   * Collapsing both to `undefined` is what lets the row builder switch over
+   * `Interpretation["is"]`, so declaring a new one is a compile error in every
+   * place that has to decide how to draw it — rather than a `RegionKind` with
+   * nine sites nothing checks.
+   */
+  interpretationAt(address: number): Interpretation["is"] | undefined {
+    const kind = this.getKindAt(address);
+    return kind === undefined || kind === "code" || kind === "unknown" ? undefined : kind;
   }
 
   /** Every jumptable region across all layers, for entry point extraction. */

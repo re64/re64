@@ -45,8 +45,8 @@ export type HygieneKind =
   | "constant.nameShared"
   /** An annotation inside an instruction: stored, and rendered nowhere. */
   | "annotation.insideInstruction"
-  /** A region asks for a decoder the project does not have. */
-  | "region.missingDecoder"
+  /** A claim asks for a decoder the project does not have. */
+  | "claim.missingDecoder"
   /** Two inline comments on one row, the second indented under the first. */
   | "comment.inlineDuplicated";
 
@@ -171,17 +171,19 @@ export function checkHygiene(
   // encoding, which makes a listing plainer rather than absent — so nothing
   // else would ever say the decoder went missing.
   const known = new Set((loaded.project.decoders ?? []).map((d) => d.id).filter(Boolean));
-  for (const region of loaded.map.getAllRegions()) {
-    const view = region.view;
+  for (const claim of loaded.claims) {
+    // Only two interpretations carry one, so the narrowing is the check.
+    const says = claim.says;
+    const view = says && (says.is === "bitmap" || says.is === "text") ? says.view : undefined;
     if (!view?.startsWith("snippet:")) continue;
     const id = view.slice("snippet:".length);
     if (known.has(id)) continue;
     found.push({
-      kind: "region.missingDecoder",
+      kind: "claim.missingDecoder",
       message:
-        `The region at ${hex4(region.start)} asks for decoder ${id}, which this ` +
+        `The claim at ${hex4(claim.at)} asks for decoder ${id}, which this ` +
         `project does not have, so it renders with its declared encoding instead.`,
-      subjects: [{ id: region.id, address: hex4(region.start) }],
+      subjects: [{ id: claim.id, address: hex4(claim.at) }],
     });
   }
 

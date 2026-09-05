@@ -8,6 +8,7 @@
  * CLAUDE.md.
  */
 
+import { Interpretation } from "../claims/model.js";
 import { analyzeProgram } from "../analysis/program.js";
 import { describeWarning } from "../arch/mos6502/disassembler.js";
 import { BasicBlock } from "../analysis/blocks.js";
@@ -602,8 +603,7 @@ export function analyze(
       continue;
     }
 
-    const kind = map.getKindAt(addr) ?? "data";
-    const strategy = rowStrategy(kind);
+    const strategy = rowStrategy(map.interpretationAt(addr));
 
     if (strategy === "word") {
       emitLabels(addr);
@@ -733,7 +733,7 @@ export function analyze(
     while (addr < rangeEnd && !index.has(addr)) {
       // Stop where a different strategy takes over, so every byte in the range
       // is claimed by exactly one branch of the outer dispatch.
-      if (rowStrategy(map.getKindAt(addr) ?? "data") !== strategy) break;
+      if (rowStrategy(map.interpretationAt(addr)) !== strategy) break;
       // Break for a comment as well as a label, or one written about an
       // address inside a data run would be swallowed by the row and never
       // appear anywhere.
@@ -765,7 +765,7 @@ export function analyze(
     // say so, because silence here would look like a hang.
     if (addr === addrAtStart) {
       walkWarnings.push(
-        `${hex4(addr)}: could not render (region kind "${kind}"); skipped one byte`
+        `${hex4(addr)}: could not render (strategy "${strategy}"); skipped one byte`
       );
       addr++;
     }
@@ -808,8 +808,14 @@ export function analyze(
  */
 type RowStrategy = "word" | "text" | "bytes" | "bitmap";
 
-function rowStrategy(kind: RegionKind): RowStrategy {
-  switch (kind) {
+function rowStrategy(is: Interpretation["is"] | undefined): RowStrategy {
+  // Nothing said what these bytes are, so they are shown as bytes. `undefined`
+  // covers both of the region kinds that were never interpretations: `code`,
+  // which is what bytes are when nobody has said otherwise, and `unknown`,
+  // which was the absence of a claim wearing the name of a kind.
+  if (is === undefined) return "bytes";
+
+  switch (is) {
     case "jumptable":
       return "word";
     case "text":
@@ -817,12 +823,10 @@ function rowStrategy(kind: RegionKind): RowStrategy {
     case "bitmap":
       return "bitmap";
     case "data":
-    case "code":
-    case "unknown":
       return "bytes";
     default: {
-      const unhandled: never = kind;
-      throw new Error(`unhandled region kind: ${String(unhandled)}`);
+      const unhandled: never = is;
+      throw new Error(`unhandled interpretation: ${String(unhandled)}`);
     }
   }
 }
