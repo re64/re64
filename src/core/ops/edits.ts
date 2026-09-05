@@ -156,7 +156,7 @@ const SAYS_FOR_KIND: Partial<Record<RegionKind, Interpretation["is"]>> = {
  */
 const AUTHOR: Provenance = { author: "project", source: "user" };
 
-const claimById = (loaded: LoadedProject, id: string): Claim | undefined =>
+export const claimById = (loaded: LoadedProject, id: string): Claim | undefined =>
   loaded.claims.find((c) => c.id === id);
 
 /** Claims that name an address without saying what its bytes are. */
@@ -255,7 +255,7 @@ export function renameLabelOp(
     };
   }
   throw new Error(
-    `No label has id ${id}. list_labels reports the id of every label a project ` +
+    `No claim has id ${id}. claims_at reports the id of every claim covering an ` +
       `owns; an invented name has none, because nothing stored it.`
   );
 }

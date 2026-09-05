@@ -485,14 +485,16 @@ which renders, and **no tool to rename one by id at all**. Renaming could only b
 done by the address-keyed call, so the destructive path was not the default by
 choice; it was the only path.
 
-So there is no "set" for a label any more:
+So there is no "set" for a label any more — and the vocabulary that replaced it
+keeps the shape, with `claim` in place of `label` once naming and interpreting
+became one act:
 
 | | |
 |---|---|
-| `add_label`, `add_labels` | name an address — **always adds, never replaces** |
-| `rename_label` | correct a name, **by id** |
-| `remove_label` | by id |
-| `set_primary_label` | the one thing anybody sets, last-write-wins |
+| `add_claim`, `add_claims` | name an address — **always adds, never replaces** |
+| `set_claim` | correct what you said, **by id**, one field at a time |
+| `remove_claim` | by id |
+| `set_primary_name` | the one thing anybody sets, last-write-wins |
 
 Three rules fell out, and two of them came from being wrong first:
 
@@ -1436,15 +1438,44 @@ Orient, read, decide, act, catch up:
 | | |
 |---|---|
 | `list_projects`, `describe_project` | what is here, and how far along it is |
-| `read_disassembly`, `list_labels` | structured rows, never rendered text — an agent cannot use character offsets into a text column |
+| `read_disassembly`, `list_claims` | structured rows, never rendered text — an agent cannot use character offsets into a text column |
 | `find_references`, `find_unnamed`, `find_instructions`, `call_graph` | who calls this, what touches the SID, and the shape of the whole |
 | `effects` | what code at an address touches, over a scope the caller names |
 | `run_block` | what a routine *does*, by running it |
-| `add_label`, `rename_label`, `remove_label`, `mark_function` | naming |
-| `set_region`, `remove_region` | exposed to agents **before** the web UI; the ops and the CLI already did this, so it was wiring rather than new capability |
+| `add_claim`, `add_claims`, `set_claim`, `remove_claim` | saying something about an address, and correcting what you said |
+| `claims_at`, `list_roots`, `disagreements` | what is already there, where decoding starts, and where the project contradicts itself |
 | `list_decoders`, `set_decoder`, `remove_decoder` | decoders the project carries |
 | `undo` | the same inverse the CLI and the browser use |
 | `changes_since` | what happened while the agent was not looking |
+
+**One noun, so one verb each.** `add_label` and `set_region` were two writes
+because an assembler source file has labels and directives, and the machine has
+neither — so naming an address and saying what a span holds were the same act
+wearing two schemas, with two spellings for an extent and two ways to be refused.
+`add_claim` takes a `name`, an `is`, an `extent` and a `root`, any of them, at
+least one of them.
+
+Three things fell out, and the third is the one that keeps the surface from
+growing back:
+
+- **`extent` replaced the `end`/`length` pair**, so the two ways of getting a
+  span wrong — passing both, passing neither — are gone rather than validated.
+- **Adding always adds and correcting is by id.** Every write returns the ids it
+  made, because `set_decoder` returned none and two agents in one run made the
+  same decoder twice looking for it. `set_claim` is partial, and **`null` clears
+  a field**, which is the distinction `Partial<>` cannot make — without it a root
+  could be declared and never taken off.
+- **There is no `add_root`/`remove_root`.** A root is a *field on a claim*, so
+  those would be a second spelling for `add_claim root:` and `set_claim
+  root: null`. `list_roots` exists because a **read** has nowhere else to live:
+  `describe_project` counts them, which answers "is anything decoding" and not
+  "what did I declare, and can I take it back". A root with no id is inherent to
+  a file rather than something the project said.
+
+**No deprecation aliases.** An MCP surface is rediscovered from the schema every
+session and has no persisted callers, so a retired name is a second vocabulary to
+learn for nothing. A transport test asserts the old names are *absent*, not
+merely unmentioned.
 
 Three things the tools say about themselves, because a confident wrong answer is
 worse than a gap:
@@ -3005,7 +3036,7 @@ gone. Branching into the middle of an instruction stays legitimate 6502 — the
 reference disassembly of Gridrunner does it twice — and the model represents it
 rather than refusing it.
 
-**What is still true:** the label itself renders nowhere. `set_label` on a
+**What is still true:** the label itself renders nowhere. `add_claim` on a
 mid-instruction address reports success, the name resolves correctly in operands
 (`LDA CopyrightLine,X` at `$807F` has always worked), and the listing shows no
 row for it. That is a real gap and a small one, and it is the whole of what is

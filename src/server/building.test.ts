@@ -215,7 +215,7 @@ describe("building a project from a disk image", () => {
     camels.addLabel(builder, 0x0801, "waveTable");
     const over = camels.addLabel(builder, 0x0801, "zoneTable") as { warnings?: string[] };
     expect(over.warnings?.join(" ")).toMatch(/already had "waveTable"/);
-    expect(over.warnings?.join(" ")).toMatch(/rename_label/);
+    expect(over.warnings?.join(" ")).toMatch(/set_claim/);
 
     // Both survive, and the one that was there still renders.
     const here = camels.labels({ range: { start: 0x0801, end: 0x0802 } }).labels.map((l) => l.name);

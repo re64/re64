@@ -15,6 +15,13 @@
 import { z } from "zod";
 import type { LabelType } from "../../core/index.js";
 import type { McpContext } from "./transport.js";
+import type { Claim, Interpretation, RootKind } from "../../core/claims/model.js";
+import type { ClaimEdit } from "../../core/ops/types.js";
+import type { TextEncoding } from "../../core/c64/text.js";
+import type { ClaimInput } from "../workspace.js";
+
+/** One entry of `add_claims`, which is one claim. */
+type ClaimArg = ClaimInput;
 
 /**
  * Accepts `$8100`, `0x8100`, `"33024"` **or the number 33024**, and says so.
@@ -635,12 +642,15 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
 
   tool(
     "find_undecoded",
-    "Spans of bytes nothing has explained: no instruction covers them and no " +
-      "region says what they hold. This is the orientation question on a " +
-      "project nobody has worked on yet — find_unnamed ranks what has already " +
-      "been reached, which on a fresh project is almost nothing. Biggest span " +
-      "first. Declaring a span data or text is an answer and removes it from " +
-      "this list; so does making it decode.",
+    "Spans of bytes nothing has explained: no claim says what they hold and no " +
+      "root reaches them, so nothing decoded there either. This is the " +
+      "orientation question on a project nobody has worked on yet — find_unnamed " +
+      "ranks what has already been reached, which on a fresh project is almost " +
+      "nothing. Biggest span first. " +
+      "Both kinds of answer shrink this list: `add_claim is:` says what bytes " +
+      "are, and `add_claim root:` says to decode them. It counts what is left " +
+      "to do rather than what is wrong, which is why it is not a hygiene check " +
+      "— on a fresh project it is the whole binary, and none of that is a fault.",
     {
       project,
       limit: z.number().int().min(1).max(200).optional().describe("Default 20"),
@@ -656,7 +666,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
-    "list_labels",
+    "list_claims",
     "Labels, narrowed by where they came from, their type, their name, or an " +
       "address range.",
     {
@@ -671,7 +681,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       // one, so "what is named in zero page" could only be answered by pulling
       // every label and filtering locally. `labels()` took a range all along.
       from: address.optional().describe("Inclusive; with `to`, narrows to a range"),
-      to: address.optional().describe("Inclusive, like `set_region`'s `end`"),
+      to: address.optional().describe("Inclusive, like `export_listing`'s `to`"),
       limit: z.number().int().min(1).max(500).optional().describe("Default 200"),
     },
     ({
@@ -694,8 +704,8 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
             ...(from === undefined && to === undefined
               ? {}
               : // Inclusive, because every other range on this surface is —
-                // `set_region` and `export_listing` both take an `end` that is
-                // part of the span. `labels()` itself is half-open and says so;
+                // `export_listing`'s `to` is part of the span, and a claim's
+                // `extent` counts the last byte in. `labels()` itself is half-open and says so;
                 // converting here is what stops `from:$0400 to:$0400` coming
                 // back empty, which is the shape anybody asking about one
                 // address writes.
@@ -772,23 +782,31 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   // all, so that number is how you tell a good guess from a wasted one.
 
   tool(
-    "add_label",
-    "Name an address. **This adds a name; it never replaces one.** " +
-      "Several labels can share an address — the reference disassembly calls $08 " +
-      "a scratch byte in most of a program and something specific in one " +
-      "routine, and both are true — so an address cannot say which label you " +
-      "meant, and a write keyed by one must not decide. Where a name is already " +
-      "there you get a second and are told whose you joined. " +
-      "To correct a name rather than add to it, use rename_label with its id. " +
-      "Which name an operand shows is set_primary_label, and that is the only " +
-      "thing about a label anybody sets; without a choice, resolution is by " +
-      "source rank then id — arbitrary, and the same on every machine.",
+    "add_claim",
+    "Say something about an address. **This adds; it never replaces.** " +
+      "A claim carries any of: a `name`, what the bytes are (`is`), how far it " +
+      "reaches (`extent`), and whether to decode from there (`root`). One tool " +
+      "rather than two, because naming an address and saying what a span holds " +
+      "were only ever separate because an assembler source file has labels and " +
+      "directives — the machine does not. " +
+      "Several claims can cover one address and that is the point: the reference " +
+      "disassembly calls $08 a scratch byte in most of a program and something " +
+      "specific in one routine, and both are true. So an address cannot say " +
+      "which claim you meant, and a write keyed by one must not decide. " +
+      "The id comes back; use it with set_claim to correct what you said, or " +
+      "claims_at first to see what is already there. Which name an operand shows " +
+      "is set_primary_name, and that is the only thing anybody sets.",
     {
       project,
-      address,
-      name: z.string().min(1),
-      type: z.enum(["entry", "function", "code", "address"]).optional(),
-      comment: z.string().optional(),
+      at: address,
+      name: z.string().min(1).optional(),
+      is: z
+        .enum(["data", "text", "bitmap", "jumptable"])
+        .optional()
+        .describe(
+          "What the bytes are. There is no `code`: code is what bytes are when " +
+            "nobody has said otherwise, so to have an address decoded set a root."
+        ),
       extent: z
         .number()
         .int()
@@ -796,9 +814,20 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         .max(0x10000)
         .optional()
         .describe(
-          "Bytes this name covers, when it names an array rather than a spot. " +
-            "An operand inside it renders as NAME + $000F instead of a bare address."
+          "Bytes covered. On a name it makes an operand inside render as " +
+            "NAME + $000F; on an interpretation it is the span."
         ),
+      root: z
+        .enum(["entry", "routine", "location", "data"])
+        .optional()
+        .describe(
+          "Surface this regardless of what reaches it. `routine` is a subroutine, " +
+            "`entry` is where execution starts, `data` means show these bytes even " +
+            "though nothing names them — an unreferenced sprite sheet needs it."
+        ),
+      encoding: z.enum(["petscii", "screen", "ascii"]).optional(),
+      view: z.string().optional().describe("For a bitmap: char:8, bits:3, sprite, snippet:<id>"),
+      comment: z.string().optional(),
       expectVersion: z
         .string()
         .optional()
@@ -806,100 +835,176 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      address: number;
-      name: string;
-      type?: "entry" | "function" | "code" | "address";
-      comment?: string;
+      at: number;
+      name?: string;
+      is?: "data" | "text" | "bitmap" | "jumptable";
       extent?: number;
+      root?: "entry" | "routine" | "location" | "data";
+      encoding?: "petscii" | "screen" | "ascii";
+      view?: string;
+      comment?: string;
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.addLabel(
-        caller,
-        args.address,
-        args.name,
-        args.type,
-        args.comment,
-        args.extent
-      );
+      return space.addClaim(caller, args);
     }
   );
 
   tool(
-    "add_labels",
-    "Name several addresses in one call, as one action. Undo takes the whole " +
-      "batch back. Use this rather than a call per label: a real disassembly " +
-      "has hundreds, and one round trip each is almost all protocol.",
+    "list_roots",
+    "Where decoding starts. " +
+      "A root is what makes bytes get decoded regardless of whether anything " +
+      "reaches them — a load address, an entry point, a routine nothing calls " +
+      "because it is reached through a jump table. " +
+      "There is no add_root or remove_root: a root is a field on a claim, so " +
+      "add_claim with `root` declares one and set_claim with `root: null` takes " +
+      "it back. A root reported without an id is inherent to a file rather than " +
+      "something this project said, so there is nothing to take back.",
+    { project },
+    (args: { project?: string }) => context().workspace(args.project).listRoots()
+  );
+
+  tool(
+    "claims_at",
+    "Every claim covering an address, with nothing resolved. " +
+      "The read that makes an additive write safe: naming an address never " +
+      "replaces what is there, so this is how you see what is there before " +
+      "adding beside it — and how you get the id to correct one instead. " +
+      "Several claims covering an address is ordinary, not a fault; which of " +
+      "them renders is a separate question.",
+    { project, at: address },
+    (args: { project?: string; at: number }) =>
+      context().workspace(args.project).claimsAt(args.at)
+  );
+
+  tool(
+    "disagreements",
+    "Where this project contradicts itself: one name reaching two addresses, " +
+      "two claims reading one span differently, a decode root inside somebody " +
+      "else's data. " +
+      "Nothing is resolved for you — that is the point. Declaring is additive, " +
+      "so two readers who disagree both stand and this is how anybody finds out, " +
+      "rather than one of them silently winning. " +
+      "A claim nested inside another is not a contradiction: an 8K table and a " +
+      "40-byte string inside it are both true.",
+    { project },
+    (args: { project?: string }) => context().workspace(args.project).disagreements()
+  );
+
+  tool(
+    "add_claims",
+    "Say several things at once, as one action. Undo takes the whole batch back. " +
+      "Use this rather than a call per claim: a real disassembly has hundreds, " +
+      "and one round trip each is almost all protocol. " +
+      "Partial, like every batch here — an entry that cannot be written is " +
+      "reported in `rejected` and the rest still land.",
     {
       project,
-      labels: z
+      claims: z
         .array(
           z.strictObject({
-            address,
-            name: z.string().min(1),
-            type: z.enum(["entry", "function", "code", "address"]).optional(),
-            comment: z.string().optional(),
+            at: address,
+            name: z.string().min(1).optional(),
+            is: z
+              .enum(["data", "text", "bitmap", "jumptable"])
+              .optional()
+              .describe(
+                "What the bytes are. There is no `code`: code is what bytes are when " +
+                        "nobody has said otherwise, so to have an address decoded set a root."
+              ),
             extent: z.number().int().min(1).max(0x10000).optional(),
+            root: z.enum(["entry", "routine", "location", "data"]).optional(),
+            encoding: z.enum(["petscii", "screen", "ascii"]).optional(),
+            view: z.string().optional(),
+            comment: z.string().optional(),
           })
         )
         .min(1)
         .max(500),
       expectVersion: z.string().optional(),
     },
-    (args: {
-      project?: string;
-      labels: {
-        address: number;
-        name: string;
-        type?: LabelType;
-        comment?: string;
-        extent?: number;
-      }[];
-      expectVersion?: string;
-    }) => {
+    (args: { project?: string; claims: ClaimArg[]; expectVersion?: string }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.addLabels(caller, args.labels);
+      return space.addClaims(caller, args.claims);
     }
   );
 
   tool(
-    "rename_label",
-    "Change a label's name, by its id. " +
-      "The way to correct a name rather than add to it: naming an *address* " +
-      "always adds, because several labels can share an address and so an " +
-      "address cannot say which one you meant. `list_labels` reports the id of " +
-      "every label a project owns — an invented `dat_`/`loc_`/`sub_` name has " +
-      "none, because nothing stored it, and naming that address is an ordinary " +
-      "`add_label`.",
+    "set_claim",
+    "Correct a claim, by its id. " +
+      "The way to change what you said rather than say something else: adding is " +
+      "never keyed by an address, because several claims cover any interesting " +
+      "one and so an address cannot say which you meant. `claims_at` reports the " +
+      "ids covering an address; an invented `dat_`/`loc_`/`sub_` name has none, " +
+      "because nothing stored it, and naming that address is an ordinary " +
+      "`add_claim`. " +
+      "Every field is optional and **omitting one leaves it alone**; passing " +
+      "`null` clears it — which is how a root is taken off, an extent removed, " +
+      "or an interpretation un-said.",
     {
       project,
-      id: z.string().describe("Label id, from list_labels"),
-      name: z.string().min(1),
-      type: z.enum(["entry", "function", "code", "address"]).optional(),
-      extent: z.number().int().min(1).max(0x10000).optional(),
+      id: z.string().describe("Claim id, from claims_at or add_claim"),
+      name: z.string().min(1).nullable().optional(),
+      is: z.enum(["data", "text", "bitmap", "jumptable"]).nullable().optional(),
+      extent: z.number().int().min(1).max(0x10000).nullable().optional(),
+      root: z.enum(["entry", "routine", "location", "data"]).nullable().optional(),
+      encoding: z.enum(["petscii", "screen", "ascii"]).nullable().optional(),
+      view: z.string().nullable().optional(),
       expectVersion: z.string().optional(),
     },
     (args: {
       project?: string;
       id: string;
-      name: string;
-      type?: LabelType;
-      extent?: number;
+      name?: string | null;
+      is?: Interpretation["is"] | null;
+      extent?: number | null;
+      root?: RootKind | null;
+      encoding?: TextEncoding | null;
+      view?: string | null;
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.renameLabel(caller, args.id, args.name, args.type, args.extent);
+
+      // Omitted means "leave alone" and null means "clear", so the edit is
+      // built from the keys actually present rather than from their values.
+      // `is`, `encoding` and `view` are three arguments for one field: `says`
+      // is the interpretation together with how to read it, and a caller should
+      // not have to assemble that by hand.
+      const fields: Record<string, unknown> = {};
+      const says: Record<string, unknown> = {};
+      let saysTouched = false;
+      let saysCleared = false;
+      for (const [key, value] of Object.entries({
+        name: args.name,
+        extent: args.extent,
+        root: args.root,
+      })) {
+        if (value !== undefined) fields[key] = value;
+      }
+      for (const [key, value] of [
+        ["is", args.is],
+        ["encoding", args.encoding],
+        ["view", args.view],
+      ] as const) {
+        if (value === undefined) continue;
+        saysTouched = true;
+        if (key === "is" && value === null) saysCleared = true;
+        else if (value !== null) says[key] = value;
+      }
+      if (saysTouched) fields.says = saysCleared ? null : (says as Claim["says"]);
+
+      return space.setClaim(caller, args.id, fields as ClaimEdit);
     }
   );
 
   tool(
-    "set_primary_label",
+    "set_primary_name",
     "Choose which of several names at an address is shown where nothing says " +
       "otherwise.",
     { project, address, name: z.string().min(1), expectVersion: z.string().optional() },
@@ -912,7 +1017,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
-    "bind_label",
+    "bind_name",
     "Say which name the operands referring to an address mean, over a span. " +
       "Give `from` alone for one instruction, or `from` and `to` for a whole " +
       "routine. Stored per site, so a binding travels with its instruction " +
@@ -941,7 +1046,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
-    "unbind_label",
+    "unbind_name",
     "Let the operand at an address resolve by the usual rule again.",
     { project, address, expectVersion: z.string().optional() },
     (args: { project?: string; address: number; expectVersion?: string }) => {
@@ -952,29 +1057,6 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     }
   );
 
-  tool(
-    "remove_label",
-    "Remove a label, by id or by an address that names exactly one. Several " +
-      "labels can share an address, so an address does not identify one — where " +
-      "it is ambiguous this refuses and names the candidates, which is where " +
-      "the id comes from. list_labels reports ids for the labels this project " +
-      "owns; a built-in or invented name has none and cannot be removed.",
-    {
-      project,
-      address: address.optional().describe("When exactly one label is yours here"),
-      id: z.string().optional().describe("From list_labels; unambiguous"),
-      expectVersion: z.string().optional(),
-    },
-    (args: { project?: string; address?: number; id?: string; expectVersion?: string }) => {
-      const { workspace, caller } = context();
-      const space = workspace(args.project);
-      space.expect(args.expectVersion);
-      if (args.id === undefined && args.address === undefined) {
-        throw new Error("Give an id, or an address that names exactly one label.");
-      }
-      return space.removeLabel(caller, args.id ?? args.address!);
-    }
-  );
 
   tool(
     "export_listing",
@@ -986,9 +1068,10 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       project,
       start: address.optional().describe("From the beginning if omitted"),
       lines: z.number().int().min(1).max(2000).optional().describe("Default 200"),
-      // `set_region` takes an end address, so reaching for one here is the
-      // natural first guess and cost a round trip to find out otherwise. Both
-      // are accepted; `lines` wins when somebody passes both.
+      // A caller who has just written a claim is thinking in addresses, so
+      // reaching for an end address here is the natural first guess and cost a
+      // round trip to find out otherwise. Both are accepted; `lines` wins when
+      // somebody passes both.
       end: address.optional().describe("Alternative to `lines`: stop at this address"),
     },
     (args: { project?: string; start?: number; lines?: number; end?: number }) =>
@@ -1603,177 +1686,21 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     }
   );
 
+
+
   tool(
-    "set_region",
-    "Say what a span of memory holds. Marking code starts decoding at its first " +
-      "address, marking a jumptable decodes the code it points at — which no " +
-      "control-flow walk reaches on its own — and marking a bitmap draws the " +
-      "bytes as a picture instead of a hex column. " +
-      "Marking data stops the walk falling into the span, but it does not stop a " +
-      "JMP, JSR or branch that names an address inside it: a claim says what " +
-      "bytes mean and the program says where control goes, so the program wins " +
-      "and the disagreement is reported instead. " +
-      "Give start with either end (exclusive) or length; the reply says which " +
-      "bytes it actually took. The span must lie in a layer that supplies bytes " +
-      "— a region says how to read bytes, so there has to be something there to " +
-      "read.",
-    {
-      project,
-      start: address,
-      end: address
-        .optional()
-        .describe("Exclusive: the first address AFTER the span. Give this or length."),
-      length: z
-        .number()
-        .int()
-        .min(1)
-        .optional()
-        .describe("How many bytes, as an alternative to end. No off-by-one to get wrong."),
-      kind: z.enum(["code", "data", "text", "jumptable", "bitmap", "unknown"]),
-      name: z.string().optional(),
-      comment: z.string().optional(),
-      encoding: z
-        .enum(["ascii", "petscii", "screen"])
-        .optional()
-        .describe(
-          "How to read a text region: petscii for KERNAL strings, screen for " +
-            "bytes destined for screen RAM, ascii by default. Neither C64 " +
-            "encoding is ASCII, so the default misreads most C64 text."
-        ),
-      id: z
-        .string()
-        .optional()
-        .describe(
-          "The region to revise, from describe_project. Without one, a " +
-            "declaration strictly inside an existing region creates a new, " +
-            "nested region rather than resizing the one already there."
-        ),
-      view: z
-        .string()
-        .optional()
-        .describe(
-          "For kind:bitmap, how to read the bytes as a picture. " +
-            "char:<columns> for a character set, sprite:<columns> or " +
-            "sprite-multi:<columns> for sprites, bits:<bytes per row> for " +
-            "anything else. The listing then draws it, in the browser and in " +
-            "exported text alike."
-        ),
-      expectVersion: z.string().optional(),
-    },
-    (args: {
-      project?: string;
-      start: number;
-      end?: number;
-      length?: number;
-      kind: "code" | "data" | "text" | "jumptable" | "bitmap" | "unknown";
-      name?: string;
-      comment?: string;
-      id?: string;
-      view?: string;
-      encoding?: "ascii" | "petscii" | "screen";
-      expectVersion?: string;
-    }) => {
+    "remove_claim",
+    "Take back a claim, by its id. " +
+      "By id and only by id: an address cannot identify a claim, since several " +
+      "cover any interesting one — which is what claims_at is for. Removing a " +
+      "claim leaves its bytes explained by whatever else covers them, or by " +
+      "nothing, which is an honest answer rather than a gap to be avoided.",
+    { project, id: z.string().min(1), expectVersion: z.string().optional() },
+    (args: { project?: string; id: string; expectVersion?: string }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-
-      // Either, not neither and not both — two ways to say the same thing that
-      // disagree is worse than one way that is easy to misread.
-      if ((args.end === undefined) === (args.length === undefined)) {
-        throw new Error("Give exactly one of end (exclusive) or length.");
-      }
-      const end = args.end ?? args.start + (args.length as number);
-
-      return space.setRegion(
-        caller,
-        args.start,
-        end,
-        args.kind,
-        args.name,
-        args.comment,
-        args.encoding,
-        args.view,
-        args.id
-      );
-    }
-  );
-
-  tool(
-    "set_regions",
-    "Declare several regions in one call, as one action. Undo takes the batch " +
-      "back whole. " +
-      "The last write that had no batch form, and the most used of all of them: " +
-      "three readers on one project spent 129 of 648 calls on set_region, one " +
-      "round trip each. " +
-      "Applies what it can and reports what it declined in `rejected`, so one " +
-      "bad span does not lose the other thirty-nine. Every entry is checked the " +
-      "same way a single call is.",
-    {
-      project,
-      regions: z
-        .array(
-          z.object({
-            start: address,
-            end: address.optional(),
-            lines: z.number().int().min(1).optional(),
-            kind: z.enum(["code", "data", "text", "jumptable", "bitmap", "unknown"]),
-            name: z.string().optional(),
-            comment: z.string().optional(),
-            encoding: z.enum(["petscii", "screen", "ascii"]).optional(),
-            view: z.string().optional(),
-            id: z.string().optional(),
-          })
-        )
-        .min(1)
-        .max(200),
-      expectVersion: z.string().optional(),
-    },
-    (args: {
-      project?: string;
-      regions: {
-        start: number;
-        end?: number;
-        lines?: number;
-        kind: "code" | "data" | "text" | "jumptable" | "bitmap" | "unknown";
-        name?: string;
-        comment?: string;
-        encoding?: "petscii" | "screen" | "ascii";
-        view?: string;
-        id?: string;
-      }[];
-      expectVersion?: string;
-    }) => {
-      const { workspace, caller } = context();
-      const space = workspace(args.project);
-      space.expect(args.expectVersion);
-      return space.setRegions(
-        caller,
-        args.regions.map((r) => ({
-          ...r,
-          end: r.end ?? r.start + (r.lines ?? 1),
-        }))
-      );
-    }
-  );
-
-  tool(
-    "remove_region",
-    "Drop a region, so its span falls back to whatever the region around it — or " +
-      "its layer — declares. A start address is enough while only one region " +
-      "begins there; where several do, because one is nested inside another, it " +
-      "refuses and names them so you can say which by id. describe_project " +
-      "reports the ids.",
-    {
-      project,
-      start: address.optional().describe("Where it begins; not needed if you give `id`"),
-      id: z.string().optional().describe("Which region — enough on its own"),
-      expectVersion: z.string().optional(),
-    },
-    (args: { project?: string; start?: number; id?: string; expectVersion?: string }) => {
-      const { workspace, caller } = context();
-      const space = workspace(args.project);
-      space.expect(args.expectVersion);
-      return space.removeRegion(caller, args.start, args.id);
+      return space.removeClaim(caller, args.id);
     }
   );
 

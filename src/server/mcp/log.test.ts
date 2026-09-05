@@ -59,11 +59,11 @@ describe("the transcript", () => {
   });
 
   it("records what was asked for, not just that something happened", async () => {
-    await call("add_label", { address: "$8870", name: "Named" });
+    await call("add_claim", { at: "$8870", name: "Named" });
 
-    const [entry] = transcript().filter((e) => e.tool === "add_label");
+    const [entry] = transcript().filter((e) => e.tool === "add_claim");
     expect(entry.method).toBe("tools/call");
-    expect(entry.args).toEqual({ address: "$8870", name: "Named" });
+    expect(entry.args).toEqual({ at: "$8870", name: "Named" });
     expect(entry.caller).toBe("usr_agent");
     expect(entry.ok).toBe(true);
     expect(entry.ms).toBeGreaterThanOrEqual(0);
@@ -88,11 +88,11 @@ describe("the transcript", () => {
   });
 
   it("separates a refusal from a failure", async () => {
-    await call("remove_label", { address: "$8F80" });
+    await call("remove_claim", { id: "clm_nothere" });
 
-    const [entry] = transcript().filter((e) => e.tool === "remove_label");
+    const [entry] = transcript().filter((e) => e.tool === "remove_claim");
     expect(entry.ok).toBe(false);
-    expect(entry.error).toMatch(/no label at/i);
+    expect(entry.error).toMatch(/no claim/i);
   });
 
   it("counts a large read without keeping a copy of it", async () => {

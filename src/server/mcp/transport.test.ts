@@ -95,15 +95,41 @@ describe("speaking the protocol", () => {
         "find_references",
         "find_unnamed",
         "changes_since",
-        "add_label",
-        "mark_function",
-        "set_region",
-        "remove_region",
+        "add_claim",
+        "add_claims",
+        "claims_at",
+        "list_roots",
+        "disagreements",
+        "set_claim",
+        "remove_claim",
+        "list_claims",
         "mark_function",
         "unmark_function",
         "undo",
       ])
     );
+
+    // Gone, not aliased. An agent rediscovers this surface from the schema
+    // every session and has no persisted callers, so a deprecated name is a
+    // second vocabulary to learn for nothing — and the whole point of the
+    // claims redesign is that there is one noun.
+    for (const retired of [
+      "add_label",
+      "add_labels",
+      "rename_label",
+      "remove_label",
+      "list_labels",
+      "set_region",
+      "set_regions",
+      "remove_region",
+      "set_primary_label",
+      "bind_label",
+      "unbind_label",
+      "add_root",
+      "remove_root",
+    ]) {
+      expect(names).not.toContain(retired);
+    }
   });
 
 });
@@ -287,12 +313,12 @@ describe("asking what a routine does", () => {
     // The last write with no batch form, and the most used of all of them: 129
     // of 648 calls in one collaborative run, a round trip each. Partial, like
     // every other batch here — one bad span must not lose the rest.
-    const { isError, value } = await callTool("set_regions", {
-      regions: [
-        { start: "$8E00", end: "$8E40", kind: "data", name: "batchOne" },
-        { start: "$8E40", end: "$8E80", kind: "data", name: "batchTwo" },
-        // End before start: rejected, and the others still land.
-        { start: "$8F00", end: "$8E00", kind: "data", name: "backwards" },
+    const { isError, value } = await callTool("add_claims", {
+      claims: [
+        { at: "$8E00", extent: 0x40, is: "data", name: "batchOne" },
+        { at: "$8E40", extent: 0x40, is: "data", name: "batchTwo" },
+        // Says nothing at all: rejected, and the others still land.
+        { at: "$8F00" },
       ],
     });
     expect(isError).toBeFalsy();
@@ -305,7 +331,7 @@ describe("asking what a routine does", () => {
     // Every other range on this surface has an inclusive end — `set_region`,
     // `export_listing` — and this one was half-open with `to` carrying no
     // description at all, so asking about a single address came back empty.
-    const { value } = await callTool("list_labels", { from: "$8000", to: "$8000" });
+    const { value } = await callTool("list_claims", { from: "$8000", to: "$8000" });
     expect((value as { total: number }).total).toBeGreaterThan(0);
   });
 
@@ -375,15 +401,15 @@ describe("asking what a routine does", () => {
 
 describe("editing as an agent", () => {
   it("names an address and says what it did", async () => {
-    const { value } = await callTool("add_label", {
-      address: "$8870",
+    const { value } = await callTool("add_claim", {
+      at: "$8870",
       name: "NamedByAnAgent",
-      type: "function",
+      root: "routine",
     });
 
     expect((value as { did: string[] }).did[0]).toContain("NamedByAnAgent");
 
-    const listed = await callTool("list_labels", { namePattern: "NamedByAnAgent" });
+    const listed = await callTool("list_claims", { namePattern: "NamedByAnAgent" });
     expect((listed.value as { total: number }).total).toBe(1);
   });
 
@@ -398,9 +424,9 @@ describe("editing as an agent", () => {
     const { value: described } = await callTool("describe_project");
     const stale = (described as { version: string }).version;
 
-    await callTool("add_label", { address: "$8870", name: "Meanwhile" });
-    const conflicted = await callTool("add_label", {
-      address: "$8450",
+    await callTool("add_claim", { at: "$8870", name: "Meanwhile" });
+    const conflicted = await callTool("add_claim", {
+      at: "$8450",
       name: "TooLate",
       expectVersion: stale,
     });
@@ -410,7 +436,7 @@ describe("editing as an agent", () => {
   });
 
   it("records the change, attributed to the caller", async () => {
-    await callTool("add_label", { address: "$8870", name: "Attributed" });
+    await callTool("add_claim", { at: "$8870", name: "Attributed" });
     const { value } = await callTool("changes_since", { cursor: 0 });
     const { changes } = value as { changes: { did: string; by: string }[] };
 
@@ -420,11 +446,11 @@ describe("editing as an agent", () => {
   });
 
   it("lets a caller catch up on what it missed", async () => {
-    await callTool("add_label", { address: "$8870", name: "First" });
+    await callTool("add_claim", { at: "$8870", name: "First" });
     const { value: first } = await callTool("changes_since", { cursor: 0 });
     const cursor = (first as { cursor: number }).cursor;
 
-    await callTool("add_label", { address: "$8450", name: "Second" });
+    await callTool("add_claim", { at: "$8450", name: "Second" });
     const { value: next } = await callTool("changes_since", { cursor });
 
     const { changes } = next as { changes: { did: string }[] };
@@ -445,27 +471,29 @@ describe("editing as an agent", () => {
   });
 
   it("takes an edit back", async () => {
-    await callTool("add_label", { address: "$8870", name: "Regretted" });
+    await callTool("add_claim", { at: "$8870", name: "Regretted" });
     const { value } = await callTool("undo");
 
     expect((value as { undone: string }).undone).toContain("Regretted");
-    const listed = await callTool("list_labels", { namePattern: "Regretted" });
+    const listed = await callTool("list_claims", { namePattern: "Regretted" });
     expect((listed.value as { total: number }).total).toBe(0);
   });
 
   it("sets a region, which the browser cannot", async () => {
-    const { value } = await callTool("set_region", {
-      start: "$8F00",
-      end: "$8F20",
-      kind: "text",
+    const { value } = await callTool("add_claim", {
+      at: "$8F00",
+      extent: 0x20,
+      is: "text",
       name: "blurb",
     });
     expect((value as { ok: boolean }).ok).toBe(true);
   });
 
   it("takes back a region and a function declaration", async () => {
-    await callTool("set_region", { start: "$8F00", end: "$8F20", kind: "text" });
-    const dropped = await callTool("remove_region", { start: "$8F00" });
+    const made = await callTool("add_claim", { at: "$8F00", extent: 0x20, is: "text" });
+    const dropped = await callTool("remove_claim", {
+      id: (made.value as { claims: string[] }).claims[0],
+    });
     expect(dropped.isError).toBe(false);
 
     // $801B is reached by nothing, so the declaration is what decodes it —
@@ -483,10 +511,10 @@ describe("editing as an agent", () => {
     // A bare shape becomes a zod object that strips unknown keys, so this
     // returned ok having quietly ignored both. For something probing what an
     // API can do, "ok, did nothing" reads as a feature that exists and works.
-    const result = await callTool("set_region", {
-      start: "$8F00",
-      end: "$8F20",
-      kind: "text",
+    const result = await callTool("add_claim", {
+      at: "$8F00",
+      extent: 0x20,
+      is: "text",
       encoding: "petscii",
       charset: "$2000",
     });
@@ -495,33 +523,23 @@ describe("editing as an agent", () => {
     expect(result.text).toMatch(/encoding|charset|unrecognized/i);
   });
 
-  it("takes a length instead of an exclusive end", async () => {
-    const { value } = await callTool("set_region", {
-      start: "$8F00",
-      length: 32,
-      kind: "text",
+  it("says how far a claim reaches in one spelling, not two", async () => {
+    // `set_region` took `end` *or* `length` and had to refuse both and neither.
+    // A claim has `extent`, which is the length, so the pair — and the two ways
+    // of getting it wrong — are gone rather than validated.
+    const { value } = await callTool("add_claim", {
+      at: "$8F00",
+      extent: 32,
+      is: "text",
     });
 
     expect((value as { covers: string }).covers).toBe("$8F00-$8F1F (32 bytes)");
   });
 
-  it("insists on exactly one of end and length", async () => {
-    const neither = await callTool("set_region", { start: "$8F00", kind: "text" });
-    const both = await callTool("set_region", {
-      start: "$8F00",
-      end: "$8F20",
-      length: 32,
-      kind: "text",
-    });
-
-    expect(neither.isError).toBe(true);
-    expect(both.isError).toBe(true);
-  });
-
   it("says what is wrong rather than failing silently", async () => {
-    const missing = await callTool("remove_label", { address: "$8F80" });
+    const missing = await callTool("remove_claim", { id: "clm_nothere" });
     expect(missing.isError).toBe(true);
-    expect(missing.text).toMatch(/no label at/i);
+    expect(missing.text).toMatch(/no claim/i);
   });
 
   // Every argument below reached a caller only as a rejection until it was
@@ -529,7 +547,7 @@ describe("editing as an agent", () => {
   // an end address all along, and the schema in front of it did not. That is
   // the class of bug this file exists for.
   it("narrows labels to an address range, which the description always promised", async () => {
-    const zeroPage = await callTool("list_labels", { from: "$00", to: "$FF" });
+    const zeroPage = await callTool("list_claims", { from: "$00", to: "$FF" });
     expect(zeroPage.isError).toBe(false);
     const { labels } = zeroPage.value as { labels: { address: string }[] };
     expect(labels.length).toBeGreaterThan(0);
@@ -590,19 +608,133 @@ describe("editing as an agent", () => {
     expect(refused.text).toMatch(/holds no file/i);
   });
 
-  it("removes a label by id when an address names more than one", async () => {
-    await callTool("add_label", { address: "$8250", name: "firstName" });
-    await callTool("add_label", { address: "$8250", name: "secondName" });
+  it("says several things at once and reports what it declined", async () => {
+    const { isError, value } = await callTool("add_claims", {
+      claims: [
+        { at: "$8E00", extent: 0x40, is: "data", name: "batchA" },
+        { at: "$8250", name: "batchB" },
+        { at: "$801B", root: "routine", name: "batchC" },
+      ],
+    });
 
-    const refused = await callTool("remove_label", { address: "$8250" });
-    expect(refused.isError).toBe(true);
-    expect(refused.text).toMatch(/carries 2 labels/);
+    expect(isError).toBeFalsy();
+    const result = value as { claims: string[]; rejected?: unknown[] };
+    expect(result.rejected).toBeUndefined();
+    // One id per claim, so the batch is as correctable as three single calls.
+    expect(result.claims).toHaveLength(3);
+  });
 
-    const listed = await callTool("list_labels", { namePattern: "secondName" });
-    const { labels } = listed.value as { labels: { id?: string; name: string }[] };
-    const id = labels.find((l) => l.name === "secondName")?.id;
-    expect(id).toBeDefined();
-    expect((await callTool("remove_label", { id })).isError).toBe(false);
+  it("reports every claim covering an address, resolving nothing", async () => {
+    await callTool("add_claim", { at: "$8250", name: "oneReading" });
+    await callTool("add_claim", { at: "$8250", name: "another" });
+
+    const { isError, value } = await callTool("claims_at", { at: "$8250" });
+    expect(isError).toBeFalsy();
+
+    // Both stand. Which of them an operand shows is a separate question, and
+    // this tool deliberately does not answer it.
+    const names = (value as { claims: { name?: string }[] }).claims.map((c) => c.name);
+    expect(names).toContain("oneReading");
+    expect(names).toContain("another");
+  });
+
+  it("corrects one field of a claim and leaves the rest alone", async () => {
+    const made = await callTool("add_claim", {
+      at: "$8250",
+      name: "beforeCorrection",
+      extent: 16,
+    });
+    const id = (made.value as { claims: string[] }).claims[0];
+
+    const revised = await callTool("set_claim", { id, name: "afterCorrection" });
+    expect(revised.isError).toBeFalsy();
+
+    const { value } = await callTool("claims_at", { at: "$8250" });
+    const claim = (value as { claims: { id?: string; name?: string; extent?: number }[] }).claims.find(
+      (c) => c.id === id
+    );
+    expect(claim?.name).toBe("afterCorrection");
+    // Omitted means "leave alone", which is the whole reason a revise is
+    // partial: two people correcting different fields must both survive.
+    expect(claim?.extent).toBe(16);
+  });
+
+  it("clears a field with null, which omitting it cannot say", async () => {
+    const made = await callTool("add_claim", { at: "$8250", name: "hasAnExtent", extent: 16 });
+    const id = (made.value as { claims: string[] }).claims[0];
+
+    const cleared = await callTool("set_claim", { id, extent: null });
+    expect(cleared.isError).toBeFalsy();
+
+    const { value } = await callTool("claims_at", { at: "$8250" });
+    const claim = (value as { claims: { id?: string; extent?: number }[] }).claims.find(
+      (c) => c.id === id
+    );
+    expect(claim?.extent).toBeUndefined();
+  });
+
+  it("refuses a revise that names no field, rather than reporting success", async () => {
+    const made = await callTool("add_claim", { at: "$8250", name: "untouched" });
+    const id = (made.value as { claims: string[] }).claims[0];
+
+    const nothing = await callTool("set_claim", { id });
+    expect(nothing.isError).toBe(true);
+    expect(nothing.text).toMatch(/at least one field/i);
+  });
+
+  it("says where decoding starts, and which of those it can take back", async () => {
+    const before = await callTool("list_roots", {});
+    const listed = before.value as {
+      total: number;
+      roots: { address: string; id?: string; writable: boolean }[];
+    };
+    expect(listed.total).toBeGreaterThan(0);
+
+    // A PRG's load address is inherent to the file: reported, and with no id,
+    // because handing one back invites a write against an identity nobody owns.
+    expect(listed.roots.some((r) => !r.writable && r.id === undefined)).toBe(true);
+
+    // A root somebody declared is correctable, by the id the write returned.
+    const made = await callTool("add_claim", { at: "$801B", root: "routine", name: "aRoot" });
+    const id = (made.value as { claims: string[] }).claims[0];
+
+    const after = (await callTool("list_roots", {})).value as {
+      roots: { address: string; id?: string; writable: boolean }[];
+    };
+    const mine = after.roots.find((r) => r.address === "$801B");
+    expect(mine?.writable).toBe(true);
+    expect(mine?.id).toBe(id);
+  });
+
+  it("reports where the project contradicts itself", async () => {
+    // One name reaching two addresses: `levelTable-1` means a different byte
+    // against each, so an operand rendered bare would be a wrong answer that
+    // looks right — which is what both neutral readers in experiment 3 hit.
+    await callTool("add_claim", { at: "$8250", name: "sharedName" });
+    await callTool("add_claim", { at: "$8450", name: "sharedName" });
+
+    const { isError, value } = await callTool("disagreements", {});
+    expect(isError).toBeFalsy();
+    const found = value as { total: number; findings: { kind: string; what: string }[] };
+    expect(found.total).toBeGreaterThan(0);
+    expect(found.findings.some((f) => f.what.includes("sharedName"))).toBe(true);
+  });
+
+  it("removes a claim by id, which is the only thing that can name one", async () => {
+    // Two names at one address is ordinary — the reference disassembly calls
+    // $08 two things — so "remove the claim at $8250" has no single answer and
+    // there is no longer a spelling that asks it. The write returns the id, and
+    // claims_at reports every id covering an address.
+    const first = await callTool("add_claim", { at: "$8250", name: "firstName" });
+    const second = await callTool("add_claim", { at: "$8250", name: "secondName" });
+
+    const covering = await callTool("claims_at", { at: "$8250" });
+    const ids = (covering.value as { claims: { id?: string }[] }).claims.map((c) => c.id);
+    expect(ids).toContain((first.value as { claims: string[] }).claims[0]);
+    expect(ids).toContain((second.value as { claims: string[] }).claims[0]);
+
+    const id = (second.value as { claims: string[] }).claims[0];
+    expect((await callTool("remove_claim", { id })).isError).toBe(false);
   });
 
   it("runs a program over the wire and reports where it stopped", async () => {
@@ -670,7 +802,7 @@ describe("editing as an agent", () => {
     const tagged = await callTool("tag_project", { name: "wire-test", note: "over MCP" });
     expect(tagged.isError).toBe(false);
 
-    await callTool("add_label", { address: "$8210", name: "afterWireTag" });
+    await callTool("add_claim", { at: "$8210", name: "afterWireTag" });
 
     const since = await callTool("changes_since", { tag: "wire-test" });
     expect(since.isError).toBe(false);

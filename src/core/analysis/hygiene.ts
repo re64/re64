@@ -100,8 +100,8 @@ export function checkHygiene(
       kind: "label.duplicated",
       message:
         `${hex4(address)} is called "${name}" ${twins.length} times over. Only one of ` +
-        `them renders, so the rest are invisible — remove_label takes one by id, ` +
-        `or rename_label makes it say something different.`,
+        `them renders, so the rest are invisible — remove_claim takes one by id, ` +
+        `or set_claim makes it say something different.`,
       subjects: twins.map((label) => ({ address: hex4(label.address), id: label.id })),
     });
   }

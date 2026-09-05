@@ -58,6 +58,7 @@ import {
   ownsAddress,
   newId,
   makeFileLoader,
+  claimById,
   markFunctionOps,
   parseProject,
   parseProjectAddress,
@@ -75,6 +76,36 @@ import { runDecoder } from "../sandbox/run.js";
 import { renderTextWith } from "../sandbox/sync.js";
 import { databaseFileBytes } from "../store/load.js";
 import { CommentPlacement, TextEncoding, describeWarning } from "../core/index.js";
+import { Interpretation, RootKind, compareClaims } from "../core/claims/model.js";
+import { ClaimEdit } from "../core/ops/types.js";
+import { ClaimSet, disagreements, describeDisagreement } from "../core/claims/set.js";
+
+/** The region kind an interpretation projects to, for the span writer. */
+/**
+ * What a caller says when it claims something.
+ *
+ * One shape for the single write and the batch, so the two cannot disagree
+ * about their own contract — which is exactly how `bind_constants` and
+ * `add_comments` ended up with different answers to "what happens to the rest".
+ */
+export interface ClaimInput {
+  at: number;
+  name?: string;
+  extent?: number;
+  is?: Interpretation["is"];
+  encoding?: TextEncoding;
+  view?: string;
+  root?: RootKind;
+  comment?: string;
+}
+
+const KIND_FOR_IS: Record<Interpretation["is"], RegionKind> = {
+  data: "data",
+  text: "text",
+  bitmap: "bitmap",
+  jumptable: "jumptable",
+};
+
 import { FileStorage, ProjectStore, SqliteStorage } from "../store/index.js";
 import { nodeFileBytes } from "../node-files.js";
 import { MAX_UPLOAD_BYTES, uploadTokens } from "./uploads.js";
@@ -124,6 +155,12 @@ export interface Room {
    */
   baseUrl?: string;
 }
+
+/** The claims an edit brought into being or revised, in the order it did. */
+const claimIds = (ops: readonly Op[]): string[] =>
+  ops
+    .filter((op) => op.op === "claim.add" || op.op === "claim.set")
+    .map((op) => (op.op === "claim.add" ? op.claim.id : op.id));
 
 const hex4 = (address: number) => `$${address.toString(16).toUpperCase().padStart(4, "0")}`;
 
@@ -1265,7 +1302,7 @@ export class Workspace {
     throw new Error(
       `No decoded block covers ${hex4(address)}` +
         (nearest ? `; the nearest starts at ${hex4(nearest.b.start)}` : "; nothing decoded at all") +
-        `. It may be data, or unreachable from any entry point — find_undecoded says which.`
+        `. It may be data, or reached by nothing this walk follows — find_undecoded says which.`
     );
   }
 
@@ -2046,7 +2083,9 @@ export class Workspace {
         }
 
         const kind = loaded.map.getKindAt(address);
-        // Explained: something decoded here, or someone said what it holds.
+        // Explained: something decoded here, or a claim said what it holds.
+        // `unknown` is the *absence* of a claim rather than a kind somebody
+        // chose, so it does not explain anything and must not close a run.
         const explained =
           covered.has(address) ||
           kind === "data" ||
@@ -2124,6 +2163,306 @@ export class Workspace {
   }
 
   // --- writes ---------------------------------------------------------
+
+/**
+   * Make a claim about an address.
+   *
+   * One write where there were two, because the model has one noun. Naming an
+   * address and saying what a span holds were `add_label` and `set_region`, and
+   * the split was never about the machine — it was the shape an assembler source
+   * file has. A claim carries a name, an extent, an interpretation and a root,
+   * and any combination of them is a thing somebody might want to say.
+   *
+   * **Always adds.** Correcting what a claim says is `set_claim`, by its id,
+   * which is returned here — an address cannot identify one, since several sit
+   * at any interesting address and that is the point.
+   */
+/**
+   * Take back a claim, by id.
+   *
+   * By id and only by id, which is the identity rule this project states first
+   * and has now had to apply four times: an address cannot identify a label, a
+   * slot cannot identify a comment, a name cannot identify a constant, and a
+   * span cannot identify a claim. `claims_at` is how a caller gets the id.
+   */
+/**
+   * Say several things at once, as one action.
+   *
+   * The same contract every batch here has: apply what is applicable, report
+   * what was declined, fail only when nothing was. One bad span must not lose
+   * the rest — `bind_constants` was all-or-nothing and rejected 167 good
+   * entries over one bad one, in both runs that used it.
+   */
+/**
+   * Where decoding starts, and why each of them is a start.
+   *
+   * There is no `add_root`/`remove_root` beside this, deliberately: a root is a
+   * field on a claim, so adding one is `add_claim root:` and taking one off is
+   * `set_claim root: null`. A second spelling for the same write is the thing
+   * this redesign exists to remove — one noun, one way to say something about
+   * it.
+   *
+   * A read, though, has nowhere else to live. `describe_project` reports how
+   * many there are, which answers "is anything decoding" and not "what did I
+   * declare, and can I take it back". A root nothing stored — a PRG's load
+   * address — has no id, and says so, because handing back an id that identifies
+   * nothing invites a write against an identity nobody owns.
+   */
+  listRoots(): {
+    total: number;
+    roots: { address: string; kind?: RootKind; name?: string; id?: string; writable: boolean }[];
+  } {
+    const program = this.program();
+    const claimed = new Map(
+      program.loaded.claims
+        .filter((c) => c.root !== undefined)
+        .map((c) => [c.at, c] as const)
+    );
+
+    const roots = program.entryPoints.map((at) => {
+      const claim = claimed.get(at);
+      return {
+        address: hex4(at),
+        ...(claim?.root ? { kind: claim.root } : {}),
+        ...(claim?.name ? { name: claim.name } : {}),
+        ...(claim?.id ? { id: claim.id } : {}),
+        // A load address is inherent to the file and not something a project
+        // said, so there is nothing to correct and no id to correct it by.
+        writable: claim !== undefined,
+      };
+    });
+
+    return { total: roots.length, roots };
+  }
+
+  addClaims(caller: Caller, claims: readonly ClaimInput[]): EditResult {
+    if (claims.length === 0) throw new Error("Give at least one claim.");
+
+    // `address` rather than `at`, so every batch tool's rejection list has one
+    // shape — the contract is the point of having one.
+    const rejected: { address: string; reason: string }[] = [];
+    const usable: ClaimInput[] = [];
+    for (const claim of claims) {
+      try {
+        this.checkClaim(claim);
+        usable.push(claim);
+      } catch (err) {
+        rejected.push({
+          address: hex4(claim.at),
+          reason: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    if (usable.length === 0) {
+      throw new Error(
+        `None of the ${claims.length} claims could be made. ` +
+          rejected.map((r) => `${r.address}: ${r.reason}`).join(" ")
+      );
+    }
+
+    const span = {
+      start: Math.min(...usable.map((c) => c.at)),
+      end: Math.max(...usable.map((c) => c.at + (c.extent ?? 1))),
+    };
+    const made: string[] = [];
+    const result = this.edit(
+      caller,
+      (loaded) => {
+        const ops = usable.flatMap((claim) => this.claimOps(loaded, claim));
+        made.push(...claimIds(ops));
+        return ops;
+      },
+      span
+    );
+    return {
+      ...result,
+      ...(made.length ? { claims: made } : {}),
+      ...(rejected.length ? { rejected } : {}),
+    };
+  }
+
+  /**
+   * Correct a claim, by id, one field at a time.
+   *
+   * Partial by construction, and `null` is how a field is *cleared* — the
+   * distinction `Partial<>` cannot make, so removing an extent or un-saying an
+   * interpretation would otherwise be unexpressible, and the inverse of "set a
+   * root on a claim that had none" unwritable.
+   */
+  setClaim(caller: Caller, id: string, fields: ClaimEdit): EditResult {
+    if (Object.keys(fields).length === 0) {
+      throw new Error("Give at least one field to change. Omitted means 'leave alone'; null clears.");
+    }
+    return this.edit(caller, (loaded) => {
+      if (!claimById(loaded, id)) {
+        throw new Error(
+          `No claim ${id} in this project. claims_at reports what covers an address, with ids.`
+        );
+      }
+      return [{ op: "claim.set", id, fields }];
+    });
+  }
+
+  removeClaim(caller: Caller, id: string): EditResult {
+    return this.edit(caller, (loaded) => {
+      const op = labelDeleteByIdOp(loaded, id);
+      if (!op) {
+        throw new Error(
+          `No claim ${id} in this project. claims_at reports what covers an ` +
+            `address, with ids.`
+        );
+      }
+      return [op];
+    });
+  }
+
+  addClaim(caller: Caller, claim: ClaimInput): EditResult {
+    this.checkClaim(claim);
+    const made: string[] = [];
+    const result = this.edit(
+      caller,
+      (loaded) => {
+        const ops = this.claimOps(loaded, claim);
+        made.push(...claimIds(ops));
+        return ops;
+      },
+      { start: claim.at, end: claim.at + (claim.extent ?? 1) }
+    );
+    // The id, because everything that corrects a claim is keyed by one and a
+    // caller that has to go and look it up will collide with somebody who did
+    // not — which is exactly how two agents made the same decoder twice.
+    // And the span, spelled out: `extent` is a count and a reader checking they
+    // covered the right bytes should not have to do the arithmetic.
+    return {
+      ...result,
+      ...(made.length ? { claims: made } : {}),
+      ...(claim.extent !== undefined
+        ? {
+            covers:
+              `${hex4(claim.at)}-${hex4(claim.at + claim.extent - 1)} ` +
+              `(${claim.extent} bytes)`,
+          }
+        : {}),
+    };
+  }
+
+  /**
+   * What a claim must say to be worth storing, checked before any of it is
+   * written — so a batch can decline one entry and keep the rest.
+   */
+  private checkClaim(claim: ClaimInput): void {
+    if (claim.name === undefined && claim.is === undefined && claim.root === undefined) {
+      throw new Error(
+        "A claim must say something: a name, what the bytes are (`is`), or that " +
+          "they should be decoded (`root`). All three are optional individually " +
+          "and at least one is required."
+      );
+    }
+    if (claim.is !== undefined) {
+      this.checkedRegion(claim.at, claim.at + (claim.extent ?? 1), KIND_FOR_IS[claim.is], claim.view);
+    }
+  }
+
+  /**
+   * One claim, as operations.
+   *
+   * The single and the batch path share this, or they drift: `bind_constants`
+   * and `add_comments` disagreed about their own contract precisely because the
+   * batch restated what the single call did rather than calling it.
+   */
+  private claimOps(loaded: LoadedProject, claim: ClaimInput): Op[] {
+    const end = claim.at + (claim.extent ?? 1);
+    // An interpretation covers a span, so it goes through the span writer — the
+    // one that checks there are bytes there to read.
+    if (claim.is !== undefined) {
+      const kind = KIND_FOR_IS[claim.is];
+      return [
+        regionSetOp(
+          loaded,
+          claim.at,
+          end,
+          kind,
+          claim.name,
+          claim.comment,
+          claim.encoding,
+          this.checkedRegion(claim.at, end, kind, claim.view)
+        ),
+      ];
+    }
+
+    const ops: Op[] =
+      claim.root === "routine"
+        ? markFunctionOps(loaded, claim.at, claim.name)
+        : claim.root !== undefined
+          ? [regionSetOp(loaded, claim.at, claim.at + 1, "code", claim.name)]
+          : labelSetOps(loaded, claim.at, claim.name!, undefined, claim.extent).ops;
+
+    // A comment on a span rides on the region; on a name it is its own object,
+    // because a comment stopped being a field on something else.
+    if (claim.comment !== undefined) {
+      ops.push(commentAddOp(loaded, claim.at, "before", claim.comment));
+    }
+    return ops;
+  }
+
+  /**
+   * Every claim that covers an address, with nothing resolved.
+   *
+   * The read that makes an additive write safe: naming an address never replaces
+   * what is there, so a caller has to be able to see what is there. Nothing here
+   * picks a winner — several claims covering one address is the ordinary state,
+   * and which of them *renders* is a separate question with its own tool.
+   */
+  claimsAt(address: number): {
+    address: string;
+    claims: {
+      id: string;
+      at: string;
+      extent?: number;
+      name?: string;
+      is?: string;
+      root?: string;
+      by: string;
+    }[];
+  } {
+    const covering = this.program()
+      .loaded.claims.filter((c) => address >= c.at && address < c.at + (c.extent ?? 1))
+      .sort(compareClaims);
+
+    return {
+      address: hex4(address),
+      claims: covering.map((c) => ({
+        id: c.id,
+        at: hex4(c.at),
+        ...(c.extent !== undefined ? { extent: c.extent } : {}),
+        ...(c.name !== undefined ? { name: c.name } : {}),
+        ...(c.says ? { is: c.says.is } : {}),
+        ...(c.root !== undefined ? { root: c.root } : {}),
+        by: c.by.author,
+      })),
+    };
+  }
+
+  /**
+   * Where the project contradicts itself.
+   *
+   * Had no home before. Two people declaring the same span differently used to
+   * end with one of them silently winning, so there was nothing to report;
+   * declaring is additive now, both stand, and this is how anybody finds out.
+   *
+   * Containment is not a contradiction — "this 8K block is the zone table" and
+   * "these 40 bytes inside it are text" are both true, and reporting that would
+   * make the ordinary way of working look like a fault.
+   */
+  disagreements(): { total: number; findings: { kind: string; what: string }[] } {
+    const set = new ClaimSet(this.program().loaded.claims);
+    const found = disagreements(set);
+    return {
+      total: found.length,
+      findings: found.map((d) => ({ kind: d.kind, what: describeDisagreement(d) })),
+    };
+  }
 
   addLabel(
     caller: Caller,
@@ -2921,7 +3260,7 @@ export class Workspace {
       `Added ${beside.length} name(s) beside one somebody had chosen: ${list}` +
         (beside.length > 6 ? `, and ${beside.length - 6} more` : "") +
         `. Both names are kept and the older one still renders. To correct a name ` +
-        `rather than add to it, use rename_label with its id; changes_since says ` +
+        `rather than add to it, use set_claim with its id; changes_since says ` +
         `who chose the first.`,
     ];
     return result;
@@ -3204,7 +3543,7 @@ export class Workspace {
     if (typeof target === "string") {
       return this.edit(caller, (loaded) => {
         const op = labelDeleteByIdOp(loaded, target);
-        if (!op) throw new Error(`No label ${target}. list_labels shows what this project has.`);
+        if (!op) throw new Error(`No claim ${target}. list_claims shows what this project has.`);
         return [op];
       });
     }
@@ -3432,7 +3771,7 @@ export class Workspace {
               `${enclosing.name ?? enclosing.kind} ` +
               `(${hex4(enclosing.start)}-${hex4(enclosing.end - 1)}), which is unchanged and ` +
               `still explains the bytes either side. To shrink it instead, ` +
-              `remove_region ${hex4(enclosing.start)} first.`,
+              `remove_claim ${enclosing.id ?? hex4(enclosing.start)} first.`,
           }
         : {}),
     };
@@ -3572,7 +3911,7 @@ export class Workspace {
         // confident guess in the one message meant to be trusted.
         hint:
           `Nothing in this analysis reaches ${hex4(orphan)} any more. If it is ` +
-          `still code, say so: set_region start ${hex4(orphan)} kind "code", ` +
+          `still code, say so: add_claim at ${hex4(orphan)} root "location", ` +
           `or mark_function if something reaches it in a way a static walk ` +
           `cannot see.`,
       },
@@ -3640,6 +3979,16 @@ export interface EditResult {
   did: string[];
   instructions: { before: number; after: number; delta: number };
   /**
+   * The claims this edit made or revised, in the order it made them.
+   *
+   * Everything that corrects a claim is keyed by id, so a write that did not
+   * return one would force every caller to go and look it up — and a caller
+   * that looks up by address is guessing, since several claims cover any
+   * interesting one. `set_decoder` returned no id and two agents in one run
+   * made the same decoder twice because of it.
+   */
+  claims?: string[];
+  /**
    * Instructions this edit stopped decoding, when it stopped any.
    *
    * Absent almost always. Present when a decision cut something off — which
@@ -3670,10 +4019,11 @@ export interface EditResult {
    */
   rejected?: { address: string; reason: string }[];
   /**
-   * The span a region write actually took, inclusive at both ends.
+   * The span a claim covers, inclusive at both ends.
    *
-   * Stated because `end` is exclusive and a reader who assumed otherwise has
-   * no other way to notice: the write succeeds and the region is a byte short.
+   * Spelled out because `extent` is a count: a reader checking they covered the
+   * right bytes should not have to do the arithmetic, and one who assumed an
+   * exclusive end has no other way to notice a claim a byte short.
    */
   covers?: string;
 }

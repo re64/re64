@@ -1311,7 +1311,7 @@ describe("an edit that cuts code off", () => {
     expect(result.instructions.delta).toBeLessThan(-1000);
     expect(result.orphaned).toBeDefined();
     expect(result.orphaned!.instructions).toBeGreaterThan(1000);
-    expect(result.orphaned!.hint).toContain("set_region");
+    expect(result.orphaned!.hint).toContain("add_claim");
   });
 
   it("names an address outside the span, not one inside it", () => {
@@ -1621,7 +1621,7 @@ describe("declaring a picture", () => {
 
     expect(workspace.undecoded(50).unexplainedBytes).toBe(before);
     expect(result.nestedInside).toContain("characterSetData");
-    expect(result.nestedInside).toContain("remove_region");
+    expect(result.nestedInside).toContain("remove_claim");
   });
 
   it("draws the inner picture and leaves the outer region either side", () => {
