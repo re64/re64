@@ -199,6 +199,44 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         doc.getMap<Y.Map<unknown>>("decoders").delete(op.id);
         break;
 
+      case "type.set": {
+        const types = doc.getMap<Y.Map<unknown>>("types");
+        let entry = types.get(op.id);
+        if (!entry) {
+          entry = new Y.Map<unknown>();
+          types.set(op.id, entry);
+        }
+        assign(entry, { id: op.id, name: op.name, size: op.size });
+
+        // The fields are a map of their own, written key by key, so two readers
+        // adding different fields to one record both survive. Replacing the
+        // whole map — which is what writing it as a value would do — is
+        // last-writer-wins over the lot, and losing a field somebody proved
+        // from a copy routine is exactly the silent destruction this project
+        // has now been caught by three times.
+        let fields = entry.get("fields") as Y.Map<unknown> | undefined;
+        if (!(fields instanceof Y.Map)) {
+          fields = new Y.Map<unknown>();
+          entry.set("fields", fields);
+        }
+        const wanted = new Set(Object.keys(op.fields));
+        // A key the operation does not mention is one it removed: a whole-value
+        // op says "the record looks like this", and leaving a stale field would
+        // make a removal silently fail.
+        for (const key of [...fields.keys()]) {
+          if (!wanted.has(key)) fields.delete(key);
+        }
+        for (const [offset, field] of Object.entries(op.fields)) {
+          const held = fields.get(offset);
+          if (JSON.stringify(held) !== JSON.stringify(field)) fields.set(offset, field);
+        }
+        break;
+      }
+
+      case "type.delete":
+        doc.getMap<Y.Map<unknown>>("types").delete(op.id);
+        break;
+
       case "constant.bind": {
         const uses = childMap(layerById(doc, op.layerId), "constantUses");
         let entry = uses.get(op.id);
@@ -321,6 +359,7 @@ export function undoManagerFor(doc: Y.Doc, origin: unknown = "local"): Y.UndoMan
       // — and it still did, three roots later. A list that has to be extended
       // by hand is one that will be short again.
       doc.getMap("decoders"),
+      doc.getMap("types"),
       doc.getMap("constants"),
       doc.getMap("files"),
       doc.getMap("targets"),

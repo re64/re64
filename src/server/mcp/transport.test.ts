@@ -99,6 +99,10 @@ describe("speaking the protocol", () => {
         "add_claims",
         "claims_at",
         "list_roots",
+        "add_type",
+        "edit_type",
+        "remove_type",
+        "list_types",
         "disagreements",
         "set_claim",
         "remove_claim",
@@ -680,6 +684,115 @@ describe("editing as an agent", () => {
     const nothing = await callTool("set_claim", { id });
     expect(nothing.isError).toBe(true);
     expect(nothing.text).toMatch(/at least one field/i);
+  });
+
+  it("declares a record layout with a hole in it, and binds a claim to it", async () => {
+    // The layout is the one a reader actually established in Revenge of the
+    // Mutant Camels: 200-byte records with a 40-character name at +$A0, in
+    // screen codes. The hole between the fields is the point — declaring what
+    // you have proved without inventing padding for the rest.
+    const made = await callTool("add_type", {
+      name: "Zone",
+      size: 200,
+      fields: {
+        "0": { name: "kind", type: "u8" },
+        "$A0": { name: "label", type: "char(40,screen)" },
+      },
+    });
+    expect(made.isError).toBeFalsy();
+    const typeId = (made.value as { type: string }).type;
+    expect(typeId).toMatch(/^typ_/);
+
+    const listed = (await callTool("list_types", {})).value as {
+      types: {
+        id: string;
+        fields: { offset: string; name: string; type: string }[];
+        unexplainedBytes: number;
+        usedAt: string[];
+      }[];
+    };
+    const zone = listed.types.find((t) => t.id === typeId)!;
+    // Memory order, derived from the offsets, which is why fields need no ids.
+    expect(zone.fields.map((f) => f.name)).toEqual(["kind", "label"]);
+    expect(zone.fields[1].offset).toBe("+$A0");
+    // The type came back the way it was written, byte order and encoding kept.
+    expect(zone.fields[1].type).toBe("char(40,screen)");
+    // 200 bytes, 41 accounted for: the rest is a work queue, not a fault.
+    expect(zone.unexplainedBytes).toBe(159);
+    expect(zone.usedAt).toEqual([]);
+
+    const bound = await callTool("add_claim", {
+      at: "$8E00",
+      is: "record",
+      typeId,
+      extent: 400,
+      name: "zones",
+    });
+    expect(bound.isError).toBeFalsy();
+
+    const after = (await callTool("list_types", {})).value as {
+      types: { id: string; usedAt: string[] }[];
+    };
+    expect(after.types.find((t) => t.id === typeId)!.usedAt).toEqual(["$8E00"]);
+  });
+
+  it("declines a field it cannot read and keeps the rest", async () => {
+    // Partial, like every batch here: one bad field must not lose the ones
+    // somebody proved from a copy routine.
+    const made = await callTool("add_type", {
+      name: "Partial",
+      size: 8,
+      fields: {
+        "0": { name: "good", type: "u8" },
+        "1": { name: "bogus", type: "widget" },
+        "9": { name: "outside", type: "u8" },
+      },
+    });
+
+    expect(made.isError).toBeFalsy();
+    const result = made.value as {
+      type: string;
+      rejected: { address: string; reason: string }[];
+    };
+    expect(result.rejected.map((r) => r.address).sort()).toEqual(["1", "9"]);
+    expect(result.rejected.find((r) => r.address === "9")!.reason).toMatch(/outside/);
+
+    const listed = (await callTool("list_types", {})).value as {
+      types: { id: string; fields: { name: string }[] }[];
+    };
+    expect(listed.types.find((t) => t.id === result.type)!.fields.map((f) => f.name)).toEqual([
+      "good",
+    ]);
+  });
+
+  it("refuses a record claim with no layout and no extent, rather than guessing", async () => {
+    const made = await callTool("add_type", { name: "Tiny", size: 2, fields: {} });
+    const typeId = (made.value as { type: string }).type;
+
+    const noType = await callTool("add_claim", { at: "$8E00", is: "record", extent: 8 });
+    expect(noType.isError).toBe(true);
+    expect(noType.text).toMatch(/typeId/);
+
+    // How many records is derived from extent / size, so an extent-less record
+    // claim is one record and almost certainly not what anybody meant.
+    const noExtent = await callTool("add_claim", { at: "$8E00", is: "record", typeId });
+    expect(noExtent.isError).toBe(true);
+    expect(noExtent.text).toMatch(/extent/);
+  });
+
+  it("leaves a claim readable when the layout it names is taken away", async () => {
+    // Same rule as a dangling constant: the bytes render, so a delete racing
+    // somebody else's binding heals itself rather than needing a sweep.
+    const made = await callTool("add_type", { name: "Doomed", size: 4, fields: {} });
+    const typeId = (made.value as { type: string }).type;
+    await callTool("add_claim", { at: "$8E00", is: "record", typeId, extent: 8 });
+
+    expect((await callTool("remove_type", { id: typeId })).isError).toBeFalsy();
+    // Still there, still readable, still saying what it said.
+    const covering = (await callTool("claims_at", { at: "$8E00" })).value as {
+      claims: { name?: string }[];
+    };
+    expect(covering.claims.length).toBeGreaterThan(0);
   });
 
   it("says where decoding starts, and which of those it can take back", async () => {

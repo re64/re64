@@ -299,6 +299,41 @@ export interface Project {
    * belong to a layer, because that is about those bytes.
    */
   decoders?: ProjectDecoder[];
+  types?: ProjectType[];
+}
+
+/**
+ * A record layout, as a `.re64` writes it.
+ *
+ * Fields are an object keyed by offset — `"0"`, `"160"` — which is what the
+ * model holds and what JSON can carry directly. No ids on them: two fields
+ * cannot share an offset, so the key *is* the identity, and two people adding
+ * different fields touch different keys. That is the whole merge property ids
+ * exist for elsewhere.
+ *
+ * Offsets are decimal or hex strings like every other address here.
+ */
+export interface ProjectType {
+  id?: string;
+  name: string;
+  /** Bytes per record. Holes are legal, so this is declared, not derived. */
+  size: number | string;
+  fields: Record<string, ProjectField>;
+}
+
+export interface ProjectField {
+  name: string;
+  /**
+   * `u8`, `i8`, `u16`, `u16be`, `ptr`, `ptrbe`, `char(n)`, `char(n,screen)`,
+   * `bytes(n)`, or the name of another type.
+   *
+   * One string rather than a discriminated object, for the reason `view` is one
+   * string: a format and its parameters are one rendering choice, and splitting
+   * them would thread three fields through the schema, the serializer, the CRDT
+   * assignment, the op, the diff, the inverse and four signatures.
+   */
+  type: string;
+  description?: string;
 }
 
 export interface ProjectConstant {
@@ -333,6 +368,14 @@ export interface ProjectClaim {
   encoding?: TextEncoding;
   /** How to draw a `bitmap` claim: `char:8`, `bits:3`, `sprite`, `snippet:<id>`. */
   view?: string;
+  /**
+   * Which layout a `record` claim is an array of.
+   *
+   * Spelled flat beside `is`, like `encoding` and `view`, for the reason this
+   * whole shape exists: `says` is several keys in the file so that changing one
+   * touches one line of a diff.
+   */
+  typeId?: string;
   /** Surface this regardless of what reaches it. */
   root?: RootKind;
   /** What the name means, where somebody other than this project decided. */
@@ -364,9 +407,11 @@ export function projectClaims(claims: readonly ProjectClaim[] = []): Claim[] {
         ? { is: "text", encoding: c.encoding }
         : c.is === "bitmap"
           ? { is: "bitmap", view: c.view }
-          : c.is === "data" || c.is === "jumptable"
-            ? { is: c.is }
-            : undefined;
+          : c.is === "record" && c.typeId
+            ? { is: "record", typeId: c.typeId }
+            : c.is === "data" || c.is === "jumptable"
+              ? { is: c.is }
+              : undefined;
 
     return {
       id: c.id ?? derivedId("clm", String(at), c.name ?? "", c.is ?? ""),
@@ -411,7 +456,13 @@ const REGION_KINDS: readonly LegacyRegionKind[] = [
   "unknown",
 ];
 const LABEL_TYPES: readonly LabelType[] = ["entry", "function", "code", "address"];
-const INTERPRETATIONS: readonly Interpretation["is"][] = ["data", "text", "bitmap", "jumptable"];
+const INTERPRETATIONS: readonly Interpretation["is"][] = [
+  "data",
+  "text",
+  "bitmap",
+  "jumptable",
+  "record",
+];
 const ROOT_KINDS: readonly RootKind[] = ["entry", "routine", "location", "data"];
 const PROVENANCE_SOURCES: readonly Provenance["source"][] = [
   "user",
@@ -672,6 +723,13 @@ export function parseProject(json: string): Project {
           `Expected one of: ${INTERPRETATIONS.join(", ")}. ` +
           `Note there is no "code": code is what bytes are when nobody has said otherwise.`
       );
+    }
+    // A record without a layout is a claim that says "these are records" and
+    // cannot say of what, which renders nothing. Checked here rather than left
+    // to the row builder, because a file is user-written and a typo should name
+    // the claim rather than surface as an empty span.
+    if (claim.is === "record" && !claim.typeId) {
+      throw new Error(`A record ${where} needs a typeId: which layout it is an array of.`);
     }
     if (claim.root !== undefined && !ROOT_KINDS.includes(claim.root)) {
       throw new Error(

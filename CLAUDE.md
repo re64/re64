@@ -909,6 +909,89 @@ name *says*:
   resolving — so the enclosing array silently suppressed the label its own
   jump needed. Being inside an array is not being named.
 
+### Structs: what a claim alone cannot say
+
+`zoneDataTable` in Revenge of the Mutant Camels is 8,400 bytes. What a reader
+established was **42 records of exactly 200** — 152 of template plus 8 scalars
+plus a 40-character name — verified three ways, with nineteen named fields per
+creature type proved from the copy routine at `sub_9772`.
+
+The model could hold **one field per record**: the name at `+$A0`, as 42 `text`
+claims. The other 80% became one `data` blob and the finding lives in prose.
+That is not incomplete analysis — it is finished analysis, discarded for want of
+a shape.
+
+**A type is a project-level declaration and a claim references it**, which is
+exactly the split a constant has, and the justification transfers word for word:
+a way of *reading* bytes describes none of its own, so there is no layer for it
+to move with when the stack is reordered.
+
+| | declaration | use |
+|---|---|---|
+| constant | `{id, name, value}` at project level | `{id, address, constantId}` in the layer |
+| decoder | `{id, name, source}` at project level | `view: "snippet:<id>"` on the claim |
+| type | `{id, name, size, fields}` at project level | `says: {is: "record", typeId}` on the claim |
+
+**Holes are legal, and that is the whole design.** `size` is declared rather
+than derived from the fields, so a reader who has proved nineteen fields of a
+200-byte record can say so without inventing padding for the rest. The gaps are
+real gaps in interpretation, and filling them with a `.BYTE` field nobody proved
+would be the `zoneDataTable` cop-out one level down. `unexplainedBytes` on
+`list_types` reports how much is left, which is a work queue rather than a
+fault.
+
+**How many records is derived**, from `extent / size`. Storing a count would be
+a third fact that can disagree with the other two — the same reason the equate
+block is derived and the region tree is derived.
+
+**Fields are keyed by offset and carry no ids.** The identity rule this file
+states first — an address cannot identify a label, because several share one —
+does not transfer: two fields cannot share an offset, and there are no unions.
+So the key *is* the identity, and two people adding different fields to one
+record touch different keys and both survive, which is the whole merge property
+ids exist for. A `Y.Map` is unordered and need not be, because order derives
+from offset. **The nesting is load-bearing**: writing the field list as one
+value would make it last-writer-wins over the lot, and losing a field somebody
+proved from a copy routine is the silent destruction this project has now been
+caught by three times.
+
+**Endianness is in the type, not beside it.** `u16` and `u16be` are two types
+rather than one type and a flag, because a flag is a second field every reader
+has to remember to look at — which is how a region's `comment` and 382 platform
+`description`s reached no consumer at all. A 6502 is little-endian and a
+hand-written table need not be.
+
+**A pointer is not a `u16`**, and the difference is what it renders as: a name.
+The reference disassembly identified Camels' own linked list of assembler
+fragments *because the links resolve*, and that is an invariant a listing can
+only show if it resolves them.
+
+**A dangling type renders the bytes.** Same rule as a dangling constant and a
+dangling `primaryLabels` entry: deletion needs no sweep, and a delete racing a
+binding heals itself.
+
+**Additive from the start**, which is this file's own rule finally applied
+before rather than after being caught: `add_type` mints and **returns the id**,
+`edit_type` corrects by that id. Keying a write by name is what made
+`set_constant` and `set_decoder` fail the offline/online test — a reader who had
+synced somebody else's declaration of that name replaced it, one who had not
+made a second, so the same call did two different things depending on what had
+reached you. Declaring a field the parser cannot read is partial and reported,
+like every batch here: one bad field must not lose the nineteen somebody proved.
+
+**Not absorbing `text`, `bitmap` and `data`.** Those are what a reader reaches
+for on the first day, and folding them into a type system would make saying
+"this is text" require declaring a type first.
+
+Field rows render in the **row model**, not in the view — the same reason
+comment wrapping is there: a terminal cannot soft-wrap a listing into something
+readable, so anything living in CodeMirror could never serve the CLI. Each field
+carries **its own address**, unlike bitmap art which repeats one, because a
+field is a place in memory and a reader clicking it means to go there. A hole
+chunks in eights like a data run: 157 unexplained bytes is the ordinary case
+early on, and one row of 470 characters would be unreadable exactly where the
+work is still to be done.
+
 ### Constants: a value has no single meaning
 
 A label names an address and an address means one thing. A constant names a

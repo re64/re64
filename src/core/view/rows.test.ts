@@ -1,3 +1,4 @@
+import { TypeIndex } from "../memory/type.js";
 import { spanClaim } from "../claims/test-claims.js";
 import { describe, it, expect } from "vitest";
 import { analyze, wrapCommentText } from "./rows.js";
@@ -96,6 +97,7 @@ function project(
     userLabels,
     comments: new CommentIndex(),
     constants: new ConstantIndex(),
+    types: new TypeIndex(),
     layers: [layer],
   };
 }

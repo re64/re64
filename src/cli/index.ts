@@ -10,6 +10,7 @@ import {
   BytesLayer,
   FileLayer,
   NameIndex,
+  TypeIndex,
   RegionIndex,
   autoClaim,
   createC64PlatformLayer,
@@ -511,7 +512,17 @@ program
     // range, two renderers. Annotations are off because nothing in a terminal
     // is clickable, so type tags and xref stubs would only be noise.
     const analysis = analyze(
-      { project, map, prgEntries, userLabels, comments, constants, claims: [], layers: [] },
+      {
+        project,
+        map,
+        prgEntries,
+        userLabels,
+        comments,
+        constants,
+        types: new TypeIndex(),
+        claims: [],
+        layers: [],
+      },
       {
         labelTolerance: parseInt(options.labelTolerance, 10) || 1,
         annotations: false,

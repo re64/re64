@@ -10,6 +10,8 @@
 
 import { Claim, Interpretation } from "../claims/model.js";
 import { labelTypeOf } from "../claims/names.js";
+import { FieldType, fieldSize } from "../memory/type.js";
+import { MemoryMap } from "../memory/memory-map.js";
 import { analyzeProgram } from "../analysis/program.js";
 import { describeWarning } from "../arch/mos6502/disassembler.js";
 import { BasicBlock } from "../analysis/blocks.js";
@@ -64,7 +66,9 @@ export type RowKind =
   /** A second reading of bytes already shown above. */
   | "overlap"
   /** One scanline of a picture, drawn with shading characters. */
-  | "bitmap";
+  | "bitmap"
+  /** One field of one record, or a hole between two of them. */
+  | "field";
 
 /** One rendered line of the disassembly view. */
 export interface Row {
@@ -629,6 +633,96 @@ export function analyze(
     // nothing has to be built twice and the listing a person exports looks like
     // the listing they were reading. Colour and zoom belong in the explorer
     // panel, where you are choosing a format rather than reading code.
+    if (strategy === "record") {
+      const claim = map.getRegionAt(addr);
+      const typeId = claim?.says?.is === "record" ? claim.says.typeId : undefined;
+      const type = typeId === undefined ? undefined : loaded.types.get(typeId);
+
+      // A claim naming a layout nothing declares renders its bytes, exactly as
+      // a dangling constant renders the literal — so the fall-through here is
+      // the honest answer rather than an error, and hygiene reports it.
+      if (!type || type.size < 1) {
+        emitLabels(addr);
+        const run = map.readBytes(addr, Math.min(8, rangeEnd - addr));
+        push({
+          address: addr,
+          kind: "data",
+          text: `${hex4(addr)}  ${hexBytes(run)}`,
+          tokens: [],
+        });
+        addr += Math.max(1, run.length);
+        continue;
+      }
+
+      emitLabels(addr);
+
+      /**
+       * Bytes of a record nobody has explained, in eights.
+       *
+       * Chunked like a data run rather than emitted as one line: 157 unexplained
+       * bytes of a 200-byte record is the *ordinary* case early on — that is
+       * what declaring only the fields you have proved means — and one row of
+       * 470 characters would make the listing unreadable exactly where the work
+       * is still to be done.
+       */
+      const pushHole = (recordStart: number, from: number, to: number): void => {
+        for (let off = from; off < to; off += 8) {
+          const at = recordStart + off;
+          const run = map.readBytes(at, Math.min(8, to - off));
+          push({
+            address: at,
+            kind: "field",
+            text:
+              `${hex4(at)}    +$${off.toString(16).toUpperCase().padStart(2, "0")}  ` +
+              `.BYTE ${hexBytes(run)}`,
+            tokens: [],
+          });
+        }
+      };
+
+      const start = claim!.at;
+      // How many records is derived — extent over size — and stored nowhere,
+      // for the reason the equate block is derived: a stored count is a third
+      // fact that can disagree with the other two.
+      const index = Math.floor((addr - start) / type.size);
+      const recordAt = start + index * type.size;
+      const laid = loaded.types.layout(type.id);
+
+      push({
+        address: addr,
+        kind: "field",
+        text: `${hex4(addr)}  ; ${type.name}[${index}]`,
+        tokens: [],
+      });
+
+      let within = 0;
+      for (const { offset, field } of laid) {
+        // A hole is a hole. Rendering it is the field-level form of the gap a
+        // listing shows between claims: somebody has proved nineteen fields of
+        // a 200-byte record, and the rest is not padding, it is unexplained.
+        if (offset > within) pushHole(recordAt, within, offset);
+
+        const at = recordAt + offset;
+        const width = fieldSize(field.type, loaded.types.sizeOf) ?? 1;
+        push({
+          address: at,
+          kind: "field",
+          text:
+            `${hex4(at)}    +$${offset.toString(16).toUpperCase().padStart(2, "0")}  ` +
+            `${field.name}: ${fieldValue(map, at, field.type, width, allLabels)}`,
+          tokens: [],
+        });
+        within = offset + width;
+      }
+
+      if (within < type.size) pushHole(recordAt, within, type.size);
+
+      // A whole record at a time, never less than a byte: the loop-foot guard
+      // fires on a strategy that consumes nothing, and would here on `size: 0`.
+      addr = recordAt + Math.max(1, type.size);
+      continue;
+    }
+
     if (strategy === "bitmap") {
       const region = map.getRegionAt(addr);
       const options = parseBitmapView(viewOf(region)) ?? { format: "char" as const, columns: 1 };
@@ -795,7 +889,7 @@ export function analyze(
  * the inner accumulator cannot disagree about who handles what — which is
  * exactly how an unhandled kind used to leave the address un-advanced.
  */
-type RowStrategy = "word" | "text" | "bytes" | "bitmap";
+type RowStrategy = "record" | "word" | "text" | "bytes" | "bitmap";
 
 /**
  * How a claim asks for its bytes to be drawn, where it asks at all.
@@ -803,6 +897,73 @@ type RowStrategy = "word" | "text" | "bytes" | "bitmap";
  * Only `text` and `bitmap` carry one — a decoder for a program's own character
  * set, or a stride for a sprite sheet — so the narrowing is the check.
  */
+/** Bytes as a hex run, the way a data row writes them. */
+function hexBytes(bytes: readonly (number | undefined)[]): string {
+  // A byte nothing supplies shows as `??`. Reading it as zero would let a
+  // listing look complete where the project simply does not load that address —
+  // the same reason `read_bytes` reports unmapped rather than zero-filling.
+  return bytes
+    .map((b) => (b === undefined ? "??" : b.toString(16).toUpperCase().padStart(2, "0")))
+    .join(" ");
+}
+
+/**
+ * What one field holds, read out of the bytes.
+ *
+ * A pointer renders as a *name* rather than a number, which is the whole reason
+ * it is its own type rather than a `u16`: the reference disassembly of Revenge
+ * of the Mutant Camels identified its own linked list of assembler fragments
+ * precisely because the links resolve, and that is an invariant a listing can
+ * only show if it resolves them.
+ *
+ * A byte nothing supplies renders `??`. Reading it as zero would let a field
+ * look like a real value when the project simply does not load that address.
+ */
+function fieldValue(
+  map: MemoryMap,
+  at: number,
+  type: FieldType,
+  width: number,
+  names: NameIndex
+): string {
+  const read = map.readBytes(at, width);
+  if (read.length < width || read.some((b: number | undefined) => b === undefined)) return "??";
+  const bytes = read as number[];
+
+  const word = (be: boolean) => (be ? (bytes[0] << 8) | bytes[1] : bytes[0] | (bytes[1] << 8));
+
+  switch (type.is) {
+    case "u8":
+      return `$${bytes[0].toString(16).toUpperCase().padStart(2, "0")}`;
+    case "i8": {
+      const value = bytes[0] > 0x7f ? bytes[0] - 0x100 : bytes[0];
+      return String(value);
+    }
+    case "u16":
+    case "u16be":
+      return `$${word(type.is === "u16be").toString(16).toUpperCase().padStart(4, "0")}`;
+    case "ptr":
+    case "ptrbe": {
+      const target = word(type.is === "ptrbe");
+      const found = names.resolve(target);
+      return found ? names.displayName(found.label) : hex4(target);
+    }
+    case "char":
+      return `"${decodeText([...bytes], type.encoding ?? "ascii")}"`;
+    case "bytes":
+      return hexBytes([...bytes]);
+    case "record":
+      // A nested record's own fields are not expanded here: one row per field
+      // of *this* record keeps every row navigable, and the inner layout is one
+      // `list_types` call away.
+      return `<${type.typeId}>`;
+    default: {
+      const unhandled: never = type;
+      throw new Error(`unhandled field type: ${String(unhandled)}`);
+    }
+  }
+}
+
 function viewOf(claim: Claim | undefined): string | undefined {
   const says = claim?.says;
   return says && (says.is === "bitmap" || says.is === "text") ? says.view : undefined;
@@ -822,6 +983,8 @@ function rowStrategy(is: Interpretation["is"] | undefined): RowStrategy {
       return "text";
     case "bitmap":
       return "bitmap";
+    case "record":
+      return "record";
     case "data":
       return "bytes";
     default: {

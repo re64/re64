@@ -22,6 +22,7 @@ import {
   ProjectRegion,
   parseProjectAddress,
   projectClaims,
+  ProjectType,
 } from "../project/project.js";
 import { ClaimEdit, Op } from "./types.js";
 import { Claim } from "../claims/model.js";
@@ -225,6 +226,8 @@ export function diffProjects(from: Project, to: Project): Op[] {
   const afterConstants = new Map((to.constants ?? []).filter((c) => c.id).map((c) => [c.id!, c]));
   const beforeDecoders = new Map((from.decoders ?? []).filter((d) => d.id).map((d) => [d.id!, d]));
   const afterDecoders = new Map((to.decoders ?? []).filter((d) => d.id).map((d) => [d.id!, d]));
+  const beforeTypes = new Map((from.types ?? []).filter((t) => t.id).map((t) => [t.id!, t]));
+  const afterTypes = new Map((to.types ?? []).filter((t) => t.id).map((t) => [t.id!, t]));
 
   for (const [id, owned] of beforeComments) {
     if (!afterComments.has(id)) ops.push({ op: "comment.delete", id, layerId: owned.layerId });
@@ -253,6 +256,27 @@ export function diffProjects(from: Project, to: Project): Op[] {
     const before = beforeDecoders.get(id);
     if (before && before.name === decoder.name && before.source === decoder.source) continue;
     ops.push({ op: "decoder.set", id, name: decoder.name, source: decoder.source });
+  }
+
+  // Removals first, again: a claim referencing a type that has gone renders its
+  // bytes, so ordering is a tidiness rather than a correctness matter here —
+  // but doing it the same way everywhere is what stops somebody having to
+  // check which of them is which.
+  for (const id of beforeTypes.keys()) {
+    if (!afterTypes.has(id)) ops.push({ op: "type.delete", id });
+  }
+  for (const [id, type] of afterTypes) {
+    const before = beforeTypes.get(id);
+    if (before && sameType(before, type)) continue;
+    ops.push({
+      op: "type.set",
+      id,
+      name: type.name,
+      size: typeof type.size === "string" ? parseProjectAddress(type.size) : type.size,
+      fields: Object.fromEntries(
+        Object.entries(type.fields).map(([offset, field]) => [Number(offset), field])
+      ),
+    });
   }
 
   for (const [id, constant] of afterConstants) {
@@ -364,4 +388,28 @@ export function diffProjects(from: Project, to: Project): Op[] {
   }
 
   return ops;
+}
+
+/**
+ * Whether two layouts say the same thing.
+ *
+ * Structural, because a type is a small whole value and comparing field by
+ * field here would duplicate what the CRDT already does per key. `size` is
+ * normalised first: a file may write `200` or `"$C8"` and they are the same
+ * record.
+ */
+function sameType(a: ProjectType, b: ProjectType): boolean {
+  const size = (v: number | string) => (typeof v === "string" ? parseProjectAddress(v) : v);
+  return (
+    a.name === b.name &&
+    size(a.size) === size(b.size) &&
+    JSON.stringify(normaliseFields(a.fields)) === JSON.stringify(normaliseFields(b.fields))
+  );
+}
+
+/** Fields in offset order, so a re-ordered but identical map compares equal. */
+function normaliseFields(fields: ProjectType["fields"]): [number, unknown][] {
+  return Object.entries(fields)
+    .map(([offset, field]) => [Number(offset), field] as [number, unknown])
+    .sort((a, b) => a[0] - b[0]);
 }

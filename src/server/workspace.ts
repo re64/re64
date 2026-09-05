@@ -77,6 +77,7 @@ import { databaseFileBytes } from "../store/load.js";
 import { CommentPlacement, TextEncoding, describeWarning } from "../core/index.js";
 import { Claim, Interpretation, RootKind, claimSpan, compareClaims } from "../core/claims/model.js";
 import { NamedClaim, labelTypeOf } from "../core/claims/names.js";
+import { fieldSize, formatFieldType, parseFieldType } from "../core/memory/type.js";
 import { ClaimEdit } from "../core/ops/types.js";
 import { ClaimSet, disagreements, describeDisagreement } from "../core/claims/set.js";
 
@@ -93,6 +94,8 @@ export interface ClaimInput {
   name?: string;
   extent?: number;
   is?: Interpretation["is"];
+  /** Which layout, when `is` is `record`. From `list_types`. */
+  typeId?: string;
   encoding?: TextEncoding;
   view?: string;
   root?: RootKind;
@@ -105,8 +108,13 @@ export interface ClaimInput {
  * The write path still speaks the old vocabulary internally — `regionSetOp`
  * takes a kind — and this is the one place the two meet. There is no `code`
  * and no `unknown` on the left, which is the whole redesign in one mapping.
+ *
+ * `record` is excluded because it has no legacy spelling: there was never a
+ * region kind for "an array of these", which is the whole reason a reader's
+ * finished analysis of `zoneDataTable` had nowhere to go. It writes a claim op
+ * directly, which is what the rest of this should eventually do too.
  */
-const KIND_FOR_IS: Record<Interpretation["is"], LegacyRegionKind> = {
+const KIND_FOR_IS: Record<Exclude<Interpretation["is"], "record">, LegacyRegionKind> = {
   data: "data",
   text: "text",
   bitmap: "bitmap",
@@ -1740,6 +1748,140 @@ export class Workspace {
     return { ...result, decoder };
   }
 
+/**
+   * Declare a record layout, or revise one by id.
+   *
+   * Additive from the start, which is the rule this project has now applied
+   * four times after being caught three: `add_type` mints and returns an id,
+   * `edit_type` corrects by that id. Keying a write by *name* is what made
+   * `set_constant` and `set_decoder` fail the offline/online test — a reader who
+   * had synced somebody else's declaration of that name replaced it, one who had
+   * not made a second, so the same call did two different things depending on
+   * what had reached you.
+   *
+   * Fields are given whole rather than one at a time, because a layout is a
+   * small value a caller sends the shape of. What merges per-field is the CRDT
+   * map underneath: two readers adding different offsets to one record both
+   * survive without either saying so.
+   */
+  setType(
+    caller: Caller,
+    type: {
+      name: string;
+      size: number;
+      fields: Record<string, { name: string; type: string; description?: string }>;
+      id?: string;
+    }
+  ): EditResult & { type: string } {
+    const declared = this.program().loaded.project.types ?? [];
+    const existing =
+      type.id === undefined ? undefined : declared.find((t) => t.id === type.id);
+    if (type.id !== undefined && !existing) {
+      throw new Error(`No type ${type.id}. list_types shows what this project has.`);
+    }
+
+    const idForName = (name: string) => declared.find((t) => t.name === name)?.id;
+    // `address`, not `offset`, because every batch tool here reports what it
+    // declined in one shape and the shape is the contract. The value is spelled
+    // as an offset — `+$A0` — so nobody reads it as an address in memory.
+    const rejected: { address: string; reason: string }[] = [];
+    const fields: Record<number, { name: string; type: string; description?: string }> = {};
+
+    for (const [key, field] of Object.entries(type.fields)) {
+      const offset = parseProjectAddress(key);
+      if (!Number.isFinite(offset) || offset < 0) {
+        rejected.push({ address: key, reason: "not an offset" });
+        continue;
+      }
+      if (offset >= type.size) {
+        rejected.push({ address: key, reason: `outside a ${type.size}-byte record` });
+        continue;
+      }
+      // A fact about the request, which is the only kind of reason a write here
+      // may refuse for — and partial, like every batch: one bad field must not
+      // lose the nineteen somebody proved from a copy routine.
+      const parsed = parseFieldType(field.type, idForName);
+      if ("error" in parsed) {
+        rejected.push({ address: key, reason: parsed.error });
+        continue;
+      }
+      fields[offset] = field;
+    }
+
+    if (Object.keys(fields).length === 0 && Object.keys(type.fields).length > 0) {
+      throw new Error(
+        `None of the ${Object.keys(type.fields).length} fields could be declared. ` +
+          rejected.map((r) => `${r.address}: ${r.reason}`).join(" ")
+      );
+    }
+
+    const id = existing?.id ?? newId("typ");
+    const result = this.edit(caller, () => [
+      { op: "type.set", id, name: type.name, size: type.size, fields },
+    ]);
+    return { ...result, type: id, ...(rejected.length ? { rejected } : {}) };
+  }
+
+  removeType(caller: Caller, id: string): EditResult {
+    const found = (this.program().loaded.project.types ?? []).find((t) => t.id === id);
+    if (!found) throw new Error(`No type ${id}. list_types shows what this project has.`);
+    // A claim referencing a type that has gone renders its bytes, exactly as a
+    // dangling constant renders the literal — so there is no sweep to do, and a
+    // delete racing a reference heals itself.
+    return this.edit(caller, () => [{ op: "type.delete", id }]);
+  }
+
+  /**
+   * Every record layout this project declares, and where each is meant.
+   *
+   * The use sites are the half that makes it usable: `list_constants` grew
+   * `boundAt` because two readers bound one constant in two places without
+   * either being able to see the other had.
+   */
+  listTypes(): {
+    total: number;
+    types: {
+      id: string;
+      name: string;
+      size: number;
+      fields: { offset: string; name: string; type: string; description?: string }[];
+      unexplainedBytes: number;
+      usedAt: string[];
+    }[];
+  } {
+    const loaded = this.program().loaded;
+    const index = loaded.types;
+
+    return {
+      total: index.size,
+      types: index.all().map((type) => {
+        const laid = index.layout(type.id);
+        const covered = laid.reduce(
+          (sum, { field }) => sum + (fieldSize(field.type, index.sizeOf) ?? 0),
+          0
+        );
+        return {
+          id: type.id,
+          name: type.name,
+          size: type.size,
+          fields: laid.map(({ offset, field }) => ({
+            offset: `+$${offset.toString(16).toUpperCase().padStart(2, "0")}`,
+            name: field.name,
+            type: formatFieldType(field.type, (id) => index.get(id)?.name),
+            ...(field.description === undefined ? {} : { description: field.description }),
+          })),
+          // Holes are legal and are the point: a reader who has proved nineteen
+          // fields of a 200-byte record has said something true, and this says
+          // how much is left rather than pretending the record is finished.
+          unexplainedBytes: Math.max(0, type.size - covered),
+          usedAt: loaded.claims
+            .filter((c) => c.says?.is === "record" && c.says.typeId === type.id)
+            .map((c) => hex4(c.at)),
+        };
+      }),
+    };
+  }
+
   removeDecoder(caller: Caller, id: string): EditResult {
     const found = (this.program().loaded.project.decoders ?? []).find((d) => d.id === id);
     if (!found) throw new Error(`No decoder ${id}. list_decoders shows what this project has.`);
@@ -2372,6 +2514,19 @@ export class Workspace {
           "and at least one is required."
       );
     }
+    if (claim.is === "record") {
+      if (claim.typeId === undefined) {
+        throw new Error("A record claim needs a typeId: list_types shows what this project has.");
+      }
+      if (claim.extent === undefined) {
+        throw new Error(
+          "A record claim needs an extent: how many records it holds is derived " +
+            "from extent / size, so a claim with no extent is one record and " +
+            "almost certainly not what you meant."
+        );
+      }
+      return;
+    }
     if (claim.is !== undefined) {
       this.checkedRegion(claim.at, claim.at + (claim.extent ?? 1), KIND_FOR_IS[claim.is], claim.view);
     }
@@ -2386,8 +2541,30 @@ export class Workspace {
    */
   private claimOps(loaded: LoadedProject, claim: ClaimInput): Op[] {
     const end = claim.at + (claim.extent ?? 1);
-    // An interpretation covers a span, so it goes through the span writer — the
-    // one that checks there are bytes there to read.
+
+    // A record has no legacy region kind to be written as — there was never one
+    // for "an array of these", which is the whole reason a reader's finished
+    // analysis of an 8,400-byte table had nowhere to go — so it writes a claim
+    // op directly. Which is what all of these should eventually do.
+    if (claim.is === "record") {
+      return [
+        {
+          op: "claim.add",
+          claim: {
+            id: newId("clm"),
+            at: claim.at,
+            extent: claim.extent,
+            says: { is: "record", typeId: claim.typeId! },
+            root: "data",
+            ...(claim.name === undefined ? {} : { name: claim.name }),
+            by: { author: "project", source: "user" },
+          },
+        },
+      ];
+    }
+
+    // Every other interpretation covers a span, so it goes through the span
+    // writer — the one that checks there are bytes there to read.
     if (claim.is !== undefined) {
       const kind = KIND_FOR_IS[claim.is];
       return [

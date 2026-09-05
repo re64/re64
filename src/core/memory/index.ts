@@ -20,6 +20,15 @@ export {
 } from "../claims/names.js";
 export { LayerDefault, ByteReading, RegionIndex } from "./region.js";
 export {
+  RecordType,
+  Field,
+  FieldType,
+  TypeIndex,
+  fieldSize,
+  parseFieldType,
+  formatFieldType,
+} from "./type.js";
+export {
   Comment,
   CommentPlacement,
   CommentIndex,

@@ -12,6 +12,7 @@
  */
 
 import {
+  ProjectType,
   Project,
   ProjectComment,
   ProjectConstantUse,
@@ -27,6 +28,7 @@ import {
   deleteComment,
   deleteConstant,
   deleteDecoder,
+  deleteType,
   insertLayer,
   removeLayer,
   setPrimaryLabel,
@@ -40,10 +42,11 @@ import {
   deleteTarget,
   upsertConstant,
   upsertDecoder,
+  upsertType,
   upsertClaim,
   deleteClaim,
 } from "../project/serialize.js";
-import { ClaimEdit, Op } from "./types.js";
+import { ClaimEdit, Op, TypeSetOp } from "./types.js";
 import { Claim } from "../claims/model.js";
 import { ProjectClaim, projectClaims } from "../project/project.js";
 
@@ -123,6 +126,11 @@ function projectClaimOf(claim: Claim): ProjectClaim {
       ? { encoding: claim.says.encoding }
       : {}),
     ...(claim.says?.is === "bitmap" && claim.says.view ? { view: claim.says.view } : {}),
+    // Text carries a view too — a program's own character set is unreadable by
+    // any built-in encoding, so `snippet:<id>` is the only way such a span is
+    // legible — and this only ever wrote the bitmap one.
+    ...(claim.says?.is === "text" && claim.says.view ? { view: claim.says.view } : {}),
+    ...(claim.says?.is === "record" ? { typeId: claim.says.typeId } : {}),
     ...(claim.root !== undefined ? { root: claim.root } : {}),
     ...(claim.description !== undefined ? { description: claim.description } : {}),
     ...(claim.frame?.space === "layer" ? { layer: claim.frame.layer } : {}),
@@ -231,6 +239,19 @@ export function applyOp(raw: string, op: Op): string {
 
     case "decoder.delete":
       return deleteDecoder(raw, op.id);
+
+    case "type.set":
+      return upsertType(raw, {
+        id: op.id,
+        name: op.name,
+        size: op.size,
+        fields: Object.fromEntries(
+          Object.entries(op.fields).map(([offset, field]) => [String(offset), field])
+        ),
+      });
+
+    case "type.delete":
+      return deleteType(raw, op.id);
 
     case "constant.bind":
       return bindConstant(raw, layerIndexOf(project, op.layerId), {
@@ -442,6 +463,20 @@ export function invertOp(raw: string, op: Op): Op {
       return { op: "decoder.set", id: op.id, name: found.name, source: found.source };
     }
 
+    case "type.set": {
+      const found = project.types?.find((t) => t.id === op.id);
+      // Undoing a declaration is removing it; undoing a revision is putting the
+      // previous layout back.
+      if (!found) return { op: "type.delete", id: op.id };
+      return typeSetOpFor(found);
+    }
+
+    case "type.delete": {
+      const found = project.types?.find((t) => t.id === op.id);
+      if (!found) return op;
+      return typeSetOpFor(found);
+    }
+
     case "constant.bind": {
       const found = findConstantUse(project, op.id);
       if (!found) return { op: "constant.unbind", id: op.id, layerId: op.layerId };
@@ -499,4 +534,17 @@ export function invertOp(raw: string, op: Op): Op {
 /** Apply a list of operations in order. */
 export function applyOps(raw: string, ops: readonly Op[]): string {
   return ops.reduce(applyOp, raw);
+}
+
+/** A stored type, as the operation that would recreate it. */
+function typeSetOpFor(found: ProjectType): Op {
+  return {
+    op: "type.set",
+    id: found.id!,
+    size: typeof found.size === "string" ? parseProjectAddress(found.size) : found.size,
+    name: found.name,
+    fields: Object.fromEntries(
+      Object.entries(found.fields).map(([offset, field]) => [Number(offset), field])
+    ) as TypeSetOp["fields"],
+  };
 }

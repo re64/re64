@@ -801,12 +801,14 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       at: address,
       name: z.string().min(1).optional(),
       is: z
-        .enum(["data", "text", "bitmap", "jumptable"])
+        .enum(["data", "text", "bitmap", "jumptable", "record"])
         .optional()
         .describe(
           "What the bytes are. There is no `code`: code is what bytes are when " +
-            "nobody has said otherwise, so to have an address decoded set a root."
+            "nobody has said otherwise, so to have an address decoded set a root. " +
+            "`record` is an array of a layout from list_types, and needs typeId."
         ),
+      typeId: z.string().optional().describe("With is:\"record\": which layout, from list_types"),
       extent: z
         .number()
         .int()
@@ -850,6 +852,123 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       space.expect(args.expectVersion);
       return space.addClaim(caller, args);
     }
+  );
+
+  tool(
+    "add_type",
+    "Declare a record layout: what the bytes of one array element mean. " +
+      "The thing a claim alone cannot say. An 8,400-byte table that a reader " +
+      "has established is 42 records of 200 bytes, with nineteen named fields " +
+      "each, could previously be expressed as one `data` span and a note — " +
+      "finished analysis, discarded for want of a shape. " +
+      "**Holes are legal and are the point**: declare the fields you have " +
+      "proved and leave the rest unexplained, rather than inventing padding. " +
+      "`size` is bytes per record; how many records a claim holds is derived " +
+      "from its extent, never stored. " +
+      "Returns the id. Bind it with add_claim is:\"record\" typeId:<id>.",
+    {
+      project,
+      name: z.string().min(1),
+      size: z.number().int().min(1).max(0x10000).describe("Bytes per record"),
+      fields: z
+        .record(
+          z.string().describe("Offset into the record: 0, 160, or \"$A0\""),
+          z.strictObject({
+            name: z.string().min(1),
+            type: z
+              .string()
+              .describe(
+                "u8, i8, u16, u16be, ptr, ptrbe, char(n), char(n,screen), " +
+                  "bytes(n), or the name of another type. Byte order is part of " +
+                  "the type rather than a flag beside it, because a hand-written " +
+                  "table on this machine is not always little-endian."
+              ),
+            description: z.string().optional(),
+          })
+        )
+        .describe("By offset. Two fields cannot share one, so the key is the identity."),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      name: string;
+      size: number;
+      fields: Record<string, { name: string; type: string; description?: string }>;
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.setType(caller, { name: args.name, size: args.size, fields: args.fields });
+    }
+  );
+
+  tool(
+    "edit_type",
+    "Correct a record layout, by its id. " +
+      "The fields are given whole: send the layout you mean, and a field you " +
+      "leave out is one you removed. Two readers adding *different* fields to " +
+      "one record still both survive — that merges per offset underneath, which " +
+      "is why fields carry no ids of their own.",
+    {
+      project,
+      id: z.string().describe("Type id, from list_types or add_type"),
+      name: z.string().min(1),
+      size: z.number().int().min(1).max(0x10000),
+      fields: z.record(
+        z.string(),
+        z.strictObject({
+          name: z.string().min(1),
+          type: z.string(),
+          description: z.string().optional(),
+        })
+      ),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      id: string;
+      name: string;
+      size: number;
+      fields: Record<string, { name: string; type: string; description?: string }>;
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.setType(caller, {
+        id: args.id,
+        name: args.name,
+        size: args.size,
+        fields: args.fields,
+      });
+    }
+  );
+
+  tool(
+    "remove_type",
+    "Take back a record layout, by its id. " +
+      "A claim still referencing it renders its bytes rather than breaking — " +
+      "the same rule a dangling constant follows, so a delete racing somebody " +
+      "else's binding heals itself instead of needing a sweep.",
+    { project, id: z.string(), expectVersion: z.string().optional() },
+    (args: { project?: string; id: string; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.removeType(caller, args.id);
+    }
+  );
+
+  tool(
+    "list_types",
+    "Every record layout this project declares, with its fields in memory " +
+      "order and where each type is meant. " +
+      "`unexplainedBytes` is how much of a record nobody has accounted for, " +
+      "which is a work queue rather than a fault: a reader who has proved " +
+      "nineteen fields of a 200-byte record has said something true.",
+    { project },
+    (args: { project?: string }) => context().workspace(args.project).listTypes()
   );
 
   tool(

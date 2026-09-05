@@ -77,6 +77,11 @@ export function encodeClaim(claim: Claim): Record<string, unknown> {
     out.is = claim.says.is;
     if (claim.says.is === "text" && claim.says.encoding) out.encoding = claim.says.encoding;
     if (claim.says.is === "bitmap" && claim.says.view) out.view = claim.says.view;
+    // Text carries a view too: a program's own character set is unreadable by
+    // any built-in encoding, and `snippet:<id>` is the only way such a span is
+    // legible at all.
+    if (claim.says.is === "text" && claim.says.view) out.view = claim.says.view;
+    if (claim.says.is === "record") out.typeId = claim.says.typeId;
   }
   return out;
 }
@@ -86,8 +91,9 @@ export function decodeClaim(entry: Y.Map<unknown>): Claim {
   const is = get<Interpretation["is"]>("is");
 
   let says: Interpretation | undefined;
-  if (is === "text") says = { is, encoding: get("encoding") };
+  if (is === "text") says = { is, encoding: get("encoding"), view: get("view") };
   else if (is === "bitmap") says = { is, view: get("view") };
+  else if (is === "record") says = { is, typeId: get("typeId") ?? "" };
   else if (is === "data" || is === "jumptable") says = { is };
 
   const by: Provenance = {

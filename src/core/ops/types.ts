@@ -182,6 +182,30 @@ export interface DecoderDeleteOp {
   id: string;
 }
 
+/**
+ * Declare or revise a record layout.
+ *
+ * Whole-value, like `decoder.set`, and for the same reason: a layout is small,
+ * a caller sends the shape it means, and there is nothing here that two people
+ * would want to edit halves of the way they edit halves of a claim. What *does*
+ * merge per-key is the fields map inside the CRDT, which is where two readers
+ * adding different fields converge without either of them saying so.
+ */
+export interface TypeSetOp {
+  op: "type.set";
+  id: string;
+  name: string;
+  /** Bytes per record. Holes are legal, so this is declared, not derived. */
+  size: number;
+  /** By offset. Two fields cannot share one, so the key is the identity. */
+  fields: Record<number, { name: string; type: string; description?: string }>;
+}
+
+export interface TypeDeleteOp {
+  op: "type.delete";
+  id: string;
+}
+
 export interface ConstantDeleteOp {
   op: "constant.delete";
   id: string;
@@ -260,6 +284,8 @@ export type Op =
   | ConstantSetOp
   | ConstantDeleteOp
   | DecoderSetOp
+  | TypeSetOp
+  | TypeDeleteOp
   | DecoderDeleteOp
   | ConstantBindOp
   | ConstantUnbindOp
@@ -387,6 +413,10 @@ export function describeOp(op: Op): string {
       return `define decoder ${op.name}`;
     case "decoder.delete":
       return `remove decoder ${op.id}`;
+    case "type.set":
+      return `define type ${op.name}`;
+    case "type.delete":
+      return `remove type ${op.id}`;
     case "constant.bind":
       return `read ${hex(op.address)} as a constant`;
     case "constant.unbind":

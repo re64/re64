@@ -14,7 +14,7 @@
 import type { Project } from "./project.js";
 
 /** Prefix marks what an id refers to, so a stray id in a diff is readable. */
-export type IdPrefix = "lbl" | "rgn" | "cmt" | "cst" | "lay" | "fil" | "msg" | "dec" | "clm";
+export type IdPrefix = "lbl" | "rgn" | "cmt" | "cst" | "lay" | "fil" | "msg" | "dec" | "clm" | "typ";
 
 const ID_CHARS = "0123456789abcdefghijklmnopqrstuvwxyz";
 
@@ -56,7 +56,7 @@ export function derivedId(prefix: IdPrefix, ...parts: (string | number)[]): stri
 
 /** True for ids this module could have produced. */
 export function isId(value: unknown): value is string {
-  return typeof value === "string" && /^(lbl|rgn|lay|cmt|cst|fil|dec|clm)_[0-9a-z]+$/.test(value);
+  return typeof value === "string" && /^(lbl|rgn|lay|cmt|cst|fil|dec|clm|typ)_[0-9a-z]+$/.test(value);
 }
 
 /**
@@ -99,6 +99,7 @@ export function withIds(project: Project, mint: (prefix: IdPrefix) => string = n
   // `diffProjects` drops entries without ids, which means such a decoder was
   // silently absent from every export.
   const decoders = project.decoders?.map((d) => give(d, "dec"));
+  const types = project.types?.map((t) => give(t, "typ"));
 
   return minted
     ? {
@@ -106,6 +107,7 @@ export function withIds(project: Project, mint: (prefix: IdPrefix) => string = n
         layers,
         ...(constants ? { constants } : {}),
         ...(decoders ? { decoders } : {}),
+        ...(types ? { types } : {}),
         ...(claims ? { claims } : {}),
       }
     : project;

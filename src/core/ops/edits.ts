@@ -529,6 +529,9 @@ function interpretationOf(
   }
   if (is === "text") return { is, ...(encoding !== undefined ? { encoding } : {}) };
   if (is === "bitmap") return { is, ...(view !== undefined ? { view } : {}) };
+  // `record` never arrives here: it has no legacy region kind to be written as,
+  // so it goes straight to a claim op rather than through this path.
+  if (is === "record") throw new Error("a record claim is written directly, not as a region");
   return { is };
 }
 

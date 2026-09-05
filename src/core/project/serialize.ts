@@ -13,6 +13,7 @@
  */
 
 import {
+  ProjectType,
   Project,
   ProjectComment,
   ProjectConstant,
@@ -140,6 +141,27 @@ export function formatProject(project: Project): string {
       .map((d) => `    ${compactObject(d as unknown as Record<string, unknown>)}`)
       .join(",\n");
     body.push(`  "decoders": [\n${entries}\n  ]`);
+  }
+
+  if (project.types?.length) {
+    // A field per line, in offset order, so adding one is a one-line diff and a
+    // reader sees the layout laid out the way memory is. The offsets are the
+    // keys, so nothing else carries the order.
+    const entries = project.types
+      .map((t) => {
+        const fields = Object.entries(t.fields)
+          .sort((a, b) => Number(a[0]) - Number(b[0]))
+          .map(([offset, f]) => `        ${JSON.stringify(offset)}: ${compactObject(f as unknown as Record<string, unknown>)}`)
+          .join(",\n");
+        const head = [
+          `      "id": ${JSON.stringify(t.id)}`,
+          `      "name": ${JSON.stringify(t.name)}`,
+          `      "size": ${JSON.stringify(t.size)}`,
+        ].join(",\n");
+        return `    {\n${head},\n      "fields": {\n${fields}\n      }\n    }`;
+      })
+      .join(",\n");
+    body.push(`  "types": [\n${entries}\n  ]`);
   }
 
   const primary = Object.entries(project.primaryLabels ?? {});
@@ -489,6 +511,38 @@ export function upsertDecoder(raw: string, decoder: ProjectDecoder): string {
   } else {
     decoders.push(decoder);
   }
+  return formatProject(project);
+}
+
+/**
+ * Declare or revise a type.
+ *
+ * Idempotent, like every writer here: undo checks whether replaying an
+ * operation forward changes anything, and one that rewrote an identical value
+ * would fail that check and become un-undoable — which is exactly how creating
+ * a layer stopped being undoable once.
+ */
+export function upsertType(raw: string, type: ProjectType): string {
+  const project = parseProject(raw);
+  const types = (project.types ??= []);
+  const at = types.findIndex((t) => t.id === type.id);
+  if (at >= 0) {
+    if (JSON.stringify(types[at]) === JSON.stringify(type)) return raw;
+    types[at] = type;
+  } else {
+    types.push(type);
+  }
+  return formatProject(project);
+}
+
+export function deleteType(raw: string, id: string): string {
+  const project = parseProject(raw);
+  if (!project.types?.some((t) => t.id === id)) return raw;
+
+  project.types = project.types.filter((t) => t.id !== id);
+  // The key goes when the array empties, or undo's replay-forward check sees a
+  // difference where there is none.
+  if (project.types.length === 0) delete project.types;
   return formatProject(project);
 }
 

@@ -9,6 +9,7 @@
  * Each layer takes ownership of its own labels and regions as it is built.
  */
 
+import { FieldType, TypeIndex, parseFieldType } from "../memory/type.js";
 import { BytesLayer, Layer } from "../memory/layer.js";
 import { FileLayer } from "../memory/file-layer.js";
 import { SymbolLayer } from "../memory/symbol-layer.js";
@@ -30,6 +31,7 @@ import {
   projectLabelsToLabels,
   projectRegionsToRegions,
   projectClaims,
+  ProjectType,
 } from "./project.js";
 import { derivedId } from "./identity.js";
 import { needsMigration, migrateToClaims } from "../claims/migrate.js";
@@ -67,6 +69,14 @@ export interface LoadedProject {
   claims: Claim[];
   /** Names for values, and which operands mean them. */
   constants: ConstantIndex;
+  /**
+   * The record layouts this project declares.
+   *
+   * Project-level like constants and decoders: a layout describes no bytes of
+   * its own, so there is no layer for it to move with when the stack is
+   * reordered. A claim referencing one is what belongs to a layer.
+   */
+  types: TypeIndex;
   /**
    * Built layers in *declaration* order, so index i corresponds to
    * project.layers[i]. The map itself stores them in z-order (reversed, with
@@ -172,6 +182,28 @@ export function buildMemoryMap(
   const userLabels = new NameIndex();
   const comments = new CommentIndex();
   const constants = new ConstantIndex();
+  const types = new TypeIndex();
+  for (const declared of project.types ?? []) {
+    if (!declared.id) continue;
+    types.add({
+      id: declared.id,
+      name: declared.name,
+      size: typeof declared.size === "string" ? parseProjectAddress(declared.size) : declared.size,
+      fields: Object.fromEntries(
+        Object.entries(declared.fields).map(([offset, field]) => [
+          Number(offset),
+          {
+            name: field.name,
+            // Unparseable is not an error here: a field naming a type that has
+            // gone renders its bytes, exactly as a dangling constant renders
+            // the literal. Hygiene reports it; loading does not refuse.
+            type: resolveFieldType(field.type, project.types ?? []),
+            ...(field.description === undefined ? {} : { description: field.description }),
+          },
+        ])
+      ),
+    });
+  }
   // Held until the merged index exists: a site can name a label in any layer.
   const labelUses: LabelUse[] = [];
   constants.declareAll(projectConstants(project.constants));
@@ -271,5 +303,17 @@ export function buildMemoryMap(
   // one each call, so a binding set on the result would be thrown away.
   for (const use of labelUses) map.labelUses.set(use.address, use.labelId);
 
-  return { project, map, prgEntries, userLabels, comments, constants, layers, claims };
+  return { project, map, prgEntries, userLabels, comments, constants, types, layers, claims };
+}
+
+/**
+ * A field type written as text, as the model holds it.
+ *
+ * A name nothing declares falls back to opaque bytes of unknown width, which is
+ * how a dangling reference stays loadable — the honest reading of "this field
+ * is a Zone" when there is no Zone is "these bytes, and I cannot say how many".
+ */
+function resolveFieldType(text: string, declared: readonly ProjectType[]): FieldType {
+  const parsed = parseFieldType(text, (name) => declared.find((t) => t.name === name)?.id);
+  return "error" in parsed ? { is: "bytes", length: 1 } : parsed;
 }

@@ -25,6 +25,7 @@
 import * as Y from "yjs";
 import { needsMigration, migrateToClaims } from "../claims/migrate.js";
 import {
+  ProjectType,
   Project,
   ProjectComment,
   ProjectConstant,
@@ -78,6 +79,7 @@ const ROOT_META = "meta";
 const ROOT_PRIMARY = "primaryLabels";
 const ROOT_CONSTANTS = "constants";
 const ROOT_DECODERS = "decoders";
+const ROOT_TYPES = "types";
 const ROOT_FILES = "files";
 const ROOT_TARGETS = "targets";
 const ROOT_CLAIMS = "claims";
@@ -192,9 +194,37 @@ export function docFromProject(declared: Project): Y.Doc {
     for (const decoder of [...(project.decoders ?? [])].sort(byId)) {
       decoders.set(decoder.id!, mapFrom(decoder as unknown as Record<string, unknown>));
     }
+
+    const types = doc.getMap<Y.Map<unknown>>(ROOT_TYPES);
+    for (const type of [...(project.types ?? [])].sort(byId)) {
+      types.set(type.id!, typeMapFrom(type));
+    }
   }, "load");
 
   return doc;
+}
+
+/**
+ * A type, with its fields as a map of their own.
+ *
+ * The nesting is the whole point and is not incidental: two readers adding
+ * different fields to one record touch different keys of the inner map and both
+ * survive, where a flattened field list would be one value that
+ * last-writer-wins throws half of away. It is what makes fields need no ids —
+ * an offset cannot be shared, so the key is the identity.
+ */
+function typeMapFrom(type: ProjectType): Y.Map<unknown> {
+  const map = new Y.Map<unknown>();
+  map.set("id", type.id);
+  map.set("name", type.name);
+  map.set("size", type.size);
+
+  const fields = new Y.Map<unknown>();
+  for (const key of Object.keys(type.fields).sort((a, b) => Number(a) - Number(b))) {
+    fields.set(key, type.fields[key]);
+  }
+  map.set("fields", fields);
+  return map;
 }
 
 const byId = (a: { id?: string }, b: { id?: string }) =>
@@ -212,6 +242,7 @@ export function projectFromDoc(doc: Y.Doc): Project {
   const files = doc.getMap<Y.Map<unknown>>(ROOT_FILES);
   const targets = doc.getMap<Y.Map<unknown>>(ROOT_TARGETS);
   const claims = doc.getMap<Y.Map<unknown>>(ROOT_CLAIMS);
+  const types = doc.getMap<Y.Map<unknown>>(ROOT_TYPES);
 
   const project: Project = {
     layers: layers.toArray().map((entry) => {
@@ -292,6 +323,13 @@ export function projectFromDoc(doc: Y.Doc): Project {
   );
   if (decoderList.length) project.decoders = decoderList;
 
+  // By name, like decoders and constants: an id sorts by nothing a reader cares
+  // about, and a `.re64` should read the way somebody would have written it.
+  const typeList = sortedValues<ProjectType>(types, "name").map((t) =>
+    inOrder<ProjectType>(t as unknown as Record<string, unknown>, TYPE_FIELDS)
+  );
+  if (typeList.length) project.types = typeList;
+
   const fileList = sortedValues<ProjectFile>(files, "name").map((f) =>
     inOrder<ProjectFile>(f as unknown as Record<string, unknown>, FILE_FIELDS)
   );
@@ -331,6 +369,7 @@ const USE_FIELDS = ["id", "address", "constant"] as const;
 const LABEL_USE_FIELDS = ["id", "address", "label"] as const;
 const CONSTANT_FIELDS = ["id", "name", "value"] as const;
 const DECODER_FIELDS = ["id", "name", "source"] as const;
+const TYPE_FIELDS = ["id", "name", "size", "fields"] as const;
 /**
  * Field order for a claim in the file.
  *
@@ -348,6 +387,7 @@ const CLAIM_FIELDS = [
   "is",
   "encoding",
   "view",
+  "typeId",
   "root",
   "description",
   "author",

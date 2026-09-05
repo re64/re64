@@ -64,6 +64,17 @@ const BASE = `{
   ],
   "constants": [{ "id": "cst_1", "name": "WHITE", "value": "$01" }],
   "decoders": [{ "id": "dec_1", "name": "plain", "source": "return [...bytes];" }],
+  "types": [
+    {
+      "id": "typ_1",
+      "name": "Sprite",
+      "size": 4,
+      "fields": {
+        "0": { "name": "x", "type": "u8" },
+        "2": { "name": "frame", "type": "u16" }
+      }
+    }
+  ],
   "files": [{ "name": "game.prg", "hash": "abc123", "size": 16 }],
   "targets": [{ "name": "loader", "layers": ["lay_a"] }],
   "primaryLabels": { "$8000": "clm_1" }
@@ -136,6 +147,19 @@ const CASES: { [K in Op["op"]]: Case } = {
   "constant.unbind": { op: { op: "constant.unbind", id: "cst_u1", layerId: "lay_a" } },
   "decoder.set": { op: { op: "decoder.set", id: "dec_2", name: "swap", source: "return bytes;" } },
   "decoder.delete": { op: { op: "decoder.delete", id: "dec_1" } },
+  "type.set": {
+    op: {
+      op: "type.set",
+      id: "typ_2",
+      name: "Zone",
+      size: 200,
+      // A hole between the fields, which is the point of declaring `size`
+      // rather than deriving it: a reader who has proved two fields of a
+      // 200-byte record should not have to invent padding for the rest.
+      fields: { 0: { name: "kind", type: "u8" }, 160: { name: "label", type: "char(40,screen)" } },
+    },
+  },
+  "type.delete": { op: { op: "type.delete", id: "typ_1" } },
   "layer.add": {
     op: { op: "layer.add", id: "lay_c", layerType: "symbols", name: "io" },
   },
@@ -210,6 +234,7 @@ function canonical(project: ReturnType<typeof parseProject>): string {
       layers,
       ...(project.constants ? { constants: byKey(project.constants, (c) => c.id ?? "") } : {}),
       ...(project.decoders ? { decoders: byKey(project.decoders, (d) => d.id ?? "") } : {}),
+      ...(project.types ? { types: byKey(project.types, (t) => t.id ?? "") } : {}),
       ...(project.files ? { files: byKey(project.files, (f) => f.name) } : {}),
       ...(project.targets ? { targets: byKey(project.targets, (t) => t.name) } : {}),
     }),
@@ -222,7 +247,7 @@ describe("every operation reaches every path", () => {
   it("covers the whole vocabulary", () => {
     // The table is exhaustive by type; this only reports the count, so a
     // vocabulary that grows is visible in the output rather than only in a diff.
-    expect(kinds.length).toBe(22);
+    expect(kinds.length).toBe(24);
   });
 
   for (const kind of kinds) {

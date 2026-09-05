@@ -45,7 +45,23 @@ export type Interpretation =
   // which is why it is one field rather than a decoder slot per kind.
   | { readonly is: "text"; readonly encoding?: TextEncoding; readonly view?: string }
   | { readonly is: "bitmap"; readonly view?: string }
-  | { readonly is: "jumptable" };
+  | { readonly is: "jumptable" }
+  /**
+   * An array of records, whose layout is a project-level type.
+   *
+   * Additive rather than absorbing `data`/`text`/`bitmap`: those are what a
+   * reader reaches for on the first day, and folding them into a type system
+   * would make saying "this is text" require declaring a type first.
+   *
+   * **How many records is derived**, from `extent / size`. Storing a count
+   * would be a third fact that can disagree with the other two — the same
+   * reason the equate block is derived and the region tree is derived.
+   *
+   * A `typeId` nothing declares renders the bytes, exactly as a dangling
+   * constant renders the literal: a delete racing a reference heals itself
+   * rather than needing a sweep.
+   */
+  | { readonly is: "record"; readonly typeId: string };
 
 /**
  * Why an address is surfaced regardless of what reaches it.
