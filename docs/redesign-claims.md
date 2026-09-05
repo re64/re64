@@ -644,27 +644,31 @@ The design above was written from a prototype. Planning the landing sequence
 against the real codebase found nine things wrong with it. **The first four block
 implementation.**
 
-**1. The rank collision, which nothing in the model can express.** `LABEL_RANK`
-is `user:4, region:3, layer:2, platform:1, auto:0`, so a user label beats a
-same-address region name. `Provenance.source` is
-`user | layer | platform | auto | analysis` — **`region` is gone**, and there is
-no member where it ranked.
+**1. ~~The rank collision~~ — measured, and it dissolves.** `LABEL_RANK` is
+`user:4, region:3, layer:2, platform:1, auto:0`, and `Provenance.source` has no
+member where `region` sat. The obvious reading is that the claim model cannot
+express the ordering and something must be added to it.
 
-Eight addresses in `gridrunner.re64` carry both a region name and a user label,
-and three of them disagree:
+Measuring says otherwise. `compareClaims` sorts by position, then **narrowest
+span first**, and a label has no extent while a region has one — so the label
+already wins, and for a better reason than rank did. **`user > region` was
+encoding specificity, not authority**: a region-generated label names a *span*, a
+user label names an *address*, and a name on one address is more specific than a
+name on a span that merely starts there. That is the same "innermost wins" rule
+the model already applies to nesting, one level over.
 
-| | region | label |
-|---|---|---|
-| `$8000` | `initJumpTable` | `initializeDataJumpAddress` |
-| `$8BC0` | `explosionControlArrays` | `explosionYPosArrayControl` |
-| `$871F` | `podDecaySequence` | `PodDecaySequence` |
+Across all 24 projects, 215 addresses carry two named claims. **205 resolve
+exactly as rank did.** The 10 that differ are all cases where somebody declared a
+label with a span one or two bytes wider than a region — `tuneVoice1` (76)
+against `shortTuneVoice1` (78), `moveHandlerTable` (6) against `moveHandlerLo`
+(7) — near-synonyms for the same bytes where neither name is clearly right. One
+is region-against-region, which rank could not arbitrate either and settled by id.
 
-`adapt.ts` gives both `source: "user"`, so the tie falls to `compareClaims`' id
-tiebreak — which is to say, at random. The listing silently renames three rows
-and the golden hash moves for a reason with nothing to do with the redesign.
-Either add a `Provenance` member ranking between `layer` and `user`, or have
-migration pin the previously-winning label in `primaryLabels`. **Settle before
-the projection step.**
+**None of them is in the reference project**, whose eight collisions all resolve
+to the label. So the golden hash is safe through the projection, and no
+`Provenance` member and no 215 pinned `primaryLabels` entries are needed —
+either of which would have baked a rule we are deliberately replacing into the
+data. Pinned by a test, because it is a decision rather than an accident.
 
 **2. `adapt.ts` is not the migration.** It says so — *"a translation rather than
 a migration… Nothing writes back through it"* — and it does **not** auto-root

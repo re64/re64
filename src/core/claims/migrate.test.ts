@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, statSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { migrateToClaims, needsMigration } from "./migrate.js";
-import { parseProject, formatProject } from "../project/index.js";
+import { parseProject, projectClaims } from "../project/project.js";
+import { formatProject } from "../project/serialize.js";
+import { compareClaims } from "./model.js";
 
 /**
  * The migration, counted rather than asserted.
@@ -150,5 +152,76 @@ describe("migrating every project in the repository", () => {
       expect.objectContaining({ address: "$8100", placement: "before", text: "the level table" }),
     ]);
     expect(after.claims![0].description).toBeUndefined();
+  });
+});
+
+
+/**
+ * What happens to the names that used to be arbitrated by `LABEL_RANK`.
+ *
+ * The old model ranked a user label above a region-generated one, `4 > 3`, and
+ * `Provenance.source` has no member where `region` sat — so the obvious reading
+ * is that the claim model cannot express the ordering and something must be
+ * added to it.
+ *
+ * Measuring says otherwise. `compareClaims` sorts by position, then **narrowest
+ * span first**, and a label has no extent while a region has one — so the label
+ * already wins, and for a better reason than rank did. `user > region` was
+ * encoding *specificity*, not authority: a region-generated label names a span,
+ * a user label names an address, and a name on one address is more specific than
+ * a name on a span that merely starts there. That is the same "innermost wins"
+ * rule the model already applies to nesting.
+ *
+ * Across all 24 projects there are 215 addresses carrying two named claims.
+ * 205 resolve to what `LABEL_RANK` chose. The 10 that differ are all cases where
+ * somebody declared a label with a span one or two bytes wider than a region —
+ * `tuneVoice1` (76) against `shortTuneVoice1` (78), `moveHandlerTable` (6)
+ * against `moveHandlerLo` (7) — near-synonyms for the same bytes, where neither
+ * name is clearly right. One of them is region-against-region, which rank could
+ * not arbitrate either and settled by id, arbitrarily.
+ *
+ * So the rule stands on its own and no provenance member is needed. Pinned here
+ * because it is a decision rather than an accident, and because the reference
+ * project is what the golden hash depends on.
+ */
+describe("which name wins where two claims share an address", () => {
+  const winnerAt = (path: string) => {
+    const claims = projectClaims(
+      migrateToClaims(parsed(path)).project.claims
+    ).filter((c) => c.name !== undefined);
+
+    const byAddress = new Map<number, typeof claims>();
+    for (const claim of claims) {
+      const held = byAddress.get(claim.at);
+      if (held) held.push(claim);
+      else byAddress.set(claim.at, [claim]);
+    }
+    return byAddress;
+  };
+
+  it("the reference project resolves every collision to the label, as rank did", () => {
+    // Eight addresses, and this is what protects OUTPUT_SHA1 through the
+    // projection step: three of them carry genuinely different names.
+    const byAddress = winnerAt("assets/gridrunner/gridrunner.re64");
+    const contested = [...byAddress.entries()].filter(([, cs]) => cs.length > 1);
+
+    expect(contested).toHaveLength(8);
+    for (const [address, cs] of contested) {
+      const winner = [...cs].sort(compareClaims)[0];
+      expect(winner.id.startsWith("lbl_"), `$${address.toString(16)} chose ${winner.name}`).toBe(
+        true
+      );
+    }
+  });
+
+  it("prefers the narrower claim, which is what rank was approximating", () => {
+    const byAddress = winnerAt("assets/gridrunner/gridrunner.re64");
+    const [, atStart] = [...byAddress.entries()].find(([a]) => a === 0x8000)!;
+
+    const winner = [...atStart].sort(compareClaims)[0];
+    // A label naming this address, against a region naming the span that starts
+    // here. The address is the more specific statement.
+    expect(winner.name).toBe("initializeDataJumpAddress");
+    expect(winner.extent).toBeUndefined();
   });
 });
