@@ -16,6 +16,31 @@
  * things describe it and all of them are emitted, in the order they start, with
  * anything beginning inside what came before marked as sharing those bytes.
  *
+ * **Nothing splits, including a claim declared inside another.** That rule was
+ * tried and is unsound. It assumes an interpretation is byte-local — that
+ * rendering `[a,b)` then `[c,d)` equals rendering `[a,d)` minus the middle —
+ * which holds for hex and roughly for text and is false for `bitmap` and for
+ * `snippet:<id>`: a `char:8` sheet split at byte 37 breaks the glyph grid, and a
+ * decoder run over two fragments is not the decoder run over the span.
+ *
+ * The reason it looked necessary is worth more than the rule. An 8,400-byte
+ * `data` claim called `zoneDataTable` explains 1,680 of its own bytes — 20% —
+ * and dumps to completion before the forty strings inside it appear. Splitting
+ * made that read tolerably; what it really did was compensate in the display for
+ * a document problem, which is the mirror of a mistake this project already
+ * names in the other direction. Deleting the claim takes the project from 6 gaps
+ * to 48 and from 3,824 unexplained bytes to 10,544, which is the honest number:
+ * the placeholder was hiding 42 entries from the one list whose job is to show
+ * unexplained work.
+ *
+ * So the rule underneath is about claims rather than rendering: **a claim should
+ * cover exactly what it explains.** One covering bytes it does not explain is a
+ * placeholder, and a placeholder belongs in the gap list rather than over it.
+ * Composition — a struct decomposing into fields — is the real answer for spans
+ * that genuinely have parts, and it has to be *declared* rather than inferred
+ * from containment, because that is exactly the difference between "this is a
+ * struct" and "these are forty strings and forty unexplained runs".
+ *
  * Three consequences worth stating:
  *
  * - **"Primary" continues not to be a question.** It means "reached first in
@@ -56,8 +81,6 @@ export type ListingItem =
       readonly claim: PlacedClaim;
       readonly shadow: boolean;
       readonly sharesWith?: ListingItem;
-      /** One piece of a claim split around something declared inside it. */
-      readonly fragment?: { readonly of: number; readonly to: number };
     }
   | {
       /** Bytes nothing covers. Rendered as hex, described by nobody. */
@@ -148,11 +171,7 @@ export function collectListing(
     items.push({ kind: "claim", start: claim.at, end, claim, shadow: false });
   }
 
-  // Split containers *before* marking, or a nested item is marked as sharing
-  // bytes with a container that has just yielded them to it. Order matters here
-  // and getting it wrong is invisible: the listing looks right and reports 45
-  // conflicts where there are 2.
-  const pieces = split(items).sort(compareItems);
+  items.sort(compareItems);
 
   // Mark anything beginning inside what has already been emitted. `coveredTo` is
   // a high-water mark rather than a set, because "already passed" is a statement
@@ -166,7 +185,7 @@ export function collectListing(
   const marked: ListingItem[] = [];
   let coveredTo = Number.NEGATIVE_INFINITY;
   let covering: ListingItem | undefined;
-  for (const item of pieces) {
+  for (const item of items) {
     if (item.kind === "gap") continue;
     const shadow = item.start < coveredTo;
     marked.push({ ...item, shadow, ...(shadow && covering ? { sharesWith: covering } : {}) });
@@ -192,64 +211,6 @@ export function collectListing(
   if (at < range.to) gaps.push({ kind: "gap", start: at, end: range.to });
 
   return [...marked, ...gaps].sort(compareItems);
-}
-
-/**
- * Break a span around anything declared strictly inside it.
- *
- * Without this the emission order is right and the *reading* order is not: an
- * 8,400-byte zone table dumps to completion and its own forty strings appear
- * after all of it, at addresses the reader passed thousands of bytes ago.
- *
- * It resolves nothing — both items still render, in full, and neither is chosen
- * over the other. A container renders in the pieces its children leave, which is
- * what nesting has always looked like and is why the reference project can say
- * "this 8K span is the zone table" and "these forty bytes are text" at once.
- *
- * **Only containment splits.** A partial overlap is two people disagreeing about
- * where something ends, and fragmenting one around the other would present a
- * conflict as a structure. Those keep the shadow mark instead, which is what
- * having one is for: on the project three agents built, that is 2 marks where the
- * unsplit rule gives 45.
- */
-function split(items: readonly ListingItem[]): ListingItem[] {
-  const out: ListingItem[] = [];
-  for (const item of items) {
-    if (item.kind !== "claim") {
-      out.push(item);
-      continue;
-    }
-    const inner = items
-      .filter(
-        (other) =>
-          other !== item &&
-          other.kind !== "gap" &&
-          other.start >= item.start &&
-          other.end <= item.end &&
-          other.end - other.start < item.end - item.start
-      )
-      .sort((a, b) => a.start - b.start);
-
-    if (inner.length === 0) {
-      out.push(item);
-      continue;
-    }
-
-    let at = item.start;
-    const fragments: [number, number][] = [];
-    for (const child of inner) {
-      if (child.start > at) fragments.push([at, child.start]);
-      if (child.end > at) at = child.end;
-    }
-    if (at < item.end) fragments.push([at, item.end]);
-
-    // Every byte taken by something inside it: nothing left to draw, and nothing
-    // disagrees — so it contributes no row rather than a marked one.
-    for (const [start, end] of fragments) {
-      out.push({ ...item, start, end, fragment: { of: item.start, to: item.end } });
-    }
-  }
-  return out;
 }
 
 /** What each item is, in one line, for a listing header or a tool result. */

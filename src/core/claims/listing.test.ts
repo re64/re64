@@ -73,35 +73,37 @@ describe("one address-sorted listing", () => {
     expect(covered.size + gapBytes).toBe(0x1000);
   });
 
-  it("splits a container around what is declared inside it, unmarked", () => {
-    // The reading order, not merely the emission order. Unsplit, an 8,400-byte
-    // zone table dumps to completion and its own forty strings appear after all
-    // of it — at addresses the reader passed thousands of bytes ago.
+  it("renders a claim declared inside another after it, marked", () => {
+    // Nothing splits. The marker is accurate — those bytes *are* shared — and on
+    // this project it is the visible symptom of a placeholder: `zoneDataTable`
+    // spans 8,400 bytes and explains 1,680 of them, so forty strings sit inside
+    // a claim that does not account for the runs between them.
     const { graph, set, roots, reach } = build("experiments/07-scale/run/final.re64");
     const items = collectListing(graph, reach, set, roots, { from: 0x6700, to: 0x6900 });
 
     expect(items.map(describeItem)).toEqual([
-      "$6700-$67A0  data zoneDataTable",
-      "$67A0-$67C8  text",
-      "$67C8-$6868  data zoneDataTable",
-      "$6868-$6890  text",
-      "$6890-$87D0  data zoneDataTable",
+      "$6700-$87D0  data zoneDataTable",
+      "$67A0-$67C8  text  [also reads these bytes, shared above]",
+      "$6868-$6890  text  [also reads these bytes, shared above]",
     ]);
   });
 
-  it("marks a real conflict and nothing else, across a whole project", () => {
-    // Splitting must happen *before* marking, or a nested item is marked as
-    // sharing bytes with the container that just yielded them to it. Getting the
-    // order wrong is invisible — the listing looks right and reports 45 conflicts
-    // where there are 2.
+  it("a placeholder claim hides the work it does not explain", () => {
+    // The reason not to compensate for this in the renderer. Removing one 8,400
+    // byte `data` claim that accounts for 20% of its own span takes the project
+    // from 6 gaps to 48, and from 3,824 unexplained bytes to 10,544 — 42 entries
+    // the placeholder was keeping out of the list whose job is to show them.
     const { graph, set, roots, reach } = build("experiments/07-scale/run/final.re64");
-    const items = collectListing(graph, reach, set, roots, { from: 0x0800, to: 0xd000 });
-    const marked = items.filter((i) => i.kind !== "gap" && i.shadow);
+    const range = { from: 0x0800, to: 0xd000 };
 
-    // eslint-disable-next-line no-console
-    console.log(`${items.length} items across the project, ${marked.length} marked`);
-    for (const m of marked) console.log("  " + describeItem(m));
-    expect(marked).toHaveLength(1);
+    const gaps = (s: ClaimSet) => {
+      const found = collectListing(graph, reach, s, roots, range).filter((i) => i.kind === "gap");
+      return { count: found.length, bytes: found.reduce((n, g) => n + (g.end - g.start), 0) };
+    };
+    const without = new ClaimSet(set.all().filter((c) => c.name !== "zoneDataTable"));
+
+    expect(gaps(set)).toEqual({ count: 6, bytes: 3824 });
+    expect(gaps(without)).toEqual({ count: 48, bytes: 10544 });
   });
 
   it("is stable whatever order claims arrive in", () => {

@@ -381,11 +381,38 @@ Three consequences:
 - **Inclusion is reachability, not annotation.** A claim appears because
   something reaches it or because it is rooted. A sprite bank nobody rooted is
   genuinely absent, which is a fact about the project rather than an oversight.
-- **A container splits around what is declared inside it.** This resolves nothing
-  — both render, in full — but without it the emission order is right and the
-  *reading* order is not: an 8,400-byte zone table dumps to completion and its own
-  forty strings appear after all of it, at addresses the reader passed thousands
-  of bytes ago.
+**Nothing splits, including a claim declared inside another.** That rule was
+tried and removed, and why is worth more than the rule.
+
+It assumes an interpretation is byte-local — that rendering `[a,b)` then `[c,d)`
+equals rendering `[a,d)` minus the middle. True of hex, roughly true of text, and
+**false for `bitmap` and for `snippet:<id>`**: a `char:8` sheet split at byte 37
+breaks the glyph grid, and a decoder run over two fragments is not the decoder run
+over the span. Two of the four interpretations that exist today.
+
+It looked necessary because an 8,400-byte `data` claim called `zoneDataTable`
+dumps to completion before the forty strings inside it appear. But that claim
+**explains 1,680 of its own 8,400 bytes — 20%**. Splitting made a placeholder read
+tolerably, which is compensating in the display for a document problem: the mirror
+of a mistake this file already names in the other direction.
+
+Deleting the claim takes Camels from **6 gaps to 48**, and from **3,824
+unexplained bytes to 10,544**. One placeholder was keeping 42 entries out of the
+one list whose job is to show unexplained work.
+
+So the rule underneath is about claims rather than rendering:
+
+> **A claim should cover exactly what it explains.** One covering bytes it does
+> not explain is a placeholder, and a placeholder belongs in the gap list rather
+> than over it.
+
+Composition is the real answer for spans that genuinely have parts — a struct
+decomposing into fields — and it has to be **declared rather than inferred from
+containment**, because that is exactly the difference between "this is a struct"
+and "these are forty strings and forty unexplained runs". A hierarchy of
+interpretations, in which `text` is more specific than `data`, would also justify
+splitting; neither exists yet and inferring one from geometry is how you get a
+rule that is right on the case you tested and wrong on its transpose.
 
 On Gridrunner's contested span:
 
@@ -396,33 +423,23 @@ $8D16-$8D1A  2 instruction(s)  [also decodes from here, sharing bytes above]
 $8D1A-$8D24  4 instruction(s)
 ```
 
-On Camels' nesting, which is the ordinary way of working:
+On Camels, where a claim sits inside another:
 
 ```
-$6700-$67A0  data zoneDataTable
-$67A0-$67C8  text
-$67C8-$6868  data zoneDataTable
-$6868-$6890  text
-$6890-$87D0  data zoneDataTable
+$6700-$87D0  data zoneDataTable
+$67A0-$67C8  text  [also reads these bytes, shared above]
+$6868-$6890  text  [also reads these bytes, shared above]
 ```
 
-**Order matters and getting it wrong is invisible.** Splitting must happen
-*before* marking, or a nested item is marked as sharing bytes with the container
-that just yielded them to it — the listing still looks right and reports 45
-conflicts where there are 2. Across the whole Camels project: **1,155 items, one
-marked**, and it is the real six-byte overlap between a sprite set and a tune
-stream.
+Every mark there is *true* — those bytes are shared — and it is the placeholder
+being visible rather than noise. A project whose claims each covered what they
+explained would show no marks here at all.
 
-Two smaller things the rule needed:
-
-- **Only containment splits.** A partial overlap is two people disagreeing about
-  where something ends, and fragmenting one around the other would present a
-  conflict as a structure.
-- **The high-water mark is not seeded with the window edge.** An item extending
-  into the view from before it has been passed by nothing, and seeding with the
-  window makes the same listing read differently depending on where you started
-  reading — the viewport-dependent classification the arrow gutter rules already
-  forbid, arriving by a different door.
+One smaller thing the rule needed: **the high-water mark is not seeded with the
+window edge.** An item extending into the view from before it has been passed by
+nothing, and seeding with the window makes the same listing read differently
+depending on where you started reading — the viewport-dependent classification the
+arrow gutter rules already forbid, arriving by a different door.
 
 ## How often this actually destroyed somebody's work
 
