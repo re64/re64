@@ -182,6 +182,27 @@ describe("editing", () => {
     expect(result.instructions.delta).toBeGreaterThan(0);
   });
 
+  it("tells a writer when a region they declared swallows code something jumps to", () => {
+    // The feedback that was missing while `laserFrameRateForLevel` overran
+    // `PlayNewLevelSounds` by two bytes: the write returned `ok`, and 32
+    // instructions of a named routine reachable by an unconditional JMP stopped
+    // being decoded. The claim still stands — only the author knows which end to
+    // move — but the disagreement comes back on the write that caused it.
+    // $8D52 is `Waste20Cycles`, reached by `JSR $8D52` at $8D24.
+    const result = workspace.setRegion(agent, 0x8d52, 0x8d60, "data", "swallowsARoutine");
+
+    expect(result.ok).toBe(true);
+    expect(result.warnings?.join(" ")).toContain("$8D52");
+    expect(result.warnings?.join(" ")).toContain("transfers here");
+    // And the routine is still decoded, because a claim does not stop a jump.
+    // And the routine is still decoded *and* still rendered as code: the row
+    // builder prefers a decoded instruction, so a claim over jumped-to bytes
+    // does not hide them. Declaring it was not silently destructive; it was not
+    // silently anything.
+    const lines = workspace.disassembly(0x8d52, 6).lines.map((l) => l.text);
+    expect(lines.join(" ")).toContain("LDA #$20");
+  });
+
   it("reports no gain where the guess was wasted", () => {
     // $8F00 is inside a data region, so marking it decodes nothing — which is
     // exactly what a caller needs to be told rather than left to infer.
