@@ -48,7 +48,13 @@ export type HygieneKind =
   /** A claim asks for a decoder the project does not have. */
   | "claim.missingDecoder"
   /** Two inline comments on one row, the second indented under the first. */
-  | "comment.inlineDuplicated";
+  | "comment.inlineDuplicated"
+  /** A claim is an array of a layout the project does not declare. */
+  | "type.missing"
+  /** A record claim's extent is not a whole number of records. */
+  | "type.extentMismatch"
+  /** A claim describes bytes a record layout already describes. */
+  | "type.redundantClaim";
 
 export interface HygieneFinding {
   kind: HygieneKind;
@@ -185,6 +191,65 @@ export function checkHygiene(
         `project does not have, so it renders with its declared encoding instead.`,
       subjects: [{ id: claim.id, address: hex4(claim.at) }],
     });
+  }
+
+  // A record claim whose layout has gone renders its bytes rather than
+  // breaking, which is the right behaviour and is also invisible — so the one
+  // place it becomes visible is here.
+  const declared = new Map((loaded.project.types ?? []).map((t) => [t.id, t]));
+  for (const claim of loaded.claims) {
+    if (claim.says?.is !== "record") continue;
+    const type = declared.get(claim.says.typeId);
+    if (!type) {
+      found.push({
+        kind: "type.missing",
+        message:
+          `The claim at ${hex4(claim.at)} is an array of ${claim.says.typeId}, which this ` +
+          `project does not declare, so it renders as plain bytes instead.`,
+        subjects: [{ id: claim.id, address: hex4(claim.at) }],
+      });
+      continue;
+    }
+
+    // Not a fact about the layout but about this claim's span: an extent that
+    // is not a whole number of records leaves a partial one at the end, which
+    // renders as a record with its tail missing.
+    const size = typeof type.size === "string" ? Number(type.size) : type.size;
+    const extent = claim.extent ?? 1;
+    if (size > 0 && extent % size !== 0) {
+      found.push({
+        kind: "type.extentMismatch",
+        message:
+          `The claim at ${hex4(claim.at)} covers ${extent} bytes of ${size}-byte ` +
+          `${type.name} records, which leaves ${extent % size} bytes in a partial ` +
+          `record at the end.`,
+        subjects: [{ id: claim.id, address: hex4(claim.at) }],
+      });
+    }
+
+    // What happens to work somebody did before the layout existed. Camels has
+    // 42 `text` claims that are each one field of a record — the only field the
+    // old model could express — and they **stay**. They carry an author, and
+    // silently deleting somebody's forty-two recovered claims is exactly what
+    // this redesign exists to stop; a migration that removed them would be a
+    // destructive operation built from an inference, which is the shape that
+    // has bitten three times. So it is reported, and whoever sees it decides.
+    const span = { start: claim.at, end: claim.at + extent };
+    for (const other of loaded.claims) {
+      if (other.id === claim.id || other.says === undefined) continue;
+      if (other.at < span.start || other.at >= span.end) continue;
+      const offset = (other.at - claim.at) % size;
+      if (!Object.prototype.hasOwnProperty.call(type.fields, String(offset))) continue;
+      found.push({
+        kind: "type.redundantClaim",
+        message:
+          `The claim at ${hex4(other.at)} describes bytes that ${type.name} already ` +
+          `describes as "${type.fields[String(offset)].name}" at +$` +
+          `${offset.toString(16).toUpperCase().padStart(2, "0")}. Both render; ` +
+          `removing one is a judgement, so nothing has removed it.`,
+        subjects: [{ id: other.id, address: hex4(other.at) }],
+      });
+    }
   }
 
   // The model indents the second under the first deliberately, "where the
