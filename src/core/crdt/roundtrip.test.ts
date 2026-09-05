@@ -68,7 +68,10 @@ const BASE = `{
   "decoders": [{ "id": "dec_1", "name": "plain", "source": "return [...bytes];" }],
   "files": [{ "name": "game.prg", "hash": "abc123", "size": 16 }],
   "targets": [{ "name": "loader", "layers": ["lay_a"] }],
-  "primaryLabels": { "$8000": "lbl_1" }
+  "primaryLabels": { "$8000": "lbl_1" },
+  "claims": [
+    { "id": "clm_1", "at": "$8080", "extent": 32, "name": "copyright", "is": "text", "encoding": "petscii", "author": "marcus", "source": "user" }
+  ]
 }
 `;
 
@@ -90,6 +93,30 @@ interface Case {
  * A missing key is a compile error naming the operation that lacks coverage.
  */
 const CASES: { [K in Op["op"]]: Case } = {
+  "claim.add": {
+    op: {
+      op: "claim.add",
+      claim: {
+        id: "clm_2",
+        at: 0x8400,
+        extent: 0x40,
+        name: "spriteBank",
+        says: { is: "bitmap", view: "sprite" },
+        by: { author: "gfx", source: "user" },
+      },
+    },
+  },
+  "claim.set": {
+    // Names three fields at once, and one of them is a `null`: the inverse of
+    // this must restore `extent` and clear `name`, which is the case that
+    // cannot be written without `ClaimEdit` distinguishing absent from cleared.
+    op: {
+      op: "claim.set",
+      id: "clm_1",
+      fields: { name: null, extent: 0x20, says: { is: "data" } },
+    },
+  },
+  "claim.remove": { op: { op: "claim.remove", id: "clm_1" } },
   "label.set": {
     op: { op: "label.set", id: "lbl_3", layerId: "lay_a", address: 0x8200, name: "Added" },
   },
@@ -208,7 +235,7 @@ describe("every operation reaches every path", () => {
   it("covers the whole vocabulary", () => {
     // The table is exhaustive by type; this only reports the count, so a
     // vocabulary that grows is visible in the output rather than only in a diff.
-    expect(kinds.length).toBe(23);
+    expect(kinds.length).toBe(26);
   });
 
   for (const kind of kinds) {

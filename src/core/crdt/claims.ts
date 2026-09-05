@@ -26,6 +26,7 @@
 
 import * as Y from "yjs";
 import { Claim, Interpretation, Provenance, RootKind } from "../claims/model.js";
+import { parseProjectAddress } from "../project/project.js";
 
 export const ROOT_CLAIMS = "claims";
 
@@ -48,15 +49,20 @@ export type ClaimOp =
     }
   | { readonly op: "claim.remove"; readonly id: string };
 
-function claimsRoot(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
+export function claimsRoot(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
   return doc.getMap<Y.Map<unknown>>(ROOT_CLAIMS);
 }
 
 /** Flatten a claim to scalars a Y.Map can hold. Nested objects go as JSON-safe values. */
-function encode(claim: Claim): Record<string, unknown> {
+export function encodeClaim(claim: Claim): Record<string, unknown> {
   const out: Record<string, unknown> = {
     id: claim.id,
-    at: claim.at,
+    // As the file writes it, which is the convention every other root here
+    // follows — `constant.set` stores `"$01"` rather than `1`. The document is
+    // flattened straight into a `.re64`, so a number here would produce
+    // `"at": 33792` in a file whose every other address is `$8400`, and two
+    // write paths would disagree about the same claim.
+    at: `$${claim.at.toString(16).toUpperCase().padStart(4, "0")}`,
     author: claim.by.author,
     source: claim.by.source,
   };
@@ -75,7 +81,7 @@ function encode(claim: Claim): Record<string, unknown> {
   return out;
 }
 
-function decode(entry: Y.Map<unknown>): Claim {
+export function decodeClaim(entry: Y.Map<unknown>): Claim {
   const get = <T>(key: string) => entry.get(key) as T | undefined;
   const is = get<Interpretation["is"]>("is");
 
@@ -94,9 +100,10 @@ function decode(entry: Y.Map<unknown>): Claim {
   };
 
   const layer = get<string>("layer");
+  const at = get<number | string>("at")!;
   return {
     id: get<string>("id")!,
-    at: get<number>("at")!,
+    at: typeof at === "number" ? at : parseProjectAddress(at),
     ...(get<number>("extent") !== undefined ? { extent: get<number>("extent") } : {}),
     ...(get<string>("name") !== undefined ? { name: get<string>("name") } : {}),
     ...(get<string>("description") !== undefined
@@ -116,7 +123,7 @@ export function writeClaims(doc: Y.Doc, claims: readonly Claim[]): void {
     // Sorted, so two clients importing the same project insert in the same order.
     for (const claim of [...claims].sort((a, b) => a.id.localeCompare(b.id))) {
       const entry = new Y.Map<unknown>();
-      const fields = encode(claim);
+      const fields = encodeClaim(claim);
       for (const key of Object.keys(fields).sort()) entry.set(key, fields[key]);
       root.set(claim.id, entry);
     }
@@ -125,7 +132,7 @@ export function writeClaims(doc: Y.Doc, claims: readonly Claim[]): void {
 
 export function readClaims(doc: Y.Doc): Claim[] {
   const out: Claim[] = [];
-  for (const entry of claimsRoot(doc).values()) out.push(decode(entry));
+  for (const entry of claimsRoot(doc).values()) out.push(decodeClaim(entry));
   return out;
 }
 
@@ -144,7 +151,7 @@ export function applyClaimOp(doc: Y.Doc, op: ClaimOp, origin: unknown = "local")
         // — a retry, or a replayed op — never two people meaning different
         // things, because ids are minted by the writer.
         const entry = new Y.Map<unknown>();
-        const fields = encode(op.claim);
+        const fields = encodeClaim(op.claim);
         for (const key of Object.keys(fields).sort()) entry.set(key, fields[key]);
         root.set(op.claim.id, entry);
         break;

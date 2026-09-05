@@ -18,6 +18,7 @@ import { CommentPlacement } from "../memory/comment.js";
 import { LabelType } from "../memory/label.js";
 import { TextEncoding } from "../c64/text.js";
 import { RegionKind } from "../memory/region.js";
+import { Claim } from "../claims/model.js";
 
 /** Set a label's fields, creating it if the id is new. */
 export interface LabelSetOp {
@@ -35,6 +36,45 @@ export interface LabelDeleteOp {
   op: "label.delete";
   id: string;
   layerId: string;
+}
+
+/**
+ * A field of a claim, as an edit may name it.
+ *
+ * `null` means **clear this**, which `undefined` cannot: an object simply
+ * missing a key says "leave it alone", and both statements have to be
+ * expressible or the inverse of "set a root on a claim that had none" cannot be
+ * written — and `runOps` computes an inverse on every write.
+ *
+ * The alternative was carrying the whole claim, as `region.set` does. That makes
+ * clearing trivial and merging wrong: two peers revising different fields would
+ * clobber each other, which is the `target.set` bug this project already found
+ * and fixed by making that op partial.
+ */
+export type ClaimEdit = { [K in keyof Omit<Claim, "id">]?: Claim[K] | null };
+
+/**
+ * Add a claim. **Always adds; never replaces.**
+ *
+ * An id already present means the same claim arriving twice — a retry, or a
+ * replayed op — never two people meaning different things, because ids are
+ * minted by the writer rather than inferred from a span.
+ */
+export interface ClaimAddOp {
+  op: "claim.add";
+  claim: Claim;
+}
+
+/** Revise named fields of a claim, leaving the rest alone. */
+export interface ClaimSetOp {
+  op: "claim.set";
+  id: string;
+  fields: ClaimEdit;
+}
+
+export interface ClaimRemoveOp {
+  op: "claim.remove";
+  id: string;
 }
 
 /** Set a region's extent and kind, creating it if the id is new. */
@@ -245,6 +285,9 @@ export interface PrimaryClearOp {
 }
 
 export type Op =
+  | ClaimAddOp
+  | ClaimSetOp
+  | ClaimRemoveOp
   | LabelSetOp
   | LabelDeleteOp
   | RegionSetOp
@@ -336,6 +379,19 @@ export function describeOp(op: Op): string {
       return `read ${hex(op.address)} as one particular label`;
     case "label.unbind":
       return `read ${op.id} by the usual rule again`;
+    case "claim.add": {
+      const what = op.claim.name ?? op.claim.says?.is ?? "claim";
+      return `claim ${what} at ${hex(op.claim.at)}`;
+    }
+
+    case "claim.set": {
+      const named = Object.keys(op.fields);
+      return `revise claim ${op.id}: ${named.length ? named.join(", ") : "nothing"}`;
+    }
+
+    case "claim.remove":
+      return `remove claim ${op.id}`;
+
     case "constant.set":
       return `define ${op.name} as $${op.value.toString(16).toUpperCase().padStart(2, "0")}`;
     case "constant.delete":

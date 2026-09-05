@@ -27,6 +27,7 @@ import {
   Project,
   ProjectComment,
   ProjectConstant,
+  ProjectClaim,
   ProjectDecoder,
   ProjectFile,
   ProjectTarget,
@@ -78,6 +79,7 @@ const ROOT_CONSTANTS = "constants";
 const ROOT_DECODERS = "decoders";
 const ROOT_FILES = "files";
 const ROOT_TARGETS = "targets";
+const ROOT_CLAIMS = "claims";
 
 /** Scalars a project carries outside its layers. */
 const META_KEYS = ["name", "description", "entryPoints", "activeTarget"] as const;
@@ -171,6 +173,13 @@ export function docFromProject(project: Project): Y.Doc {
       files.set(file.name, mapFrom(file as unknown as Record<string, unknown>));
     }
 
+    // Keyed by id and flat, not nested in a layer: a claim is one entry edited
+    // independently, and it must be able to name an address no layer supplies.
+    const claims = doc.getMap<Y.Map<unknown>>(ROOT_CLAIMS);
+    for (const claim of [...(project.claims ?? [])].sort(byId)) {
+      claims.set(claim.id!, mapFrom(claim as unknown as Record<string, unknown>));
+    }
+
     const decoders = doc.getMap<Y.Map<unknown>>(ROOT_DECODERS);
     for (const decoder of [...(project.decoders ?? [])].sort(byId)) {
       decoders.set(decoder.id!, mapFrom(decoder as unknown as Record<string, unknown>));
@@ -194,6 +203,7 @@ export function projectFromDoc(doc: Y.Doc): Project {
   const decoders = doc.getMap<Y.Map<unknown>>(ROOT_DECODERS);
   const files = doc.getMap<Y.Map<unknown>>(ROOT_FILES);
   const targets = doc.getMap<Y.Map<unknown>>(ROOT_TARGETS);
+  const claims = doc.getMap<Y.Map<unknown>>(ROOT_CLAIMS);
 
   const project: Project = {
     layers: layers.toArray().map((entry) => {
@@ -264,6 +274,11 @@ export function projectFromDoc(doc: Y.Doc): Project {
   );
   if (constantList.length) project.constants = constantList;
 
+  const claimList = sortedValues<ProjectClaim>(claims, "at").map((c) =>
+    inOrder<ProjectClaim>(c as unknown as Record<string, unknown>, CLAIM_FIELDS)
+  );
+  if (claimList.length) project.claims = claimList;
+
   const decoderList = sortedValues<ProjectDecoder>(decoders, "name").map((d) =>
     inOrder<ProjectDecoder>(d as unknown as Record<string, unknown>, DECODER_FIELDS)
   );
@@ -308,6 +323,30 @@ const USE_FIELDS = ["id", "address", "constant"] as const;
 const LABEL_USE_FIELDS = ["id", "address", "label"] as const;
 const CONSTANT_FIELDS = ["id", "name", "value"] as const;
 const DECODER_FIELDS = ["id", "name", "source"] as const;
+/**
+ * Field order for a claim in the file.
+ *
+ * Identity, then where, then what it says, then who said it — which is the order
+ * a reader scans and the order that keeps a diff's changed key next to what it
+ * qualifies. A missing entry here is silent: `inOrder` keeps unknown keys, so it
+ * produces a subtly reordered file rather than a failure.
+ */
+const CLAIM_FIELDS = [
+  "id",
+  "at",
+  "extent",
+  "layer",
+  "name",
+  "is",
+  "encoding",
+  "view",
+  "root",
+  "description",
+  "author",
+  "source",
+  "when",
+  "confidence",
+] as const;
 const FILE_FIELDS = ["name", "hash", "size"] as const;
 const TARGET_FIELDS = ["name", "layers", "entryPoints"] as const;
 const LAYER_FIELDS = [

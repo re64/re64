@@ -13,6 +13,7 @@
 
 import {
   Project,
+  ProjectClaim,
   ProjectComment,
   ProjectConstant,
   ProjectConstantUse,
@@ -20,8 +21,19 @@ import {
   ProjectLabelUse,
   ProjectRegion,
   parseProjectAddress,
+  projectClaims,
 } from "../project/project.js";
-import { Op } from "./types.js";
+import { ClaimEdit, Op } from "./types.js";
+import { Claim } from "../claims/model.js";
+
+/** A stored claim as the model sees it, via the loader's own parser. */
+const claimFromProject = (stored: ProjectClaim): Claim => projectClaims([stored])[0];
+
+/** Its settable fields, for a partial revision. */
+const claimFields = (stored: ProjectClaim): ClaimEdit => {
+  const { id: _id, ...rest } = claimFromProject(stored);
+  return rest as ClaimEdit;
+};
 
 interface Owned<T> {
   layerId: string;
@@ -114,6 +126,9 @@ const sameRegion = (a: ProjectRegion, b: ProjectRegion) =>
  * Deletions come first so a label that moved between layers is removed before
  * it is re-added, rather than existing twice in between.
  */
+/** Two stored claims, field for field. */
+const sameClaim = (a: ProjectClaim, b: ProjectClaim) => JSON.stringify(a) === JSON.stringify(b);
+
 export function diffProjects(from: Project, to: Project): Op[] {
   const ops: Op[] = [];
 
@@ -140,6 +155,9 @@ export function diffProjects(from: Project, to: Project): Op[] {
     if (before && before.hash === file.hash && before.size === file.size) continue;
     ops.push({ op: "file.add", name, hash: file.hash, size: file.size });
   }
+
+  const beforeClaims = new Map((from.claims ?? []).map((c) => [c.id!, c]));
+  const afterClaims = new Map((to.claims ?? []).map((c) => [c.id!, c]));
 
   // Layers first, and only symbols layers, which are the only kind an
   // operation can add. A layer holding bytes is a change to what the project
@@ -228,6 +246,9 @@ export function diffProjects(from: Project, to: Project): Op[] {
   for (const id of beforeConstants.keys()) {
     if (!afterConstants.has(id)) ops.push({ op: "constant.delete", id });
   }
+  for (const id of beforeClaims.keys()) {
+    if (!afterClaims.has(id)) ops.push({ op: "claim.remove", id });
+  }
 
   for (const [id, owned] of afterLabels) {
     const before = beforeLabels.get(id);
@@ -262,6 +283,32 @@ export function diffProjects(from: Project, to: Project): Op[] {
       name: constant.name,
       value: parseProjectAddress(constant.value),
     });
+  }
+
+  // Claims after the declarations they may name and before the binds that may
+  // reference them, on the rule this file already follows: creates before
+  // references, references before their targets are deleted.
+  //
+  // `claim.add` for a new one and `claim.set` for a revised one, so a revision
+  // is a partial write and two peers changing different fields of one claim do
+  // not clobber each other. A whole-object emit would be the `target.set` bug.
+  for (const [id, claim] of afterClaims) {
+    const before = beforeClaims.get(id);
+    if (before && sameClaim(before, claim)) continue;
+    if (!before) {
+      ops.push({ op: "claim.add", claim: claimFromProject(claim) });
+      continue;
+    }
+    const fields: ClaimEdit = {};
+    const wasFields = claimFields(before);
+    const nowFields = claimFields(claim);
+    for (const key of new Set([...Object.keys(wasFields), ...Object.keys(nowFields)])) {
+      const now = (nowFields as Record<string, unknown>)[key];
+      const was = (wasFields as Record<string, unknown>)[key];
+      if (JSON.stringify(now) === JSON.stringify(was)) continue;
+      (fields as Record<string, unknown>)[key] = now === undefined ? null : now;
+    }
+    if (Object.keys(fields).length) ops.push({ op: "claim.set", id, fields });
   }
 
   for (const [id, owned] of afterLabelUses) {

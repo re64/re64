@@ -15,6 +15,7 @@ import {
 import { TEXT_ENCODINGS, TextEncoding } from "../c64/text.js";
 import { Region, RegionKind, createUserRegion } from "../memory/region.js";
 import { derivedId } from "./identity.js";
+import { Claim, Interpretation, Provenance, RootKind } from "../claims/model.js";
 
 /**
  * Layer definition in a project file.
@@ -276,6 +277,15 @@ export interface Project {
    */
   constants?: ProjectConstant[];
   /**
+   * Claims, at project level rather than nested in a layer.
+   *
+   * Flat because a claim is one entry edited independently: two people revising
+   * different claims touch different keys and neither reorders the other's. It
+   * is also what lets a claim name an address no layer supplies, which is the
+   * whole of what the symbols-layer apparatus existed to work around.
+   */
+  claims?: ProjectClaim[];
+  /**
    * Decoders somebody wrote, for data whose layout is not one of the built-in
    * ones.
    *
@@ -295,6 +305,85 @@ export interface ProjectConstant {
 }
 
 /**
+ * A claim, as a `.re64` writes it.
+ *
+ * Flat rather than nested, for two reasons. It matches how every other entry in
+ * this format is written — a region is `{start, end, kind, encoding?, view?}`,
+ * not `{span: {...}, reads: {...}}` — and it is the same shape the CRDT already
+ * encodes, so one representation serves the file and the document instead of two
+ * that can drift.
+ *
+ * The cost is that `says` and `by` are spelled across several keys, which a
+ * diff actually prefers: changing an encoding touches one line.
+ */
+export interface ProjectClaim {
+  id?: string;
+  /** Where. An address, or an offset into a layer when `layer` is set. */
+  at: number | string;
+  /** How many bytes it covers. Absent means a point. */
+  extent?: number;
+  name?: string;
+  /** What the bytes are. Absent says nothing about them; never "code". */
+  is?: Interpretation["is"];
+  /** How to read a `text` claim's bytes. */
+  encoding?: TextEncoding;
+  /** How to draw a `bitmap` claim: `char:8`, `bits:3`, `sprite`, `snippet:<id>`. */
+  view?: string;
+  /** Surface this regardless of what reaches it. */
+  root?: RootKind;
+  /** What the name means, where somebody other than this project decided. */
+  description?: string;
+  /** Who made it: a user id, an agent codename, or `cli`. */
+  author?: string;
+  /** How it arose. */
+  source?: Provenance["source"];
+  /** Milliseconds since the epoch. */
+  when?: number;
+  /** How strongly it is meant. Absent means asserted. */
+  confidence?: Provenance["confidence"];
+  /** The layer `at` is an offset into, for a claim that follows its bytes. */
+  layer?: string;
+}
+
+/**
+ * `ProjectClaim[]` to `Claim[]`.
+ *
+ * Ids are derived from content when absent, like every other entry here, so all
+ * clients loading the same un-migrated file agree — and the next write persists
+ * real ones.
+ */
+export function projectClaims(claims: readonly ProjectClaim[] = []): Claim[] {
+  return claims.map((c) => {
+    const at = parseProjectAddress(c.at);
+    const says: Interpretation | undefined =
+      c.is === "text"
+        ? { is: "text", encoding: c.encoding }
+        : c.is === "bitmap"
+          ? { is: "bitmap", view: c.view }
+          : c.is === "data" || c.is === "jumptable"
+            ? { is: c.is }
+            : undefined;
+
+    return {
+      id: c.id ?? derivedId("clm", String(at), c.name ?? "", c.is ?? ""),
+      at,
+      ...(c.extent !== undefined ? { extent: c.extent } : {}),
+      ...(c.name !== undefined ? { name: c.name } : {}),
+      ...(says ? { says } : {}),
+      ...(c.root !== undefined ? { root: c.root } : {}),
+      ...(c.description !== undefined ? { description: c.description } : {}),
+      ...(c.layer !== undefined ? { frame: { space: "layer" as const, layer: c.layer } } : {}),
+      by: {
+        author: c.author ?? "project",
+        source: c.source ?? "user",
+        ...(c.when !== undefined ? { when: c.when } : {}),
+        ...(c.confidence !== undefined ? { confidence: c.confidence } : {}),
+      },
+    };
+  });
+}
+
+/**
  * Valid values for the string-typed fields a project file can set.
  *
  * These are user-written, so they are checked here rather than deeper down:
@@ -310,6 +399,15 @@ const REGION_KINDS: readonly RegionKind[] = [
   "unknown",
 ];
 const LABEL_TYPES: readonly LabelType[] = ["entry", "function", "code", "address"];
+const INTERPRETATIONS: readonly Interpretation["is"][] = ["data", "text", "bitmap", "jumptable"];
+const ROOT_KINDS: readonly RootKind[] = ["entry", "routine", "location", "data"];
+const PROVENANCE_SOURCES: readonly Provenance["source"][] = [
+  "user",
+  "layer",
+  "platform",
+  "auto",
+  "analysis",
+];
 
 /** Parse an address that may be a number or hex string */
 export function parseProjectAddress(value: number | string): number {
@@ -518,6 +616,39 @@ export function parseProject(json: string): Project {
       "Top-level 'labels'/'regions' are no longer supported: move them into the " +
         "owning layer, or into a layer of type 'symbols' for addresses with no bytes"
     );
+  }
+
+  // Claims carry three enum-valued fields, and they are user-written. Checked
+  // here for the reason the region kinds are: a typo should name the offending
+  // claim, not surface as confident nonsense in a listing. `encoding: "petsci"`
+  // was accepted, written back and rendered as ASCII for exactly as long as
+  // nothing checked it.
+  for (const claim of project.claims ?? []) {
+    const where = `claim at ${String(claim.at)}`;
+    if (claim.is !== undefined && !INTERPRETATIONS.includes(claim.is)) {
+      throw new Error(
+        `Unknown interpretation "${claim.is}" on ${where}. ` +
+          `Expected one of: ${INTERPRETATIONS.join(", ")}. ` +
+          `Note there is no "code": code is what bytes are when nobody has said otherwise.`
+      );
+    }
+    if (claim.root !== undefined && !ROOT_KINDS.includes(claim.root)) {
+      throw new Error(
+        `Unknown root "${claim.root}" on ${where}. Expected one of: ${ROOT_KINDS.join(", ")}`
+      );
+    }
+    if (claim.encoding !== undefined && !TEXT_ENCODINGS.includes(claim.encoding)) {
+      throw new Error(
+        `Unknown text encoding "${claim.encoding}" on ${where}. ` +
+          `Expected one of: ${TEXT_ENCODINGS.join(", ")}`
+      );
+    }
+    if (claim.source !== undefined && !PROVENANCE_SOURCES.includes(claim.source)) {
+      throw new Error(
+        `Unknown source "${claim.source}" on ${where}. ` +
+          `Expected one of: ${PROVENANCE_SOURCES.join(", ")}`
+      );
+    }
   }
 
   return project;

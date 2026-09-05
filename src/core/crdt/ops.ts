@@ -10,7 +10,9 @@
  */
 
 import * as Y from "yjs";
-import { Op } from "../ops/types.js";
+import { ClaimEdit, Op } from "../ops/types.js";
+import { Claim } from "../claims/model.js";
+import { encodeClaim, decodeClaim, claimsRoot } from "./claims.js";
 
 const hex4 = (n: number) => "$" + n.toString(16).toUpperCase().padStart(4, "0");
 
@@ -293,6 +295,42 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         doc.getMap<string>("primaryLabels").set(hex4(op.address), op.labelId);
         break;
 
+      case "claim.add": {
+        const entry = new Y.Map<unknown>();
+        const fields = encodeClaim(op.claim);
+        for (const key of Object.keys(fields).sort()) entry.set(key, fields[key]);
+        claimsRoot(doc).set(op.claim.id, entry);
+        break;
+      }
+
+      case "claim.set": {
+        const entry = claimsRoot(doc).get(op.id);
+        // A revision of a claim somebody deleted concurrently does nothing,
+        // rather than resurrecting it with half its fields. Same rule as a
+        // dangling `primaryLabels` entry: the delete wins and nothing sweeps.
+        if (!entry) break;
+
+        // Re-encoded whole from the merged claim rather than key by key, so the
+        // flat spelling of `says` and `by` stays consistent — setting an
+        // interpretation to `data` must clear the `encoding` a previous `text`
+        // left behind, which a per-key write would not do.
+        const merged: Record<string, unknown> = { ...decodeClaim(entry) };
+        for (const [key, value] of Object.entries(op.fields as ClaimEdit)) {
+          if (value === null) delete merged[key];
+          else merged[key] = value;
+        }
+        const fields = encodeClaim(merged as unknown as Claim);
+        for (const key of [...entry.keys()]) {
+          if (!(key in fields)) entry.delete(key);
+        }
+        for (const key of Object.keys(fields).sort()) entry.set(key, fields[key]);
+        break;
+      }
+
+      case "claim.remove":
+        claimsRoot(doc).delete(op.id);
+        break;
+
       case "primary.clear":
         doc.getMap<string>("primaryLabels").delete(hex4(op.address));
         break;
@@ -333,6 +371,7 @@ export function undoManagerFor(doc: Y.Doc, origin: unknown = "local"): Y.UndoMan
       doc.getMap("constants"),
       doc.getMap("files"),
       doc.getMap("targets"),
+      doc.getMap("claims"),
     ],
     {
       trackedOrigins: new Set([origin]),

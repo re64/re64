@@ -17,6 +17,7 @@ import {
   ProjectComment,
   ProjectConstant,
   ProjectDecoder,
+  ProjectClaim,
   ProjectConstantUse,
   ProjectLabel,
   ProjectLabelUse,
@@ -116,6 +117,20 @@ export function formatProject(project: Project): string {
       .map((f) => `    ${compactObject(f as unknown as Record<string, unknown>)}`)
       .join(",\n");
     body.push(`  "files": [\n${entries}\n  ]`);
+  }
+
+  if (project.claims?.length) {
+    // One per line, sorted by address then id: the projection has to pick an
+    // order, and address is the one a reader scans by. Id breaks the tie so two
+    // peers flattening the same document produce the same text.
+    const entries = [...project.claims]
+      .sort((a, b) => {
+        const at = parseProjectAddress(a.at) - parseProjectAddress(b.at);
+        return at !== 0 ? at : (a.id ?? "").localeCompare(b.id ?? "");
+      })
+      .map((c) => `    ${compactObject(c as unknown as Record<string, unknown>)}`)
+      .join(",\n");
+    body.push(`  "claims": [\n${entries}\n  ]`);
   }
 
   if (project.decoders?.length) {
@@ -952,6 +967,40 @@ export function deleteDecoder(raw: string, id: string): string {
 
   project.decoders = project.decoders.filter((d) => d.id !== id);
   if (project.decoders.length === 0) delete project.decoders;
+  return formatProject(project);
+}
+
+/**
+ * Add or revise a claim.
+ *
+ * Reserialising rather than line-editing, like the constant and decoder writers:
+ * claims live at project level in a block this function owns, so there is no
+ * hand-authored layout inside it to preserve.
+ *
+ * Idempotent, because undo replays an operation forward to check that its stored
+ * inverse still means what it said — a writer that appended a duplicate would
+ * make its own op un-undoable.
+ */
+export function upsertClaim(raw: string, claim: ProjectClaim): string {
+  const project = parseProject(raw);
+  const claims = (project.claims ??= []);
+  const at = claims.findIndex((c) => c.id === claim.id);
+  if (at >= 0) {
+    if (JSON.stringify(claims[at]) === JSON.stringify(claim)) return raw;
+    claims[at] = claim;
+  } else {
+    claims.push(claim);
+  }
+  return formatProject(project);
+}
+
+export function deleteClaim(raw: string, id: string): string {
+  const project = parseProject(raw);
+  if (!project.claims?.some((c) => c.id === id)) return raw;
+
+  project.claims = project.claims.filter((c) => c.id !== id);
+  // An empty block is noise; drop it entirely, as every other root here does.
+  if (project.claims.length === 0) delete project.claims;
   return formatProject(project);
 }
 

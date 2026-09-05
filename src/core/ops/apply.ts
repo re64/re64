@@ -44,8 +44,12 @@ import {
   upsertDecoder,
   upsertLabel,
   upsertRegion,
+  upsertClaim,
+  deleteClaim,
 } from "../project/serialize.js";
-import { Op } from "./types.js";
+import { ClaimEdit, Op } from "./types.js";
+import { Claim } from "../claims/model.js";
+import { ProjectClaim, projectClaims } from "../project/project.js";
 
 /** Position of a layer in the project, by id. */
 function layerIndexOf(project: Project, layerId: string): number {
@@ -105,6 +109,60 @@ function findComment(project: Project, id: string): Found<ProjectComment> | unde
 const addressHex = (n: number) => "$" + n.toString(16).toUpperCase().padStart(4, "0");
 /** A constant's value is one byte, so it reads as two digits rather than four. */
 const addressHex8 = (n: number) => "$" + n.toString(16).toUpperCase().padStart(2, "0");
+
+/**
+ * A claim as the file writes it: flat, so a diff touches one key.
+ *
+ * The same shape the CRDT encodes, deliberately — one representation for the
+ * file and the document is one that cannot drift.
+ */
+function projectClaimOf(claim: Claim): ProjectClaim {
+  return {
+    id: claim.id,
+    at: addressHex(claim.at),
+    ...(claim.extent !== undefined ? { extent: claim.extent } : {}),
+    ...(claim.name !== undefined ? { name: claim.name } : {}),
+    ...(claim.says ? { is: claim.says.is } : {}),
+    ...(claim.says?.is === "text" && claim.says.encoding
+      ? { encoding: claim.says.encoding }
+      : {}),
+    ...(claim.says?.is === "bitmap" && claim.says.view ? { view: claim.says.view } : {}),
+    ...(claim.root !== undefined ? { root: claim.root } : {}),
+    ...(claim.description !== undefined ? { description: claim.description } : {}),
+    ...(claim.frame?.space === "layer" ? { layer: claim.frame.layer } : {}),
+    author: claim.by.author,
+    source: claim.by.source,
+    ...(claim.by.when !== undefined ? { when: claim.by.when } : {}),
+    ...(claim.by.confidence !== undefined ? { confidence: claim.by.confidence } : {}),
+  };
+}
+
+/** The other direction, reusing the loader's own parser so both agree. */
+function claimOf(stored: ProjectClaim): Claim {
+  return projectClaims([stored])[0];
+}
+
+/** Every settable field of a stored claim, in `ClaimEdit` terms. */
+function fieldsOf(stored: ProjectClaim): ClaimEdit {
+  const { id: _id, ...rest } = claimOf(stored);
+  return rest as ClaimEdit;
+}
+
+/**
+ * A stored claim with an edit applied.
+ *
+ * `null` clears, an absent key is left alone. Nothing else expresses both, and
+ * both are needed: `runOps` inverts every write, and the inverse of setting a
+ * field that was absent is clearing it.
+ */
+function editedClaim(stored: ProjectClaim, fields: ClaimEdit): ProjectClaim {
+  const next: Record<string, unknown> = { ...claimOf(stored) };
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === null) delete next[key];
+    else next[key] = value;
+  }
+  return projectClaimOf(next as unknown as Claim);
+}
 
 /** Apply one operation, returning the updated project text. */
 export function applyOp(raw: string, op: Op): string {
@@ -182,6 +240,18 @@ export function applyOp(raw: string, op: Op): string {
 
     case "label.unbind":
       return unbindLabel(raw, layerIndexOf(project, op.layerId), op.id);
+
+    case "claim.add":
+      return upsertClaim(raw, projectClaimOf(op.claim));
+
+    case "claim.set": {
+      const found = project.claims?.find((c) => c.id === op.id);
+      if (!found) return raw;
+      return upsertClaim(raw, editedClaim(found, op.fields));
+    }
+
+    case "claim.remove":
+      return deleteClaim(raw, op.id);
 
     case "constant.set":
       return upsertConstant(raw, { id: op.id, name: op.name, value: addressHex8(op.value) });
@@ -370,6 +440,36 @@ export function invertOp(raw: string, op: Op): Op {
         address: parseProjectAddress(found.entry.address),
         labelId: found.entry.label,
       };
+    }
+
+    case "claim.add": {
+      const found = project.claims?.find((c) => c.id === op.claim.id);
+      // Adding one that is already there is a retry; undoing it must put the
+      // old fields back rather than remove somebody else's claim.
+      if (!found) return { op: "claim.remove", id: op.claim.id };
+      return { op: "claim.set", id: op.claim.id, fields: fieldsOf(found) };
+    }
+
+    case "claim.set": {
+      const found = project.claims?.find((c) => c.id === op.id);
+      if (!found) return op;
+      // Only the fields this edit named, restored to what they were — and
+      // `null` where they were absent, which is the whole reason `ClaimEdit`
+      // distinguishes "clear this" from "leave it alone". Without it the inverse
+      // of setting a root on a claim that had none is unwritable.
+      const before = fieldsOf(found);
+      const restored: ClaimEdit = {};
+      for (const key of Object.keys(op.fields) as (keyof ClaimEdit)[]) {
+        (restored as Record<string, unknown>)[key] =
+          (before as Record<string, unknown>)[key] ?? null;
+      }
+      return { op: "claim.set", id: op.id, fields: restored };
+    }
+
+    case "claim.remove": {
+      const found = project.claims?.find((c) => c.id === op.id);
+      if (!found) return op;
+      return { op: "claim.add", claim: claimOf(found) };
     }
 
     case "constant.set": {
