@@ -16,11 +16,26 @@ import { z } from "zod";
 import type { LabelType } from "../../core/index.js";
 import type { McpContext } from "./transport.js";
 
-/** Accepts `$8100`, `0x8100` or plain decimal, and says so in the schema. */
+/**
+ * Accepts `$8100`, `0x8100`, `"33024"` **or the number 33024**, and says so.
+ *
+ * The number was rejected until a transport test asked for it, which is the
+ * `run_block` lesson repeating: the project file has always taken `32768` as
+ * well as `"$8000"`, so the tool surface was inconsistent with the format it
+ * writes, and every caller found out by being refused. A schema is exercised by
+ * nothing but the wire, which is why that is where this was caught.
+ */
 const address = z
-  .string()
-  .describe("An address, as $8100, 0x8100, or decimal")
+  .union([z.string(), z.number()])
+  .describe("An address, as $8100, 0x8100, decimal text, or a number")
   .transform((value, ctx) => {
+    if (typeof value === "number") {
+      if (!Number.isInteger(value) || value < 0 || value > 0xffff) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Not an address: ${value}` });
+        return z.NEVER;
+      }
+      return value;
+    }
     const text = value.trim();
     const parsed = text.startsWith("$")
       ? parseInt(text.slice(1), 16)
@@ -983,11 +998,16 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
-    "set_constant",
-    "Declare a name for a byte value: EMPTY_CELL = $00, ORANGE = $08. Declaring " +
-      "changes no listing — a value has no single meaning, and the reference " +
-      "same byte is both a colour and a direction in different routines. Use bind_constant to " +
-      "say that a particular operand means this one.",
+    "add_constant",
+    "Declare a name for a byte value: EMPTY_CELL = $00, ORANGE = $08. " +
+      "**This adds a declaration; it never replaces one.** Declaring the same " +
+      "name twice gives two constants, because a name is prose somebody chose " +
+      "and two readers can pick the same word for different things — use " +
+      "edit_constant with the id to revise one. " +
+      "Declaring changes no listing: a value has no single meaning, and in the " +
+      "reference disassembly the same byte is both a colour and a direction in " +
+      "different routines. Use bind_constant to say that a particular operand " +
+      "means this one.",
     {
       project,
       name: z.string().min(1),
@@ -998,15 +1018,42 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.setConstant(caller, args.name, args.value);
+      return space.addConstant(caller, args.name, args.value);
+    }
+  );
+
+  tool(
+    "edit_constant",
+    "Revise a declared constant by its id: its name, its value, or both. " +
+      "The id comes from add_constant or list_constants. By id because declaring " +
+      "is additive, so a name can reach two constants and would not say which.",
+    {
+      project,
+      id: z.string().min(1),
+      name: z.string().min(1).optional(),
+      value: address.optional().describe("A byte, $00-$FF"),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      id: string;
+      name?: string;
+      value?: number;
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.editConstant(caller, args.id, args.name, args.value);
     }
   );
 
   tool(
     "remove_constant",
-    "Forget a declared constant. Operands bound to it go back to showing the " +
-      "literal; nothing needs unbinding first.",
-    { project, name: z.string().min(1), expectVersion: z.string().optional() },
+    "Forget a declared constant, by id or by a name that reaches exactly one. " +
+      "Operands bound to it go back to showing the literal; nothing needs " +
+      "unbinding first.",
+    { project, name: z.string().min(1).describe("An id, or an unambiguous name"), expectVersion: z.string().optional() },
     (args: { project?: string; name: string; expectVersion?: string }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project);
@@ -1017,7 +1064,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
 
   tool(
     "bind_constants",
-    "Bind several sites in one call, as one action. set_constants batches the " +
+    "Bind several sites in one call, as one action. add_constants batches the " +
       "declarations, which change no listing by design; this batches the " +
       "operation that actually changes what a reader sees.",
     {
@@ -1065,8 +1112,11 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     "bind_constant",
     "Say that the immediate operand at an address means a named constant, so " +
       "it renders as #ORANGE rather than #$08. Refused if the instruction " +
-      "takes no immediate or loads a different value.",
-    { project, address, name: z.string().min(1), expectVersion: z.string().optional() },
+      "takes no immediate or loads a different value. " +
+      "Takes a name or an id; where a name reaches two constants the operand's " +
+      "own value picks between them, since two constants sharing a name must " +
+      "differ in value to be worth telling apart.",
+    { project, address, name: z.string().min(1).describe("A name, or an id"), expectVersion: z.string().optional() },
     (args: { project?: string; address: number; name: string; expectVersion?: string }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project);
@@ -1423,9 +1473,11 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
-    "set_constants",
-    "Declare several constants in one call, as one action. Declaring changes " +
-      "no listing; bind_constant is what makes an operand show a name.",
+    "add_constants",
+    "Declare several constants in one call, as one action. Adds, like " +
+      "add_constant: a batch that quietly revised whatever it matched would be " +
+      "the obvious way to get back the behaviour that was removed. Declaring " +
+      "changes no listing; bind_constant is what makes an operand show a name.",
     {
       project,
       constants: z
@@ -1442,7 +1494,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       const { workspace, caller } = context();
       const space = workspace(args.project);
       space.expect(args.expectVersion);
-      return space.setConstants(caller, args.constants);
+      return space.addConstants(caller, args.constants);
     }
   );
 

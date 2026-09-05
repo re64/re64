@@ -93,8 +93,25 @@ export class ConstantIndex {
       .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   }
 
+  /**
+   * The one constant with this name, or nothing if none or several.
+   *
+   * Several is now reachable: declaring is additive, so two readers who both
+   * called a value `SHIELD` produce two constants rather than one silently
+   * overwriting the other. A caller that needs to act on one must say which.
+   */
   byName(name: string): Constant | undefined {
-    return [...this.declared.values()].find((c) => c.name === name);
+    const held = this.allByName(name);
+    return held.length === 1 ? held[0] : undefined;
+  }
+
+  /** Every constant with this name, in declaration order. */
+  allByName(name: string): Constant[] {
+    return [...this.declared.values()].filter((c) => c.name === name);
+  }
+
+  byId(id: string): Constant | undefined {
+    return this.declared.get(id);
   }
 
   all(): readonly Constant[] {

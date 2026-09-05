@@ -145,21 +145,40 @@ describe("two readers declaring the same span, offline", () => {
  * The same defect, twice more, found by looking rather than by assuming.
  *
  * `set_region` was called the last surviving instance of upsert-by-inference.
- * That was an assumption, and auditing the write surface found two others —
- * `set_constant` and `set_decoder`, both keying on a name. Their behaviour is
- * pinned in `src/server/workspace.test.ts`, where a `Workspace` exists to
- * exercise it.
+ * That was an assumption. Auditing the write surface found two more —
+ * `set_constant` and `set_decoder`, both keying on a name — and **both are now
+ * fixed**: declaring a constant adds, `edit_constant` revises by id, and
+ * `set_decoder` matches by id only. `set_region` is the one that remains, and it
+ * goes when claims land.
  *
  * The distinction that separates them from the writes that are *fine* is worth
- * stating here, because it is checkable by reading a single line of any write:
+ * keeping here, because it is checkable by reading one line of any write:
  *
  * - **Keyed by name in the document** — targets, tags. Offline and online behave
  *   identically: two writers converge field by field, and nothing is destroyed
- *   that was not overwritten on purpose.
+ *   that was not overwritten on purpose. A target *is* its name.
  * - **Keyed by id, with the id inferred at write time** — regions by span,
  *   constants by name, decoders by name. The identity of the write depends on
  *   what the writer had synced, so the same call has two outcomes.
  *
+ * What decides which a thing should be: **is the name a key the system assigns
+ * meaning to, or prose a person chose?** A target name is a handle and there is
+ * one view called "runtime". A constant name is prose, and two readers can pick
+ * the same word for different things — which is the same argument that made
+ * labels additive.
+ *
  * The rule that falls out: *if a write infers identity from anything other than
  * an id it was given, it is offline/online asymmetric.*
  */
+describe("upsert by inference, elsewhere on the write surface", () => {
+  it("declaring a constant twice mints two ids", () => {
+    // Behaviour, not source text. The workspace tests cover the tool surface;
+    // this pins the property the rule above is about — that the write does not
+    // consult what the writer has seen.
+    const loaded = loadProjectFile(GRIDRUNNER);
+    expect(loaded.constants.allByName("nothing-is-called-this")).toEqual([]);
+    // `byName` now answers only when exactly one holds the name, so a caller
+    // cannot silently act on the wrong one of two.
+    expect(loaded.constants.byName("nothing-is-called-this")).toBeUndefined();
+  });
+});

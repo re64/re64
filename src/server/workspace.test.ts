@@ -729,7 +729,7 @@ describe("naming a value", () => {
     // The whole design: a value has no single meaning. Declaring ORANGE = $08
     // must not turn every #$08 in the program orange.
     const before = workspace.disassembly(0x8011, 300).lines.map((l) => l.text).join("\n");
-    workspace.setConstant(agent, "ORANGE", 0x08);
+    workspace.addConstant(agent, "ORANGE", 0x08);
 
     expect(workspace.disassembly(0x8011, 300).lines.map((l) => l.text).join("\n")).toBe(before);
     expect(workspace.constants().constants.map((c) => c.name)).toContain("ORANGE");
@@ -739,7 +739,7 @@ describe("naming a value", () => {
     const site = workspace.immediates(0x08).sites[0];
     const address = parseInt(site.address.slice(1), 16);
 
-    workspace.setConstant(agent, "ORANGE", 0x08);
+    workspace.addConstant(agent, "ORANGE", 0x08);
     workspace.bindConstant(agent, address, "ORANGE");
 
     const row = workspace.disassembly(address, 1).lines[0].text;
@@ -751,7 +751,7 @@ describe("naming a value", () => {
   });
 
   it("refuses a binding the instruction cannot mean", () => {
-    workspace.setConstant(agent, "ORANGE", 0x08);
+    workspace.addConstant(agent, "ORANGE", 0x08);
     const wrongValue = workspace.immediates().sites.find((s) => s.value !== "$08")!;
     const at = parseInt(wrongValue.address.slice(1), 16);
 
@@ -763,7 +763,7 @@ describe("naming a value", () => {
   });
 
   it("refuses a value that is not a byte", () => {
-    expect(() => workspace.setConstant(agent, "TOO_BIG", 0x100)).toThrow(/\$00-\$FF/);
+    expect(() => workspace.addConstant(agent, "TOO_BIG", 0x100)).toThrow(/\$00-\$FF/);
   });
 
   it("renders the literal again when the constant is deleted", () => {
@@ -772,7 +772,7 @@ describe("naming a value", () => {
     const site = workspace.immediates(0x08).sites[0];
     const address = parseInt(site.address.slice(1), 16);
 
-    workspace.setConstant(agent, "ORANGE", 0x08);
+    workspace.addConstant(agent, "ORANGE", 0x08);
     workspace.bindConstant(agent, address, "ORANGE");
     workspace.removeConstant(agent, "ORANGE");
 
@@ -783,7 +783,7 @@ describe("naming a value", () => {
     const site = workspace.immediates(0x08).sites[0];
     const address = parseInt(site.address.slice(1), 16);
 
-    workspace.setConstant(agent, "ORANGE", 0x08);
+    workspace.addConstant(agent, "ORANGE", 0x08);
     workspace.bindConstant(agent, address, "ORANGE");
     workspace.unbindConstant(agent, address);
 
@@ -792,26 +792,42 @@ describe("naming a value", () => {
     expect(workspace.constants().constants.map((c) => c.name)).toContain("ORANGE");
   });
 
-  it("declaring a constant twice under one name destroys the first value", () => {
-    // Upsert by inference, the same shape as set_region: the write matches an
-    // existing constant *by name* and reuses its id, so a second reader who has
-    // synced silently replaces the first's conclusion. Unsynced they would both
-    // stand, and `hygiene` would report `constant.nameShared` — which is the tell,
-    // because that check can only ever fire on work done apart. The model
-    // tolerates the state the write path refuses.
-    workspace.setConstant(agent, "SHIELD_FLAG", 0x04);
-    workspace.setConstant(agent, "SHIELD_FLAG", 0x08);
+  it("declaring a constant twice under one name keeps both", () => {
+    // It used to keep one. The write matched an existing constant by name and
+    // reused its id, so a reader who had synced silently replaced the other's
+    // conclusion while an unsynced one produced two — the same call, two
+    // outcomes, which is this project's own offline/online test failing.
+    const first = workspace.addConstant(agent, "SHIELD_FLAG", 0x04);
+    const second = workspace.addConstant(agent, "SHIELD_FLAG", 0x08);
 
+    expect(first.constant).not.toBe(second.constant);
     const held = workspace.constants().constants.filter((c) => c.name === "SHIELD_FLAG");
-    expect(held).toHaveLength(1);
-    expect(held[0].value).toBe("$08");
+    expect(held.map((c) => c.value).sort()).toEqual(["$04", "$08"]);
+    // And hygiene can now report a state the write path used to make impossible.
+    expect(held.map((c) => c.id).sort()).toEqual([first.constant, second.constant].sort());
+  });
+
+  it("revises a constant by id, and refuses an ambiguous name", () => {
+    const first = workspace.addConstant(agent, "SHIELD_FLAG", 0x04);
+    workspace.addConstant(agent, "SHIELD_FLAG", 0x08);
+
+    workspace.editConstant(agent, first.constant, "SHIELD_BIT");
+    const names = workspace.constants().constants.map((c) => c.name);
+    expect(names).toContain("SHIELD_BIT");
+    expect(names).toContain("SHIELD_FLAG");
+
+    // Two constants still share no name now, but an ambiguous remove is refused
+    // and names the candidates — which is how a caller learns the ids.
+    workspace.addConstant(agent, "SHIELD_BIT", 0x10);
+    expect(() => workspace.removeConstant(agent, "SHIELD_BIT")).toThrow(/Say which by id/);
+    expect(() => workspace.removeConstant(agent, first.constant)).not.toThrow();
   });
 
   it("lets two names share one value", () => {
     // LEFT_ZAPPER = $01 and WHITE = $01 in the reference. Both must be
     // declarable, and each site picks which it meant.
-    workspace.setConstant(agent, "LEFT_ZAPPER", 0x01);
-    workspace.setConstant(agent, "WHITE", 0x01);
+    workspace.addConstant(agent, "LEFT_ZAPPER", 0x01);
+    workspace.addConstant(agent, "WHITE", 0x01);
 
     const names = workspace.constants().constants.map((c) => c.name);
     expect(names).toContain("LEFT_ZAPPER");
@@ -838,8 +854,8 @@ describe("the work as a listing", () => {
   it("emits only the constants the span actually means", () => {
     const site = workspace.immediates(0x16).sites[0];
     const address = parseInt(site.address.slice(1), 16);
-    workspace.setConstant(agent, "EXPLOSION1", 0x16);
-    workspace.setConstant(agent, "NEVER_USED", 0x99);
+    workspace.addConstant(agent, "EXPLOSION1", 0x16);
+    workspace.addConstant(agent, "NEVER_USED", 0x99);
     workspace.bindConstant(agent, address, "EXPLOSION1");
 
     const { text } = workspace.listing(address, 4);
@@ -1211,7 +1227,7 @@ describe("the last of trial 2's list", () => {
   });
 
   it("declares a batch of constants as one action", () => {
-    const result = workspace.setConstants(agent, [
+    const result = workspace.addConstants(agent, [
       { name: "GRID", value: 0x00 },
       { name: "SHIP", value: 0x07 },
       { name: "EXPLOSION1", value: 0x16 },
@@ -1223,7 +1239,7 @@ describe("the last of trial 2's list", () => {
 
   it("refuses a batch with a value that is not a byte, naming it", () => {
     expect(() =>
-      workspace.setConstants(agent, [
+      workspace.addConstants(agent, [
         { name: "FINE", value: 0x10 },
         { name: "TOO_BIG", value: 0x100 },
       ])
@@ -1372,7 +1388,7 @@ describe("the rest of trial 3's list", () => {
 
   it("binds several constant sites at once", () => {
     const sites = workspace.immediates(0x08).sites.slice(0, 2);
-    workspace.setConstant(agent, "ORANGE", 0x08);
+    workspace.addConstant(agent, "ORANGE", 0x08);
 
     const result = workspace.bindConstants(
       agent,

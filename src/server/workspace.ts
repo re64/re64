@@ -1674,9 +1674,13 @@ export class Workspace {
     source: string,
     id?: string
   ): EditResult & { decoder: string } {
-    const existing = (this.program().loaded.project.decoders ?? []).find(
-      (d) => d.id === id || (id === undefined && d.name === name)
-    );
+    // By id only. Falling back to a name match made the write's identity depend
+    // on what the caller had synced — a reader who had seen somebody else's
+    // decoder of that name replaced it, one who had not made a second — which is
+    // the offline/online asymmetry `set_region` and `set_constant` each had.
+    const existing = id === undefined
+      ? undefined
+      : (this.program().loaded.project.decoders ?? []).find((d) => d.id === id);
     // Minted here so it can be returned. A region refers to a decoder by id
     // (`view: "snippet:<id>"`), so writing one and then having to call
     // list_decoders to find out what it was called is a round trip for
@@ -2488,34 +2492,111 @@ export class Workspace {
    * reference disassembly names $01 both A_DIRECTION and WHITE — and guessing
    * which was meant is exactly what this design refuses to do.
    */
-  setConstant(caller: Caller, name: string, value: number): EditResult {
+  /**
+   * Declare a name for a byte value. **Always adds; never replaces.**
+   *
+   * It used to match an existing constant by name and reuse its id, which made
+   * the write's identity depend on what the caller had synced: a reader who had
+   * seen somebody else's `SHIELD = $04` silently replaced it, and one who had
+   * not produced a second constant. The same call, two outcomes — which is this
+   * project's own offline/online test failing, and the same defect `set_label`
+   * and `set_comment` were each fixed for.
+   *
+   * A name is prose somebody chose, not a key the system assigns meaning to, so
+   * two people can pick the same word for different things. That is why this is
+   * additive where `set_target` is rightly keyed by name: a target *is* its name.
+   */
+  addConstant(
+    caller: Caller,
+    name: string,
+    value: number
+  ): EditResult & { constant: string } {
     if (value < 0 || value > 0xff) {
       throw new Error(`A constant names a byte, so its value must be $00-$FF; got ${value}.`);
     }
+    // Minted here so it can be returned. `set_decoder` returned no id and two
+    // agents collided over it in experiment 3; a write whose result cannot be
+    // named again is a write the caller has to go looking for.
+    const id = newId("cst");
+    const result = this.edit(caller, () => [{ op: "constant.set", id, name, value }]);
+    return { ...result, constant: id };
+  }
+
+  /** Revise a declared constant, by id. */
+  editConstant(caller: Caller, id: string, name?: string, value?: number): EditResult {
+    if (value !== undefined && (value < 0 || value > 0xff)) {
+      throw new Error(`A constant names a byte, so its value must be $00-$FF; got ${value}.`);
+    }
     return this.edit(caller, (loaded) => {
-      const existing = loaded.constants.byName(name);
-      return [{ op: "constant.set", id: existing?.id ?? newId("cst"), name, value }];
+      const existing = loaded.constants.byId(id);
+      if (!existing) throw new Error(`No constant with id ${id}.`);
+      return [
+        {
+          op: "constant.set",
+          id,
+          name: name ?? existing.name,
+          value: value ?? existing.value,
+        },
+      ];
     });
   }
 
-  removeConstant(caller: Caller, name: string): EditResult {
+  /**
+   * Which constant a caller means, by id or by an unambiguous name.
+   *
+   * The same shape as `remove_label`, which takes an id or an address that names
+   * exactly one. An ambiguous name is refused and the candidates are listed,
+   * which is also how a caller learns the ids it should have passed.
+   */
+  private resolveConstant(loaded: LoadedProject, nameOrId: string): { id: string } {
+    const byId = loaded.constants.byId(nameOrId);
+    if (byId) return byId;
+
+    const held = loaded.constants.allByName(nameOrId);
+    if (held.length === 1) return held[0];
+    if (held.length === 0) throw new Error(`No constant called ${nameOrId}.`);
+    throw new Error(
+      `${held.length} constants are called ${nameOrId}: ` +
+        held
+          .map((c) => `${c.id} ($${c.value.toString(16).toUpperCase().padStart(2, "0")})`)
+          .join(", ") +
+        `. Say which by id.`
+    );
+  }
+
+  removeConstant(caller: Caller, nameOrId: string): EditResult {
     return this.edit(caller, (loaded) => {
-      const existing = loaded.constants.byName(name);
-      if (!existing) throw new Error(`No constant called ${name}.`);
+      const existing = this.resolveConstant(loaded, nameOrId);
       // Sites bound to it are left alone: a use pointing at nothing renders the
       // literal, so deleting needs no sweep and a delete racing a bind heals.
       return [{ op: "constant.delete", id: existing.id }];
     });
   }
 
+  /**
+   * Which declared constant a bind means, given the value the operand loads.
+   */
+  private bindTarget(loaded: LoadedProject, nameOrId: string, loads: number) {
+    const byId = loaded.constants.byId(nameOrId);
+    if (byId) return byId;
+
+    const held = loaded.constants.allByName(nameOrId);
+    if (held.length === 0) {
+      throw new Error(`No constant called ${nameOrId}. Declare it first with add_constant.`);
+    }
+    const matching = held.filter((c) => c.value === loads);
+    if (matching.length === 1) return matching[0];
+    if (matching.length === 0) return held[0];
+    throw new Error(
+      `${matching.length} constants are called ${nameOrId} with the same value: ` +
+        matching.map((c) => c.id).join(", ") +
+        `. Say which by id.`
+    );
+  }
+
   /** Say that the immediate at this address means a constant. */
   bindConstant(caller: Caller, address: number, name: string): EditResult {
     return this.edit(caller, (loaded) => {
-      const constant = loaded.constants.byName(name);
-      if (!constant) {
-        throw new Error(`No constant called ${name}. Declare it first with set_constant.`);
-      }
-
       const instruction = this.program().instructions.get(address);
       if (!instruction) {
         throw new Error(`No instruction at ${hex4(address)}; nothing there to read as a constant.`);
@@ -2525,6 +2606,17 @@ export class Workspace {
           `${hex4(address)} takes no immediate operand, so there is no value to name.`
         );
       }
+
+      // Resolved against the operand, which disambiguates for free: two
+      // constants sharing a name necessarily differ in value, and only one of
+      // them can be what this instruction loads. So `bind_constant $8100 WHITE`
+      // keeps working even where `WHITE` is held twice, and an id is needed only
+      // when two constants share a name *and* a value — which hygiene reports as
+      // duplication rather than ambiguity.
+      const constant = this.bindTarget(loaded, name, instruction.operand.value);
+      // Still checked: `bindTarget` falls back to the first constant of that
+      // name when none matches the operand, so this is what turns "you meant a
+      // different one" into a message rather than a silent wrong binding.
       if (instruction.operand.value !== constant.value) {
         throw new Error(
           `${hex4(address)} loads $${instruction.operand.value
@@ -2640,7 +2732,7 @@ export class Workspace {
 
   constants(): {
     total: number;
-    constants: { name: string; value: string; uses: number; boundAt: string[] }[];
+    constants: { id: string; name: string; value: string; uses: number; boundAt: string[] }[];
   } {
     const program = this.program();
 
@@ -2654,6 +2746,10 @@ export class Workspace {
         // appeared to answer.
         const sites = program.loaded.constants.sitesOf(c.id);
         return {
+          // Returned because declaring is additive: two constants can share a
+          // name, and without the id nothing downstream can say which one it
+          // means. The same gap `list_comments` had.
+          id: c.id,
           name: c.name,
           value: `$${c.value.toString(16).toUpperCase().padStart(2, "0")}`,
           uses: sites.length,
@@ -3083,7 +3179,7 @@ export class Workspace {
   }
 
   /** Declare several constants as one action. */
-  setConstants(
+  addConstants(
     caller: Caller,
     constants: readonly { name: string; value: number }[]
   ): EditResult {
@@ -3097,10 +3193,12 @@ export class Workspace {
       }
     }
 
-    return this.edit(caller, (loaded) =>
+    // Additive, like the single call: a batch that quietly revised whatever it
+    // matched would be the obvious way to get back the behaviour just removed.
+    return this.edit(caller, () =>
       constants.map((entry) => ({
         op: "constant.set",
-        id: loaded.constants.byName(entry.name)?.id ?? newId("cst"),
+        id: newId("cst"),
         name: entry.name,
         value: entry.value,
       }))

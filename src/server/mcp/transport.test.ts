@@ -108,6 +108,64 @@ describe("speaking the protocol", () => {
 
 });
 
+describe("declaring constants over the wire", () => {
+  /**
+   * The schema in front of `addConstant` is tested by nothing else.
+   *
+   * Both `run_block` bugs got through a green suite for exactly this reason:
+   * `Workspace` is tested thoroughly and the schema in front of it was not, so
+   * everything the tests exercised worked and the tool could not be called. This
+   * grew a tool and changed two schemas, so it grows a transport test.
+   */
+  it("adds rather than replaces, and hands back the id", async () => {
+    const first = await callTool("add_constant", { name: "SHIELD_FLAG", value: "$04" });
+    const second = await callTool("add_constant", { name: "SHIELD_FLAG", value: "$08" });
+    expect(first.isError).toBe(false);
+    expect(second.isError).toBe(false);
+
+    const a = (first.value as { constant: string }).constant;
+    const b = (second.value as { constant: string }).constant;
+    expect(a).not.toBe(b);
+
+    const listed = (await callTool("list_constants")).value as {
+      constants: { id: string; name: string; value: string }[];
+    };
+    const held = listed.constants.filter((c) => c.name === "SHIELD_FLAG");
+    expect(held.map((c) => c.value).sort()).toEqual(["$04", "$08"]);
+    // Ids are returned, or nothing downstream can say which one it means.
+    expect(held.every((c) => typeof c.id === "string" && c.id.length > 0)).toBe(true);
+  });
+
+  it("revises by id and refuses an ambiguous name", async () => {
+    const first = await callTool("add_constant", { name: "SHIELD_FLAG", value: "$04" });
+    await callTool("add_constant", { name: "SHIELD_FLAG", value: "$08" });
+
+    const edited = await callTool("edit_constant", {
+      id: (first.value as { constant: string }).constant,
+      name: "SHIELD_BIT",
+    });
+    expect(edited.isError).toBe(false);
+
+    const refused = await callTool("remove_constant", { name: "SHIELD_FLAG" });
+    expect(refused.isError).toBe(false);
+
+    await callTool("add_constant", { name: "SHIELD_BIT", value: "$10" });
+    const ambiguous = await callTool("remove_constant", { name: "SHIELD_BIT" });
+    expect(ambiguous.isError).toBe(true);
+    expect(ambiguous.text).toContain("Say which by id");
+  });
+
+  it("takes a hex string or a number for the value, like every other address", async () => {
+    // The `run_block` lesson: byte values had to be numbers while addresses could
+    // be `$8100`, so the API was inconsistent with itself and every caller found
+    // out by being rejected.
+    const hex = await callTool("add_constant", { name: "AS_HEX", value: "$0F" });
+    const dec = await callTool("add_constant", { name: "AS_NUMBER", value: 15 });
+    expect(hex.isError).toBe(false);
+    expect(dec.isError).toBe(false);
+  });
+});
+
 describe("working on a project", () => {
   it("orients from nothing", async () => {
     const { value } = await callTool("list_projects");
