@@ -392,9 +392,25 @@ over the span. Two of the four interpretations that exist today.
 
 It looked necessary because an 8,400-byte `data` claim called `zoneDataTable`
 dumps to completion before the forty strings inside it appear. But that claim
-**explains 1,680 of its own 8,400 bytes — 20%**. Splitting made a placeholder read
-tolerably, which is compensating in the display for a document problem: the mirror
-of a mistake this file already names in the other direction.
+**expresses 1,680 of its own 8,400 bytes — 20%**, and the missing 80% is not
+missing analysis. From the Camels write-up:
+
+> `$6700-$87CF`: 42 records of exactly 200 bytes, 152 bytes of template plus 8
+> scalars plus a 40-character name. **Verified** three ways — the banner lands on
+> `+$A0` in all 42, the code does `ADC #$C8`, and the credits say "THE GAME
+> CONSISTS OF FORTY TWO DIFFERENT ATTACK WAVES."
+
+…with nineteen template fields per creature type, "all named, all proved by the
+copy in `sub_9772` rather than guessed". The reader knew the record count, the
+stride, the field layout and the semantics. The model could hold **one field per
+record** — the name at `+$A0`, which is the 42 `text` claims — and the rest became
+one `data` blob with the finding living in prose.
+
+So `zoneDataTable` is not an early step in the analysis. It is the finished
+analysis, discarded, because the model had no shape for an array of structs.
+Splitting made that read tolerably, which is compensating in the display for a
+document problem: the mirror of a mistake this file already names in the other
+direction.
 
 Deleting the claim takes Camels from **6 gaps to 48**, and from **3,824
 unexplained bytes to 10,544**. One placeholder was keeping 42 entries out of the
@@ -406,13 +422,21 @@ So the rule underneath is about claims rather than rendering:
 > not explain is a placeholder, and a placeholder belongs in the gap list rather
 > than over it.
 
-Composition is the real answer for spans that genuinely have parts — a struct
-decomposing into fields — and it has to be **declared rather than inferred from
-containment**, because that is exactly the difference between "this is a struct"
-and "these are forty strings and forty unexplained runs". A hierarchy of
-interpretations, in which `text` is more specific than `data`, would also justify
-splitting; neither exists yet and inferring one from geometry is how you get a
-rule that is right on the case you tested and wrong on its transpose.
+Composition is the real answer for spans that genuinely have parts, and it has to
+be **declared rather than inferred from containment** — that is exactly the
+difference between "this is a struct" and "these are forty strings and forty
+unexplained runs". A hierarchy of interpretations, in which `text` is more
+specific than `data`, would also justify splitting; neither exists yet, and
+inferring one from geometry is how you get a rule that is right on the case you
+tested and wrong on its transpose.
+
+**"Handwritten assembler is too much of a mess for structs to matter" does not
+survive the second real program.** Camels has the 42-record zone table above, and
+it also has three blocks of the author's own BASIC-assembler source left in the
+image, stored as a genuine linked list — `[link lo][link hi][line# lo][line# hi]
+text $00`, and it was *the links resolving* that made the identification certain
+rather than a lucky run of printable bytes. A structure whose proof is that its
+pointers resolve is one the model cannot express, let alone check.
 
 On Gridrunner's contested span:
 
