@@ -61,6 +61,7 @@ import {
   markFunctionOps,
   parseProject,
   parseProjectAddress,
+  targetLinks,
   regionDeleteOp,
   regionSetOp,
   unmarkFunctionOps,
@@ -841,7 +842,8 @@ export class Workspace {
     total: number;
     targets: {
       name: string;
-      layers: string[];
+      /** The linked layers, bottom-up: the last one shadows the ones before. */
+      layers: { layer: string; name?: string; at?: string }[];
       entryPoints?: string[];
       order?: number;
       description?: string;
@@ -850,6 +852,9 @@ export class Workspace {
     layers: { id: string; name: string; type: string }[];
   } {
     const project = projectFromDoc(this.room.store.document());
+    const byId = new Map(
+      project.layers.filter((l) => l.id).map((l) => [l.id!, l] as const)
+    );
     return {
       ...(project.activeTarget ? { active: project.activeTarget } : {}),
       total: (project.targets ?? []).length,
@@ -863,7 +868,15 @@ export class Workspace {
         )
         .map((t) => ({
           name: t.name,
-          layers: t.layers,
+          // Links rather than a list of ids, in z-order, with `at` present only
+          // where this target puts a layer somewhere other than its own
+          // address. Reported because it is what decides shadowing, and because
+          // a layer-scoped claim's absolute address is this plus its offset.
+          layers: targetLinks(t).map((link) => ({
+            layer: link.layer,
+            ...(byId.get(link.layer) ? { name: byId.get(link.layer)!.name } : {}),
+            ...(link.at === undefined ? {} : { at: hex4(link.at) }),
+          })),
           ...(t.entryPoints
             ? { entryPoints: t.entryPoints.map((a) => hex4(parseProjectAddress(a))) }
             : {}),
@@ -883,7 +896,7 @@ export class Workspace {
   setTarget(
     caller: Caller,
     name: string,
-    layers?: readonly string[],
+    layers?: readonly (string | { layer: string; at?: number })[],
     entryPoints?: readonly number[],
     order?: number,
     description?: string
@@ -893,7 +906,8 @@ export class Workspace {
         .layers.filter((l) => l.id)
         .map((l) => l.id!)
     );
-    const unknown = (layers ?? []).filter((id) => !known.has(id));
+    const named = (layers ?? []).map((l) => (typeof l === "string" ? l : l.layer));
+    const unknown = named.filter((id) => !known.has(id));
     if (unknown.length) {
       throw new Error(
         `No layer ${unknown.join(", ")} in this project. list_targets shows the ` +
@@ -907,6 +921,15 @@ export class Workspace {
     const exists = held.some((t) => t.name === name);
     if (layers !== undefined && layers.length === 0) {
       throw new Error("A target with no layers shows nothing.");
+    }
+    // A layer linked twice is a stack that shadows itself, which has no reading
+    // — and unlike most things here it is a fact about the request rather than
+    // a judgement about the result, so refusing is right.
+    if (new Set(named).size !== named.length) {
+      throw new Error(
+        "A layer can be linked into a target once. Listing one twice would have " +
+          "it shadow itself, which has no reading."
+      );
     }
     if (!exists && layers === undefined) {
       throw new Error(

@@ -3555,6 +3555,60 @@ alone, so two people revising different parts of one target both survive. The
 CRDT path already held a `Y.Map` per target and needed only to stop writing keys
 the operation does not carry.
 
+### A target is a memory map, not an allowlist
+
+`target.layers` was a set of layer ids and the *project's* array held the
+z-order, so a target could say which layers were active and nothing could say
+where they sat or in what order. It is a list of **links** now — bottom-up, last
+shadows the rest, each optionally naming where its layer lands:
+
+```json
+"layers": ["lay_symbols", {"layer": "lay_runtime", "at": "$0100"}]
+```
+
+A bare id is a link at the layer's own address, which for a PRG is the header
+its file carries. Almost every entry is one, which is why that spelling is the
+short one — and it survives a round trip rather than being normalised into a
+form nobody typed.
+
+**This is what makes a layer a dumb byte resource**: it holds bytes and knows
+nothing about where it sits. Two things follow that nothing could do before.
+
+**Reordering the stack is a target edit.** This file has invoked z-order for
+years as the *reason* annotations belong to layers — "reordering the layer stack
+moves them with the bytes they describe" — and recorded, correctly, that there
+was no `layer.set` and so no operation behind it: "a documented behaviour with no
+operation behind it is worse than a missing feature, because it reads as
+supported." `set_target` with a reordered list performs it, and the missing op
+turns out not to have been missing so much as on the wrong object. Z-order is a
+property of an arrangement, not of a resource.
+
+**A layer can be linked into two targets at two addresses.** Not hypothetical on
+this machine: Revenge of the Mutant Camels moves its decruncher onto the stack
+page, so the same bytes are read at two addresses in two phases of the program's
+life. The loader target links it where it loads, the running target links it
+where it runs, and both are true.
+
+Three details worth keeping:
+
+- **A symbols layer is never linked and never filtered.** It supplies no bytes,
+  so it shadows nothing and occupies no range, and a target is a statement about
+  which bytes you are reading. Putting it in each target's list is also the
+  version that fails the offline test — writing a whole layer list to name one
+  address means two people doing so at once drop each other's layers.
+- **A link naming a layer the project no longer declares is skipped**, not
+  refused. Same rule as a dangling constant, a dangling type and a dangling
+  `primaryLabels` entry: a delete racing a link heals itself and nothing sweeps.
+- **A layer linked twice is refused**, which is the exception rather than the
+  rule here — a stack that shadows itself has no reading, and that is a fact
+  about the request rather than a judgement about the result.
+
+The existing fixtures were safe to reinterpret, and it was worth checking rather
+than assuming: both Camels projects list their targets in a different order from
+the project's own `layers` array, because the list was a set and order was
+ignored. Each target holds exactly one byte layer plus the symbols layer, so
+there is nothing to shadow and no analysis moves.
+
 ### Where a claim lives, and who decides (settled, not yet built)
 
 A claim is never global. It belongs to a **layer** or to a **target**, and

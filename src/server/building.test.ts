@@ -259,7 +259,9 @@ describe("building a project from a disk image", () => {
     camels.setTarget(builder, "loader", undefined, undefined, 1, "The file as the disk loads it");
 
     const [loader] = camels.targets().targets;
-    expect(loader.layers).toEqual([packed]);
+    // Links now, in z-order, rather than a bare list of ids: what a target
+    // holds is a memory map, and the last entry shadows the ones before it.
+    expect(loader.layers).toEqual([{ layer: packed, name: "packed" }]);
     expect(loader.order).toBe(1);
     expect(loader.description).toBe("The file as the disk loads it");
   });

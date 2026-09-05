@@ -23,6 +23,8 @@ import {
   parseProjectAddress,
   projectClaims,
   ProjectType,
+  targetLinks,
+  linksAsWritten,
 } from "../project/project.js";
 import { ClaimEdit, Op } from "./types.js";
 import { Claim } from "../claims/model.js";
@@ -200,7 +202,7 @@ export function diffProjects(from: Project, to: Project): Op[] {
     ops.push({
       op: "target.set",
       name,
-      layers: target.layers,
+      layers: linksAsWritten(targetLinks(target)),
       ...(target.entryPoints === undefined
         ? {}
         : { entryPoints: target.entryPoints.map((a) => parseProjectAddress(a)) }),

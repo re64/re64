@@ -206,13 +206,37 @@ export interface ProjectFile {
  * thing *is*; a target is chosen by name and referenced by nothing else, so
  * that does not arise.
  */
+/** A layer, linked into a target, optionally somewhere other than its own address. */
+export interface ProjectLink {
+  layer: string;
+  /** Where it lands in this target. Absent means the layer's own address. */
+  at?: number | string;
+}
+
 export interface ProjectTarget {
   name: string;
   /**
-   * Layer ids that are active. A layer not named here supplies no bytes, no
-   * labels and no comments while this target is selected.
+   * The layers linked into this target, bottom-up, and where each one lands.
+   *
+   * A **link**, not an allowlist. The order here is the z-order: the last entry
+   * shadows the ones before it, exactly as the project file's own `layers`
+   * array reads bottom-up. That is what makes a layer a dumb byte resource —
+   * it holds bytes and knows nothing about where it sits, and a target says
+   * where.
+   *
+   * Two things fall out. Reordering the stack becomes `target.set` with a
+   * reordered list, which is the operation this file has long documented the
+   * *behaviour* of without anything being able to perform it. And a layer can
+   * be linked into two targets at two addresses — which is not hypothetical on
+   * this machine, since Revenge of the Mutant Camels moves its decruncher onto
+   * the stack page and runs the same bytes from somewhere else.
+   *
+   * A bare string is a link at the layer's own address — the PRG header, or
+   * what the layer declares. The object form is for the case where this target
+   * puts it somewhere else. Almost every entry is a bare string, which is why
+   * that spelling is the short one.
    */
-  layers: string[];
+  layers: (string | ProjectLink)[];
   /**
    * Where disassembly starts, beyond what the active layers contribute.
    *
@@ -751,4 +775,37 @@ export function parseProject(json: string): Project {
   }
 
   return project;
+}
+
+/**
+ * A target's links, in z-order, whatever spelling the file used.
+ *
+ * One reader for both forms, so nothing downstream has to know that a bare
+ * string is the common case.
+ */
+export function targetLinks(target: ProjectTarget): { layer: string; at?: number }[] {
+  return target.layers.map((entry) =>
+    typeof entry === "string"
+      ? { layer: entry }
+      : {
+          layer: entry.layer,
+          ...(entry.at === undefined ? {} : { at: parseProjectAddress(entry.at) }),
+        }
+  );
+}
+
+/**
+ * Links as they are written down: a bare id where the layer sits at its own
+ * address, an object only where this target moves it.
+ *
+ * The inverse of `targetLinks`, and it exists so the short spelling survives a
+ * round trip. Normalising everything to objects would rewrite every target in
+ * every file into a form nobody typed, on the first edit that touched one.
+ */
+export function linksAsWritten(
+  links: readonly { layer: string; at?: number }[]
+): (string | { layer: string; at: number })[] {
+  return links.map((link) =>
+    link.at === undefined ? link.layer : { layer: link.layer, at: link.at }
+  );
 }

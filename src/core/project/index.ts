@@ -1,4 +1,6 @@
 export {
+  ProjectLink,
+  targetLinks,
   LegacyRegionKind,
   ProjectLayer,
   ProjectLabel,

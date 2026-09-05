@@ -32,6 +32,7 @@ import {
   projectRegionsToRegions,
   projectClaims,
   ProjectType,
+  targetLinks,
 } from "./project.js";
 import { derivedId } from "./identity.js";
 import { needsMigration, migrateToClaims } from "../claims/migrate.js";
@@ -121,18 +122,34 @@ export function projectForTarget(project: Project): Project {
   const target = project.targets?.find((t) => t.name === project.activeTarget);
   if (!target) return project;
 
-  const active = new Set(target.layers);
+  const links = targetLinks(target);
+  const declared = new Map(project.layers.filter((l) => l.id).map((l) => [l.id!, l] as const));
+
+  // A symbols layer is never linked and never filtered. It supplies no bytes,
+  // so it shadows nothing and occupies no range, and a target is a statement
+  // about which bytes you are reading — there is nothing for it to say about a
+  // layer that has none. Keeping it is also the only version that survives the
+  // offline test: putting it in each target's list meant writing that whole
+  // list to name an address, so two people doing so at once would drop one
+  // another's layers out of the view.
+  const symbols = project.layers.filter((l) => l.type === "symbols");
+
+  // The target's order *is* the z-order, bottom-up like the file's own `layers`
+  // array — which is what makes a layer a dumb byte resource and what finally
+  // gives the stack an operation that can reorder it. A link naming a layer the
+  // project no longer declares is skipped rather than refused: a delete racing
+  // a link heals itself, the same rule a dangling constant follows.
+  const linked = links.flatMap((link) => {
+    const layer = declared.get(link.layer);
+    if (!layer || layer.type === "symbols") return [];
+    // Where it lands *here*. Absent means the layer's own address, which for a
+    // PRG is the header its file carries.
+    return [link.at === undefined ? layer : { ...layer, address: link.at }];
+  });
+
   return {
     ...project,
-    // A symbols layer is never filtered out. It supplies no bytes, so it shadows
-    // nothing and occupies no range, and a target is a view over *which bytes
-    // you are reading* — there is nothing for it to say about a layer that has
-    // none. Keeping it is also the only version that survives the offline test:
-    // adding it to each target meant writing each target's whole layer list, so
-    // two people naming an address at the same time would drop one another's
-    // layers out of the view, and a name written offline would land in a target
-    // made since.
-    layers: project.layers.filter((l) => l.id && (l.type === "symbols" || active.has(l.id))),
+    layers: [...symbols, ...linked],
     // The target's own list replaces the project's: the same field meaning two
     // things depending on whether a target is selected is how "entryPoints said
     // 2 while decodeStartsFrom said 19" happened.

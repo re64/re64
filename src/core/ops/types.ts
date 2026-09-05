@@ -146,7 +146,14 @@ export interface ConstantSetOp {
 export interface TargetSetOp {
   op: "target.set";
   name: string;
-  layers?: string[];
+  /**
+   * The linked layers, bottom-up, and where each lands.
+   *
+   * Order is z-order, so this is also how the stack is reordered — the
+   * operation this project documented the behaviour of for a long time without
+   * anything being able to perform it.
+   */
+  layers?: (string | { layer: string; at?: number })[];
   entryPoints?: number[];
   order?: number;
   description?: string;

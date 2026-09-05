@@ -795,6 +795,54 @@ describe("editing as an agent", () => {
     expect(covering.claims.length).toBeGreaterThan(0);
   });
 
+  it("links a layer into a target at a chosen address, and reports the link", async () => {
+    // The schema in front of `setTarget` is the only layer that catches this:
+    // `layers` used to be a plain array of ids, and a caller passing the object
+    // form would have been rejected with the logic underneath working fine.
+    const targets = (await callTool("list_targets", {})).value as {
+      layers: { id: string; name: string }[];
+    };
+    const layer = targets.layers[0].id;
+
+    const made = await callTool("set_target", {
+      name: "relocated",
+      layers: [{ layer, at: "$0100" }],
+    });
+    expect(made.isError).toBeFalsy();
+
+    const after = (await callTool("list_targets", {})).value as {
+      targets: { name: string; layers: { layer: string; at?: string }[] }[];
+    };
+    const relocated = after.targets.find((t) => t.name === "relocated")!;
+    // Reported, because it is what decides shadowing — and because a
+    // layer-scoped claim's absolute address is this plus its offset.
+    expect(relocated.layers).toEqual([{ layer, name: expect.any(String), at: "$0100" }]);
+  });
+
+  it("keeps the short spelling for a layer at its own address", async () => {
+    const targets = (await callTool("list_targets", {})).value as {
+      layers: { id: string }[];
+    };
+    const layer = targets.layers[0].id;
+
+    await callTool("set_target", { name: "plain", layers: [layer] });
+    const after = (await callTool("list_targets", {})).value as {
+      targets: { name: string; layers: { layer: string; at?: string }[] }[];
+    };
+    // No `at`: the layer sits where its own header puts it, and saying so
+    // would be inventing a fact the target does not hold.
+    expect(after.targets.find((t) => t.name === "plain")!.layers[0].at).toBeUndefined();
+  });
+
+  it("refuses to link one layer twice, which would shadow itself", async () => {
+    const targets = (await callTool("list_targets", {})).value as { layers: { id: string }[] };
+    const layer = targets.layers[0].id;
+
+    const refused = await callTool("set_target", { name: "doubled", layers: [layer, layer] });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/once/i);
+  });
+
   it("says where decoding starts, and which of those it can take back", async () => {
     const before = await callTool("list_roots", {});
     const listed = before.value as {

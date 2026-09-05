@@ -21,6 +21,8 @@ import {
   ProjectRegion,
   parseProject,
   parseProjectAddress,
+  targetLinks,
+  linksAsWritten,
 } from "../project/project.js";
 import {
   bindConstant,
@@ -352,7 +354,7 @@ export function invertOp(raw: string, op: Op): Op {
         ? {
             op: "target.set",
             name: held.name,
-            layers: held.layers,
+            layers: linksAsWritten(targetLinks(held)),
             ...(held.entryPoints === undefined
               ? {}
               : { entryPoints: held.entryPoints.map((a) => parseProjectAddress(a)) }),
@@ -366,7 +368,7 @@ export function invertOp(raw: string, op: Op): Op {
       return {
         op: "target.set",
         name: held.name,
-        layers: held.layers,
+        layers: linksAsWritten(targetLinks(held)),
         ...(held.entryPoints === undefined
           ? {}
           : { entryPoints: held.entryPoints.map((a) => parseProjectAddress(a)) }),

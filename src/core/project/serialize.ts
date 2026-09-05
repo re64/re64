@@ -14,6 +14,7 @@
 
 import {
   ProjectType,
+  ProjectLink,
   Project,
   ProjectComment,
   ProjectConstant,
@@ -413,7 +414,7 @@ export function upsertTarget(
   raw: string,
   target: {
     name: string;
-    layers?: string[];
+    layers?: (string | ProjectLink)[];
     entryPoints?: number[];
     order?: number;
     description?: string;

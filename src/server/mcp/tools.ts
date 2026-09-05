@@ -1418,11 +1418,17 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
 
   tool(
     "set_target",
-    "Declare a named view: which layers are active, and where disassembly " +
-      "starts beyond what those layers contribute. A project holding a packed " +
-      "file and the image it unpacks to can be read as the bytes load or as the " +
-      "program runs — one target each — because the second must shadow the " +
-      "first. Annotations belong to layers, so they follow activation. " +
+    "Declare a named view: which layers are linked in, in what order, where " +
+      "each one lands, and where disassembly starts beyond what they " +
+      "contribute. A project holding a packed file and the image it unpacks to " +
+      "can be read as the bytes load or as the program runs — one target each — " +
+      "because the second must shadow the first. Annotations belong to layers, " +
+      "so they follow linking. " +
+      "**The order is the z-order**, bottom-up: the last layer shadows the ones " +
+      "before it. So reordering the stack is this call with a reordered list. " +
+      "A bare layer id links it at its own address — a PRG's is in its own " +
+      "header — and `{layer, at}` puts it somewhere else, which is what a " +
+      "program relocating its own code needs. " +
       "The list is a history of the program's life — loader, then the image it " +
       "expands into, then whatever it loads later — so `order` says where this " +
       "sits and `description` says what the phase is. " +
@@ -1432,7 +1438,22 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     {
       project,
       name: z.string().min(1),
-      layers: z.array(z.string()).min(1).optional().describe("Layer ids, from list_targets; omit to leave them as they are"),
+      layers: z
+        .array(
+          z.union([
+            z.string(),
+            z.strictObject({
+              layer: z.string(),
+              at: address.describe("Where this layer lands in this target"),
+            }),
+          ])
+        )
+        .min(1)
+        .optional()
+        .describe(
+          "Bottom-up, so the last shadows the rest. Layer ids from list_targets; " +
+            "omit to leave the links as they are"
+        ),
       entryPoints: z.array(address).optional(),
       order: z
         .number()
