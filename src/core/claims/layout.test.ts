@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { layoutClaims, describeAlternate } from "./layout.js";
 import { ClaimSet } from "./set.js";
-import { Claim } from "./model.js";
+import { Claim, arrayExtent } from "./model.js";
 import { claimsFromProject } from "./adapt.js";
 import { loadProjectFile } from "../../node-files.js";
 
@@ -90,5 +90,34 @@ describe("laying out claims that disagree", () => {
     const forward = layoutClaims(new ClaimSet(claims), 0x1000, 0x1040);
     const backward = layoutClaims(new ClaimSet([...claims].reverse()), 0x1000, 0x1040);
     expect(forward).toEqual(backward);
+  });
+});
+
+describe("the extent bug this design must not be able to restate", () => {
+  it("a code root offers no offsets to operand rendering", () => {
+    // `mark_function` once declared a routine's extent, sharing the field with
+    // the one that makes `LDA SCREEN_RAM + $000F,X` render. Declaring a routine
+    // therefore turned `BPL loc_8050` into `BPL UpdateExplosion + $0010`.
+    //
+    // Root and extent are orthogonal fields here, so the shape permits the
+    // combination and the constraint has to be stated instead.
+    const routine: Claim = {
+      id: "r", at: 0x8040, extent: 0x40, name: "UpdateExplosion",
+      root: "routine", by: by("marcus"),
+    };
+    const array: Claim = {
+      id: "a", at: 0x0400, extent: 0x3e8, name: "SCREEN_RAM",
+      says: { is: "data" }, by: by("marcus"),
+    };
+    const sprites: Claim = {
+      id: "s", at: 0x2000, extent: 0x800, name: "spriteBank",
+      says: { is: "bitmap" }, root: "data", by: by("marcus"),
+    };
+
+    expect(arrayExtent(routine)).toBeUndefined();
+    expect(arrayExtent(array)).toBe(0x3e8);
+    // A *data* root is still an array: it is rooted so it renders at all, which
+    // says nothing about whether operands may index it.
+    expect(arrayExtent(sprites)).toBe(0x800);
   });
 });

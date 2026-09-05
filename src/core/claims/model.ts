@@ -124,6 +124,30 @@ export interface Claim {
   readonly by: Provenance;
 }
 
+/**
+ * The extent an *operand* may render an offset against.
+ *
+ * Not simply `claim.extent`, and the difference is a bug this project already
+ * paid for. `mark_function` used to declare a routine's extent, sharing the field
+ * with the one that makes `LDA SCREEN_RAM + $000F,X` render — so declaring a
+ * routine turned `BPL loc_8050` into `BPL UpdateExplosion + $0010`, because every
+ * branch target inside it started rendering as an offset into its name.
+ *
+ * The fix then was to stop routines declaring extents at all, since a routine's
+ * extent is derived and 20 of 50 in the reference project are not even
+ * contiguous. Here the fields are orthogonal — a claim may carry a root *and* an
+ * extent — so the constraint has to be stated rather than implied by the shape.
+ *
+ * A code root's extent, if somebody writes one, is a span to *show*; it is never
+ * an array to index into. Only a claim about data offers offsets.
+ */
+export function arrayExtent(claim: Claim): number | undefined {
+  if (claim.root === "entry" || claim.root === "routine" || claim.root === "location") {
+    return undefined;
+  }
+  return claim.extent;
+}
+
 /** One past the last byte a claim covers. A point claim covers one address. */
 export function claimEnd(claim: Claim): number {
   return claim.at + (claim.extent ?? 1);
