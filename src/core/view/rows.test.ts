@@ -55,6 +55,7 @@ function project(
   return {
     project: { layers: [], entryPoints: [ORG] },
     map,
+    claims: [],
     prgEntries: [ORG],
     userLabels,
     comments: new CommentIndex(),

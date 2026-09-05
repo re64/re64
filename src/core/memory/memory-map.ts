@@ -107,6 +107,13 @@ export class MemoryMap {
       index.addLabels(layer.getLabels());
       index.addLabels(layer.regions.generateLabels());
     }
+    // Names from claims, which are project-level and belong to no layer.
+    //
+    // Not filtered by a target, for the reason a symbols layer never was: a
+    // claim may name an address nothing supplies, so there is no layer for a
+    // view to include or exclude it with. Most of these are exactly what used
+    // to require a symbols layer — zero page, I/O registers, KERNAL entries.
+    index.addLabels(this.claimLabels);
     index.setPrimaryLabels(this.primaryLabels);
     // Applied here rather than by the caller: this returns a fresh index every
     // call, so anything set on the result is discarded.
@@ -132,6 +139,15 @@ export class MemoryMap {
    * The effective region kind at an address, falling back to the owning
    * layer's default. Undefined where no layer supplies a byte.
    */
+  /**
+   * Names derived from project-level claims.
+   *
+   * Held here rather than pushed onto a layer because a claim has no owning
+   * layer — which is the whole point of moving them up, and what deletes the
+   * apparatus that created a symbols layer just to give an annotation a home.
+   */
+  readonly claimLabels: Label[] = [];
+
   getKindAt(address: number): RegionKind | undefined {
     const layer = this.readByteWithSource(address)?.layer;
     return layer ? layerKindAt(layer, address) : undefined;

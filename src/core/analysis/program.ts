@@ -163,12 +163,26 @@ function entryPointsFor(loaded: LoadedProject, override?: number[]): number[] {
     .filter((r) => r.kind === "code")
     .map((r) => r.start);
 
+  // Roots read from the claims directly, not through the labels they project
+  // to. A named claim's root arrives as a label type and is already covered
+  // above; an *unnamed* one produces no label at all, and would otherwise seed
+  // nothing — which is exactly what a `code` region with no name used to do, and
+  // what this list exists to preserve.
+  //
+  // `data` roots are excluded: they say "surface these bytes regardless of what
+  // reaches them", which is a statement about rendering, not about where the
+  // walk begins. Seeding from them would decode every declared span as code.
+  const fromRoots = loaded.claims
+    .filter((c) => c.root !== undefined && c.root !== "data")
+    .map((c) => c.at);
+
   if (override?.length) return override;
 
   const declared = project.entryPoints?.map(parseProjectAddress) ?? [];
-  if (declared.length > 0) return [...declared, ...fromLabels, ...fromCodeRegions];
-  if (prgEntries.length > 0) return [...prgEntries, ...fromLabels, ...fromCodeRegions];
-  return [...fromLabels, ...fromCodeRegions];
+  if (declared.length > 0) return [...declared, ...fromLabels, ...fromCodeRegions, ...fromRoots];
+  if (prgEntries.length > 0)
+    return [...prgEntries, ...fromLabels, ...fromCodeRegions, ...fromRoots];
+  return [...fromLabels, ...fromCodeRegions, ...fromRoots];
 }
 
 /**

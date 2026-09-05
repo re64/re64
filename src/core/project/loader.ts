@@ -13,7 +13,8 @@ import { BytesLayer, Layer } from "../memory/layer.js";
 import { FileLayer } from "../memory/file-layer.js";
 import { SymbolLayer } from "../memory/symbol-layer.js";
 import { MemoryMap } from "../memory/memory-map.js";
-import { LabelIndex, LabelUse } from "../memory/label.js";
+import { Label, LabelIndex, LabelType, LabelUse, createUserLabel } from "../memory/label.js";
+import { Region, RegionKind, createUserRegion } from "../memory/region.js";
 import { CommentIndex } from "../memory/comment.js";
 import { ConstantIndex } from "../memory/constant.js";
 import { createC64PlatformLayer } from "../c64/symbols.js";
@@ -27,8 +28,10 @@ import {
   projectLabelUses,
   projectLabelsToLabels,
   projectRegionsToRegions,
+  projectClaims,
 } from "./project.js";
 import { derivedId } from "./identity.js";
+import { Claim, Interpretation, arrayExtent } from "../claims/model.js";
 
 /** How the loader gets at file bytes, so core stays free of node:fs. */
 export interface FileLoader {
@@ -53,6 +56,13 @@ export interface LoadedProject {
    * address", and the answer does not depend on which layer holds it.
    */
   comments: CommentIndex;
+  /**
+   * Every claim, resolved.
+   *
+   * The stored form. `userLabels` and each layer's `regions` are views derived
+   * from it, which is why nothing else needs to know claims exist yet.
+   */
+  claims: Claim[];
   /** Names for values, and which operands mean them. */
   constants: ConstantIndex;
   /**
@@ -118,6 +128,64 @@ export function projectForTarget(project: Project): Project {
       ? { entryPoints: undefined }
       : { entryPoints: target.entryPoints }),
   };
+}
+
+/**
+ * The kind a claim's interpretation projects to.
+ *
+ * There is no `code` and no `unknown`, which is the redesign in one mapping:
+ * code is what bytes are when nobody has said otherwise, and the absence of a
+ * claim is what `unknown` always meant.
+ */
+const KIND_FOR_SAYS: Record<Interpretation["is"], RegionKind> = {
+  data: "data",
+  text: "text",
+  bitmap: "bitmap",
+  jumptable: "jumptable",
+};
+
+function regionFromClaim(claim: Claim): Region {
+  const says = claim.says!;
+  return createUserRegion({
+    id: claim.id,
+    start: claim.at,
+    end: claim.at + (claim.extent ?? 1),
+    kind: KIND_FOR_SAYS[says.is],
+    ...(claim.name !== undefined ? { name: claim.name } : {}),
+    ...(says.is === "text" && says.encoding ? { encoding: says.encoding } : {}),
+    ...(says.is === "bitmap" && says.view ? { view: says.view } : {}),
+  });
+}
+
+/**
+ * The label type a claim's root projects to.
+ *
+ * `entry`, `function` and `code` are all decode roots and behave alike today,
+ * which is exactly why this file's own guidance says not to collapse them: they
+ * diverge the moment anything reasons about a call graph.
+ */
+const TYPE_FOR_ROOT: Record<string, LabelType> = {
+  entry: "entry",
+  routine: "function",
+  location: "code",
+};
+
+function labelFromClaim(claim: Claim): Label {
+  const label = createUserLabel(
+    claim.id,
+    claim.at,
+    claim.name!,
+    (claim.root && TYPE_FOR_ROOT[claim.root]) ?? "address",
+    undefined,
+    // Only a claim about data offers offsets to operand rendering. A code root
+    // carrying an extent must not, or declaring a routine turns `BPL loc_8050`
+    // into `BPL UpdateExplosion + $0010` — the bug `arrayExtent` exists for.
+    arrayExtent(claim)
+  );
+  // A gloss on what a name means, where somebody other than this project decided
+  // — deliberately not a comment, which is what somebody wrote about an address
+  // *in* this project.
+  return claim.description === undefined ? label : { ...label, description: claim.description };
 }
 
 export function buildMemoryMap(
@@ -187,6 +255,35 @@ export function buildMemoryMap(
     map.addLayer(layer);
   });
 
+  // Claims, projected onto the structures the analysis already reads.
+  //
+  // A one-way derivation: claims are the stored form, `Region` and `Label` are
+  // views over them. **Additive for now**, alongside the layer-declared labels
+  // and regions rather than instead of them, so a file written either way loads
+  // identically and every existing write path keeps working. The legacy reads
+  // go when the write path cuts over; doing both at once would put the change
+  // that can move the listing in the same commit as the change that cannot. Regions must land on the layer *supplying* their bytes,
+  // because `getKindAt` asks the topmost such layer — that z-order is what
+  // decides which reading of a shadowed address wins. Labels may land anywhere,
+  // since `getLabels()` concatenates, so they go to the map rather than to a
+  // layer that would only be arbitrary.
+  const claims = projectClaims(project.claims);
+  for (const claim of claims) {
+    if (claim.says) {
+      const owner = map.layerAt(claim.at);
+      // No layer supplies these bytes in this target, so there is nothing here
+      // to interpret. The claim is not lost — it simply says nothing about a
+      // view that does not load what it describes.
+      if (!owner) continue;
+      owner.regions.addRegion(regionFromClaim(claim));
+      continue;
+    }
+    if (claim.name === undefined) continue;
+    const label = labelFromClaim(claim);
+    userLabels.addLabel(label);
+    map.claimLabels.push(label);
+  }
+
   for (const [address, labelId] of Object.entries(project.primaryLabels ?? {})) {
     map.primaryLabels.set(parseProjectAddress(address), labelId);
   }
@@ -195,5 +292,5 @@ export function buildMemoryMap(
   // one each call, so a binding set on the result would be thrown away.
   for (const use of labelUses) map.labelUses.set(use.address, use.labelId);
 
-  return { project, map, prgEntries, userLabels, comments, constants, layers };
+  return { project, map, prgEntries, userLabels, comments, constants, layers, claims };
 }
