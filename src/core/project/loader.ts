@@ -13,7 +13,8 @@ import { BytesLayer, Layer } from "../memory/layer.js";
 import { FileLayer } from "../memory/file-layer.js";
 import { SymbolLayer } from "../memory/symbol-layer.js";
 import { MemoryMap } from "../memory/memory-map.js";
-import { Label, LabelIndex, LabelType, LabelUse, createUserLabel } from "../memory/label.js";
+import { LabelType } from "../memory/label-type.js";
+import { NameIndex, LabelUse } from "../claims/names.js";
 import { Region, RegionKind, createUserRegion } from "../memory/region.js";
 import { CommentIndex } from "../memory/comment.js";
 import { ConstantIndex } from "../memory/constant.js";
@@ -49,7 +50,7 @@ export interface LoadedProject {
   /** Load addresses of PRG layers that did not suppress their entry point. */
   prgEntries: number[];
   /** Every user label across all layers, for entry point collection. */
-  userLabels: LabelIndex;
+  userLabels: NameIndex;
   /**
    * Everything written about an address, across all layers.
    *
@@ -159,34 +160,22 @@ function regionFromClaim(claim: Claim): Region {
 }
 
 /**
- * The label type a claim's root projects to.
+ * A claim, as the name index takes it.
  *
- * `entry`, `function` and `code` are all decode roots and behave alike today,
- * which is exactly why this file's own guidance says not to collapse them: they
- * diverge the moment anything reasons about a call graph.
+ * This was `labelFromClaim`, building a parallel `Label` record out of every
+ * field the claim already had. What is left is the one thing that conversion
+ * was actually *doing*: narrowing the extent.
+ *
+ * Only a claim about data offers offsets to operand rendering. A code root
+ * carrying an extent must not, or declaring a routine turns `BPL loc_8050` into
+ * `BPL UpdateExplosion + $0010` — the bug `arrayExtent` exists for, and the
+ * reason this is a function rather than nothing at all.
  */
-const TYPE_FOR_ROOT: Record<string, LabelType> = {
-  entry: "entry",
-  routine: "function",
-  location: "code",
-};
-
-function labelFromClaim(claim: Claim): Label {
-  const label = createUserLabel(
-    claim.id,
-    claim.at,
-    claim.name!,
-    (claim.root && TYPE_FOR_ROOT[claim.root]) ?? "address",
-    undefined,
-    // Only a claim about data offers offsets to operand rendering. A code root
-    // carrying an extent must not, or declaring a routine turns `BPL loc_8050`
-    // into `BPL UpdateExplosion + $0010` — the bug `arrayExtent` exists for.
-    arrayExtent(claim)
-  );
-  // A gloss on what a name means, where somebody other than this project decided
-  // — deliberately not a comment, which is what somebody wrote about an address
-  // *in* this project.
-  return claim.description === undefined ? label : { ...label, description: claim.description };
+function nameClaim(claim: Claim): Claim {
+  const extent = arrayExtent(claim);
+  if (extent === claim.extent) return claim;
+  const { extent: _dropped, ...rest } = claim;
+  return extent === undefined ? rest : { ...rest, extent };
 }
 
 export function buildMemoryMap(
@@ -206,7 +195,7 @@ export function buildMemoryMap(
 
   const map = new MemoryMap();
   const prgEntries: number[] = [];
-  const userLabels = new LabelIndex();
+  const userLabels = new NameIndex();
   const comments = new CommentIndex();
   const constants = new ConstantIndex();
   // Held until the merged index exists: a site can name a label in any layer.
@@ -280,17 +269,22 @@ export function buildMemoryMap(
   // layer that would only be arbitrary.
   const claims = projectClaims(project.claims);
   for (const claim of claims) {
+    // One claim, two things it may say, and both are read here.
+    //
+    // A named span used to be two objects: a region, plus a label the region
+    // generated at its start. Splitting them is what created the rank the
+    // generated label needed — and dropping the generation without reading the
+    // name here is what made `characterSetData` render as `dat_8E00`, which the
+    // golden hash caught within a minute.
     if (claim.says) {
       const owner = map.layerAt(claim.at);
       // No layer supplies these bytes in this target, so there is nothing here
       // to interpret. The claim is not lost — it simply says nothing about a
       // view that does not load what it describes.
-      if (!owner) continue;
-      owner.regions.addRegion(regionFromClaim(claim));
-      continue;
+      if (owner) owner.regions.addRegion(regionFromClaim(claim));
     }
     if (claim.name === undefined) continue;
-    const label = labelFromClaim(claim);
+    const label = nameClaim(claim);
     userLabels.addLabel(label);
     map.claimLabels.push(label);
   }

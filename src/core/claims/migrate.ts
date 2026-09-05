@@ -32,7 +32,7 @@
  */
 
 import { Project, ProjectClaim, parseProjectAddress } from "../project/project.js";
-import { LabelType } from "../memory/label.js";
+import { LabelType } from "../memory/label-type.js";
 import { RegionKind } from "../memory/region.js";
 import { RootKind } from "./model.js";
 import { derivedId } from "../project/identity.js";

@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { DecodeGraph } from "./graph.js";
 import { reachFrom, Root } from "./reach.js";
-import { claimsFromProject } from "./adapt.js";
 import { ClaimSet, disagreements, describeDisagreement, LayerPlacement } from "./set.js";
 import { codeInsideClaims, unreachedClaims, describeFinding } from "./review.js";
 import { Claim } from "./model.js";
@@ -20,7 +19,7 @@ const build = (path: string) => {
   const loaded = loadProjectFile(path);
   const program = analyzeProgram(loaded);
   const graph = DecodeGraph.build(loaded.map);
-  const { claims, stats } = claimsFromProject(loaded);
+  const claims = loaded.claims;
 
   const roots: Root[] = [
     ...program.entryPoints.map((address) => ({ address, kind: "code" as const, why: "entryPoint" })),
@@ -30,7 +29,7 @@ const build = (path: string) => {
   ];
   const reach = reachFrom(graph, roots, { operands: true });
   const set = new ClaimSet(claims);
-  return { loaded, program, graph, reach, set, stats };
+  return { loaded, program, graph, reach, set, claims };
 };
 
 describe("what the claim model recovers", () => {
@@ -60,18 +59,27 @@ describe("what the claim model recovers", () => {
     expect(recovered.length).toBe(0);
   });
 
-  it("reduces the vocabulary: code regions lose their spans, unknown vanishes", () => {
+  it("reduces the vocabulary: no code claims, and nothing says `unknown`", () => {
+    // The counts this used to print came from a measurement adapter that ran
+    // beside the real conversion. The adapter is gone because the conversion is
+    // the only path now, so the property is asserted rather than reported: a
+    // claim never says `code`, because code is what bytes are when nobody has
+    // said otherwise, and it never says `unknown`, because that was the absence
+    // of a claim wearing the name of a kind.
     for (const path of [
       "assets/gridrunner/gridrunner.re64",
       "experiments/07-scale/run/final.re64",
     ]) {
-      const { stats, set } = build(path);
-      // eslint-disable-next-line no-console
-      console.log(
-        `${path.split("/").pop()}: claims=${set.size} fromLabels=${stats.fromLabels} ` +
-        `fromRegions=${stats.fromRegions} codeRegionsDemoted=${stats.codeRegionsDemoted} ` +
-        `unknownDropped=${stats.unknownRegionsDropped}`
-      );
+      const { claims } = build(path);
+      const said = new Set(claims.map((c) => c.says?.is).filter(Boolean));
+      expect([...said].sort()).not.toContain("code");
+      expect([...said].sort()).not.toContain("unknown");
+      // And every claim says *something*: a name, a reading, or a root.
+      for (const claim of claims) {
+        expect(
+          claim.name !== undefined || claim.says !== undefined || claim.root !== undefined
+        ).toBe(true);
+      }
     }
   });
 

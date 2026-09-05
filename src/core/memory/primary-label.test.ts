@@ -1,5 +1,20 @@
 import { describe, it, expect } from "vitest";
-import { LabelIndex, createUserLabel, createPlatformLabel } from "./label.js";
+import { NameIndex, platformClaim } from "../claims/names.js";
+import { Claim } from "../claims/model.js";
+import { LabelType } from "./label-type.js";
+
+/** A name somebody chose: a claim, with the root its type asks for. */
+const userClaim = (id: string, at: number, name: string, type: LabelType = "address", extent?: number): Claim => ({
+  id,
+  at,
+  name,
+  ...(type === "entry" ? { root: "entry" as const } : {}),
+  ...(type === "function" ? { root: "routine" as const } : {}),
+  ...(type === "code" ? { root: "location" as const } : {}),
+  ...(extent === undefined ? {} : { extent }),
+  by: { author: "test", source: "user" },
+});
+
 import { MemoryMap } from "./memory-map.js";
 import { SymbolLayer } from "./symbol-layer.js";
 
@@ -11,8 +26,8 @@ import { SymbolLayer } from "./symbol-layer.js";
  * different orders have to agree on what to display.
  */
 
-const index = (labels: ReturnType<typeof createUserLabel>[]) => {
-  const idx = new LabelIndex();
+const index = (labels: Claim[]) => {
+  const idx = new NameIndex();
   idx.addLabels(labels);
   return idx;
 };
@@ -22,8 +37,8 @@ describe("resolution is independent of insertion order", () => {
     // This is the bug the primary index exists to close: comparing rank alone
     // left equal-ranked labels in insertion order, so these two resolved
     // differently from identical data.
-    const zebra = createUserLabel("lbl_z", 0x8000, "Zebra", "address");
-    const alpha = createUserLabel("lbl_a", 0x8000, "Alpha", "address");
+    const zebra = userClaim("lbl_z", 0x8000, "Zebra", "address");
+    const alpha = userClaim("lbl_a", 0x8000, "Alpha", "address");
 
     expect(index([zebra, alpha]).resolve(0x8000)?.label.name).toBe(
       index([alpha, zebra]).resolve(0x8000)?.label.name
@@ -32,16 +47,16 @@ describe("resolution is independent of insertion order", () => {
 
   it("breaks a rank tie by id, not by name", () => {
     // By id, so renaming a label does not silently move the primary.
-    const first = createUserLabel("lbl_a", 0x8000, "Zebra", "address");
-    const second = createUserLabel("lbl_b", 0x8000, "Alpha", "address");
+    const first = userClaim("lbl_a", 0x8000, "Zebra", "address");
+    const second = userClaim("lbl_b", 0x8000, "Alpha", "address");
 
     expect(index([first, second]).resolve(0x8000)?.label.id).toBe("lbl_a");
     expect(index([second, first]).resolve(0x8000)?.label.id).toBe("lbl_a");
   });
 
   it("still prefers a higher-ranked source over a lower one", () => {
-    const user = createUserLabel("lbl_zzz", 0xffd2, "ROM_CHROUT", "address");
-    const platform = createPlatformLabel("lbl_aaa", 0xffd2, "CHROUT");
+    const user = userClaim("lbl_zzz", 0xffd2, "ROM_CHROUT", "address");
+    const platform = platformClaim("lbl_aaa", 0xffd2, "CHROUT");
 
     expect(index([platform, user]).resolve(0xffd2)?.label.name).toBe("ROM_CHROUT");
   });
@@ -49,10 +64,10 @@ describe("resolution is independent of insertion order", () => {
 
 describe("explicit primary", () => {
   const two = () => {
-    const idx = new LabelIndex();
+    const idx = new NameIndex();
     idx.addLabels([
-      createUserLabel("lbl_a", 0x8000, "Alpha", "address"),
-      createUserLabel("lbl_b", 0x8000, "Beta", "address"),
+      userClaim("lbl_a", 0x8000, "Alpha", "address"),
+      userClaim("lbl_b", 0x8000, "Beta", "address"),
     ]);
     return idx;
   };
@@ -66,10 +81,10 @@ describe("explicit primary", () => {
   });
 
   it("promotes a lower-ranked label when asked", () => {
-    const idx = new LabelIndex();
+    const idx = new NameIndex();
     idx.addLabels([
-      createUserLabel("lbl_u", 0xffd2, "ROM_CHROUT", "address"),
-      createPlatformLabel("lbl_p", 0xffd2, "CHROUT"),
+      userClaim("lbl_u", 0xffd2, "ROM_CHROUT", "address"),
+      platformClaim("lbl_p", 0xffd2, "CHROUT"),
     ]);
     idx.setPrimaryLabels(new Map([[0xffd2, "lbl_p"]]));
 
@@ -93,7 +108,7 @@ describe("explicit primary", () => {
 
   it("leaves other addresses alone", () => {
     const idx = two();
-    idx.addLabel(createUserLabel("lbl_c", 0x9000, "Gamma", "address"));
+    idx.addLabel(userClaim("lbl_c", 0x9000, "Gamma", "address"));
     idx.setPrimaryLabels(new Map([[0x8000, "lbl_b"]]));
 
     expect(idx.resolve(0x9000)?.label.id).toBe("lbl_c");
@@ -105,8 +120,8 @@ describe("the map carries the project's choice", () => {
     const map = new MemoryMap();
     map.addLayer(
       new SymbolLayer("syms", [
-        createUserLabel("lbl_a", 0xd016, "VIC_CTRL2", "address"),
-        createUserLabel("lbl_b", 0xd016, "SCROLX", "address"),
+        userClaim("lbl_a", 0xd016, "VIC_CTRL2", "address"),
+        userClaim("lbl_b", 0xd016, "SCROLX", "address"),
       ])
     );
     map.primaryLabels.set(0xd016, "lbl_b");

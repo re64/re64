@@ -1,5 +1,6 @@
 import { Layer } from "./layer.js";
-import { Label, createLayerLabel } from "./label.js";
+import { Claim } from "../claims/model.js";
+import { layerClaim } from "../claims/names.js";
 import { RegionIndex, RegionKind } from "./region.js";
 import { derivedId, newId } from "../project/identity.js";
 
@@ -17,7 +18,7 @@ export class FileLayer implements Layer {
   public readonly defaultRegionKind: RegionKind;
   public readonly hasBytes = true;
   public readonly regions = new RegionIndex();
-  public readonly labels: Label[] = [];
+  public readonly labels: Claim[] = [];
 
   constructor(
     public readonly name: string,
@@ -60,14 +61,14 @@ export class FileLayer implements Layer {
     return this.data[offset % this.data.length];
   }
 
-  getLabels(): readonly Label[] {
+  getLabels(): readonly Claim[] {
     if (!this.isPrg || this.suppressEntry) {
       return this.labels;
     }
     // PRG files have an entry point at the start address
     const basename = this.path.split("/").pop()?.replace(/\.[^.]+$/, "") ?? this.name;
     return [
-      createLayerLabel(derivedId("lbl", this.id, "entry"), this.start, basename, "entry", this.name),
+      layerClaim(derivedId("lbl", this.id, "entry"), this.start, basename, "entry"),
       ...this.labels,
     ];
   }

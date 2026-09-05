@@ -2,7 +2,20 @@ import { describe, it, expect } from "vitest";
 import { analyze, wrapCommentText } from "./rows.js";
 import { MemoryMap } from "../memory/memory-map.js";
 import { FileLayer } from "../memory/file-layer.js";
-import { LabelIndex, createPlatformLabel, createUserLabel } from "../memory/label.js";
+import { NameIndex, platformClaim } from "../claims/names.js";
+import { Claim } from "../claims/model.js";
+import { LabelType } from "../memory/label-type.js";
+
+/** A name somebody chose: a claim, with the root its type asks for. */
+const userClaim = (id: string, at: number, name: string, type: LabelType): Claim => ({
+  id,
+  at,
+  name,
+  ...(type === "entry" ? { root: "entry" as const } : {}),
+  ...(type === "function" ? { root: "routine" as const } : {}),
+  ...(type === "code" ? { root: "location" as const } : {}),
+  by: { author: "test", source: "user" },
+});
 import { CommentIndex } from "../memory/comment.js";
 import { ConstantIndex } from "../memory/constant.js";
 import { createUserRegion, RegionKind } from "../memory/region.js";
@@ -31,22 +44,38 @@ function project(
   const map = new MemoryMap();
   const layer = new FileLayer("test", "test.prg", ORG, new Uint8Array(bytes), undefined, true, true);
 
+  const claims: Claim[] = [];
   for (const r of extra.regions ?? []) {
+    const id = `rgn_${r.start.toString(16)}`;
     layer.regions.addRegion(createUserRegion({
-      id: `rgn_${r.start.toString(16)}`,
+      id,
       start: r.start,
       end: r.end,
       kind: r.kind,
       name: r.name,
       view: r.view,
     }));
+    // A named span is one claim saying two things, so the name has to be read
+    // here as well — which is what the loader does, and what a region-generated
+    // label used to do before the two became one object.
+    if (r.name !== undefined) {
+      claims.push({
+        id,
+        at: r.start,
+        extent: r.end - r.start,
+        name: r.name,
+        says: { is: r.kind === "code" || r.kind === "unknown" ? "data" : r.kind },
+        by: { author: "test", source: "user" },
+      });
+    }
   }
 
-  const userLabels = new LabelIndex();
+  const userLabels = new NameIndex();
+  for (const claim of claims) userLabels.addLabel(claim);
   // Indexed as well as addressed: several labels can share an address, and an
   // id derived from the address alone would make two of them one.
   for (const [i, l] of (extra.labels ?? []).entries()) {
-    const label = createUserLabel(`lbl_${l.address.toString(16)}_${i}`, l.address, l.name, l.type ?? "address");
+    const label = userClaim(`lbl_${l.address.toString(16)}_${i}`, l.address, l.name, l.type ?? "address");
     layer.labels.push(label);
     userLabels.addLabel(label);
   }
@@ -55,7 +84,7 @@ function project(
   return {
     project: { layers: [], entryPoints: [ORG] },
     map,
-    claims: [],
+    claims,
     prgEntries: [ORG],
     userLabels,
     comments: new CommentIndex(),
@@ -365,7 +394,7 @@ describe("a name the project did not choose", () => {
     // above the label because it introduces the name, which is how a
     // hand-written disassembly reads.
     const loaded = project([0xea, 0x60]);
-    const described = createPlatformLabel("lbl_plat", ORG, "CHROUT", "address", "Write a byte");
+    const described = platformClaim("lbl_plat", ORG, "CHROUT", "address", "Write a byte");
     loaded.userLabels.addLabel(described);
 
     const rows = analyze(loaded, { annotations: false }).rows;
@@ -382,7 +411,7 @@ describe("a name the project did not choose", () => {
     // a Comment at the address.
     const loaded = project([0xea, 0x60]);
     loaded.userLabels.addLabel(
-      createPlatformLabel("lbl_far", 0xffd2, "CHROUT", "address", "Write a byte")
+      platformClaim("lbl_far", 0xffd2, "CHROUT", "address", "Write a byte")
     );
     const rows = analyze(loaded, { annotations: false }).rows;
     expect(rows.some((r) => r.text.includes("Write a byte"))).toBe(false);

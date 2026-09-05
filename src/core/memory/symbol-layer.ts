@@ -1,5 +1,5 @@
 import { Layer } from "./layer.js";
-import { Label } from "./label.js";
+import { Claim } from "../claims/model.js";
 import { RegionIndex, RegionKind } from "./region.js";
 import { newId } from "../project/identity.js";
 
@@ -27,7 +27,7 @@ export class SymbolLayer implements Layer {
 
   constructor(
     public readonly name: string,
-    public readonly labels: Label[] = [],
+    public readonly labels: Claim[] = [],
     public readonly id: string = newId("lay")
   ) {}
 
@@ -35,7 +35,7 @@ export class SymbolLayer implements Layer {
     return undefined;
   }
 
-  getLabels(): readonly Label[] {
+  getLabels(): readonly Claim[] {
     return this.labels;
   }
 }

@@ -1,4 +1,4 @@
-import { Label } from "./label.js";
+import { Claim } from "../claims/model.js";
 import { newId } from "../project/identity.js";
 import { Region, RegionIndex, RegionKind } from "./region.js";
 
@@ -33,13 +33,13 @@ export interface Layer {
    * User labels owned by this layer. Like regions, they travel with the layer
    * when the stack is reordered.
    */
-  readonly labels: Label[];
+  readonly labels: Claim[];
 
   /** Returns the byte at address, or undefined if outside this layer's range */
   readByte(address: number): number | undefined;
 
   /** Layer-generated labels (e.g. PRG entry points) plus its owned labels */
-  getLabels(): readonly Label[];
+  getLabels(): readonly Claim[];
 }
 
 /**
@@ -74,7 +74,7 @@ export class BytesLayer implements Layer {
   public readonly defaultRegionKind: RegionKind = "data";
   public readonly hasBytes = true;
   public readonly regions = new RegionIndex();
-  public readonly labels: Label[] = [];
+  public readonly labels: Claim[] = [];
 
   constructor(
     public readonly name: string,
@@ -113,7 +113,7 @@ export class BytesLayer implements Layer {
     return this.data[offset % this.data.length];
   }
 
-  getLabels(): readonly Label[] {
+  getLabels(): readonly Claim[] {
     return this.labels;
   }
 }

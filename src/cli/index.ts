@@ -9,9 +9,9 @@ import {
   MemoryMap,
   BytesLayer,
   FileLayer,
-  LabelIndex,
+  NameIndex,
   RegionIndex,
-  createAutoLabel,
+  autoClaim,
   createC64PlatformLayer,
   disassemble,
   formatInstruction,
@@ -432,7 +432,7 @@ program
   .action((options) => {
     let map: MemoryMap;
     let prgEntries: number[] = [];
-    let userLabels = new LabelIndex();
+    let userLabels = new NameIndex();
     // Layers declared on the command line carry no annotations of their own.
     let comments = new CommentIndex();
     let constants = new ConstantIndex();

@@ -1,4 +1,4 @@
-import { MemoryMap, LabelIndex } from "../core/index.js";
+import { MemoryMap, NameIndex } from "../core/index.js";
 
 export interface HexDumpOptions {
   bytesPerLine?: number;
@@ -52,10 +52,10 @@ function formatHexLine(
 }
 
 /** Format labels at an address */
-function formatLabels(labels: LabelIndex, address: number): string[] {
+function formatLabels(labels: NameIndex, address: number): string[] {
   const labelsAtAddr = labels.getLabelsAt(address);
   return labelsAtAddr.map((label) => {
-    const addrStr = formatAddr(label.address);
+    const addrStr = formatAddr(label.at);
     return `${addrStr} ${label.name}:`;
   });
 }
@@ -73,7 +73,7 @@ export function hexDump(
   // Get labels for this range if showing labels
   const labels = showLabels ? map.getLabels() : null;
   const labelsInRange = labels?.getLabelsInRange(start, end) ?? [];
-  const labelAddresses = new Set(labelsInRange.map((l) => l.address));
+  const labelAddresses = new Set(labelsInRange.map((l) => l.at));
 
   let offset = 0;
   while (offset < length) {

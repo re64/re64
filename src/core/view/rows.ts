@@ -8,14 +8,14 @@
  * CLAUDE.md.
  */
 
-import { Interpretation } from "../claims/model.js";
+import { Claim, Interpretation } from "../claims/model.js";
+import { labelTypeOf } from "../claims/names.js";
 import { analyzeProgram } from "../analysis/program.js";
 import { describeWarning } from "../arch/mos6502/disassembler.js";
 import { BasicBlock } from "../analysis/blocks.js";
 import { decodeText } from "../c64/text.js";
 import {
-  LabelIndex,
-  Label,
+  NameIndex,
   LabelType,
   formatOperand,
   LoadedProject,
@@ -417,8 +417,8 @@ export function analyze(
     const here = allLabels.getLabelsAt(addr);
     // The built-in name is redundant wherever the project supplied one, and
     // rendering both would show CHROUT and ROM_CHROUT on consecutive rows.
-    const shown = here.some((l) => l.source.kind !== "platform")
-      ? here.filter((l) => l.source.kind !== "platform")
+    const shown = here.some((l) => l.by.source !== "platform")
+      ? here.filter((l) => l.by.source !== "platform")
       : here;
 
     // Each name at an address renders once — unless a person wrote it twice, and
@@ -441,7 +441,7 @@ export function analyze(
     // the hygiene check uses, which is the sign it is the right one.
     const written = new Map<string, number>();
     for (const label of shown) {
-      if (label.source.kind !== "user") continue;
+      if (label.by.source !== "user") continue;
       written.set(label.name, (written.get(label.name) ?? 0) + 1);
     }
 
@@ -479,21 +479,21 @@ export function analyze(
           kind: "label",
           target: addr,
           name: shownName,
-          labelType: label.type,
+          labelType: labelTypeOf(label),
         },
       ];
 
       // "address" is the default and by far the most common, so tagging it
       // would add noise to most rows without saying anything.
-      if (annotations && label.type !== "address") {
-        const tag = ` [${LABEL_TYPE_TAGS[label.type]}]`;
+      if (annotations && labelTypeOf(label) !== "address") {
+        const tag = ` [${LABEL_TYPE_TAGS[labelTypeOf(label)]}]`;
         tokens.push({
           start: text.length + 1,
           end: text.length + tag.length,
           kind: "labeltype",
           target: addr,
           name: shownName,
-          labelType: label.type,
+          labelType: labelTypeOf(label),
         });
         text += tag;
       }
@@ -541,7 +541,7 @@ export function analyze(
       const bound = allLabels.labelForSite(addr);
       const resolveHere = bound
         ? (target: number) =>
-            target === bound.address
+            target === bound.at
               ? { name: bound.name, offset: 0 }
               : resolveLabel(target)
         : resolveLabel;

@@ -14,7 +14,7 @@
  */
 
 import { CommentPlacement } from "../memory/comment.js";
-import { Label, LabelType } from "../memory/label.js";
+import { LabelType } from "../memory/label-type.js";
 import { TextEncoding } from "../c64/text.js";
 import { RegionKind } from "../memory/region.js";
 import { LoadedProject } from "../project/loader.js";
@@ -199,7 +199,7 @@ export function labelSetOps(
   // than quietly doubled. An invented `dat_XXXX`, a PRG layer's entry label
   // named after its file, and a region's name are all machinery — naming such an
   // address is the ordinary act of naming an unnamed one.
-  const chosenHere = index.getLabelsAt(address).filter((l) => l.source.kind === "user");
+  const chosenHere = index.getLabelsAt(address).filter((l) => l.by.source === "user");
 
   // Always adds — even the same name twice. Two labels are told apart by id,
   // and two people each making one is simpler than making the second react to a

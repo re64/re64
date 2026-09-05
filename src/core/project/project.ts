@@ -5,13 +5,8 @@ import {
   createConstant,
   createConstantUse,
 } from "../memory/constant.js";
-import {
-  Label,
-  LabelType,
-  LabelUse,
-  createLabelUse,
-  createUserLabel,
-} from "../memory/label.js";
+import { LabelType } from "../memory/label-type.js";
+import { LabelUse, createLabelUse } from "../claims/names.js";
 import { TEXT_ENCODINGS, TextEncoding } from "../c64/text.js";
 import { Region, RegionKind, createUserRegion } from "../memory/region.js";
 import { derivedId } from "./identity.js";
@@ -425,23 +420,39 @@ export function parseProjectAddress(value: number | string): number {
 }
 
 /**
- * Convert project labels to Label objects.
+ * A layer's own declared labels, as claims.
  *
- * A label without an id gets one derived from its layer, address, and name, so
- * every client that loads the same un-migrated file agrees on it. The next
- * write persists a real id and the derivation stops mattering.
+ * Almost always empty: migration lifts a file's layer labels into project-level
+ * claims before this is reached, which is why the conversion is one shape now
+ * rather than two. It stays because a layer may still be constructed with them
+ * directly, and because a label without an id gets one derived from its layer,
+ * address and name — so every client loading the same un-migrated file agrees
+ * on it, and the next write persists a real one.
  */
 export function projectLabelsToLabels(
   projectLabels: ProjectLabel[],
   layerId: string
-): Label[] {
+): Claim[] {
   return projectLabels.map((pl) => {
-    const address = parseProjectAddress(pl.address);
-    const type = pl.type ?? "address";
-    const id = pl.id ?? derivedId("lbl", layerId, address, pl.name);
-    return createUserLabel(id, address, pl.name, type, pl.comment, pl.extent);
+    const at = parseProjectAddress(pl.address);
+    const root = ROOT_FOR_LABEL_TYPE[pl.type ?? "address"];
+    return {
+      id: pl.id ?? derivedId("lbl", layerId, at, pl.name),
+      at,
+      name: pl.name,
+      ...(root ? { root } : {}),
+      ...(pl.extent === undefined ? {} : { extent: pl.extent }),
+      by: { author: "project", source: "user" as const },
+    };
   });
 }
+
+/** The root a declared label type asks for; `address` asks for none. */
+const ROOT_FOR_LABEL_TYPE: Partial<Record<LabelType, RootKind>> = {
+  entry: "entry",
+  function: "routine",
+  code: "location",
+};
 
 /**
  * Convert project comments to Comment objects.

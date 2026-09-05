@@ -14,7 +14,8 @@
 import { InstructionIndex, disassemble } from "../arch/mos6502/disassembler.js";
 import { BasicBlock, buildBlocks } from "./blocks.js";
 import { DisassemblyWarning } from "../arch/mos6502/disassembler.js";
-import { Label, LabelIndex, createAutoLabel } from "../memory/label.js";
+import { Claim } from "../claims/model.js";
+import { NameIndex, autoClaim, labelTypeOf } from "../claims/names.js";
 import { HygieneFinding, checkHygiene } from "./hygiene.js";
 import { decimalSites } from "./flags.js";
 import { ValueAnalysis, proveValues } from "./values.js";
@@ -73,14 +74,14 @@ export interface ProgramAnalysis {
    */
   blocks: BasicBlock[];
   /** Every label, including the auto-generated ones the disassembly invented. */
-  labels: LabelIndex;
+  labels: NameIndex;
   /**
    * The labels nobody chose.
    *
    * `sub_`/`loc_`/`dat_` by what refers to them. This is the agent's work
    * queue: an auto-named address is one nothing has been understood about yet.
    */
-  autoLabels: readonly Label[];
+  autoLabels: readonly Claim[];
   warnings: readonly DisassemblyWarning[];
   /**
    * What is wrong with the *annotations*, as opposed to with the program.
@@ -135,8 +136,8 @@ function executionOrigins(loaded: LoadedProject, override?: number[]): number[] 
   const declared = project.entryPoints?.map(parseProjectAddress) ?? [];
   const entryLabels = userLabels
     .getAllLabels()
-    .filter((l) => l.type === "entry")
-    .map((l) => l.address);
+    .filter((l) => labelTypeOf(l) === "entry")
+    .map((l) => l.at);
   return [...new Set([...declared, ...prgEntries, ...entryLabels])];
 }
 
@@ -145,8 +146,8 @@ function entryPointsFor(loaded: LoadedProject, override?: number[]): number[] {
 
   const fromLabels = userLabels
     .getAllLabels()
-    .filter((l) => l.type === "entry" || l.type === "function" || l.type === "code")
-    .map((l) => l.address);
+    .filter((l) => labelTypeOf(l) === "entry" || labelTypeOf(l) === "function" || labelTypeOf(l) === "code")
+    .map((l) => l.at);
 
   // Declaring a span "code" starts decoding at its first address.
   //
@@ -194,22 +195,34 @@ function entryPointsFor(loaded: LoadedProject, override?: number[]): number[] {
  */
 function autoLabelsFor(
   references: ReadonlyMap<number, { type: string }[]>,
-  known: LabelIndex,
+  known: NameIndex,
   labelTolerance: number
-): Label[] {
-  const invented: Label[] = [];
+): Claim[] {
+  const invented: Claim[] = [];
 
   for (const [address, refs] of references) {
-    if (known.resolve(address, labelTolerance)) continue;
+    // Being *inside* somebody's array is not being named, and for a control
+    // target it is not even close: with `laserFrameRateForLevel` covering
+    // $8D16, a resolution hit suppressed `loc_8D16` and the jump to it rendered
+    // as `laserFrameRateForLevel + $0020` — a jump into the middle of a table.
+    //
+    // A data reference is the opposite case and keeps the old test: an offset
+    // into a named array says which element, where `dat_8F00` says nothing, so
+    // there is nothing to invent.
+    const control = refs.some(
+      (r) => r.type === "call" || r.type === "jump" || r.type === "branch"
+    );
+    const resolved = known.resolve(address, labelTolerance);
+    if (resolved && !(control && resolved.offset !== 0)) continue;
     const id = derivedId("lbl", "auto", address);
     const name = hex4(address);
 
     if (refs.some((r) => r.type === "call")) {
-      invented.push(createAutoLabel(id, address, `sub_${name}`, "function"));
+      invented.push(autoClaim(id, address, `sub_${name}`, "function"));
     } else if (refs.some((r) => r.type === "jump" || r.type === "branch")) {
-      invented.push(createAutoLabel(id, address, `loc_${name}`, "code"));
+      invented.push(autoClaim(id, address, `loc_${name}`, "code"));
     } else {
-      invented.push(createAutoLabel(id, address, `dat_${name}`, "address"));
+      invented.push(autoClaim(id, address, `dat_${name}`, "address"));
     }
   }
 
@@ -227,7 +240,7 @@ export function analyzeProgram(
   const origins = executionOrigins(loaded, override);
   const result = disassemble(map, { entryPoints, regions: map });
 
-  const labels = new LabelIndex();
+  const labels = new NameIndex();
   labels.addLabels(map.getLabels().getAllLabels());
   labels.addLabels(userLabels.getAllLabels());
   // Carried across explicitly. This index is built fresh from labels alone, so

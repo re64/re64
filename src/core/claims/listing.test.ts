@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { DecodeGraph } from "./graph.js";
 import { reachFrom, Root } from "./reach.js";
-import { claimsFromProject } from "./adapt.js";
 import { ClaimSet } from "./set.js";
 import { collectListing, describeItem } from "./listing.js";
 import { Claim, arrayExtent } from "./model.js";
@@ -12,7 +11,7 @@ function build(path: string) {
   const loaded = loadProjectFile(path);
   const program = analyzeProgram(loaded);
   const graph = DecodeGraph.build(loaded.map);
-  const { claims } = claimsFromProject(loaded);
+  const claims = loaded.claims;
   const set = new ClaimSet(claims);
   const roots: Root[] = [
     ...program.entryPoints.map((address) => ({ address, kind: "code" as const, why: "entryPoint" })),

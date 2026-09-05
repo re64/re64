@@ -12,7 +12,6 @@
 import { dirname } from "node:path";
 import {
   AnalysisResult,
-  Label,
   LabelType,
   LoadedProject,
   Op,
@@ -76,7 +75,8 @@ import { runDecoder } from "../sandbox/run.js";
 import { renderTextWith } from "../sandbox/sync.js";
 import { databaseFileBytes } from "../store/load.js";
 import { CommentPlacement, TextEncoding, describeWarning } from "../core/index.js";
-import { Interpretation, RootKind, compareClaims } from "../core/claims/model.js";
+import { Claim, Interpretation, RootKind, compareClaims } from "../core/claims/model.js";
+import { NamedClaim, labelTypeOf } from "../core/claims/names.js";
 import { ClaimEdit } from "../core/ops/types.js";
 import { ClaimSet, disagreements, describeDisagreement } from "../core/claims/set.js";
 
@@ -345,7 +345,7 @@ export class Workspace {
         ...program.labels
           .filter({ type: "function" })
           .concat(program.labels.filter({ type: "entry" }))
-          .map((l) => l.address),
+          .map((l) => l.at),
         ...program.origins,
       ]
     );
@@ -1121,7 +1121,7 @@ export class Workspace {
           ...(instruction ? { mnemonic: instruction.mnemonic, flow: instruction.flow } : {}),
           ...(outbound ? { target: hex4(outbound.to), targetType: outbound.type } : {}),
           ...(label
-            ? { name: label.name, labelType: label.type, source: label.source.kind }
+            ? { name: label.name, labelType: labelTypeOf(label), source: label.by.source }
             : {}),
           ...(row.illegal ? { illegal: true } : {}),
         };
@@ -1162,7 +1162,7 @@ export class Workspace {
       for (let at = from; at >= from - 0x400 && at >= 0; at--) {
         const label = program.labels
           .getLabelsAt(at)
-          .find((l) => l.type === "function" || l.type === "entry" || l.type === "code");
+          .find((l) => labelTypeOf(l) === "function" || labelTypeOf(l) === "entry" || labelTypeOf(l) === "code");
         if (label) return label.name;
       }
       return undefined;
@@ -1214,7 +1214,7 @@ export class Workspace {
 
   labels(
     criteria: {
-      source?: Label["source"]["kind"];
+      source?: Claim["by"]["source"];
       type?: LabelType;
       namePattern?: string;
       range?: { start: number; end: number };
@@ -1254,7 +1254,7 @@ export class Workspace {
     return { total: found.length, targets: found.slice(0, limit) };
   }
 
-  private summarise(label: Label): LabelSummary {
+  private summarise(label: NamedClaim): LabelSummary {
     const program = this.program();
     // An auto label's id is derived from the fact that nothing named it, and
     // handing one out invites an edit claiming an identity that means nothing.
@@ -1264,15 +1264,15 @@ export class Workspace {
     // Both were reported writable, which is worse than either gap: it is the
     // field a reader uses to decide what it may edit, so it was planned
     // against and then refused.
-    const invented = label.source.kind === "auto";
-    const builtIn = label.source.kind === "platform";
+    const invented = label.by.source === "auto";
+    const builtIn = label.by.source === "platform";
     return {
       ...(invented || builtIn ? {} : { id: label.id }),
-      address: hex4(label.address),
+      address: hex4(label.at),
       name: label.name,
-      type: label.type,
-      source: label.source.kind,
-      references: program.xrefs.count(label.address),
+      type: labelTypeOf(label),
+      source: label.by.source,
+      references: program.xrefs.count(label.at),
       writable: !invented && !builtIn,
       // An extent reshapes every operand in its range and any writer can set
       // one, and no read tool reported it — so it was shared state nobody could
@@ -3572,7 +3572,7 @@ export class Workspace {
       // belongs to nothing this project can edit.
       const showing = loaded.map.getLabels().getLabelsAt(address);
       if (showing.length > 0) {
-        const sources = [...new Set(showing.map((l) => l.source.kind))].join(", ");
+        const sources = [...new Set(showing.map((l) => l.by.source))].join(", ");
         throw new Error(
           `${hex4(address)} is named ${showing.map((l) => l.name).join(", ")}, ` +
             `but that comes from ${sources} rather than from this project, so ` +

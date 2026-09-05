@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { labelTypeOf } from "../claims/names.js";
 import { analyzeProgram } from "./program.js";
 import { loadProjectFile } from "../../node-files.js";
 
@@ -132,7 +133,7 @@ describe("filtering labels", () => {
   it("narrows by type", () => {
     const functions = gridrunner().labels.filter({ type: "function" });
     expect(functions.length).toBeGreaterThan(0);
-    expect(functions.every((l) => l.type === "function")).toBe(true);
+    expect(functions.every((l) => labelTypeOf(l) === "function")).toBe(true);
   });
 
   it("narrows by name, case-insensitively", () => {
@@ -144,7 +145,7 @@ describe("filtering labels", () => {
   it("narrows by address range, half-open", () => {
     const inRange = gridrunner().labels.filter({ range: { start: 0x8000, end: 0x8100 } });
     expect(inRange.length).toBeGreaterThan(0);
-    expect(inRange.every((l) => l.address >= 0x8000 && l.address < 0x8100)).toBe(true);
+    expect(inRange.every((l) => l.at >= 0x8000 && l.at < 0x8100)).toBe(true);
   });
 
   it("combines criteria", () => {

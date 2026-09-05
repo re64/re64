@@ -185,8 +185,17 @@ and occupies no address range. A built-in C64 platform layer of this kind sits
 at the bottom of every stack, supplying standard hardware and KERNAL names; a
 project's own labels outrank it, so `ROM_CHROUT` beats the built-in `CHROUT`.
 
-Label priority is explicit rather than insertion order:
-`user > region > layer > platform > auto`.
+Name priority is explicit rather than insertion order:
+`user > analysis > layer > platform > auto`, then the **narrower** claim, then
+id.
+
+`region` is gone from that list and its absence is the point. A named span used
+to generate a label of its own, ranking between `layer` and `user` — which is
+where the rank collision came from: a person's name for an address and their
+name for the table starting there were two objects competing at one rank, and
+eight addresses in the reference project carried both. One claim carries both
+now, and where two of a person's claims tie on source the narrower wins, which
+is the specific answer rather than a rank nobody could see.
 
 ## UI Design Decisions
 
@@ -834,6 +843,44 @@ label — the 1-indexed table idiom — which no extent covers, so the ±1 windo
 stays. The two render differently on purpose: `NAME + $000F` says "element N of
 this array", `NAME-1` says "just before this label", and they should not look
 alike.
+
+**Merging labels and regions made a named span's extent real, and that changed
+four things in the listing.** It could not before: a region carried a span, and
+the *label it generated* carried none — so everything in this section reached a
+user label and never a region name. One claim carries both, and the golden hash
+moved for it. Every change was a gain, which is the argument that the merge was
+the right shape:
+
+- **A named span renders its name.** `screenHeaderText` and four others were
+  regions whose names appeared in no row of the listing at all.
+- **A named span offers offsets**, so `dat_8F00` became
+  `characterSetData + $0100`. This is the section above, finally applying where
+  it was always meant to.
+- **A control target gets its own name rather than an offset from a
+  neighbour.** `BNE loc_821A` where it read `BNE CheckForPausePressed-1`, and
+  `JMP loc_8BD2` where it read `JMP MaybeRestartLevel+1`. The human
+  disassembly calls the first `b821A` and branches to it by name.
+- **Where an extent and the 1-indexed idiom compete, the idiom wins.** This is
+  the case the rule above did not anticipate — it says the idiom survives
+  because "no extent covers" the byte before a table, and once a span offers
+  offsets, the *preceding* array's tail covers it exactly. `LDA
+  screenHeaderColors,X` with X from 1 to $28 never reads $8847, so
+  `screenHeaderText + $0027` names a byte the instruction does not touch. The
+  last byte of an array is the one offset an indexed load cannot mean.
+
+Two rules keep the gain without the losses, and both turn on what an invented
+name *says*:
+
+- **An extent beats an invented name only when that name says nothing.**
+  `dat_040F` encodes its own address; `loc_8D16` says control arrives here,
+  which no offset carries. Letting an extent beat one turned `JMP loc_8D16`
+  into `JMP laserFrameRateForLevel + $0020` — a jump into the middle of a
+  table. A root is exactly the difference: `dat_` has none, `loc_` and `sub_`
+  do.
+- **A control target inside somebody's array still gets a name.** Auto-naming
+  skips an address that already resolves, and being inside an extent counts as
+  resolving — so the enclosing array silently suppressed the label its own
+  jump needed. Being inside an array is not being named.
 
 ### Constants: a value has no single meaning
 

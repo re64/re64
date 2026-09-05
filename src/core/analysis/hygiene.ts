@@ -30,7 +30,7 @@
  * thing it describes is fixed.
  */
 
-import { LabelIndex } from "../memory/label.js";
+import { NameIndex } from "../claims/names.js";
 import { CommentIndex } from "../memory/comment.js";
 import { ConstantIndex } from "../memory/constant.js";
 import { InstructionIndex } from "../arch/mos6502/disassembler.js";
@@ -79,7 +79,7 @@ function insideInstruction(
 
 export function checkHygiene(
   loaded: LoadedProject,
-  labels: LabelIndex,
+  labels: NameIndex,
   instructions: InstructionIndex
 ): HygieneFinding[] {
   const found: HygieneFinding[] = [];
@@ -102,7 +102,7 @@ export function checkHygiene(
         `${hex4(address)} is called "${name}" ${twins.length} times over. Only one of ` +
         `them renders, so the rest are invisible — remove_claim takes one by id, ` +
         `or set_claim makes it say something different.`,
-      subjects: twins.map((label) => ({ address: hex4(label.address), id: label.id })),
+      subjects: twins.map((label) => ({ address: hex4(label.at), id: label.id })),
     });
   }
 
@@ -111,10 +111,10 @@ export function checkHygiene(
       kind: "label.nameShared",
       message:
         `${holders.length} labels are called "${name}" (${holders
-          .map((l) => hex4(l.address))
+          .map((l) => hex4(l.at))
           .join(", ")}), so the name identifies none of them. They render ` +
         `qualified — "${name}@<id>" — until one is renamed or removed.`,
-      subjects: holders.map((l) => ({ id: l.id, address: hex4(l.address) })),
+      subjects: holders.map((l) => ({ id: l.id, address: hex4(l.at) })),
     });
   }
 
@@ -155,15 +155,15 @@ export function checkHygiene(
     });
   }
   for (const label of labels.getAllLabels()) {
-    if (label.source.kind === "platform" || label.source.kind === "auto") continue;
-    const inside = insideInstruction(instructions, label.address);
+    if (label.by.source === "platform" || label.by.source === "auto") continue;
+    const inside = insideInstruction(instructions, label.at);
     if (inside === undefined) continue;
     found.push({
       kind: "annotation.insideInstruction",
       message:
-        `The label "${label.name}" is at ${hex4(label.address)}, inside the ` +
+        `The label "${label.name}" is at ${hex4(label.at)}, inside the ` +
         `instruction at ${hex4(inside)}. It resolves in operands but has no row.`,
-      subjects: [{ id: label.id, address: hex4(label.address) }],
+      subjects: [{ id: label.id, address: hex4(label.at) }],
     });
   }
 

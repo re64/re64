@@ -1,5 +1,4 @@
 import { TextEncoding } from "../c64/text.js";
-import { Label, createRegionLabel } from "./label.js";
 import { derivedId } from "../project/identity.js";
 
 /** What kind of data a memory region contains */
@@ -136,30 +135,4 @@ export class RegionIndex {
     return this.regions.length;
   }
 
-  /**
-   * Generate labels from named region boundaries.
-   * Creates a label at the start of each named region.
-   * For code regions, the label type is "entry"; otherwise "address".
-   */
-  generateLabels(): Label[] {
-    const labels: Label[] = [];
-
-    for (const region of this.regions) {
-      if (region.name) {
-        const type = region.kind === "code" ? "entry" : "address";
-        // Derived from the region's own id so the label is stable across loads.
-        labels.push(
-          createRegionLabel(
-            derivedId("lbl", region.id, "name"),
-            region.start,
-            region.name,
-            type,
-            region.name
-          )
-        );
-      }
-    }
-
-    return labels;
-  }
 }

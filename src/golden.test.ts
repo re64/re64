@@ -58,7 +58,24 @@ const PROJECT = "assets/gridrunner/gridrunner.re64";
 // instructions read as ordinary undecoded space. The listing now shows both
 // `loc_8D16` and `PlayNewLevelSounds:` two bytes apart, which is what makes the
 // misplaced label visible at last.
-const OUTPUT_SHA1 = "9a3059eab85474b17da4222dfd40eb3cd9683da5";
+//
+// It moved again when labels and regions became one claim, and every change was
+// an improvement the merge made reachable:
+//
+//   - A named span renders its name. `screenHeaderText:` and four others were
+//     regions whose names appeared in no row at all.
+//   - A named span offers offsets, so `dat_8F00` is `characterSetData + $0100`.
+//     The extent was always on the region; the label it generated never carried
+//     one, which is why "an operand inside a named array" reached user labels
+//     and not region names.
+//   - A control target gets its own name rather than an offset from a
+//     neighbour: `BNE loc_821A` where it read `BNE CheckForPausePressed-1`, and
+//     `JMP loc_8BD2` where it read `JMP MaybeRestartLevel+1`. The human
+//     disassembly calls that first one `b821A` and branches to it by name.
+//   - Where an extent and the 1-indexed idiom compete, the idiom wins:
+//     `screenHeaderColors-1` is what `LDA screenHeaderColors,X` with X from 1
+//     means, and `screenHeaderText + $0027` names a byte the load never reads.
+const OUTPUT_SHA1 = "c1ca66153bee7a4867ef215e14abdedbc2c57807";
 
 describe("gridrunner disassembly", () => {
   const result = analyze(loadProjectFile(PROJECT), { annotations: false });
@@ -71,7 +88,7 @@ describe("gridrunner disassembly", () => {
   it("holds its shape", () => {
     expect(result.stats).toMatchObject({
       instructions: 1481,
-      rows: 1872,
+      rows: 1877,
       arrows: 208,
       regions: 16,
       // 495, not the 597 this asserted before: the merged index counted every

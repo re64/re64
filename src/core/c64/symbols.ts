@@ -17,7 +17,7 @@
  */
 
 import { SymbolLayer } from "../memory/symbol-layer.js";
-import { createPlatformLabel } from "../memory/label.js";
+import { platformClaim } from "../claims/names.js";
 import { derivedId } from "../project/identity.js";
 
 export interface C64Symbol {
@@ -468,7 +468,7 @@ export function createC64PlatformLayer(): SymbolLayer {
     "c64",
     // Derived, not minted: the built-in set must have the same ids everywhere.
     C64_SYMBOLS.map((s) =>
-      createPlatformLabel(
+      platformClaim(
         derivedId("lbl", "c64", s.address),
         s.address,
         s.name,

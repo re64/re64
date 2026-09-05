@@ -2,14 +2,29 @@ import { describe, it, expect } from "vitest";
 import { MemoryMap } from "./memory-map.js";
 import { BytesLayer } from "./layer.js";
 import { SymbolLayer } from "./symbol-layer.js";
-import { createPlatformLabel, createUserLabel, LABEL_RANK } from "./label.js";
+import { platformClaim, CLAIM_RANK } from "../claims/names.js";
+import { Claim } from "../claims/model.js";
+import { LabelType } from "./label-type.js";
+
+/** A name somebody chose: a claim, with the root its type asks for. */
+const userClaim = (id: string, at: number, name: string, type: LabelType = "address", extent?: number): Claim => ({
+  id,
+  at,
+  name,
+  ...(type === "entry" ? { root: "entry" as const } : {}),
+  ...(type === "function" ? { root: "routine" as const } : {}),
+  ...(type === "code" ? { root: "location" as const } : {}),
+  ...(extent === undefined ? {} : { extent }),
+  by: { author: "test", source: "user" },
+});
+
 import { createC64PlatformLayer, C64_SYMBOLS } from "../c64/symbols.js";
 
 describe("SymbolLayer", () => {
   it("supplies no bytes and never shadows", () => {
     const map = new MemoryMap();
     map.addLayer(new BytesLayer("data", 0x1000, new Uint8Array([0xaa]), 0x10));
-    map.addLayer(new SymbolLayer("syms", [createPlatformLabel("lbl_platform1000", 0x1000, "SOMETHING")]));
+    map.addLayer(new SymbolLayer("syms", [platformClaim("lbl_platform1000", 0x1000, "SOMETHING")]));
 
     // Symbol layer was added last, so it is on top — and must still not shadow.
     expect(map.readByte(0x1000)).toBe(0xaa);
@@ -18,7 +33,7 @@ describe("SymbolLayer", () => {
 
   it("contributes labels regardless of having no range", () => {
     const map = new MemoryMap();
-    map.addLayer(new SymbolLayer("syms", [createPlatformLabel("lbl_platformd020", 0xd020, "EXTCOL")]));
+    map.addLayer(new SymbolLayer("syms", [platformClaim("lbl_platformd020", 0xd020, "EXTCOL")]));
 
     expect(map.getLabels().resolve(0xd020)?.label.name).toBe("EXTCOL");
   });
@@ -37,8 +52,8 @@ describe("SymbolLayer", () => {
 describe("label priority", () => {
   it("ranks a user label above a platform one at the same address", () => {
     const map = new MemoryMap();
-    map.addLayer(new SymbolLayer("c64", [createPlatformLabel("lbl_platformffd2", 0xffd2, "CHROUT")]));
-    map.addLayer(new SymbolLayer("project", [createUserLabel("lbl_userffd2", 0xffd2, "ROM_CHROUT", "address")]));
+    map.addLayer(new SymbolLayer("c64", [platformClaim("lbl_platformffd2", 0xffd2, "CHROUT")]));
+    map.addLayer(new SymbolLayer("project", [userClaim("lbl_userffd2", 0xffd2, "ROM_CHROUT", "address")]));
 
     expect(map.getLabels().resolve(0xffd2)?.label.name).toBe("ROM_CHROUT");
   });
@@ -46,20 +61,30 @@ describe("label priority", () => {
   it("resolves by rank rather than insertion order", () => {
     // The platform label is added last; insertion order would have let it win.
     const map = new MemoryMap();
-    map.addLayer(new SymbolLayer("project", [createUserLabel("lbl_userd016", 0xd016, "VIC_CTRL2", "address")]));
-    map.addLayer(new SymbolLayer("c64", [createPlatformLabel("lbl_platformd016", 0xd016, "SCROLX")]));
+    map.addLayer(new SymbolLayer("project", [userClaim("lbl_userd016", 0xd016, "VIC_CTRL2", "address")]));
+    map.addLayer(new SymbolLayer("c64", [platformClaim("lbl_platformd016", 0xd016, "SCROLX")]));
 
     expect(map.getLabels().resolve(0xd016)?.label.name).toBe("VIC_CTRL2");
-    expect(LABEL_RANK.user).toBeGreaterThan(LABEL_RANK.platform);
+    expect(CLAIM_RANK.user).toBeGreaterThan(CLAIM_RANK.platform);
   });
 
-  it("orders every source kind unambiguously", () => {
-    const ranks = Object.values(LABEL_RANK);
+  it("orders every source unambiguously", () => {
+    const ranks = Object.values(CLAIM_RANK);
     expect(new Set(ranks).size).toBe(ranks.length);
-    expect(LABEL_RANK.user).toBeGreaterThan(LABEL_RANK.region);
-    expect(LABEL_RANK.region).toBeGreaterThan(LABEL_RANK.layer);
-    expect(LABEL_RANK.layer).toBeGreaterThan(LABEL_RANK.platform);
-    expect(LABEL_RANK.platform).toBeGreaterThan(LABEL_RANK.auto);
+    expect(CLAIM_RANK.user).toBeGreaterThan(CLAIM_RANK.analysis);
+    expect(CLAIM_RANK.analysis).toBeGreaterThan(CLAIM_RANK.layer);
+    expect(CLAIM_RANK.layer).toBeGreaterThan(CLAIM_RANK.platform);
+    expect(CLAIM_RANK.platform).toBeGreaterThan(CLAIM_RANK.auto);
+  });
+
+  it("has no rank for a named span, because the span is the name", () => {
+    // `region` sat between `layer` and `user` and generated a second name of
+    // its own, which is where the rank collision came from: a person's name for
+    // an address and their name for the table containing it were two objects
+    // competing at one rank. One claim now carries both, and the narrower of
+    // two user claims wins on specificity rather than on a rank nobody could
+    // see.
+    expect(CLAIM_RANK).not.toHaveProperty("region");
   });
 });
 
@@ -85,7 +110,7 @@ describe("C64 symbol table", () => {
     // Cross-checked against assets/gridrunner/gridrunner.asm, which was produced without
     // this table: a wrong entry here would silently mislabel operands.
     const layer = createC64PlatformLayer();
-    const byAddress = new Map(layer.getLabels().map((l) => [l.address, l.name]));
+    const byAddress = new Map(layer.getLabels().map((l) => [l.at, l.name]));
 
     expect(byAddress.get(0xffd2)).toBe("CHROUT");
     expect(byAddress.get(0xfd15)).toBe("ROM_RESTOR");
@@ -96,7 +121,7 @@ describe("C64 symbol table", () => {
   });
 
   it("carries every description onto its label", () => {
-    // The table held 382 descriptions and createPlatformLabel dropped the
+    // The table held 382 descriptions and platformClaim dropped the
     // argument, so none of them reached any consumer — the fourth instance of
     // this project's "a field nothing reads" shape.
     const layer = createC64PlatformLayer();

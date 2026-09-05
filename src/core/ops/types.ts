@@ -15,7 +15,7 @@
  */
 
 import { CommentPlacement } from "../memory/comment.js";
-import { LabelType } from "../memory/label.js";
+import { LabelType } from "../memory/label-type.js";
 import { TextEncoding } from "../c64/text.js";
 import { RegionKind } from "../memory/region.js";
 import { Claim } from "../claims/model.js";
