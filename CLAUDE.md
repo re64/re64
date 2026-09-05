@@ -2117,6 +2117,50 @@ claude mcp add --transport http re64 http://127.0.0.1:5164/mcp \
 
 The user id is one from `list_users`; the server does not verify it.
 
+## The claims redesign, in progress
+
+**`docs/redesign-claims.md` is the live design document. Read it before changing
+labels, regions, or the walk.** It is written after a prototype rather than
+before one, so every number in it is something the code measured.
+
+The one-line version: **labels and regions are two halves of one noun, and the
+line between them was drawn by an assembler source file rather than by the
+machine.** Both carry an id, both nest, both resolve innermost-first, and the
+pair is implemented twice. A `code` region is not an interpretation at all —
+for the walk it is indistinguishable from `unknown` and from silence — so it
+becomes a *root*, and what a person declares is either a root (decode from here)
+or an interpretation (these bytes are not instructions).
+
+What is prototyped, in `src/core/claims/` and `src/core/crdt/claims.ts`, all of
+it parallel to the live model and reaching nothing:
+
+- `model.ts` — one `Claim`: an id, a position, an optional extent, an optional
+  name, an optional interpretation, an optional root, and **who made it**.
+- `graph.ts` / `reach.ts` — the decode as a fact about bytes, computed once for
+  all 64K (2.6ms on Gridrunner, 4.1ms on Camels), with reachability a 0.8ms query
+  from a root set. Decode once, ask many times.
+- `set.ts` — nothing resolves at rest; picking is a named function a consumer
+  calls.
+- `layout.ts` — two live interpretations render the way overlapping blocks do:
+  both, in start order, the later marked.
+- `crdt/claims.ts` — two peers who never met, merged, with nobody's work lost.
+
+What has **landed** on this branch, because it was a real bug rather than a
+design: a claim can no longer stop control flow. See the section above.
+
+Three things it is worth knowing before touching any of this:
+
+- **Containment is refinement, partial overlap is contradiction.** Reporting
+  nesting as a conflict fires 43 times on one real project.
+- **Report at the coarsest unit that explains the finding.** This was got wrong
+  three times in one evening — per address instead of per overlap (1,832 findings
+  instead of 46), per instruction instead of per run, and per nested claim
+  instead of per outermost.
+- **The measured cost of the current design is six.** Cross-agent region
+  overwrites inside a shared project across all nine experiment runs, from
+  `npm run experiments:collisions`. Small, and every one destroyed a conclusion
+  somebody reached.
+
 ## Where the algebra is incomplete
 
 Written down because it is the kind of thing that is obvious while building and
