@@ -27,3 +27,7 @@ experiments/*/run*/*.d64
 
 # Third-party test material is fetched, not built
 3party/**/*.bin
+
+# Experiment run directories: databases, transcripts, server logs.
+experiments/08-fresh/solo/
+experiments/08-fresh/pair/
