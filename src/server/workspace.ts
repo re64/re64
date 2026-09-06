@@ -50,7 +50,7 @@ import {
   ensureOwningLayer,
   labelAddOp,
   labelSetOp,
-  labelSetOps,
+  claimAddOps,
   renameLabelOp,
   owningLayerId,
   ownsAddress,
@@ -122,6 +122,13 @@ export interface ClaimInput {
  * finished analysis of `zoneDataTable` had nowhere to go. It writes a claim op
  * directly, which is what the rest of this should eventually do too.
  */
+/** The root a label type asks for; `address` is a name and asks for none. */
+const ROOT_FOR_LABEL_TYPE: Partial<Record<LabelType, RootKind>> = {
+  entry: "entry",
+  function: "routine",
+  code: "location",
+};
+
 const KIND_FOR_IS: Record<Exclude<Interpretation["is"], "record">, LegacyRegionKind> = {
   data: "data",
   text: "text",
@@ -2420,7 +2427,10 @@ export class Workspace {
         .map((c) => [c.at, c] as const)
     );
 
-    const roots = program.entryPoints.map((at) => {
+    // Deduplicated: `entryPoints` is a concatenation — declared points, load
+    // addresses, every rooted claim — so an address reached two ways appeared
+    // twice, and a reader counting roots got a number larger than the list.
+    const roots = [...new Set(program.entryPoints)].map((at) => {
       const claim = claimed.get(at);
       return {
         address: hex4(at),
@@ -2466,12 +2476,28 @@ export class Workspace {
       start: Math.min(...usable.map((c) => c.at)),
       end: Math.max(...usable.map((c) => c.at + (c.extent ?? 1))),
     };
-    const made: string[] = [];
+    // Each id beside the address it was minted for.
+    //
+    // A positional array is what the first batch reader got, and it silently
+    // destroyed three unrelated claims: one entry produced no `claim.add` — a
+    // name that revised an existing claim rather than adding one — so every id
+    // after it lined up with the wrong input, and six `set_claim` calls landed
+    // on claims the reader had never looked at. Every call returned `ok`.
+    //
+    // An index cannot be checked and an address can, which is the whole of why
+    // this shape is different. It is the same rule the rest of this surface
+    // follows: an id is how you name a thing, and it has to arrive attached to
+    // what you asked about.
+    const made: { at: string; claim: string }[] = [];
     const result = this.edit(
       caller,
       (loaded) => {
-        const ops = usable.flatMap((claim) => this.claimOps(loaded, claim));
-        made.push(...claimIds(ops));
+        const ops: Op[] = [];
+        for (const claim of usable) {
+          const built = this.claimOps(loaded, claim);
+          for (const id of claimIds(built)) made.push({ at: hex4(claim.at), claim: id });
+          ops.push(...built);
+        }
         return ops;
       },
       span
@@ -2496,12 +2522,25 @@ export class Workspace {
       throw new Error("Give at least one field to change. Omitted means 'leave alone'; null clears.");
     }
     return this.edit(caller, (loaded) => {
-      if (!claimById(loaded, id)) {
+      const held = claimById(loaded, id);
+      if (!held) {
         throw new Error(
           `No claim ${id} in this project. claims_at reports what covers an address, with ids.`
         );
       }
-      return [{ op: "claim.set", id, fields }];
+
+      // `says` is one field, so writing it replaces the whole interpretation.
+      // A caller changing only how to *read* the bytes — an encoding, a decoder
+      // — means to change that and not to un-say what the bytes are, so the
+      // parts it did not mention come from what is already there. Without this,
+      // `set_claim view:` turned a text span back into a hex dump and clearing
+      // the view did not bring it back.
+      const edit: ClaimEdit =
+        fields.says && fields.says !== null && held.says && !("is" in (fields.says as object))
+          ? { ...fields, says: { ...held.says, ...fields.says } as Claim["says"] }
+          : fields;
+
+      return [{ op: "claim.set", id, fields: edit }];
     });
   }
 
@@ -2520,12 +2559,12 @@ export class Workspace {
 
   addClaim(caller: Caller, claim: ClaimInput): EditResult {
     this.checkClaim(claim);
-    const made: string[] = [];
+    const made: { at: string; claim: string }[] = [];
     const result = this.edit(
       caller,
       (loaded) => {
         const ops = this.claimOps(loaded, claim);
-        made.push(...claimIds(ops));
+        for (const id of claimIds(ops)) made.push({ at: hex4(claim.at), claim: id });
         return ops;
       },
       { start: claim.at, end: claim.at + (claim.extent ?? 1) }
@@ -2589,58 +2628,67 @@ export class Workspace {
    * batch restated what the single call did rather than calling it.
    */
   private claimOps(loaded: LoadedProject, claim: ClaimInput): Op[] {
-    const end = claim.at + (claim.extent ?? 1);
+    // **Always adds.** Every kind of claim mints, and none of them upserts.
+    //
+    // A claim carrying an `is` or a `root` used to route through `regionSetOp`,
+    // which infers an existing claim from a start address and reuses its id —
+    // an upsert, under a tool whose own description promises it never replaces,
+    // in the noun this project rewrote its model around specifically to stop
+    // that. Two readers found it by probing and it ate a name.
+    //
+    // It is `set_label`'s history repeating a third time. Both earlier times the
+    // upsert was justified by single-author use and survived the arrival of a
+    // second author unrevisited; this time it survived the *rewrite that existed
+    // to remove it*, because one path was left going the old way.
+    const says: Interpretation | undefined =
+      claim.is === undefined
+        ? undefined
+        : claim.is === "record"
+          ? { is: "record", typeId: claim.typeId! }
+          : claim.is === "text"
+            ? {
+                is: "text",
+                ...(claim.encoding === undefined ? {} : { encoding: claim.encoding }),
+                // Text carries a view too — a program with its own character set
+                // is unreadable by any built-in encoding, so `snippet:<id>` is
+                // the only way such a span is legible. This was dropped on the
+                // way in, so a decoder could be defined and run and never
+                // attached to the text it decodes.
+                ...(claim.view === undefined ? {} : { view: claim.view }),
+              }
+            : claim.is === "bitmap"
+              ? { is: "bitmap", ...(claim.view === undefined ? {} : { view: claim.view }) }
+              : { is: claim.is };
 
-    // A record has no legacy region kind to be written as — there was never one
-    // for "an array of these", which is the whole reason a reader's finished
-    // analysis of an 8,400-byte table had nowhere to go — so it writes a claim
-    // op directly. Which is what all of these should eventually do.
-    if (claim.is === "record") {
-      return [
-        {
-          op: "claim.add",
-          claim: {
-            id: newId("clm"),
-            ...placed(loaded, claim.at),
-            extent: claim.extent,
-            says: { is: "record", typeId: claim.typeId! },
-            root: "data",
-            ...(claim.name === undefined ? {} : { name: claim.name }),
-            by: { author: "project", source: "user" },
-          },
-        },
-      ];
-    }
+    const { ops } = claimAddOps(loaded, claim.at, {
+      ...(claim.name === undefined ? {} : { name: claim.name }),
+      ...(says === undefined ? {} : { says }),
+      // An interpretation is surfaced whether or not anything reaches it, which
+      // is what `root: "data"` means; a caller's own root wins over that.
+      ...(claim.root !== undefined
+        ? { root: claim.root }
+        : says !== undefined
+          ? { root: "data" as const }
+          : {}),
+      ...(claim.extent === undefined ? {} : { extent: claim.extent }),
+    });
 
-    // Every other interpretation covers a span, so it goes through the span
-    // writer — the one that checks there are bytes there to read.
-    if (claim.is !== undefined) {
-      const kind = KIND_FOR_IS[claim.is];
-      return [
-        regionSetOp(
-          loaded,
-          claim.at,
-          end,
-          kind,
-          claim.name,
-          claim.comment,
-          claim.encoding,
-          this.checkedRegion(claim.at, end, kind, claim.view)
-        ),
-      ];
-    }
-
-    const ops: Op[] =
-      claim.root === "routine"
-        ? markFunctionOps(loaded, claim.at, claim.name)
-        : claim.root !== undefined
-          ? [regionSetOp(loaded, claim.at, claim.at + 1, "code", claim.name)]
-          : labelSetOps(loaded, claim.at, claim.name!, undefined, claim.extent).ops;
-
-    // A comment on a span rides on the region; on a name it is its own object,
-    // because a comment stopped being a field on something else.
+    // A comment is its own object and always was. It used to be handed to the
+    // span writer as a field that no longer exists, so a claim carrying both an
+    // `is` and a `comment` silently kept the first and dropped the second —
+    // nineteen findings in one run, on exactly the claims where the comment is
+    // the only place the finding lives, because a data claim renders as hex and
+    // argues for nothing by itself.
     if (claim.comment !== undefined) {
-      ops.push(commentAddOp(loaded, claim.at, "before", claim.comment));
+      // A comment still needs a layer to hold it, and a name no longer does —
+      // so commenting a byteless address makes one, exactly as `add_comment`
+      // does. Without this the batch threw *inside* the transaction, past the
+      // per-claim guard, and one zero-page comment rejected all fifty-one
+      // claims with advice the caller had no way to follow. A batch tool that
+      // fails whole is not a batch tool, and this one had one path that did.
+      const owning = ensureOwningLayer(loaded, claim.at, this.room.projectId);
+      if (owning.create) ops.push(owning.create);
+      ops.push(commentAddOp(loaded, claim.at, "before", claim.comment, owning.layerId));
     }
     return ops;
   }
@@ -2661,6 +2709,9 @@ export class Workspace {
       extent?: number;
       name?: string;
       is?: string;
+      encoding?: string;
+      view?: string;
+      typeId?: string;
       root?: string;
       /** `layer:<id>`, `target:<name>` or `machine` — what this claim belongs to. */
       scope: string;
@@ -2679,6 +2730,14 @@ export class Workspace {
         ...(c.extent !== undefined ? { extent: c.extent } : {}),
         ...(c.name !== undefined ? { name: c.name } : {}),
         ...(c.says ? { is: c.says.is } : {}),
+        // How it renders, which was invisible: a reader could set a decoder or
+        // an encoding and had no way to read back what a claim currently asked
+        // for. A field only the writer can observe is one that gets fought over.
+        ...(c.says?.is === "text" && c.says.encoding ? { encoding: c.says.encoding } : {}),
+        ...((c.says?.is === "text" || c.says?.is === "bitmap") && c.says.view
+          ? { view: c.says.view }
+          : {}),
+        ...(c.says?.is === "record" ? { typeId: c.says.typeId } : {}),
         ...(c.root !== undefined ? { root: c.root } : {}),
         // The read that verifies the write can see what the write chose. It is
         // not something the caller picks, but it decides whether the claim
@@ -2721,7 +2780,11 @@ export class Workspace {
     // label — one action, two operations, so undo takes both back together.
     let beside: { address: number; from: string }[] = [];
     const result = this.edit(caller, (loaded) => {
-      const built = labelSetOps(loaded, address, name, type, extent);
+      const built = claimAddOps(loaded, address, {
+        name,
+        ...(type && ROOT_FOR_LABEL_TYPE[type] ? { root: ROOT_FOR_LABEL_TYPE[type] } : {}),
+        ...(extent === undefined ? {} : { extent }),
+      });
       if (built.addedBeside) beside = [{ address, from: built.addedBeside }];
 
       // A comment still needs a layer to hold it; a name no longer does. That
@@ -2802,7 +2865,15 @@ export class Workspace {
         // No layer at all for the name: a claim names an address whether or not
         // anything supplies its bytes, which is what the symbols layer existed
         // to fake.
-        ops.push(...labelSetOps(loaded, entry.address, entry.name, entry.type, entry.extent).ops);
+        ops.push(
+          ...claimAddOps(loaded, entry.address, {
+            name: entry.name,
+            ...(entry.type && ROOT_FOR_LABEL_TYPE[entry.type]
+              ? { root: ROOT_FOR_LABEL_TYPE[entry.type] }
+              : {}),
+            ...(entry.extent === undefined ? {} : { extent: entry.extent }),
+          }).ops
+        );
 
         // A comment still needs one, so it is created here and only here.
         if (entry.comment) {
@@ -4256,15 +4327,18 @@ export interface EditResult {
   did: string[];
   instructions: { before: number; after: number; delta: number };
   /**
-   * The claims this edit made or revised, in the order it made them.
+   * The claims this edit made or revised, each beside the address it was made
+   * for.
    *
-   * Everything that corrects a claim is keyed by id, so a write that did not
-   * return one would force every caller to go and look it up — and a caller
-   * that looks up by address is guessing, since several claims cover any
-   * interesting one. `set_decoder` returned no id and two agents in one run
-   * made the same decoder twice because of it.
+   * Keyed by address rather than by position, because a positional array is
+   * what the first batch reader got and it silently destroyed three unrelated
+   * claims: one entry produced no new claim, every id after it lined up with
+   * the wrong input, and six corrections landed on claims the reader had never
+   * looked at. Every call returned `ok`.
+   *
+   * An index cannot be checked and an address can.
    */
-  claims?: string[];
+  claims?: { at: string; claim: string }[];
   /**
    * What the claims this edit made belong to: `layer:<id>`, `target:<name>`, or
    * `machine`.

@@ -461,7 +461,11 @@ export function projectClaims(claims: readonly ProjectClaim[] = []): Claim[] {
     const at = parseProjectAddress(c.at);
     const says: Interpretation | undefined =
       c.is === "text"
-        ? { is: "text", encoding: c.encoding }
+        ? // A text claim carries a view too: a program with its own character
+          // set is unreadable by any built-in encoding, so `snippet:<id>` is the
+          // only way such a span is legible. Dropped here, a decoder could be
+          // defined and run and never attached to the text it decodes.
+          { is: "text", encoding: c.encoding, view: c.view }
         : c.is === "bitmap"
           ? { is: "bitmap", view: c.view }
           : c.is === "record" && c.typeId

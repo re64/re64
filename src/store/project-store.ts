@@ -49,6 +49,8 @@ import {
   formatProject,
   invertOp,
   parseProject,
+  AddressResolver,
+  buildMemoryMap,
 } from "../core/index.js";
 import {
   CrdtDoc,
@@ -486,7 +488,15 @@ export class ProjectStore {
       }
       this.storage.appendOps(changes);
 
-      return { applied: ops.length, descriptions: ops.map(describeOp), changeset };
+      // Resolved against the project the ops were just applied to, so a
+      // description speaks the addresses the caller used rather than the
+      // offsets a layer-framed claim is stored as.
+      const absolute = addressesOf(text);
+      return {
+        applied: ops.length,
+        descriptions: ops.map((op) => describeOp(op, absolute)),
+        changeset,
+      };
     });
   }
 
@@ -558,6 +568,9 @@ export class ProjectStore {
         : [newest];
 
       let text = formatProject(projectFromDoc(this.document()));
+      // Addresses, not offsets — an undo report is read for the same reason a
+      // write's `did` is: to check that what happened is what was meant.
+      const absolute = addressesOf(text);
       const skipped: UndoOutcome["skipped"] = [];
       const applying: StoredChange[] = [];
 
@@ -568,7 +581,7 @@ export class ProjectStore {
         const settled = undone ? change.op : change.inverse;
         if (applyOp(text, settled) !== text) {
           skipped.push({
-            description: describeOp(change.op),
+            description: describeOp(change.op, absolute),
             reason: "changed by someone else since",
           });
           continue;
@@ -586,7 +599,7 @@ export class ProjectStore {
       }
 
       return {
-        undone: applying.length > 0 ? describeOp(newest.op) : null,
+        undone: applying.length > 0 ? describeOp(newest.op, absolute) : null,
         applied: applying.length,
         skipped,
       };
@@ -631,7 +644,7 @@ export class ProjectStore {
     const entry: HistoryEntry = {
       at: now,
       authors: [...this.authors].sort(),
-      summary: this.sessionOps.map(describeOp),
+      summary: this.sessionOps.map((op) => describeOp(op)),
     };
     this.storage.appendHistory(entry);
 
@@ -685,11 +698,49 @@ export class ProjectStore {
 
 }
 
-/** Convert a change log into a history entry, for edits that bypassed a session. */
-export function entryFromChanges(changes: readonly Change[], now: number): HistoryEntry {
+/**
+ * Convert a change log into a history entry, for edits that bypassed a session.
+ *
+ * Free-standing, so it has no project to resolve a claim's position against —
+ * a layer-framed one is described as the offset it is rather than as an address
+ * it is not. The callers that *do* have the project pass a resolver.
+ */
+export function entryFromChanges(
+  changes: readonly Change[],
+  now: number,
+  resolve?: AddressResolver
+): HistoryEntry {
   return {
     at: now,
     authors: [...new Set(changes.map((c) => c.author ?? "unknown"))].sort(),
-    summary: changes.map((c) => describeOp(c.op)),
+    summary: changes.map((c) => describeOp(c.op, resolve)),
+  };
+}
+
+/**
+ * How to turn a stored claim position back into an address, for this project.
+ *
+ * Built from the text the ops were applied to, so it knows where each layer
+ * landed — which is the whole of what resolving an offset needs.
+ */
+function addressesOf(text: string): AddressResolver {
+  let starts: Map<string, number> | undefined;
+  return (claim) => {
+    if (claim.frame?.space !== "layer") return claim.at;
+    if (!starts) {
+      starts = new Map();
+      try {
+        const loaded = buildMemoryMap(parseProject(text), () => {
+          throw new Error("a description needs no file bytes");
+        });
+        for (const layer of loaded.layers) starts.set(layer.id, layer.start);
+      } catch {
+        // A project whose bytes are not reachable from here still gets a
+        // description; it just says the offset it has rather than an address
+        // it cannot work out.
+      }
+    }
+    const start = starts.get(claim.frame.layer);
+    return start === undefined ? undefined : start + claim.at;
   };
 }

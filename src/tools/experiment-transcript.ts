@@ -85,10 +85,15 @@ function report(path: string): void {
     say(`  ${String(n.total).padStart(4)}  ${name}${n.refused ? `  (${n.refused} refused)` : ""}`);
   }
 
-  // A tool that is not there never reaches a handler, so the server records the
-  // call and an error naming it. This is the list worth more than any prose.
+  // `Tool X not found` and nothing else.
+  //
+  // A first version matched any error mentioning "tool", which swept in every
+  // schema rejection — 42 invented tools where there were 8, because one
+  // caller retried `remove_decoder` with a bad argument 23 times. The inflated
+  // number is the more persuasive one, which is exactly why it has to be the
+  // narrow test: this list is read as a statement about what the API lacks.
   const invented = calls.filter(
-    (c) => c.ok === false && typeof c.error === "string" && /tool/i.test(c.error)
+    (c) => c.ok === false && typeof c.error === "string" && /not found/i.test(c.error)
   );
   say(`\n-- tools reached for that do not exist: ${invented.length}`);
   for (const [name, n] of [...new Map(
@@ -116,15 +121,27 @@ function report(path: string): void {
   // Two readers saying something about one address. Under the claims model both
   // should survive, which is the whole point; this counts the opportunities.
   const writes = calls.filter(
-    (c) => c.ok !== false && /^(add_claim|add_claims|set_claim|add_comment|mark_function)$/.test(c.tool ?? "")
+    (c) =>
+      c.ok !== false &&
+      /^(add_claim|add_claims|add_comment|add_comments|mark_function)$/.test(c.tool ?? "")
   );
   const byAddress = new Map<number, Set<string>>();
   for (const call of writes) {
-    const at = parseAddress(call.args?.at ?? call.args?.address);
-    if (at === undefined) continue;
-    const held = byAddress.get(at) ?? new Set<string>();
-    held.add(call.caller ?? "?");
-    byAddress.set(at, held);
+    // A batch carries its addresses inside the array, which the first version
+    // did not look at — so a run whose readers wrote almost everything in
+    // batches reported zero shared addresses, in a session where they described
+    // arguing over three of them.
+    const batch =
+      (call.args?.claims as Record<string, unknown>[] | undefined) ??
+      (call.args?.comments as Record<string, unknown>[] | undefined) ??
+      [call.args ?? {}];
+    for (const item of batch) {
+      const at = parseAddress(item.at ?? item.address);
+      if (at === undefined) continue;
+      const held = byAddress.get(at) ?? new Set<string>();
+      held.add(call.caller ?? "?");
+      byAddress.set(at, held);
+    }
   }
   const shared = [...byAddress].filter(([, who]) => who.size > 1);
   say(`\n-- addresses two readers both wrote about: ${shared.length}`);

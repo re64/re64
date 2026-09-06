@@ -497,7 +497,7 @@ describe("editing as an agent", () => {
   it("takes back a region and a function declaration", async () => {
     const made = await callTool("add_claim", { at: "$8F00", extent: 0x20, is: "text" });
     const dropped = await callTool("remove_claim", {
-      id: (made.value as { claims: string[] }).claims[0],
+      id: (made.value as { claims: { claim: string }[] }).claims[0].claim,
     });
     expect(dropped.isError).toBe(false);
 
@@ -623,10 +623,16 @@ describe("editing as an agent", () => {
     });
 
     expect(isError).toBeFalsy();
-    const result = value as { claims: string[]; rejected?: unknown[] };
+    const result = value as { claims: { at: string; claim: string }[]; rejected?: unknown[] };
     expect(result.rejected).toBeUndefined();
-    // One id per claim, so the batch is as correctable as three single calls.
-    expect(result.claims).toHaveLength(3);
+
+    // Each id beside the address it was minted for, not a positional array.
+    // A positional array is what the first batch reader got: one entry produced
+    // no new claim, every id after it lined up with the wrong input, and six
+    // corrections landed on claims the reader had never looked at — every call
+    // returning `ok`. An index cannot be checked and an address can.
+    expect(result.claims.map((c) => c.at).sort()).toEqual(["$801B", "$8250", "$8E00"]);
+    for (const made of result.claims) expect(made.claim).toMatch(/^clm_|^rgn_|^lbl_/);
   });
 
   it("reports every claim covering an address, resolving nothing", async () => {
@@ -649,7 +655,7 @@ describe("editing as an agent", () => {
       name: "beforeCorrection",
       extent: 16,
     });
-    const id = (made.value as { claims: string[] }).claims[0];
+    const id = (made.value as { claims: { claim: string }[] }).claims[0].claim;
 
     const revised = await callTool("set_claim", { id, name: "afterCorrection" });
     expect(revised.isError).toBeFalsy();
@@ -666,7 +672,7 @@ describe("editing as an agent", () => {
 
   it("clears a field with null, which omitting it cannot say", async () => {
     const made = await callTool("add_claim", { at: "$8250", name: "hasAnExtent", extent: 16 });
-    const id = (made.value as { claims: string[] }).claims[0];
+    const id = (made.value as { claims: { claim: string }[] }).claims[0].claim;
 
     const cleared = await callTool("set_claim", { id, extent: null });
     expect(cleared.isError).toBeFalsy();
@@ -680,7 +686,7 @@ describe("editing as an agent", () => {
 
   it("refuses a revise that names no field, rather than reporting success", async () => {
     const made = await callTool("add_claim", { at: "$8250", name: "untouched" });
-    const id = (made.value as { claims: string[] }).claims[0];
+    const id = (made.value as { claims: { claim: string }[] }).claims[0].claim;
 
     const nothing = await callTool("set_claim", { id });
     expect(nothing.isError).toBe(true);
@@ -870,6 +876,104 @@ describe("editing as an agent", () => {
     expect(again.text).toMatch(/already links/);
   });
 
+  it("adds beside a rooted claim rather than replacing it", async () => {
+    // The defect two readers found by probing, and it ate a name. A claim
+    // carrying a root routed through the span writer, which infers an existing
+    // claim from a start address and reuses its id — an upsert, under a tool
+    // whose own description promises it never replaces, in the noun this
+    // project rewrote its model around to stop exactly that.
+    const first = await callTool("add_claim", { at: "$8250", name: "firstReading", root: "routine" });
+    const second = await callTool("add_claim", { at: "$8250", name: "secondReading", root: "routine" });
+    expect(second.isError).toBeFalsy();
+
+    const covering = (await callTool("claims_at", { at: "$8250" })).value as {
+      claims: { id?: string; name?: string }[];
+    };
+    const names = covering.claims.map((c) => c.name);
+    expect(names).toContain("firstReading");
+    expect(names).toContain("secondReading");
+    expect((first.value as { claims: { claim: string }[] }).claims[0].claim).not.toBe(
+      (second.value as { claims: { claim: string }[] }).claims[0].claim
+    );
+  });
+
+  it("stores the root it was given, not a different one", async () => {
+    // `location` was stored as `entry`, so twenty-eight branch targets became
+    // program entry points — inflating the root count and generating two
+    // hundred phantom shadow decodes. The two write paths disagreed about
+    // their own enum, which nothing could see from outside.
+    const made = await callTool("add_claim", { at: "$8300", name: "aBranchTarget", root: "location" });
+    const id = (made.value as { claims: { claim: string }[] }).claims[0].claim;
+
+    const covering = (await callTool("claims_at", { at: "$8300" })).value as {
+      claims: { id?: string; root?: string }[];
+    };
+    expect(covering.claims.find((c) => c.id === id)?.root).toBe("location");
+  });
+
+  it("keeps the comment on a claim that also says what the bytes are", async () => {
+    // Nineteen findings were destroyed by this in one run, with `ok: true` and
+    // nothing in `rejected` — and on exactly the claims where the comment is
+    // the only place the finding lives, because a data claim renders as hex and
+    // argues for nothing by itself. The comment was handed to the span writer
+    // as a field that no longer exists.
+    const made = await callTool("add_claims", {
+      claims: [
+        { at: "$8E00", extent: 0x40, is: "data", name: "aTable", comment: "why this is a table" },
+      ],
+    });
+    expect(made.isError).toBeFalsy();
+
+    const comments = (await callTool("list_comments", {})).value as {
+      comments: { address: string; text: string }[];
+    };
+    expect(comments.comments.some((c) => c.text === "why this is a table")).toBe(true);
+  });
+
+  it("attaches a decoder to the text it decodes", async () => {
+    // `view: "snippet:<id>"` was accepted everywhere and stored nowhere, so a
+    // decoder could be defined and run and never reach the span it was written
+    // for — which is the one case it exists for, a program with its own
+    // character set that no built-in encoding can read.
+    const decoder = await callTool("set_decoder", {
+      name: "glyphs",
+      source: "return { kind: 'text', lines: ['decoded'] };",
+    });
+    const id = (decoder.value as { decoder: string }).decoder;
+
+    const made = await callTool("add_claim", {
+      at: "$8F00",
+      extent: 8,
+      is: "text",
+      view: `snippet:${id}`,
+    });
+    const claimId = (made.value as { claims: { claim: string }[] }).claims[0].claim;
+
+    const covering = (await callTool("claims_at", { at: "$8F00" })).value as {
+      claims: { id?: string; view?: string }[];
+    };
+    expect(covering.claims.find((c) => c.id === claimId)?.view).toBe(`snippet:${id}`);
+  });
+
+  it("does not lose a whole batch to one comment on a byteless address", async () => {
+    // A comment needs a layer to hold it and a name no longer does, so this
+    // threw inside the transaction, past the per-claim guard — and one
+    // zero-page comment rejected all fifty-one claims with advice the caller
+    // had no way to follow. A batch tool that fails whole is not a batch tool.
+    const made = await callTool("add_claims", {
+      claims: [
+        { at: "$02", name: "aZeroPageByte", comment: "used as a pointer" },
+        { at: "$8250", name: "aNormalName" },
+      ],
+    });
+
+    expect(made.isError).toBeFalsy();
+    expect((made.value as { claims: { at: string }[] }).claims.map((c) => c.at)).toEqual([
+      "$0002",
+      "$8250",
+    ]);
+  });
+
   it("says what a claim belongs to, without being asked to choose", async () => {
     // Derived from the address, never chosen. It decides whether the claim
     // follows its bytes if that layer is ever linked somewhere else, so a
@@ -930,7 +1034,7 @@ describe("editing as an agent", () => {
 
     // A root somebody declared is correctable, by the id the write returned.
     const made = await callTool("add_claim", { at: "$801B", root: "routine", name: "aRoot" });
-    const id = (made.value as { claims: string[] }).claims[0];
+    const id = (made.value as { claims: { claim: string }[] }).claims[0].claim;
 
     const after = (await callTool("list_roots", {})).value as {
       roots: { address: string; id?: string; writable: boolean }[];
@@ -964,10 +1068,10 @@ describe("editing as an agent", () => {
 
     const covering = await callTool("claims_at", { at: "$8250" });
     const ids = (covering.value as { claims: { id?: string }[] }).claims.map((c) => c.id);
-    expect(ids).toContain((first.value as { claims: string[] }).claims[0]);
-    expect(ids).toContain((second.value as { claims: string[] }).claims[0]);
+    expect(ids).toContain((first.value as { claims: { claim: string }[] }).claims[0].claim);
+    expect(ids).toContain((second.value as { claims: { claim: string }[] }).claims[0].claim);
 
-    const id = (second.value as { claims: string[] }).claims[0];
+    const id = (second.value as { claims: { claim: string }[] }).claims[0].claim;
     expect((await callTool("remove_claim", { id })).isError).toBe(false);
   });
 

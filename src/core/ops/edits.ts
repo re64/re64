@@ -206,12 +206,29 @@ const editOf = (claim: Claim): ClaimEdit => {
  * An invented `dat_XXXX` is not a chosen name and not a stored object, so naming
  * such an address still mints, which is the overwhelmingly common act.
  */
-export function labelSetOps(
+/**
+ * Say something about an address. **Always adds.**
+ *
+ * The whole vocabulary goes through this now, and it did not: a claim carrying
+ * an `is` or a `root` used to route through `regionSetOp`, which infers an
+ * existing claim from a start address and reuses its id — an upsert, under a
+ * tool whose own description promises it never replaces. The first pair of
+ * readers to meet it found it by deliberately probing, and it ate a name.
+ *
+ * That is `set_label`'s history repeating for the third time, on the noun this
+ * project rewrote its model around specifically to stop it. The rule is stated
+ * in `CLAUDE.md` in as many words — *an address cannot identify a claim* — and
+ * the write path kept one path that did.
+ */
+export function claimAddOps(
   loaded: LoadedProject,
   address: number,
-  name: string,
-  type?: LabelType,
-  extent?: number
+  claim: {
+    name?: string;
+    says?: Interpretation;
+    root?: RootKind;
+    extent?: number;
+  }
 ): { ops: Op[]; addedBeside?: string } {
   const index = loaded.map.getLabels();
   // Only a name a *person* chose is somebody's judgement to be joined rather
@@ -232,7 +249,7 @@ export function labelSetOps(
       // Pin what is showing, unless somebody has chosen. Two user labels tie on
       // rank so the winner falls to id order, which is random: without this a
       // second name silently renames every reference to the address.
-      ...(chosenHere.length > 0 && showing && !chosen
+      ...(claim.name !== undefined && chosenHere.length > 0 && showing && !chosen
         ? [{ op: "primary.set", address, labelId: showing.id } as Op]
         : []),
       {
@@ -240,9 +257,10 @@ export function labelSetOps(
         claim: {
           id: newId("clm"),
           ...placed(loaded, address),
-          name,
-          ...(type && ROOT_FOR_TYPE[type] ? { root: ROOT_FOR_TYPE[type] } : {}),
-          ...(extent !== undefined ? { extent } : {}),
+          ...(claim.name === undefined ? {} : { name: claim.name }),
+          ...(claim.says === undefined ? {} : { says: claim.says }),
+          ...(claim.root === undefined ? {} : { root: claim.root }),
+          ...(claim.extent === undefined ? {} : { extent: claim.extent }),
           by: AUTHOR,
         },
       } as Op,
@@ -361,12 +379,14 @@ export function commentAddOp(
   loaded: LoadedProject,
   address: number,
   placement: CommentPlacement,
-  text: string
+  text: string,
+  /** The layer to hold it, where the caller has just created one. */
+  layerId?: string
 ): Op {
   return {
     op: "comment.set",
     id: newId("cmt"),
-    layerId: owningLayerId(loaded, address),
+    layerId: layerId ?? owningLayerId(loaded, address),
     address,
     placement,
     text,

@@ -348,7 +348,22 @@ export interface Change {
 }
 
 /** A short human-readable summary, for history listings and undo prompts. */
-export function describeOp(op: Op): string {
+/**
+ * Where a claim is, in the only terms a reader thinks in.
+ *
+ * A layer-framed claim stores an offset into its layer's bytes, so describing
+ * one without resolving it reports `$03C1` for a claim at `$83C1` — which the
+ * first reader to meet it read as their write having landed 32KB away. Offsets
+ * never cross the wire, and a description is very much the wire: it is the
+ * field a caller checks to see that its write did what it asked.
+ *
+ * Optional because two of the four callers describe an op with no project to
+ * hand. Where it is absent the position is spelled as the offset it is, rather
+ * than as an address it is not.
+ */
+export type AddressResolver = (claim: { at: number; frame?: Claim["frame"] }) => number | undefined;
+
+export function describeOp(op: Op, resolve?: AddressResolver): string {
   const hex = (n: number) => `$${n.toString(16).toUpperCase().padStart(4, "0")}`;
   switch (op.op) {
     case "comment.set": {
@@ -371,9 +386,17 @@ export function describeOp(op: Op): string {
     // $8004" is what the data looks like afterwards.
     case "claim.add": {
       const claim = op.claim;
-      const where = claim.extent
-        ? `${hex(claim.at)}-${hex(claim.at + claim.extent)}`
-        : hex(claim.at);
+      const at = resolve?.(claim);
+      // Inclusive, like `covers` and like every other span this surface prints:
+      // `extent: 32` at `$8F00` is `$8F00-$8F1F`, not `-$8F20`.
+      const where =
+        at === undefined
+          ? claim.extent
+            ? `+${hex(claim.at)}-+${hex(claim.at + claim.extent - 1)}`
+            : `+${hex(claim.at)}`
+          : claim.extent
+            ? `${hex(at)}-${hex(at + claim.extent - 1)}`
+            : hex(at);
       const named = claim.name ? ` (${claim.name})` : "";
       if (claim.says) return `declare ${where} ${claim.says.is}${named}`;
       if (claim.root === "routine") return `mark ${where} a routine${named}`;

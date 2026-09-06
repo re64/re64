@@ -256,7 +256,7 @@ export class ProjectSession {
   /** Apply operations as one undoable action. */
   private run(ops: readonly Op[]): void {
     if (ops.length === 0) return;
-    this.client.labelNextChange(ops.map(describeOp).join(", "));
+    this.client.labelNextChange(ops.map((op) => describeOp(op)).join(", "));
     this.client.apply(ops);
   }
 
