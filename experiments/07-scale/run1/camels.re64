@@ -801,7 +801,7 @@
     { "name": "loader", "layers": ["lay_jogeqk","lay_hhkekw"], "entryPoints": ["$080D"] },
     { "name": "runtime", "layers": ["lay_5d0hyp","lay_hhkekw"], "entryPoints": ["$C065","$8A3C","$88D5","$88D4"] }
   ],
-  "activeTarget": "runtime",
+  "defaultTarget": "runtime",
   "files": [
     { "name": "revenge-of-the-mutant-camels.d64", "hash": "e4cc65f20fc1d50de9547dfe1ad0810c9246202048576299ddd5741da908190c", "size": 174848 },
     { "name": "runtime.prg", "hash": "0f199c007d692c45d20f8364c54754ed67cd16efb0062f7966204775722f7ea0", "size": 47392 }

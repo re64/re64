@@ -3603,13 +3603,53 @@ has fewer layers — rather than each of them learning about targets separately.
 Filtering there also keeps `layers[i]` corresponding to `project.layers[i]`,
 which several things rely on.
 
-The selection lives in the document, not in a caller, so it is shared and
-visible. That is deliberate: a view is a fact about the project, and two agents
-disagreeing about which one to read is a conversation rather than a setting. It
-moves `version()` and re-analyses, which is correct — the answer really is
-different. If the shared selection turns out to be contended, the evidence will
-say so and a per-call override is a small addition; guessing now would be
-building the override before anyone has wanted it.
+**A view is a parameter of the request, and the server holds no current one.**
+
+That is a reversal, and the reasoning it replaces is worth keeping because the
+mistake was subtle. The selection used to live in the document, on the grounds
+that "a view is a fact about the project, and two agents disagreeing about which
+one to read is a conversation rather than a setting". Half of that is true: which
+targets *exist*, and which one a project opens with, are facts about the project.
+Which one **I am reading right now** is not. It is a cursor — the distinction
+this file already drew for presence, and then missed here.
+
+Experiment 7 produced the evidence and it was misread once. The finding was not
+contention over the shared selection but **avoidance**: changing what everybody
+is reading so you can glance at the packed loader is a cost nobody would pay, so
+a whole target went unread. The response was to give `read_bytes` its own
+`target` argument — a patch on the sharing rather than a repair of it, and the
+same patch was then applied to `add_claim` for the same reason.
+
+Then a sharper objection: even a *session*-held selection is wrong, because one
+client can show two targets at once. A split-screen UI has two panes over one
+document, and neither may move the other out from under it. So there is nowhere
+correct for a current target to live, and the patch was the mechanism all along.
+
+- **Every tool takes `target`**, injected once in the `tool()` helper rather than
+  declared seventy times.
+- **A `Workspace` is a view**: it is constructed for a project *and* a target,
+  which is why the target reaches seventy methods without appearing in any of
+  their signatures. `view(name)` hands you another workspace; it never changes
+  this one.
+- **`select_target` is gone.** There is nothing to set, so reading costs no op,
+  moves no version, and repaints nobody.
+- **`activeTarget` became `defaultTarget`** — which view to open with, declared
+  by the project and never written while reading. Renamed so it cannot drift
+  back into a cursor. It survives an export for the reason it exists: somebody
+  handed this file should see what it is *for*.
+- **Naming a view that does not exist is refused**, not answered for with the
+  default — that would be a different stack than the caller asked for, with no
+  way to tell.
+- **Every answer reports the view it was computed for.** Omitting the argument is
+  allowed and gets the declared default; being told which one answered is what
+  turns "always name your target" into a habit the API teaches rather than a rule
+  it enforces. Whether agents pick it up is then a question the transcript can
+  answer.
+
+One collision worth recording, because it is the shape this file warns about:
+`bind_name` already had a `target` argument meaning *the address being referred
+to*. Two meanings for one argument name in one schema is exactly the ambiguity
+refused everywhere else, so it is `address` now.
 
 `list_targets` reports **every** layer, including those the current selection
 hides, because that is how a caller finds the view that shows them — the read

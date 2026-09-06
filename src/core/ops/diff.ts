@@ -139,7 +139,7 @@ export function diffProjects(from: Project, to: Project): Op[] {
   // be emitted — so `set_project_description` reached the document, showed up
   // in `describe_project`, and was absent from every export. An op nothing
   // produces is a feature that exists only from the inside.
-  for (const key of ["name", "description", "activeTarget"] as const) {
+  for (const key of ["name", "description", "defaultTarget"] as const) {
     if (from[key] !== to[key]) ops.push({ op: "meta.set", key, value: to[key] });
   }
 

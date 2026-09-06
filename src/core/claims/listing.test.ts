@@ -94,7 +94,7 @@ describe("one address-sorted listing", () => {
     // the placeholder was keeping out of the list whose job is to show them.
     //
     // The counts moved by one when `loadProjectFile` started honouring the
-    // target a file declares. This project says `activeTarget: runtime`, so it
+    // target a file declares. This project says `defaultTarget: runtime`, so it
     // is now read as the program runs rather than as every layer at once — the
     // packed file is shadowed out, which is what a target is for and what the
     // file was already asking for.

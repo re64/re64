@@ -27,7 +27,7 @@ const bytes = (id: string, address: string, hex: string) => ({
 const project = (targets: Project["targets"], active: string): Project => ({
   layers: [bytes("lay_low", "$1000", "aa aa aa aa"), bytes("lay_high", "$1000", "bb bb bb bb")],
   targets,
-  activeTarget: active,
+  defaultTarget: active,
 });
 
 const load = (p: Project) =>
@@ -65,7 +65,7 @@ describe("where a layer lands is a property of the link", () => {
     expect(load(p).map.readByte(0x1000)).toBe(0xaa);
     expect(load(p).map.readByte(0x0100)).toBeUndefined();
 
-    const running = load({ ...p, activeTarget: "asRun" });
+    const running = load({ ...p, defaultTarget: "asRun" });
     expect(running.map.readByte(0x0100)).toBe(0xaa);
     // And it is no longer where it was: a link says where, not also where not.
     expect(running.map.readByte(0x1000)).toBeUndefined();
@@ -100,7 +100,7 @@ describe("every project has a target, so there is one way to get a stack", () =>
     // seam it replaces — the thing deciding z-order would be invisible in the
     // file, absent from list_targets and unreachable by set_target.
     const withOne = withDefaultTarget(bare());
-    expect(withOne.activeTarget).toBe("gridrunner");
+    expect(withOne.defaultTarget).toBe("gridrunner");
     expect(withOne.targets).toHaveLength(1);
     expect(withOne.targets![0].layers).toEqual(["lay_a", "lay_b"]);
   });
@@ -129,11 +129,11 @@ describe("every project has a target, so there is one way to get a stack", () =>
         { name: "runtime", layers: ["lay_b"], order: 2 },
         { name: "loader", layers: ["lay_a"], order: 1 },
       ],
-      activeTarget: undefined,
+      defaultTarget: undefined,
     };
     // Ordered the way `list_targets` orders them, so a reader gets the one they
     // were shown first — a program starts at its loader.
-    expect(withDefaultTarget(p).activeTarget).toBe("loader");
+    expect(withDefaultTarget(p).defaultTarget).toBe("loader");
   });
 
   it("links a layer that has no id yet, by the id the loader will derive", () => {

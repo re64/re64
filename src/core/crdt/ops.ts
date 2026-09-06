@@ -164,7 +164,7 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         // A selection pointing at nothing reads as a filter that silently does
         // nothing, which is worse than no selection at all.
         const meta = doc.getMap<unknown>("meta");
-        if (meta.get("activeTarget") === op.name) meta.delete("activeTarget");
+        if (meta.get("defaultTarget") === op.name) meta.delete("defaultTarget");
         break;
       }
 

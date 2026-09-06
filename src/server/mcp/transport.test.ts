@@ -994,7 +994,7 @@ describe("editing as an agent", () => {
     expect(refused.text).toMatch(/at least one byte/i);
   });
 
-  it("declares a view over the layer stack and selects it", async () => {
+  it("declares a view, and answers for it when a call names it", async () => {
     const listed = await callTool("list_targets");
     expect(listed.isError).toBe(false);
     const { layers } = listed.value as { layers: { id: string; name: string }[] };
@@ -1003,12 +1003,19 @@ describe("editing as an agent", () => {
     const made = await callTool("set_target", { name: "just-the-prg", layers: [layers[0].id] });
     expect(made.isError).toBe(false);
 
-    const chosen = await callTool("select_target", { name: "just-the-prg" });
-    expect(chosen.isError).toBe(false);
-    expect((await callTool("list_targets")).text).toContain("just-the-prg");
+    // Named per call, and nothing on the server remembers it — so this reads
+    // through that view without changing what anybody else sees, and there is
+    // no selection to put back afterwards.
+    const through = await callTool("describe_project", { target: "just-the-prg" });
+    expect(through.isError).toBe(false);
+    expect((through.value as { layers: unknown[] }).layers).toHaveLength(1);
 
-    // Back to everything, then tidy up so later cases see the whole project.
-    expect((await callTool("select_target", {})).isError).toBe(false);
+    // A view nothing declares is refused rather than answered for with a
+    // different stack, which would be a wrong answer that looks right.
+    const missing = await callTool("describe_project", { target: "no-such-view" });
+    expect(missing.isError).toBe(true);
+    expect(missing.text).toMatch(/No target/);
+
     expect((await callTool("remove_target", { name: "just-the-prg" })).isError).toBe(false);
   });
 

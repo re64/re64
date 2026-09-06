@@ -91,11 +91,11 @@ export interface CommentDeleteOp {
 export interface MetaSetOp {
   op: "meta.set";
   /**
-   * `activeTarget` rides here rather than getting an operation of its own:
+   * `defaultTarget` rides here rather than getting an operation of its own:
    * selecting a view is setting one project-level scalar, which is exactly what
    * this op is for.
    */
-  key: "name" | "description" | "activeTarget";
+  key: "name" | "description" | "defaultTarget";
   value?: string;
 }
 

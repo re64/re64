@@ -164,14 +164,16 @@ function layerIdOf(decl: ProjectLayer, index: number): string {
 
 export function withDefaultTarget(project: Project): Project {
   if (project.targets?.length) {
-    // Targets but no selection: the first phase, which is where a program
-    // starts. Sorted the way `list_targets` sorts, so a reader sees the one
-    // they were shown first.
-    if (project.activeTarget !== undefined) return project;
+    // A project may declare which view to open with — that is a fact about the
+    // project, and the reason it survives an export: somebody handed this file
+    // should see what it is *for*. It is emphatically not a cursor. Nothing
+    // writes it while reading, no tool sets it as a side effect of looking, and
+    // it moves no version.
+    if (project.defaultTarget !== undefined) return project;
     const first = [...project.targets].sort(
       (a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER)
     )[0];
-    return { ...project, activeTarget: first.name };
+    return { ...project, defaultTarget: first.name };
   }
 
   const name = project.name ?? "project";
@@ -193,12 +195,12 @@ export function withDefaultTarget(project: Project): Project {
         ...(project.entryPoints === undefined ? {} : { entryPoints: project.entryPoints }),
       },
     ],
-    activeTarget: name,
+    defaultTarget: name,
   };
 }
 
 export function projectForTarget(project: Project): Project {
-  const target = project.targets?.find((t) => t.name === project.activeTarget);
+  const target = project.targets?.find((t) => t.name === project.defaultTarget);
   // Unreachable through `buildMemoryMap`, which derives one first. Kept as a
   // guard rather than an assertion because this is exported and a caller may
   // hand it anything.
@@ -285,9 +287,21 @@ export function buildMemoryMap(
   // layer whatever the project said. Two consumers of one project disagreeing
   // about which bytes are in it is the kind of thing nobody notices until a
   // listing and a tool answer differently.
+  // A view nothing declares is refused rather than answered for. Falling back
+  // to the default would hand a caller a different stack than the one it named,
+  // with no way to tell — the confident wrong answer this project refuses.
+  if (
+    options.target !== undefined &&
+    !(migrated.targets ?? []).some((t) => t.name === options.target)
+  ) {
+    throw new Error(
+      `No target called "${options.target}" in this project. ` +
+        `list_targets shows what there is.`
+    );
+  }
   const project = projectForTarget(
     withDefaultTarget(
-      options.target === undefined ? migrated : { ...migrated, activeTarget: options.target }
+      options.target === undefined ? migrated : { ...migrated, defaultTarget: options.target }
     )
   );
 

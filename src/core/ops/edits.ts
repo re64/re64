@@ -171,7 +171,7 @@ export function placed(loaded: LoadedProject, address: number): { frame: Frame; 
     // A symbols layer supplies no bytes and has no address, so nothing can be
     // an offset into one — `layerAt` already returns only byte layers.
     owner ? { id: owner.id, start: owner.start } : undefined,
-    loaded.project.activeTarget
+    loaded.project.defaultTarget
   );
 }
 

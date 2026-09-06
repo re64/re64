@@ -104,16 +104,6 @@ export interface ClaimInput {
   is?: Interpretation["is"];
   /** Which layout, when `is` is `record`. From `list_types`. */
   typeId?: string;
-  /**
-   * Decide the scope against this view rather than the selected one.
-   *
-   * The escape hatch, and deliberately a *view* rather than a scope: naming
-   * which arrangement you mean is a concept a caller already has, and the scope
-   * still derives by the same rule. There is no way to name a scope directly,
-   * because the only thing that could reach is binding a claim to a layer that
-   * does not supply its bytes.
-   */
-  target?: string;
   encoding?: TextEncoding;
   view?: string;
   root?: RootKind;
@@ -187,6 +177,17 @@ export interface Room {
    * a value that never changes.
    */
   baseUrl?: string;
+  /**
+   * Which view this workspace answers for, when the caller named one.
+   *
+   * A `Workspace` *is* a view over a project: layers, claims and analysis all
+   * come out narrowed to one target. That is why the target lives here rather
+   * than being threaded through seventy method signatures — and why there is no
+   * "current" target anywhere on the server. A caller names one per request; a
+   * browser showing two targets side by side is two requests, not a setting
+   * that two panes have to fight over.
+   */
+  target?: string;
 }
 
 /** The claims an edit brought into being or revised, in the order it did. */
@@ -307,6 +308,21 @@ export class Workspace {
 
   constructor(private readonly room: Room) {}
 
+  /**
+   * The same project, read through another target.
+   *
+   * A workspace *is* a view, so asking for a different one hands you another
+   * workspace rather than changing this one. That is the whole shape: nothing
+   * on the server holds a "current" target, so two views of one project are two
+   * objects and neither can move the other out from under it — which is what a
+   * split-screen UI needs and what made `select_target` a shared setting nobody
+   * was willing to touch.
+   */
+  view(target?: string): Workspace {
+    if (target === this.room.target) return this;
+    return new Workspace({ ...this.room, ...(target === undefined ? {} : { target }) });
+  }
+
   // --- freshness ------------------------------------------------------
 
   /**
@@ -400,6 +416,19 @@ export class Workspace {
     return label && label.offset === 0 ? label.label.name : hex4(owning.entry);
   }
 
+  /**
+   * Which view this workspace answers for, resolved.
+   *
+   * Reported on answers rather than left implicit: a caller that named no
+   * target got the project's declared default, and seeing which one it was is
+   * the difference between learning the habit and silently reading the wrong
+   * stack. The same move as `scope` on a claim write — derived, not chosen, and
+   * never invisible.
+   */
+  targetName(): string | undefined {
+    return this.program().loaded.project.defaultTarget;
+  }
+
   /** The analysed program, rebuilt only when something it depends on moved. */
   program(): ProgramAnalysis {
     const key = this.key();
@@ -435,31 +464,6 @@ export class Workspace {
     return rows;
   }
 
-/**
-   * The memory map of a target that is not the selected one.
-   *
-   * Only for deciding a claim's scope, so it stops at the map and never
-   * analyses — which keeps it cheap enough to be the ordinary way to annotate
-   * another view. A write carrying its own target does not move the shared
-   * selection, and that matters: experiment 7 left a whole target unread for a
-   * run because changing the selection changes it for everybody and nobody was
-   * willing to.
-   */
-  private loadTarget(name: string): LoadedProject {
-    const project = projectFromDoc(this.room.store.document());
-    if (!(project.targets ?? []).some((t) => t.name === name)) {
-      throw new Error(`No target "${name}". list_targets shows what this project has.`);
-    }
-    const { storage, projectPath } = this.room;
-    const bytes =
-      storage instanceof SqliteStorage
-        ? databaseFileBytes(storage)
-        : nodeFileBytes(dirname(projectPath));
-    return buildMemoryMap(project, makeFileLoader(bytes), {
-      loadRom: nodeRomBytes(),
-      target: name,
-    });
-  }
 
   private load(): LoadedProject {
     const { store, storage, projectPath } = this.room;
@@ -476,6 +480,7 @@ export class Workspace {
     // in order to switch to one that shows them.
     return buildMemoryMap(projectFromDoc(store.document()), makeFileLoader(bytes), {
       loadRom: nodeRomBytes(),
+      ...(this.room.target === undefined ? {} : { target: this.room.target }),
     });
   }
 
@@ -914,7 +919,7 @@ export class Workspace {
       project.layers.filter((l) => l.id).map((l) => [l.id!, l] as const)
     );
     return {
-      ...(project.activeTarget ? { active: project.activeTarget } : {}),
+      ...(project.defaultTarget ? { active: project.defaultTarget } : {}),
       total: (project.targets ?? []).length,
       // In the order the program lives them, where anybody has said: a loader
       // precedes the image it expands, which precedes the levels. Unordered
@@ -940,7 +945,7 @@ export class Workspace {
             : {}),
           ...(t.order === undefined ? {} : { order: t.order }),
           ...(t.description === undefined ? {} : { description: t.description }),
-          active: t.name === project.activeTarget,
+          active: t.name === project.defaultTarget,
         })),
       // Every layer, including ones the selection hides, with the ids a target
       // is defined in terms of.
@@ -1016,24 +1021,6 @@ export class Workspace {
     return this.edit(caller, () => [{ op: "target.remove", name } as Op]);
   }
 
-  /**
-   * Choose a view. Passing nothing goes back to every layer.
-   *
-   * A change to what analysis sees, so it moves the version and re-analyses —
-   * which is correct, and is the cost of the view being part of the project
-   * rather than a per-caller setting.
-   */
-  selectTarget(caller: Caller, name?: string): EditResult {
-    if (name !== undefined) {
-      const held = projectFromDoc(this.room.store.document()).targets ?? [];
-      if (!held.some((t) => t.name === name)) {
-        throw new Error(`No target called "${name}". list_targets shows what there is.`);
-      }
-    }
-    return this.edit(caller, () => [
-      { op: "meta.set", key: "activeTarget", value: name } as Op,
-    ]);
-  }
 
   /**
    * Run the program from an address, and optionally keep what it produced.
@@ -1078,7 +1065,7 @@ export class Workspace {
     // then true immediately. It came back `instructions: 0`, `reason: "left the
     // program"` and a cheerful capture hash, which reads as a completed run.
     if (run.instructions === 0 && program.loaded.map.readByte(from) === undefined) {
-      const target = program.loaded.project.activeTarget;
+      const target = program.loaded.project.defaultTarget;
       throw new Error(
         `Nothing supplies ${hex4(from)}, so there is no instruction to start at` +
           (target
@@ -1467,46 +1454,22 @@ export class Workspace {
    * the map is a fact about the project, and a decoder handed silent zeroes
    * would draw something that looks like data.
    */
-  /** The layer stack a named target sees, built without selecting it. */
-  private mapForTarget(name: string): LoadedProject["map"] {
-    const project = projectFromDoc(this.room.store.document());
-    if (!(project.targets ?? []).some((t) => t.name === name)) {
-      throw new Error(
-        `No target called "${name}". list_targets shows what there is, including ` +
-          `the layers each one holds.`
-      );
-    }
-    const { storage, projectPath } = this.room;
-    const bytes =
-      storage instanceof SqliteStorage
-        ? databaseFileBytes(storage)
-        : nodeFileBytes(dirname(projectPath));
-    return buildMemoryMap(project, makeFileLoader(bytes), {
-      loadRom: nodeRomBytes(),
-      target: name,
-    }).map;
-  }
 
   /**
-   * Bytes from the memory map, optionally through a view nobody has selected.
+   * Bytes from the memory map, through this workspace's own view.
    *
-   * `select_target` is shared, and rightly — a view is a fact about the project
-   * rather than a setting of yours. The consequence measured in experiment 7 was
-   * not contention but **avoidance**: changing what two other people are reading
-   * so you can glance at the packed loader is a cost nobody would pay, so the
-   * loader went unread for the whole run and a reader tried
-   * `read_bytes {target: "loader"}` and got `Unrecognized key`.
+   * This took a `target` argument once, added so a reader could glance at
+   * another view without moving a shared selection — experiment 7 measured not
+   * contention over that selection but **avoidance**: changing what two other
+   * people are reading so you can look at the packed loader is a cost nobody
+   * would pay, so the loader went unread for a whole run.
    *
-   * A read can answer for another view without moving anybody, because it
-   * changes nothing. Only the bytes, deliberately: a disassembly of another
-   * target would need its own analysis, and that is a real cost to spend when
-   * somebody asks for it rather than now.
+   * The patch became the mechanism. A view is a parameter of the request, so
+   * every call names one and a workspace *is* the view — reading another is
+   * `view(name).bytes(...)`, a different object rather than a different
+   * argument, and nothing on the server remembers a current anything.
    */
-  bytes(
-    start: number,
-    length: number,
-    target?: string
-  ): {
+  bytes(start: number, length: number): {
     start: string;
     length: number;
     hex: string;
@@ -1514,9 +1477,10 @@ export class Workspace {
     target?: string;
     unmapped?: { from: string; to: string }[];
   } {
-    const map =
-      target === undefined ? this.program().loaded.map : this.mapForTarget(target);
-    const read = map.readBytes(start, length);
+    // This workspace's own view, because a workspace *is* one. Reading another
+    // is `view(name).bytes(...)`, which is a different object rather than a
+    // different argument.
+    const read = this.program().loaded.map.readBytes(start, length);
 
     const gaps: { from: string; to: string }[] = [];
     let run: number | undefined;
@@ -1533,7 +1497,6 @@ export class Workspace {
     return {
       start: hex4(start),
       length: read.length,
-      ...(target === undefined ? {} : { target }),
       // Both, because they answer different questions: hex is readable in a
       // transcript, base64 is what you paste into your own tooling.
       hex: [...filled].map((b) => b.toString(16).toUpperCase().padStart(2, "0")).join(" "),
@@ -2557,9 +2520,6 @@ export class Workspace {
 
   addClaim(caller: Caller, claim: ClaimInput): EditResult {
     this.checkClaim(claim);
-    // Resolved once for the reported scope; `claimOps` resolves it again inside
-    // the edit, where the document may have moved under us.
-    const view = claim.target === undefined ? undefined : this.loadTarget(claim.target);
     const made: string[] = [];
     const result = this.edit(
       caller,
@@ -2578,7 +2538,7 @@ export class Workspace {
     return {
       ...result,
       ...(made.length ? { claims: made } : {}),
-      scope: describeScope(placed(view ?? this.program().loaded, claim.at).frame),
+      scope: describeScope(placed(this.program().loaded, claim.at).frame),
       ...(claim.extent !== undefined
         ? {
             covers:
@@ -2628,12 +2588,7 @@ export class Workspace {
    * and `add_comments` disagreed about their own contract precisely because the
    * batch restated what the single call did rather than calling it.
    */
-  private claimOps(view: LoadedProject, claim: ClaimInput): Op[] {
-    // One view decides everything about a write — where the claim belongs, what
-    // names are already there, which layer supplies the bytes. Mixing the named
-    // target for one of those and the selected one for the rest would be a
-    // write nobody could reason about.
-    const loaded = claim.target === undefined ? view : this.loadTarget(claim.target);
+  private claimOps(loaded: LoadedProject, claim: ClaimInput): Op[] {
     const end = claim.at + (claim.extent ?? 1);
 
     // A record has no legacy region kind to be written as — there was never one

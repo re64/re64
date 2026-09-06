@@ -272,15 +272,22 @@ export function startServer(options: ServerOptions): RunningServer {
       registerTools,
       log: mcpLog,
       context: () => ({
-        workspace: (projectId) => workspaceFor(projectId ?? defaultProject()),
+        workspace: (projectId, target) => workspaceFor(projectId ?? defaultProject(), target),
         caller: callerFor(),
       }),
     }));
 
-  /** One Workspace per project, holding its analysis cache between calls. */
+  /**
+   * One Workspace per project *and target*, holding its analysis cache.
+   *
+   * A workspace is a view, so the view is part of its identity — two targets
+   * are two analyses over one document, and neither invalidates the other.
+   * Bounded by the number of targets a project declares, which is small.
+   */
   const workspaces = new Map<string, Workspace>();
-  function workspaceFor(projectId: string): Workspace {
-    const existing = workspaces.get(projectId);
+  function workspaceFor(projectId: string, target?: string): Workspace {
+    const key = `${projectId}\u0000${target ?? ""}`;
+    const existing = workspaces.get(key);
     if (existing) return existing;
 
     const { sync, storage } = room(projectId);
@@ -290,8 +297,9 @@ export function startServer(options: ServerOptions): RunningServer {
       projectId,
       projectPath,
       baseUrl: `http://${host === "0.0.0.0" ? "127.0.0.1" : host}:${port}`,
+      ...(target === undefined ? {} : { target }),
     });
-    workspaces.set(projectId, made);
+    workspaces.set(key, made);
     return made;
   }
 

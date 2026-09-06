@@ -135,20 +135,19 @@ describe("building a project from a disk image", () => {
     expect(camels.targets().total).toBe(2);
     expect(camels.targets().active).toBeUndefined();
 
-    camels.selectTarget(builder, "loader");
-    const loader = camels.describe();
+    const loader = camels.view("loader").describe();
     expect(loader.layers).toHaveLength(1);
     expect(loader.layers[0].name).toBe("packed");
 
-    camels.selectTarget(builder, "runtime");
-    expect(camels.describe().layers[0].name).toBe("unpacked");
+    expect(camels.view("runtime").describe().layers[0].name).toBe("unpacked");
 
     // Clearing the selection falls back to the first phase, not to "everything".
     // There is no everything: a stack is always a target's link list, and the
     // union of every layer was a stack the project never declared — packed and
     // unpacked shadowing each other in declaration order, which is exactly what
     // targets exist to replace.
-    camels.selectTarget(builder);
+    // Naming no view falls back to the project's declared default, and with
+    // none declared that is the first phase. There is no "everything" stack.
     expect(camels.describe().layers).toHaveLength(1);
     expect(camels.describe().layers[0].name).toBe("packed");
   });
@@ -186,9 +185,14 @@ describe("building a project from a disk image", () => {
     // A target holding only the *other* layer, so $0801 is supplied by nothing.
     const other = camels.targets().layers.find((l) => l.name === "other")!.id;
     camels.setTarget(builder, "elsewhere", [other]);
-    camels.selectTarget(builder, "elsewhere");
 
-    expect(() => camels.runProgram(builder, 0x0801)).toThrow(/hiding the layer|no instruction to start/);
+    // Read through that view, without it becoming everybody's view: a workspace
+    // *is* a view, so asking for another hands you another object rather than
+    // moving anything. Experiment 7 left a whole target unread because reading
+    // one meant changing it for everyone.
+    expect(() => camels.view("elsewhere").runProgram(builder, 0x0801)).toThrow(
+      /hiding the layer|no instruction to start/
+    );
   });
 
   it("takes a layer back out, and a name does not hold it hostage", () => {
@@ -332,16 +336,18 @@ describe("building a project from a disk image", () => {
     camels.addByteLayer(builder, { type: "prg", path: "p.prg", name: "p" });
     const id = camels.targets().layers.find((l) => l.name === "p")!.id;
     camels.setTarget(builder, "runtime", [id], [0x8002]);
-    camels.selectTarget(builder, "runtime");
+    
+    const runtimeView = camels.view("runtime");
 
     expect(() => camels.callGraph(0x8002)).not.toThrow();
   });
 
   it("reads another view without selecting it for everybody", () => {
-    // select_target is shared, and rightly. The consequence measured in
-    // experiment 7 was not contention but avoidance: changing what two other
-    // people are reading so you can glance at the packed loader is a cost
-    // nobody would pay, so the loader went unread for the whole run.
+    // What experiment 7 measured was not contention over the shared selection
+    // but *avoidance*: changing what two other people are reading so you can
+    // glance at the packed loader is a cost nobody would pay, so the loader
+    // went unread for the whole run. There is no selection now — a view is a
+    // parameter of the request — so looking cannot cost anybody anything.
     ws.createProject("camels");
     const camels = upload("camels", "packed.prg", new Uint8Array([0x00, 0x80, 0xaa]));
     camels.addByteLayer(builder, { type: "prg", path: "packed.prg", name: "packed" });
@@ -351,12 +357,11 @@ describe("building a project from a disk image", () => {
     const ids = Object.fromEntries(camels.targets().layers.map((l) => [l.name, l.id]));
     camels.setTarget(builder, "loader", [ids.packed]);
     camels.setTarget(builder, "runtime", [ids.runtime]);
-    camels.selectTarget(builder, "runtime");
-
-    expect(camels.bytes(0x8000, 1).hex.toLowerCase()).toBe("bb");
-    expect(camels.bytes(0x8000, 1, "loader").hex.toLowerCase()).toBe("aa");
-    // And looking did not move anybody.
-    expect(camels.targets().active).toBe("runtime");
+    expect(camels.view("runtime").bytes(0x8000, 1).hex.toLowerCase()).toBe("bb");
+    expect(camels.view("loader").bytes(0x8000, 1).hex.toLowerCase()).toBe("aa");
+    // Two views of one project are two objects, so neither can move the other
+    // out from under it — which is also what a split-screen UI needs.
+    expect(camels.view("runtime").bytes(0x8000, 1).hex.toLowerCase()).toBe("bb");
   });
 
   it("does not hide the symbols layer a name had to create", () => {
@@ -371,7 +376,8 @@ describe("building a project from a disk image", () => {
 
     const packed = camels.targets().layers.find((l) => l.name === "packed")!.id;
     camels.setTarget(builder, "runtime", [packed]);
-    camels.selectTarget(builder, "runtime");
+    
+    const runtimeView = camels.view("runtime");
 
     // $00FB is zero page: nothing supplies it, so this mints a symbols layer.
     camels.addLabel(builder, 0x00fb, "decrunchPointer");
@@ -403,11 +409,8 @@ describe("building a project from a disk image", () => {
     camels.setTarget(builder, "loader", [ids.first]);
     camels.setTarget(builder, "runtime", [ids.second]);
 
-    camels.selectTarget(builder, "runtime");
-    expect(camels.labels({ namePattern: "inTheLoader" }).total).toBe(0);
-
-    camels.selectTarget(builder, "loader");
-    expect(camels.labels({ namePattern: "inTheLoader" }).total).toBe(1);
+    expect(camels.view("runtime").labels({ namePattern: "inTheLoader" }).total).toBe(0);
+    expect(camels.view("loader").labels({ namePattern: "inTheLoader" }).total).toBe(1);
   });
 
   it("refuses a target naming a layer that is not there, and one with none", () => {
@@ -416,22 +419,24 @@ describe("building a project from a disk image", () => {
     camels.addByteLayer(builder, { type: "prg", path: "a.prg" });
     expect(() => camels.setTarget(builder, "bad", ["lay_nope"])).toThrow(/No layer/);
     expect(() => camels.setTarget(builder, "empty", [])).toThrow(/shows nothing/);
-    expect(() => camels.selectTarget(builder, "missing")).toThrow(/No target/);
+    // A view nothing declares is refused rather than silently answered for.
+    expect(() => camels.view("missing").describe()).toThrow(/No target|missing/);
   });
 
-  it("drops the selection when the selected target is removed", () => {
-    // A selection pointing at nothing reads as a filter that silently does
-    // nothing, which is worse than no selection at all.
+  it("refuses to answer for a target that has been removed", () => {
+    // There is no selection to drop any more — a view is a parameter of the
+    // request, so removing a target cannot leave anything pointing at nothing.
+    // What it does mean is that naming it afterwards is refused rather than
+    // quietly answered for with a different stack.
     ws.createProject("camels");
     const camels = upload("camels", "a.prg", new Uint8Array([0x00, 0x08, 0x60]));
     camels.addByteLayer(builder, { type: "prg", path: "a.prg" });
     const id = camels.targets().layers[0].id;
     camels.setTarget(builder, "only", [id]);
-    camels.selectTarget(builder, "only");
-    expect(camels.targets().active).toBe("only");
+    expect(camels.view("only").describe().layers).toHaveLength(1);
 
     camels.removeTarget(builder, "only");
-    expect(camels.targets().active).toBeUndefined();
+    expect(() => camels.view("only").describe()).toThrow(/No target/);
   });
 
   it("runs the real decruncher and captures what it produced", () => {

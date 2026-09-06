@@ -42,7 +42,7 @@ const INSTRUCTIONS = [
 ].join("\n\n");
 
 export interface McpContext {
-  workspace: (projectId?: string) => Workspace;
+  workspace: (projectId?: string, target?: string) => Workspace;
   caller: Caller;
 }
 

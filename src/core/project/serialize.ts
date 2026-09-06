@@ -107,8 +107,8 @@ export function formatProject(project: Project): string {
     body.push(`  "targets": [\n${entries}\n  ]`);
   }
 
-  if (project.activeTarget !== undefined) {
-    body.push(`  "activeTarget": ${JSON.stringify(project.activeTarget)}`);
+  if (project.defaultTarget !== undefined) {
+    body.push(`  "defaultTarget": ${JSON.stringify(project.defaultTarget)}`);
   }
 
   if (project.files?.length) {
@@ -464,7 +464,7 @@ export function deleteTarget(raw: string, name: string): string {
   if (project.targets.length === 0) delete project.targets;
   // A selection pointing at nothing is worse than none: it would read as a
   // filter that silently does nothing.
-  if (project.activeTarget === name) delete project.activeTarget;
+  if (project.defaultTarget === name) delete project.defaultTarget;
   return formatProject(project);
 }
 
@@ -666,7 +666,7 @@ export function unbindLabel(raw: string, layerIndex: number, id: string): string
  */
 export function setProjectMeta(
   raw: string,
-  key: "name" | "description" | "activeTarget",
+  key: "name" | "description" | "defaultTarget",
   value: string | undefined
 ): string {
   const project = parseProject(raw);
