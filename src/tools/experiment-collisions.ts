@@ -62,23 +62,38 @@ function declarationsIn(path: string): Declaration[] {
     } catch {
       continue;
     }
-    if (call.tool !== "set_region" && call.tool !== "set_regions") continue;
+    // Both vocabularies, deliberately. The runs that produced the number this
+    // tool exists for used `set_region`, which no longer exists — reading only
+    // the new names would quietly stop measuring the very evidence the claims
+    // redesign was built on, and reading only the old ones would report zero
+    // for every run since. A tool that silently measures nothing is worse than
+    // one that is missing.
+    const legacy = call.tool === "set_region" || call.tool === "set_regions";
+    const current = call.tool === "add_claim" || call.tool === "add_claims";
+    if (!legacy && !current) continue;
 
     const args = call.args ?? {};
     const project = String(args.project ?? "?");
-    const batch = (args.regions as Record<string, unknown>[] | undefined) ?? [args];
+    const batch =
+      (args.regions as Record<string, unknown>[] | undefined) ??
+      (args.claims as Record<string, unknown>[] | undefined) ??
+      [args];
     for (const item of batch) {
-      const start = parseAddress(item.start);
+      // `at` + `extent` is the claim spelling; `start` + `end`/`length` the
+      // region one. The two ways of getting a span wrong went with the pair.
+      const start = parseAddress(item.start ?? item.at);
       if (start === undefined) continue;
+      const extent = parseAddress(item.extent);
       const end =
         parseAddress(item.end) ??
-        (parseAddress(item.length) !== undefined ? start + parseAddress(item.length)! : undefined);
+        (parseAddress(item.length) !== undefined ? start + parseAddress(item.length)! : undefined) ??
+        (extent !== undefined ? start + extent : undefined);
       if (end === undefined) continue;
       out.push({
         project,
         start,
         end,
-        kind: item.kind as string | undefined,
+        kind: (item.kind ?? item.is) as string | undefined,
         name: item.name as string | undefined,
         agent: call.codename ?? "?",
         at: call.at ?? "",
