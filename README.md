@@ -1,22 +1,48 @@
 # re64
 
-A collaborative C64 disassembler.
+An agentic-first C64 disassembler. Reverse engineering a game is a long grind of
+recognising a routine, naming it and moving on, and that is work an agent can do
+alongside a person rather than instead of one.
+
+Four consumers sit over one document, and none of them is the primary: a CLI, an
+HTTP API, a web UI, and an MCP surface for agents. They share a document rather
+than a file format, so an agent naming a subroutine and a person reading the same
+code see each other's work as it happens.
 
 ## Status
 
-In active development. Currently supports:
-- Loading PRG files and D64 disk images
-- Memory layering system (multiple files can overlay each other)
-- Work-queue 6502 disassembler with control flow analysis
-- Project files (.re64 JSON) for configuration
-- Labels with resolution in instruction operands
-- Regions to define memory semantics (code, data, text, jumptable)
-- Combined output showing both instructions and hex dumps for data
-- Cross-reference arrow gutter, in the CLI and the web UI alike
-- Stable ids on labels, regions, and layers
-- Operation-based editing with undo/redo, from the CLI or the UI
-- Real-time collaboration over a WebSocket, with per-session history
-- Web UI with a memory map sidebar, inline label editing, and local analysis
+In active development.
+
+**Reading a binary.** PRG files and D64 disk images; stacked memory layers;
+a work-queue 6502 disassembler with control-flow analysis; text, bitmap and
+record rendering; a cross-reference arrow gutter drawn identically in the CLI and
+the browser.
+
+**Saying things about it.** One noun — a *claim* — carries a name, what the bytes
+are, how far it reaches, and whether to decode from there. Adding always adds and
+correcting is by id, so two people who disagree both stand and the contradiction
+is reported rather than resolved by whoever wrote last.
+
+**Understanding it.** A P-Code lifter over all 56 documented instructions, an
+interpreter that passes Klaus Dormann's functional test suite including decimal
+mode, basic blocks, a call graph, per-routine effects, and known-bits value
+analysis for proving flags. `run_program` executes the program's own decruncher.
+
+**Working together.** Real-time collaboration over a WebSocket, a shared chat, a
+participant list, per-session undo, and an append-only operation log every
+surface writes through.
+
+**Agents.** 72 MCP tools inside the same server, so an agent's edit lands in an
+open browser without a reload.
+
+## Documentation
+
+| | |
+|---|---|
+| `docs/model.md` | the document model as it stands — read this first |
+| `docs/api.md` | the MCP surface, from the live schema |
+| `docs/experiments.md` | eight agent runs, and what each one changed |
+| `CLAUDE.md` | why any of it is shaped the way it is |
 
 ## Development
 
@@ -44,33 +70,32 @@ The recommended way to work with re64 is through project files (`.re64` JSON fil
 {
   "name": "My Game",
   "layers": [
-    {
-      "type": "symbols",
-      "name": "game-symbols",
-      "labels": [
-        { "address": "$02", "name": "playerX" }
-      ]
-    },
-    {
-      "type": "prg",
-      "path": "game.prg",
-      "regions": [
-        { "start": "$2000", "end": "$3000", "kind": "data", "name": "spriteData" }
-      ],
-      "labels": [
-        { "address": "$0810", "name": "MainLoop", "type": "function" }
-      ]
-    }
+    { "id": "lay_game", "type": "prg", "path": "game.prg" }
+  ],
+  "claims": [
+    { "id": "clm_1", "at": "$02", "name": "playerX" },
+    { "id": "clm_2", "at": "$0810", "name": "MainLoop", "root": "routine" },
+    { "id": "clm_3", "at": "$2000", "extent": 4096,
+      "name": "spriteData", "is": "data", "layer": "lay_game" }
   ],
   "entryPoints": ["$0810"]
 }
 ```
 
-Labels and regions belong to the layer that owns them, so reordering the layer
-stack moves annotations with the bytes they describe. Use a `symbols` layer for
-addresses with no loaded bytes — zero page variables and the like. Standard C64
-hardware registers and KERNAL entry points (`$D020 EXTCOL`, `$FFD2 CHROUT`, …)
-are built in, so projects only declare the names they want to override.
+A **claim** is anything anybody says about an address: a name, what the bytes
+are (`is`), how far it reaches (`extent`), whether to decode from there
+(`root`), or any combination. What used to be a "label" is a claim with a name;
+what used to be a "region" is one with an extent and an `is`.
+
+A claim belongs to the layer supplying its bytes — stored as an offset, so
+relinking that layer moves the claim with it — or to the target, for addresses
+no file supplies. That is derived from the address; you never say it, and the
+tools speak absolute addresses throughout.
+
+Standard C64 hardware registers and KERNAL entry points (`$D020 EXTCOL`,
+`$FFD2 CHROUT`, …) are built in, so projects only declare names they want to
+override. Older files carrying `labels` and `regions` inside layers still load;
+`re64 migrate` converts one.
 
 ```bash
 # Disassemble using project file
@@ -104,10 +129,16 @@ without a browser:
 
 ```json
 [
-  { "op": "label.set", "id": "lbl_a1b2c3", "layerId": "lay_x1y2z3",
-    "address": 33186, "name": "DrawGrid", "type": "function" }
+  { "op": "claim.add",
+    "claim": { "id": "clm_a1b2c3", "at": 33186, "name": "DrawGrid",
+               "root": "routine",
+               "by": { "author": "agent-1", "source": "user" } } }
 ]
 ```
+
+The CLI's `label` and `region` subcommands are the old vocabulary over the new
+model — they write claims. Agents use the MCP surface, where the vocabulary is
+`add_claim`, `set_claim` and `remove_claim`; see `docs/api.md`.
 
 ### Loading files directly
 
@@ -163,58 +194,69 @@ npx re64 disasm -l game.prg -r '$0800:$0900'
 
 ### Conceptual Model
 
+Two layers, where there used to be three.
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Memory Map                              │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │ Layers (actual bytes)                                   ││
-│  │  - FileLayer: PRG/raw files                             ││
-│  │  - BytesLayer: inline hex patterns                      ││
-│  │  - Layers stack and shadow (top wins)                   ││
-│  └─────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                       Regions                                │
-│  Define what memory ranges mean (code/data/text/jumptable)  │
-│  - Auto-generated from layers (PRG→code, raw→data)          │
-│  - User-defined regions override auto-generated             │
-│  - Guide disassembler behavior                              │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                        Labels                                │
-│  Mark individual addresses with names                       │
-│  - Layer-generated (PRG entry points)                       │
-│  - Region-generated (region start addresses)                │
-│  - User-defined (any address)                               │
-│  - Resolved in instruction operands (JSR ROM_CHROUT)        │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Layers — bytes, and nothing else                            │
+│    a PRG, a raw file, inline hex, a symbols table, a ROM     │
+│    dumb resources: they hold bytes and know nothing about    │
+│    where they sit                                            │
+└──────────────────────────────────────────────────────────────┘
+        │  arranged by
+        ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Targets — which layers, in what order, at what address      │
+│    the order is the z-order; a layer can be linked into two  │
+│    targets at two addresses, which is what a program that    │
+│    relocates its own code needs                              │
+└──────────────────────────────────────────────────────────────┘
+        │  described by
+        ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Claims — everything anybody says about an address           │
+│    name · is · extent · root, any of them, at least one      │
+│    several cover any interesting address, and that is the    │
+│    design: adding always adds, correcting is by id           │
+└──────────────────────────────────────────────────────────────┘
 ```
+
+**Nothing resolves at rest.** Which name an operand shows, whether a byte is
+code, how a span renders, what nests inside what — all of it is derived when
+something asks. `disagreements()` reports where a project contradicts itself
+rather than picking a winner.
+
+`docs/model.md` is the full reference.
 
 ### Project Structure
 
 ```
 src/
 ├── core/             # pure; runs under Node and in the browser
-│   ├── memory/       # MemoryMap, layers, labels, regions
+│   ├── memory/       # MemoryMap, layers, comments, constants, types
+│   ├── claims/       # the model: Claim, NameIndex, decode graph, listing
 │   ├── arch/
 │   │   └── mos6502/  # opcodes, decoder, work-queue disassembler
-│   ├── c64/          # D64 parser, built-in hardware/KERNAL symbols
-│   ├── project/      # schema, loader, line-preserving serializer
-│   ├── analysis/     # program analysis: xrefs (blocks, call graph next)
+│   ├── il/           # P-Code lifter, interpreter, value analysis
+│   ├── c64/          # D64 parser, built-in symbols, derived ROM effects
+│   ├── project/      # schema, loader, serializer, migration
+│   ├── ops/          # the closed edit vocabulary, each with an inverse
+│   ├── crdt/         # the Yjs document; the only place yjs is imported
+│   ├── analysis/     # blocks, call graph, routines, effects, hygiene
 │   └── view/         # view model: rows, tokens, arrow lanes, gutter
+├── sandbox/          # SES compartments for decoders somebody else wrote
 ├── cli/              # Node I/O; renders rows as text
 ├── ui/               # browser; renders rows as CodeMirror decorations
-└── server/           # serves the project file and layer bytes
+├── store/            # SQLite persistence, the update log, the ops history
+└── server/           # HTTP, WebSocket sync, and server/mcp/ for agents
 ```
 
-**Analysis runs client-side.** The core library is free of Node APIs so the same
-disassembly runs in the CLI and in the browser; the web UI fetches the project
-and its bytes, then builds the memory map and analyses locally. The server only
-stores files.
+**Analysis runs client-side, and also on the server.** The core library is free
+of Node APIs, so the same disassembly runs in the CLI, in the browser and on the
+server. The browser holds its own `Y.Doc` and analyses locally, which is why a
+rename shows instantly and only the sync crosses the wire. The server analyses
+too — an agent has no local analysis — cached per document version and computed
+only when a tool asks.
 
 **The CLI and the web UI share one render walk.** Both consume the same rows —
 the CLI prints them and ignores the interaction spans, while the UI turns those

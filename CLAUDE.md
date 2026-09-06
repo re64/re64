@@ -1175,7 +1175,7 @@ somebody wrote about an address **in this project**; this is what a name means o
 this **machine**, and it travels with the name. The practical difference decides
 it: nothing supplies the bytes at `$FFD2` in an ordinary game, so a comment there
 would render nowhere — while `description` on the label is reachable everywhere
-the name is, which is what `list_labels` now returns.
+the name is, which is what `list_claims` now returns.
 
 It does not reintroduce the field that was removed from labels. That one was the
 *only* home for a comment, so commenting an instruction meant inventing a name
@@ -2394,11 +2394,12 @@ claude mcp add --transport http re64 http://127.0.0.1:5164/mcp \
 
 The user id is one from `list_users`; the server does not verify it.
 
-## The claims redesign, in progress
+## The claims redesign, landed
 
-**`docs/redesign-claims.md` is the live design document. Read it before changing
-labels, regions, or the walk.** It is written after a prototype rather than
-before one, so every number in it is something the code measured.
+**It is done.** `docs/model.md` is the model as it stands; read that first.
+`docs/redesign-claims.md` is the design document it was built from, kept because
+every number in it is something the code measured — but it describes a plan, and
+the plan was executed. What follows is the argument, not a proposal.
 
 The one-line version: **labels and regions are two halves of one noun, and the
 line between them was drawn by an assembler source file rather than by the
@@ -2408,8 +2409,8 @@ for the walk it is indistinguishable from `unknown` and from silence — so it
 becomes a *root*, and what a person declares is either a root (decode from here)
 or an interpretation (these bytes are not instructions).
 
-What is prototyped, in `src/core/claims/` and `src/core/crdt/claims.ts`, all of
-it parallel to the live model and reaching nothing:
+What it put in `src/core/claims/` and `src/core/crdt/claims.ts`, all of it now
+the live model rather than beside it:
 
 - `model.ts` — one `Claim`: an id, a position, an optional extent, an optional
   name, an optional interpretation, an optional root, and **who made it**.
@@ -2429,11 +2430,12 @@ it parallel to the live model and reaching nothing:
 What has **landed**, because it was a real bug rather than a design: a claim can
 no longer stop control flow. See the section above.
 
-The implementation order is planned and the design document carries nine
-corrections found while planning it. Four are blocking and are recorded there:
-the `LABEL_RANK`/`Provenance` rank collision, that `adapt.ts` is a measurement
-adapter and not the migration, that migration must preserve ids verbatim, and
-that `claim.set` cannot yet express "clear this field".
+The design document carried nine corrections found while planning, four of them
+blocking. All four are settled: the rank collision dissolved once `compareClaims`
+turned out to be encoding specificity rather than authority; `adapt.ts` was the
+measurement adapter and is deleted; migration preserves ids verbatim; and
+`claim.set` clears a field with `null`, which is the distinction `Partial<>`
+cannot make.
 
 Three things it is worth knowing before touching any of this:
 
@@ -2453,25 +2455,27 @@ Three things it is worth knowing before touching any of this:
 Written down because it is the kind of thing that is obvious while building and
 invisible six weeks later. None of it is urgent; all of it is real.
 
-**One hole in the operation vocabulary.** There is `layer.add` and
-`layer.remove`, and no `layer.set` — a layer can be created and destroyed, never
-modified. So nothing can rename a layer or **reorder the stack**, and z-order is
-invoked throughout this file as the *reason* annotations belong to layers:
-"reordering the layer stack moves them with the bytes they describe rather than
-leaving them pointing at whatever else lands at that address." That property has
-never been exercisable through any surface. A documented behaviour with no
-operation behind it is worse than a missing feature, because it reads as
-supported. Relatedly, `add_layer` makes only `symbols` layers, so a byte layer
-cannot be added at all — which is why the shadowing it is supposed to enable
-cannot be tested end to end.
+**One hole left in the operation vocabulary.** There is `layer.add` and
+`layer.remove`, and no `layer.set` — so a layer still cannot be renamed.
+
+**Reordering is no longer part of that hole**, and how it stopped being one is
+the interesting half. Z-order was invoked throughout this file as the *reason*
+annotations belong to layers, with the honest note that nothing could perform
+it — a documented behaviour with no operation behind it, which reads as
+supported. The missing operation turned out not to be missing so much as *on the
+wrong object*: z-order is a property of an arrangement, not of a resource, so a
+target holds the ordered link list and `set_target` reorders it.
+
+Byte layers are `add_byte_layer` and ROMs are `add_rom_layer`; `add_layer` makes
+symbols layers only, which is now a naming wart rather than a gap.
 
 **The debt is really in the surfaces, and it is lopsided:**
 
 | | reaches |
 |---|---|
-| MCP | ~41 tools — nearly the whole vocabulary |
-| CLI | labels, regions, undo/redo, import/export |
-| Browser | labels and regions, and nothing else |
+| MCP | 72 tools — the whole vocabulary |
+| CLI | labels, regions, undo/redo, import/export, migrate, transcript |
+| Browser | `addLabel`, `removeLabel`, `setRegion`, `removeRegion`, `undo`, `redo` |
 
 The browser cannot write a comment, declare a constant, or set a primary label,
 though all three are modelled, rendered and reachable by an agent. For a project
@@ -4299,28 +4303,30 @@ which is what overlap is for. The model already supported it — regions may
 overlap and `getRegionAt` resolves innermost-first — so the inner one renders
 inside its span, the outer one either side, and nothing becomes unexplained.
 
-**A region has an id, and that is the way to name one.** `describe_project`
-reports them and `set_region`/`remove_region` accept them, which removes the
-inference entirely: an id says *this* region, however far its span has moved.
+**A claim has an id, and that is the way to name one.** `claims_at` reports
+them and `set_claim`/`remove_claim` take them, which removes the inference
+entirely: an id says *this* claim, however far its span has moved.
 That is the same rule everything else here follows — "an address cannot identify
 a label", and a region's start is no better, which the identity section said long
 before regions could nest.
 
-The inference below is what happens when no id is given, because usually none
-is: a person reading a listing sees an address, not an id.
+**The inference is gone, and it is worth knowing what it was.** A declaration
+used to be matched against existing claims by start address, in three cases: the
+same span exactly reused the id, the only one starting there was an extend or a
+move, anything else nested. Checking the exact span first was load-bearing —
+without it, re-declaring a span inside a larger one nested again on every call,
+and two identical spans raced to be the innermost, which showed up as a test
+that passed eight times and then failed twice.
 
-Three cases, strongest signal first:
+It was an upsert wearing a heuristic, and experiment 8 found the last path still
+going through it: `add_claim` with a `root` reused an existing claim's id and
+replaced its name, under a tool whose description promises it never replaces.
 
-| declaration | meaning |
-|---|---|
-| the same span exactly | one statement corrected — reuse the id |
-| the only region starting here, and not strictly inside it | an extend or a move |
-| strictly inside, or ambiguous because several regions start here | a new region, nested |
-
-**Checking the exact span first is not a detail.** Without it, re-declaring the
-same span inside a larger region nests again on every call, and two identical
-spans then race to be the innermost — which showed up as a test that passed
-eight times in a row and then failed twice.
+**Adding always adds now, and correcting is by id.** What the heuristic was
+trying to do — let somebody re-declare a span without minting a duplicate — is
+not something the model needs done for it: several claims covering one address
+is the design, `claims_at` is how you find the one you meant, and a duplicate is
+a hygiene finding rather than a thing to prevent at the point of writing.
 
 **Nesting also cost the start address its uniqueness**, which `remove_region`
 had been relying on: two regions can now begin in the same place, and picking
