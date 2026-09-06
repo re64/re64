@@ -34,19 +34,24 @@ person reading the same code see each other's work as it happens.
 
 Keep core/ free of Node.js-specific APIs where possible to maintain web compatibility.
 
-### Start here: `docs/model.md`
+### Start here: `docs/model.md` and `docs/api.md`
 
-**Read it before this file.** It is the model as it stands — the nine document
+**Read them before this file.** `docs/model.md` is the model as it stands — the nine document
 roots, the claim and its value types, layers and targets, the three declaration
 tables, what is derived — with no account of how any of it got here, and a
 closing section listing the known tensions flatly and without recommendations.
 
-This file is the reasoning and the history, and that is the point of keeping the
-two apart: every shape here arrives with the bug that produced it, which is what
+`docs/api.md` is the seventy-two MCP tools, extracted from the live `tools/list`
+schema rather than from the source, with the conventions every one of them
+shares and the frictions two readers hit in experiment 8.
+
+This file is the reasoning and the history, and that is the point of keeping
+them apart: every shape here arrives with the bug that produced it, which is what
 makes it hard to think *about* the design rather than along with it. Read the
 state first, then come here for why.
 
-The sections below are the conceptual summary; `docs/model.md` is the reference.
+The sections below are the conceptual summary and the argument; those two are
+the reference.
 
 ### Conceptual Model
 
