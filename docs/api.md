@@ -1,8 +1,8 @@
 # The re64 MCP API, as it stands
 
 Seventy-two tools, extracted from the live `tools/list` schema rather than from
-the source, so this is what a client actually sees. Companion to
-`docs/model.md`: that one is the document, this one is how you reach it.
+the source, so this is what a client actually sees. Companion to `docs/model.md`, which is the document this reaches, and to
+`docs/experiments.md`, which is where most of these tools came from.
 
 No history here either. `CLAUDE.md` says why each of these exists and what it
 replaced.

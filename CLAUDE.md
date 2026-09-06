@@ -34,7 +34,7 @@ person reading the same code see each other's work as it happens.
 
 Keep core/ free of Node.js-specific APIs where possible to maintain web compatibility.
 
-### Start here: `docs/model.md` and `docs/api.md`
+### Start here: `docs/model.md`, `docs/api.md`, `docs/experiments.md`
 
 **Read them before this file.** `docs/model.md` is the model as it stands — the nine document
 roots, the claim and its value types, layers and targets, the three declaration
@@ -44,6 +44,10 @@ closing section listing the known tensions flatly and without recommendations.
 `docs/api.md` is the seventy-two MCP tools, extracted from the live `tools/list`
 schema rather than from the source, with the conventions every one of them
 shares and the frictions two readers hit in experiment 8.
+
+`docs/experiments.md` is the eight runs — what each asked, and which line of code
+it moved. Most of the model and most of the API came out of those, so it is the
+shortest route to why anything is shaped the way it is.
 
 This file is the reasoning and the history, and that is the point of keeping
 them apart: every shape here arrives with the bug that produced it, which is what

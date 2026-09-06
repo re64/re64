@@ -5,8 +5,8 @@ reasoning and the history; this carries the shape. Where the two disagree, read
 the code — but this file is meant to be checked against it and kept true.
 
 Written to be read cold, in about ten minutes, by somebody deciding what to
-change. `docs/api.md` is the companion: this is the document, that is how you
-reach it.
+change. `docs/api.md` is how you reach it, and `docs/experiments.md` is where most of
+this came from.
 
 ---
 
