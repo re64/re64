@@ -128,12 +128,87 @@ function layerName(layer: ProjectLayer, index: number): string {
  * No target selected means every layer and the project's own entry points,
  * so a one-layer project declares nothing and behaves exactly as before.
  */
+/**
+ * The project with a target, deriving one where the file has none.
+ *
+ * Every project has a stack, so every project has a target: the alternative was
+ * two ways to get one — a target's link list when a file declares them, and the
+ * *declaration order* of `project.layers` when it does not. The same field
+ * meaning two things depending on whether a target is selected is how
+ * "entryPoints said 2 while decodeStartsFrom said 19" happened, one field over,
+ * in this same function.
+ *
+ * Derived on load and **persisted by the next write**, which is the precedent
+ * this project already set for ids: a file without them stays loadable, the
+ * derivation is content-based so every client agrees, and the next write makes
+ * it real. Deriving it on every load and never persisting would be worse than
+ * the seam it replaces — the thing deciding your z-order would be invisible in
+ * the file, absent from `list_targets`, and unreachable by `set_target`.
+ *
+ * Named after the project rather than `default`, because a name nobody chose is
+ * what this codebase keeps being caught by, and because "gridrunner" reads as a
+ * fact where a placeholder reads as machinery.
+ */
+/**
+ * A layer's id, derived where the file has none.
+ *
+ * Shared with the layer construction below rather than restated, because a
+ * target links layers *by id* and a derivation that drifted from the one the
+ * layers get would silently drop every un-migrated layer out of its own stack.
+ * Deterministic, so every client loading the same file agrees — the same
+ * property the id derivation has everywhere else here.
+ */
+function layerIdOf(decl: ProjectLayer, index: number): string {
+  return decl.id ?? derivedId("lay", index, decl.type, decl.path ?? decl.name ?? "");
+}
+
+export function withDefaultTarget(project: Project): Project {
+  if (project.targets?.length) {
+    // Targets but no selection: the first phase, which is where a program
+    // starts. Sorted the way `list_targets` sorts, so a reader sees the one
+    // they were shown first.
+    if (project.activeTarget !== undefined) return project;
+    const first = [...project.targets].sort(
+      (a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER)
+    )[0];
+    return { ...project, activeTarget: first.name };
+  }
+
+  const name = project.name ?? "project";
+  return {
+    ...project,
+    targets: [
+      {
+        name,
+        // Declaration order, so the derived stack is the stack the file already
+        // had. A symbols layer is never linked — it supplies no bytes, so it
+        // shadows nothing and a target has nothing to say about it.
+        layers: project.layers
+          .map((l, index) => ({ decl: l, id: layerIdOf(l, index) }))
+          .filter(({ decl }) => decl.type !== "symbols")
+          .map(({ id }) => id),
+        // Moved, not copied: `projectForTarget` lets a target's list *replace*
+        // the project's, so leaving them behind would silently drop every entry
+        // point the moment a default target existed.
+        ...(project.entryPoints === undefined ? {} : { entryPoints: project.entryPoints }),
+      },
+    ],
+    activeTarget: name,
+  };
+}
+
 export function projectForTarget(project: Project): Project {
   const target = project.targets?.find((t) => t.name === project.activeTarget);
+  // Unreachable through `buildMemoryMap`, which derives one first. Kept as a
+  // guard rather than an assertion because this is exported and a caller may
+  // hand it anything.
   if (!target) return project;
 
   const links = targetLinks(target);
-  const declared = new Map(project.layers.filter((l) => l.id).map((l) => [l.id!, l] as const));
+  // By the *derived* id, so a file whose layers have none is still linkable —
+  // the ids are content-derived and every client agrees on them, which is what
+  // makes an un-migrated file load identically everywhere.
+  const declared = new Map(project.layers.map((l, i) => [layerIdOf(l, i), l] as const));
 
   // A symbols layer is never linked and never filtered. It supplies no bytes,
   // so it shadows nothing and occupies no range, and a target is a statement
@@ -192,7 +267,7 @@ function nameClaim(claim: Claim): Claim {
 export function buildMemoryMap(
   declared: Project,
   loadFile: FileLoader,
-  options: { platform?: boolean; loadRom?: RomLoader } = {}
+  options: { platform?: boolean; loadRom?: RomLoader; target?: string } = {}
 ): LoadedProject {
   // One form below, whatever the file holds. A project still written with labels
   // and regions is converted here, exactly as `re64 migrate` converts it on disk
@@ -202,7 +277,19 @@ export function buildMemoryMap(
   // This is what makes the write path's cutover visible. While the projection
   // was additive, an edit to a legacy label produced a `claim.set` naming an id
   // no claim had, and did nothing at all.
-  const project = needsMigration(declared) ? migrateToClaims(declared).project : declared;
+  const migrated = needsMigration(declared) ? migrateToClaims(declared).project : declared;
+
+  // Narrowed here rather than by each caller, which is the second half of "one
+  // path to a stack". Only the server did it, so `loadProjectFile` — the CLI,
+  // the golden test, every core test — ignored targets entirely and read every
+  // layer whatever the project said. Two consumers of one project disagreeing
+  // about which bytes are in it is the kind of thing nobody notices until a
+  // listing and a tool answer differently.
+  const project = projectForTarget(
+    withDefaultTarget(
+      options.target === undefined ? migrated : { ...migrated, activeTarget: options.target }
+    )
+  );
 
   const map = new MemoryMap();
   const prgEntries: number[] = [];
@@ -247,7 +334,7 @@ export function buildMemoryMap(
     const name = layerName(decl, index);
     // Derived from position and source when absent: stable for a given file,
     // replaced by a real id on the next write.
-    const layerId = decl.id ?? derivedId("lay", index, decl.type, decl.path ?? decl.name ?? "");
+    const layerId = layerIdOf(decl, index);
     let layer: Layer;
 
     if (decl.type === "prg") {

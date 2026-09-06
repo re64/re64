@@ -40,7 +40,6 @@ import {
   blobPaths,
   isBitmapView,
   buildMemoryMap,
-  projectForTarget,
   describeOp,
   labelDeleteOp,
   labelDeleteByIdOp,
@@ -456,11 +455,10 @@ export class Workspace {
       storage instanceof SqliteStorage
         ? databaseFileBytes(storage)
         : nodeFileBytes(dirname(projectPath));
-    return buildMemoryMap(
-      projectForTarget({ ...project, activeTarget: name }),
-      makeFileLoader(bytes),
-      { loadRom: nodeRomBytes() }
-    );
+    return buildMemoryMap(project, makeFileLoader(bytes), {
+      loadRom: nodeRomBytes(),
+      target: name,
+    });
   }
 
   private load(): LoadedProject {
@@ -476,11 +474,9 @@ export class Workspace {
     // see the same narrowed stack. `describe_project` reads the unfiltered
     // project separately, since a caller needs to see the layers a target hides
     // in order to switch to one that shows them.
-    return buildMemoryMap(
-      projectForTarget(projectFromDoc(store.document())),
-      makeFileLoader(bytes),
-      { loadRom: nodeRomBytes() }
-    );
+    return buildMemoryMap(projectFromDoc(store.document()), makeFileLoader(bytes), {
+      loadRom: nodeRomBytes(),
+    });
   }
 
   /** Content-addressed, for anything crossing a process boundary. */
@@ -1485,11 +1481,10 @@ export class Workspace {
       storage instanceof SqliteStorage
         ? databaseFileBytes(storage)
         : nodeFileBytes(dirname(projectPath));
-    return buildMemoryMap(
-      projectForTarget({ ...project, activeTarget: name }),
-      makeFileLoader(bytes),
-      { loadRom: nodeRomBytes() }
-    ).map;
+    return buildMemoryMap(project, makeFileLoader(bytes), {
+      loadRom: nodeRomBytes(),
+      target: name,
+    }).map;
   }
 
   /**

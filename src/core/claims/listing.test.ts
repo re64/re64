@@ -90,8 +90,14 @@ describe("one address-sorted listing", () => {
   it("a placeholder claim hides the work it does not explain", () => {
     // The reason not to compensate for this in the renderer. Removing one 8,400
     // byte `data` claim that accounts for 20% of its own span takes the project
-    // from 6 gaps to 48, and from 3,824 unexplained bytes to 10,544 — 42 entries
+    // from 5 gaps to 47, and from 3,823 unexplained bytes to 10,543 — 42 entries
     // the placeholder was keeping out of the list whose job is to show them.
+    //
+    // The counts moved by one when `loadProjectFile` started honouring the
+    // target a file declares. This project says `activeTarget: runtime`, so it
+    // is now read as the program runs rather than as every layer at once — the
+    // packed file is shadowed out, which is what a target is for and what the
+    // file was already asking for.
     const { graph, set, roots, reach } = build("experiments/07-scale/run/final.re64");
     const range = { from: 0x0800, to: 0xd000 };
 
@@ -101,8 +107,8 @@ describe("one address-sorted listing", () => {
     };
     const without = new ClaimSet(set.all().filter((c) => c.name !== "zoneDataTable"));
 
-    expect(gaps(set)).toEqual({ count: 6, bytes: 3824 });
-    expect(gaps(without)).toEqual({ count: 48, bytes: 10544 });
+    expect(gaps(set)).toEqual({ count: 5, bytes: 3823 });
+    expect(gaps(without)).toEqual({ count: 47, bytes: 10543 });
   });
 
   it("is stable whatever order claims arrive in", () => {

@@ -143,9 +143,14 @@ describe("building a project from a disk image", () => {
     camels.selectTarget(builder, "runtime");
     expect(camels.describe().layers[0].name).toBe("unpacked");
 
-    // And back to everything.
+    // Clearing the selection falls back to the first phase, not to "everything".
+    // There is no everything: a stack is always a target's link list, and the
+    // union of every layer was a stack the project never declared — packed and
+    // unpacked shadowing each other in declaration order, which is exactly what
+    // targets exist to replace.
     camels.selectTarget(builder);
-    expect(camels.describe().layers.length).toBeGreaterThan(1);
+    expect(camels.describe().layers).toHaveLength(1);
+    expect(camels.describe().layers[0].name).toBe("packed");
   });
 
   it("reports what a run wrote, including over bytes the project already had", () => {
