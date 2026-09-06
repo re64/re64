@@ -265,6 +265,7 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         const entry = new Y.Map<unknown>();
         entry.set("id", op.id);
         entry.set("type", op.layerType);
+        if (op.rom !== undefined) entry.set("rom", op.rom);
         entry.set("name", op.name);
         if (op.path !== undefined) entry.set("path", op.path);
         if (op.address !== undefined) entry.set("address", hex4(op.address));

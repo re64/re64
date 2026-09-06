@@ -298,6 +298,7 @@ export function applyOp(raw: string, op: Op): string {
           // A byte layer's contents come from its file; only a symbols layer
           // starts with an empty label list to put names in.
           ...(op.layerType === "symbols" ? { labels: [] } : {}),
+          ...(op.rom === undefined ? {} : { rom: op.rom }),
         },
         op.index
       );

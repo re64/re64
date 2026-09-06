@@ -99,6 +99,7 @@ describe("speaking the protocol", () => {
         "add_claims",
         "claims_at",
         "list_roots",
+        "add_rom_layer",
         "add_type",
         "edit_type",
         "remove_type",
@@ -841,6 +842,32 @@ describe("editing as an agent", () => {
     const refused = await callTool("set_target", { name: "doubled", layers: [layer, layer] });
     expect(refused.isError).toBe(true);
     expect(refused.text).toMatch(/once/i);
+  });
+
+  it("links a ROM as reference, and keeps it out of the disassembly", async () => {
+    const added = await callTool("add_rom_layer", { rom: "basic" });
+    expect(added.isError).toBeFalsy();
+
+    // It is in the project, and it is not in the listing: a ROM is bytes to
+    // resolve through, not bytes to read.
+    const layers = (await callTool("list_targets", {})).value as {
+      layers: { name: string; type: string }[];
+    };
+    expect(layers.layers.some((l) => l.type === "rom")).toBe(true);
+
+    const listing = (await callTool("export_listing", { start: "$A000", lines: 5 })).value as {
+      text?: string;
+      lines?: unknown[];
+    };
+    const rendered = JSON.stringify(listing);
+    expect(rendered).not.toMatch(/A00[0-9A-F]  [0-9A-F]{2} /);
+  });
+
+  it("refuses to link the same ROM twice", async () => {
+    await callTool("add_rom_layer", { rom: "kernal" });
+    const again = await callTool("add_rom_layer", { rom: "kernal" });
+    expect(again.isError).toBe(true);
+    expect(again.text).toMatch(/already links/);
   });
 
   it("says what a claim belongs to, without being asked to choose", async () => {

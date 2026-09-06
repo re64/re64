@@ -252,7 +252,9 @@ export interface LayerAddOp {
    * declared in a file by hand. A byte layer is what lets an agent handed a
    * disk image end up with something to disassemble.
    */
-  layerType: "symbols" | "prg" | "raw";
+  layerType: "symbols" | "prg" | "raw" | "rom";
+  /** Which machine ROM, for a `rom` layer. */
+  rom?: "basic" | "kernal" | "characters";
   name: string;
   /** For a byte layer: the file it reads, as `name` or `disk.d64:NAME`. */
   path?: string;

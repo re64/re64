@@ -3513,6 +3513,13 @@ describes the address space without occupying any of it; this occupies it
 without being what you are reading — and it costs one flag and one condition,
 the filter that already excludes symbol layers from the rendered range.
 
+`add_rom_layer` is its own call rather than an argument to `add_byte_layer`,
+because every argument that one takes is one this must refuse: a ROM's bytes
+come from the host rather than the project's files, it lands where the hardware
+decodes it rather than anywhere a caller chooses, and it is reference. Folding
+them together would be a call with three arguments meaningless half the time. It
+goes at the bottom of the stack, since reference material must shadow nothing.
+
 What it makes answerable: `$A000-$BFFF` is where the flat memory model finally
 cost something real, since Gridrunner's random number generator reads ROM bytes
 for entropy through eleven callers and nothing supplied them. A project that

@@ -3464,6 +3464,35 @@ export class Workspace {
    * disk image — a form the loader has always understood and nothing could ask
    * for.
    */
+  /**
+   * Link a machine ROM in, as reference rather than as something to read.
+   *
+   * Deliberately its own call. A ROM's bytes come from the host rather than
+   * from this project's files, it lands where the hardware decodes it rather
+   * than anywhere a caller chooses, and it is `reference` — so every argument
+   * `add_byte_layer` takes is one this must refuse. Folding them together would
+   * be a call with three arguments that are meaningless half the time.
+   */
+  addRomLayer(caller: Caller, rom: "basic" | "kernal" | "characters"): EditResult {
+    const held = this.program().loaded.project.layers;
+    const already = held.find((l) => l.type === "rom" && l.rom === rom);
+    if (already) {
+      throw new Error(`This project already links the ${rom} ROM as "${already.name}".`);
+    }
+    return this.edit(caller, () => [
+      {
+        op: "layer.add",
+        id: newId("lay"),
+        layerType: "rom",
+        rom,
+        name: `${rom} rom`,
+        // Bottom of the stack: reference material shadows nothing, and the
+        // program being read must win wherever the two overlap.
+        index: 0,
+      } as Op,
+    ]);
+  }
+
   addByteLayer(
     caller: Caller,
     options: { type: "prg" | "raw"; path: string; name?: string; address?: number }

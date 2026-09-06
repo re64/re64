@@ -867,6 +867,39 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "add_rom_layer",
+    "Link a machine ROM into this project, as reference rather than as " +
+      "something to read. " +
+      "It lands where the hardware decodes it — BASIC at $A000, the KERNAL at " +
+      "$E000, the character set at $D000 — and its bytes stay **out of the " +
+      "disassembly**: you want to know what the program reads out of a ROM, not " +
+      "eight kilobytes of it in your listing. " +
+      "Never added by default, because that would make the analysis depend on " +
+      "whether the host happens to have the files. If it does not, the project " +
+      "still loads and describe_project reports `romsMissing` — every answer " +
+      "that would have used those bytes is then short, and that must not be " +
+      "silent. " +
+      "What it makes answerable: a program reading ROM for data. Gridrunner's " +
+      "random number generator takes its entropy from BASIC ROM through eleven " +
+      "callers, and with nothing supplying those bytes there is no answer.",
+    {
+      project,
+      rom: z.enum(["basic", "kernal", "characters"]),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      rom: "basic" | "kernal" | "characters";
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project);
+      space.expect(args.expectVersion);
+      return space.addRomLayer(caller, args.rom);
+    }
+  );
+
+  tool(
     "add_type",
     "Declare a record layout: what the bytes of one array element mean. " +
       "The thing a claim alone cannot say. An 8,400-byte table that a reader " +
