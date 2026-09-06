@@ -141,7 +141,7 @@ const KIND_FOR_IS: Record<Exclude<Interpretation["is"], "record">, LegacyRegionK
 };
 
 import { FileStorage, ProjectStore, SqliteStorage } from "../store/index.js";
-import { nodeFileBytes } from "../node-files.js";
+import { nodeFileBytes, nodeRomBytes } from "../node-files.js";
 import { MAX_UPLOAD_BYTES, uploadTokens } from "./uploads.js";
 import { runProgram } from "../core/il/program.js";
 import { listDirectory } from "../core/c64/d64.js";
@@ -458,7 +458,8 @@ export class Workspace {
         : nodeFileBytes(dirname(projectPath));
     return buildMemoryMap(
       projectForTarget({ ...project, activeTarget: name }),
-      makeFileLoader(bytes)
+      makeFileLoader(bytes),
+      { loadRom: nodeRomBytes() }
     );
   }
 
@@ -477,7 +478,8 @@ export class Workspace {
     // in order to switch to one that shows them.
     return buildMemoryMap(
       projectForTarget(projectFromDoc(store.document())),
-      makeFileLoader(bytes)
+      makeFileLoader(bytes),
+      { loadRom: nodeRomBytes() }
     );
   }
 
@@ -545,6 +547,15 @@ export class Workspace {
      * answering `ok` while nothing leaves the document.
      */
     exportStale?: { failedAt: string; error: string };
+    /**
+     * ROMs this project asked for and this host does not have.
+     *
+     * Present only when something is missing. Every answer that would have used
+     * those bytes is short by an unknown amount, and an unexplained short answer
+     * is what this project keeps being caught by — so it is said here rather
+     * than left to be inferred from a layer that supplies nothing.
+     */
+    romsMissing?: string[];
   } {
     const program = this.program();
     const { loaded } = program;
@@ -603,6 +614,13 @@ export class Workspace {
       },
       warnings: program.warnings.length,
       ...(program.hygiene.length ? { hygiene: [...program.hygiene] } : {}),
+      // Said rather than left to be inferred from a layer that supplies nothing:
+      // every answer that would have used those bytes is short by an unknown
+      // amount, and an unexplained short answer is the failure this project
+      // keeps recording.
+      ...(program.loaded.romsMissing.length
+        ? { romsMissing: [...program.loaded.romsMissing] }
+        : {}),
       ...(exportStatus.current
         ? {}
         : {
@@ -1469,7 +1487,8 @@ export class Workspace {
         : nodeFileBytes(dirname(projectPath));
     return buildMemoryMap(
       projectForTarget({ ...project, activeTarget: name }),
-      makeFileLoader(bytes)
+      makeFileLoader(bytes),
+      { loadRom: nodeRomBytes() }
     ).map;
   }
 

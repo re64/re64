@@ -35,7 +35,32 @@ export interface ProjectLayer {
    */
   id?: string;
   /** Layer type. "symbols" carries names for addresses with no loaded bytes. */
-  type: "prg" | "raw" | "bytes" | "symbols";
+  type: "prg" | "raw" | "bytes" | "symbols" | "rom";
+  /**
+   * Which machine ROM, for a `rom` layer.
+   *
+   * Resolved from wherever the host keeps them rather than from the project's
+   * own files, because they are the machine's and not this project's — and
+   * because they are not in this repository and never will be. A project that
+   * asks for one it cannot get loads with the layer supplying no bytes and a
+   * warning, rather than failing: the request is committed even though the
+   * bytes are not, so a project stays openable by somebody who has no ROMs.
+   */
+  rom?: "basic" | "kernal" | "characters";
+  /**
+   * Bytes to resolve *through*, not bytes to read.
+   *
+   * A ROM is reference material: you want its names, its effects and the ability
+   * to see what a program reads out of it, and you emphatically do not want
+   * eight kilobytes of it in your disassembly. So a reference layer supplies
+   * bytes to every question and is left out of the rendered range.
+   *
+   * One step along from what a symbols layer already is — that describes the
+   * address space without occupying any of it; this occupies it without being
+   * what you are reading. Defaults to true for a `rom` layer, since that is what
+   * a ROM is for here, and false for everything else.
+   */
+  reference?: boolean;
   /** File path (for prg/raw) */
   path?: string;
   /** Load address (for raw, optional override for prg) */

@@ -98,6 +98,7 @@ function project(
     comments: new CommentIndex(),
     constants: new ConstantIndex(),
     types: new TypeIndex(),
+    romsMissing: [],
     layers: [layer],
   };
 }

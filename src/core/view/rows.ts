@@ -273,9 +273,12 @@ export function analyze(
       : undefined;
   };
 
-  // Symbol layers describe the address space but occupy none of it, so the
-  // rendered range comes only from layers that actually supply bytes.
-  const byteLayers = map.getLayers().filter((l) => l.hasBytes);
+  // Symbol layers describe the address space but occupy none of it, and a
+  // reference layer occupies it without being what you are reading — a machine
+  // ROM answers questions about what a program reads out of it, and belongs in
+  // nobody's listing. So the rendered range comes from the layers that supply
+  // bytes somebody actually asked to read.
+  const byteLayers = map.getLayers().filter((l) => l.hasBytes && !l.reference);
   const rangeStart = byteLayers.length ? Math.min(...byteLayers.map((l) => l.start)) : 0;
   const rangeEnd = byteLayers.length ? Math.max(...byteLayers.map((l) => l.end)) : 0;
 

@@ -520,6 +520,7 @@ program
         comments,
         constants,
         types: new TypeIndex(),
+    romsMissing: [],
         claims: [],
         layers: [],
       },

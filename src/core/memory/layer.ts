@@ -22,6 +22,14 @@ export interface Layer {
    */
   readonly hasBytes: boolean;
   /**
+   * Bytes to resolve through rather than bytes to read.
+   *
+   * True for a machine ROM: its names and its contents answer questions, and
+   * its eight kilobytes have no business in somebody's disassembly. Layers
+   * carrying it are left out of the rendered range and out of nothing else.
+   */
+  readonly reference?: boolean;
+  /**
    * Regions declared inside this layer.
    *
    * Owned by the layer rather than the address space, so reordering the stack
@@ -83,7 +91,9 @@ export class BytesLayer implements Layer {
     length?: number,
     // Defaulted so ad-hoc layers (CLI -l, tests) need not invent one; the
     // project loader passes the persisted id so it survives reloads.
-    public readonly id: string = newId("lay")
+    public readonly id: string = newId("lay"),
+    /** Bytes to resolve through rather than to read: a machine ROM. */
+    public readonly reference = false
   ) {
     this.length = length ?? data.length;
 

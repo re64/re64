@@ -1,3 +1,4 @@
+import type { RomLoader } from "./core/project/loader.js";
 /**
  * Reading project bytes under Node.
  *
@@ -10,8 +11,8 @@
  * D64 form by three different rules.
  */
 
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join, dirname, resolve } from "node:path";
 import {
   FileBytes,
   LoadedProject,
@@ -36,5 +37,34 @@ export function nodeFileBytes(baseDir?: string): FileBytes {
 /** Load a project file and build its memory map. */
 export function loadProjectFile(projectPath: string): LoadedProject {
   const project = parseProject(readFileSync(projectPath, "utf-8"));
-  return buildMemoryMap(project, makeFileLoader(nodeFileBytes(dirname(projectPath))));
+  return buildMemoryMap(project, makeFileLoader(nodeFileBytes(dirname(projectPath))), {
+    loadRom: nodeRomBytes(),
+  });
+}
+
+/**
+ * Machine ROMs, from where this repository asks for them to be put.
+ *
+ * Not in the repository and never will be: they are Commodore's, and
+ * `3party/roms/README.md` says which files to supply and gives their hashes.
+ * A host without them returns nothing and the project loads with the layer
+ * empty and a report, which is what keeps a project that wants BASIC banked in
+ * openable by somebody who has no ROMs.
+ *
+ * Deliberately *not* automatic. Loading these into every project would add
+ * twelve kilobytes to its address space and change what the analysis says
+ * depending on whether a developer happens to have gitignored files on disk —
+ * so a project asks for one by declaring a `rom` layer, and the request is
+ * committed even though the bytes are not.
+ */
+export function nodeRomBytes(directory = "3party/roms"): RomLoader {
+  const FILES: Record<string, string> = {
+    basic: "basic.901226-01.bin",
+    kernal: "kernal.901227-03.bin",
+    characters: "characters.901225-01.bin",
+  };
+  return (rom) => {
+    const path = join(directory, FILES[rom]);
+    return existsSync(path) ? new Uint8Array(readFileSync(path)) : undefined;
+  };
 }

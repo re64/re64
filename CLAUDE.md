@@ -3483,6 +3483,43 @@ the read is genuine on real hardware and meaningless as an effect. Left in and
 recorded rather than filtered, because recognising `BIT`-as-skip is a decode
 question and inventing an exception here would hide it.
 
+### A ROM is a layer you ask for, and never one you get by default
+
+`{"type": "rom", "rom": "basic"}` resolves from wherever the host keeps ROMs —
+`3party/roms/` under Node, nowhere in a browser — and lands at the address the
+machine decodes it at, which is fixed rather than a property of a link: a ROM is
+not linked anywhere, the hardware puts it there.
+
+**Never automatic, and that is the whole decision.** Loading these into every
+project whenever the files happen to be present would add twelve kilobytes to
+its address space and make the analysis depend on a *gitignored file* — the
+golden test passing on a machine without ROMs and failing on one with them. That
+is worse than a missing feature: it is a suite that means different things in
+different places. A project asks, and the request is committed even though the
+bytes never are.
+
+**A project asking for one it cannot get still opens.** The layer supplies
+nothing and `describe_project` reports `romsMissing`, because somebody who
+cannot legally be handed a ROM must still be able to read a project that wants
+one — and because every answer that would have used those bytes is then short by
+an unknown amount, which is exactly the unexplained short answer this file keeps
+recording.
+
+**`reference: true` is what keeps eight kilobytes of BASIC out of the listing.**
+A ROM is bytes to resolve *through*, not bytes to read: you want to know what a
+program reads out of it, and you emphatically do not want it rendered as your
+disassembly. One step along from what a symbols layer already is — that
+describes the address space without occupying any of it; this occupies it
+without being what you are reading — and it costs one flag and one condition,
+the filter that already excludes symbol layers from the rendered range.
+
+What it makes answerable: `$A000-$BFFF` is where the flat memory model finally
+cost something real, since Gridrunner's random number generator reads ROM bytes
+for entropy through eleven callers and nothing supplied them. A project that
+asks now has an answer. Banking is still not modelled — a ROM layer is present
+for the whole analysis, where the real machine banks it in and out — so this is
+the reference half of the problem rather than the whole of it.
+
 ### BASIC, named by the machine rather than by a book
 
 `npm run gen:basic` derives `src/core/c64/basic-effects.ts` — what each of

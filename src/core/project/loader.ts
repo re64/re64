@@ -79,6 +79,16 @@ export interface LoadedProject {
    */
   types: TypeIndex;
   /**
+   * ROMs this project asked for and this host does not have.
+   *
+   * Reported rather than thrown: the request is committed and the bytes are
+   * not, so a project that wants BASIC banked in stays openable by somebody who
+   * has no ROMs. But it must not be *silent* — every answer that would have
+   * used those bytes is short, and an unexplained short answer is the failure
+   * this project keeps recording.
+   */
+  romsMissing: string[];
+  /**
    * Built layers in *declaration* order, so index i corresponds to
    * project.layers[i]. The map itself stores them in z-order (reversed, with
    * the platform layer at the bottom), which is no use for writing edits back.
@@ -182,7 +192,7 @@ function nameClaim(claim: Claim): Claim {
 export function buildMemoryMap(
   declared: Project,
   loadFile: FileLoader,
-  options: { platform?: boolean } = {}
+  options: { platform?: boolean; loadRom?: RomLoader } = {}
 ): LoadedProject {
   // One form below, whatever the file holds. A project still written with labels
   // and regions is converted here, exactly as `re64 migrate` converts it on disk
@@ -230,6 +240,9 @@ export function buildMemoryMap(
     map.addLayer(createC64PlatformLayer());
   }
 
+  const { loadRom } = options;
+  const romsMissing: string[] = [];
+
   project.layers.forEach((decl, index) => {
     const name = layerName(decl, index);
     // Derived from position and source when absent: stable for a given file,
@@ -249,6 +262,20 @@ export function buildMemoryMap(
       const addr = parseProjectAddress(decl.address!);
       const { data } = loadFile(decl.path!, addr);
       layer = new FileLayer(name, decl.path!, addr, data, decl.length, false, false, layerId);
+    } else if (decl.type === "rom") {
+      // The machine's bytes, not this project's, so they come from wherever the
+      // host keeps ROMs rather than from the project's files. A host that has
+      // none — a browser, or anybody who has not put them there — gets a layer
+      // that supplies nothing and says so, because a project must stay openable
+      // by somebody who cannot legally be handed a ROM.
+      const rom = decl.rom ?? "kernal";
+      const bytes = loadRom?.(rom);
+      if (!bytes) {
+        romsMissing.push(rom);
+        layer = new SymbolLayer(name, [], layerId);
+      } else {
+        layer = new BytesLayer(name, ROM_AT[rom], bytes, undefined, layerId, decl.reference ?? true);
+      }
     } else if (decl.type === "bytes") {
       const addr = parseProjectAddress(decl.address!);
       layer = new BytesLayer(name, addr, parseHexBytes(decl.bytes!), decl.length, layerId);
@@ -332,7 +359,18 @@ export function buildMemoryMap(
   // one each call, so a binding set on the result would be thrown away.
   for (const use of labelUses) map.labelUses.set(use.address, use.labelId);
 
-  return { project, map, prgEntries, userLabels, comments, constants, types, layers, claims };
+  return {
+    project,
+    map,
+    prgEntries,
+    userLabels,
+    comments,
+    constants,
+    types,
+    layers,
+    claims,
+    romsMissing,
+  };
 }
 
 /**
@@ -346,3 +384,19 @@ function resolveFieldType(text: string, declared: readonly ProjectType[]): Field
   const parsed = parseFieldType(text, (name) => declared.find((t) => t.name === name)?.id);
   return "error" in parsed ? { is: "bytes", length: 1 } : parsed;
 }
+
+/**
+ * Where each machine ROM lands.
+ *
+ * Fixed, because these are the addresses the machine decodes them at — unlike a
+ * layer's load address, which is a property of a link. A ROM is not linked
+ * anywhere; it is where the hardware puts it.
+ */
+export const ROM_AT: Record<"basic" | "kernal" | "characters", number> = {
+  basic: 0xa000,
+  kernal: 0xe000,
+  characters: 0xd000,
+};
+
+/** Bytes for a machine ROM, from wherever the host keeps them. */
+export type RomLoader = (rom: "basic" | "kernal" | "characters") => Uint8Array | undefined;
