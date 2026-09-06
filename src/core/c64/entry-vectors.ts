@@ -16,6 +16,7 @@ import { MemoryMap } from "../memory/memory-map.js";
 import { OriginKind } from "../analysis/values.js";
 import { REGISTER_NAMES } from "../il/run.js";
 import { KERNAL_CLOBBERS } from "./kernal-effects.js";
+import { BASIC_CLOBBERS } from "./basic-effects.js";
 
 /** The 6502's own vectors, at the top of memory. */
 const NMI = 0xfffa;
@@ -82,7 +83,14 @@ export function classifyOrigins(map: MemoryMap): Map<number, OriginKind> {
  * would be believed.
  */
 export function kernalClobbers(map: MemoryMap): (address: number) => readonly number[] | undefined {
-  const byAddress = new Map(
+  // BASIC's routines first, so a KERNAL row for the same address wins: eleven
+  // BASIC keywords are implemented at $E000-$E4FF and the two tables overlap
+  // there. The KERNAL's is the better answer, because it carries a *proved*
+  // preservation set and this one does not.
+  const byAddress = new Map<number, readonly number[]>(
+    BASIC_CLOBBERS.map((c) => [c.address, offsetsOf(c.writes)] as const)
+  );
+  for (const [address, offsets] of new Map(
     KERNAL_CLOBBERS.map((c) => {
       // What it writes, minus what it provably gives back. Every write to `D` in
       // this ROM is a `PLP` restoring a byte the routine pushed itself, so
@@ -95,8 +103,17 @@ export function kernalClobbers(map: MemoryMap): (address: number) => readonly nu
         .filter((offset): offset is number => offset !== undefined);
       return [c.address, offsets] as const;
     })
-  );
+  )) {
+    byAddress.set(address, offsets);
+  }
   return (address) => (map.readByte(address) === undefined ? byAddress.get(address) : undefined);
+}
+
+/** Register names as a generated table spells them, back to IL offsets. */
+function offsetsOf(names: readonly string[]): number[] {
+  return names
+    .map((name) => REGISTER_OFFSETS[name])
+    .filter((offset): offset is number => offset !== undefined);
 }
 
 /** Register names as the generated table spells them, back to IL offsets. */

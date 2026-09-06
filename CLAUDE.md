@@ -3483,6 +3483,63 @@ the read is genuine on real hardware and meaningless as an effect. Left in and
 recorded rather than filtered, because recognising `BIT`-as-skip is a decode
 question and inventing an exception here would hide it.
 
+### BASIC, named by the machine rather than by a book
+
+`npm run gen:basic` derives `src/core/c64/basic-effects.ts` — what each of
+BASIC's 58 keyword routines touches — and that file is committed while neither
+ROM ever is. Same arrangement as the KERNAL table, one step further, because
+re64 ships no *names* for `$A000-$BFFF` at all: `C64_SYMBOLS` has 137 entries in
+the KERNAL range and **zero** in BASIC's.
+
+**So the names come from the machine too.** BASIC carries its own keyword table
+at `$A09E` — 76 entries in PETSCII with bit 7 marking each last character, which
+is what its tokeniser reads — and two dispatch tables sit beside it in exactly
+that order:
+
+| | | |
+|---|---|---|
+| `$A00C` | 35 statements, `END` to `NEW` | **target − 1** |
+| `$A052` | 23 functions, `SGN` to `MID$` | plain |
+
+The `− 1` is the RTS-dispatch idiom this project's catalogue already records,
+met here in the place it was invented for: BASIC pushes the address and executes
+`RTS`. Getting it wrong would put every statement one byte early and still
+produce a plausible-looking table, so `END` at `$A831` and `FOR` at `$A742` are
+pinned by name.
+
+The seven keywords between the tables — `TAB(`, `TO`, `FN`, `SPC(`, `THEN`,
+`NOT`, `STEP` — and the ten operators are syntax rather than routines and
+dispatch through neither, which is why 58 of 76 keywords get a row.
+
+Three things this found that a transcription would not:
+
+- **Eleven BASIC routines live in the KERNAL ROM.** `RND`, `SYS`, `SAVE`,
+  `VERIFY`, `LOAD`, `OPEN`, `CLOSE` and the four trig functions are at
+  `$E000-$E4FF`, because BASIC's code outgrew its own chip. That is why the
+  generator loads both ROMs and not merely because BASIC calls the KERNAL:
+  without the second, those eleven would decode as nothing and report touching
+  nothing, which reads exactly like a routine with no effects. The same shape as
+  `canTouch` skipping an unseen callee and turning an omission into what looked
+  like a proof.
+- **`USR` dispatches through `$0310`**, a RAM cell BASIC's own initialisation
+  fills, so what it reaches is in neither ROM. Reported as vectored rather than
+  dropped, for the reason an absent row is always dangerous here: it is
+  indistinguishable from a routine that touches nothing.
+- **`PRINT#` and `PRINT` collided.** The first version of the name derivation
+  stripped punctuation, so two routines shared one name — the ambiguity this
+  project refuses everywhere, since a name reaching two addresses makes `name+4`
+  identify nothing. `#` and `$` are spelled out now, and the generator *asserts*
+  uniqueness rather than hoping, because it is a property of this ROM revision's
+  keyword list.
+
+`BASIC_CLOBBERS` ships alongside, covering 239 routines rather than the 58
+entry points, for the reason the KERNAL's does: programs call ROM internals
+directly and games lean on BASIC's floating-point routines without going near a
+keyword. It is consulted through the same `kernalClobbers` seam, with the
+KERNAL's row winning where the two overlap — that one carries a *proved*
+preservation set and this one does not, and shipping an unmeasured preservation
+column would be exactly the confident wrong answer refused everywhere else.
+
 ### Targets: a named view over the layer stack
 
 The problem both builders hit second: the decrunched image must shadow the
