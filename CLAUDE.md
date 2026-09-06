@@ -2246,6 +2246,72 @@ answers it without setting anything up. Do not guess it in the meantime.
 Note this also means "should agents have sessions" and "should MCP be stateful"
 are less independent than the stateless decision above assumed.
 
+### What two readers on the claims model actually did
+
+Experiment 8: Gridrunner from nothing — one PRG layer, five instructions
+decoding a cartridge header — one reader alone and two sharing a document, on
+identical blank projects. The first run of this binary that did not start from
+somebody else's annotations.
+
+**Both pairs reached the same account of the program, and neither needed the
+oracle.** The chain each walked: `CBM80` at `$8004` says cartridge, so `$8000`
+and `$8002` are vectors and the five instructions were a header being misread as
+code — declaring that took the decode from 5 to 1480. Then `find_instructions
+from:$D018` resolved the one indirect write (`STA ($02),Y`) to `$D018 = $18`,
+putting the character base at `$2000`, and a copy loop reading `$8E00` made those
+512 bytes a 64-glyph font. Every string in the game is written in it, and the set
+contains only the nineteen letters those strings need — no C, K, Q, W, X or Z.
+
+**They partitioned in two messages and never renegotiated.** One proposed a
+split, the other noticed the halves overlapped and tightened the cut. Nobody
+asked for a lease, a lock or a claim mechanism — the third run in a row to
+decline the coordination this file deliberately did not build.
+
+**Zero page is the one region an address split cannot divide**, and that is where
+they collided: `$0B`, `$0C` and `$35`, confirmed in the log. It went well, and
+the reason is mechanical rather than social. Adding is additive and pins whatever
+was already rendering, so the second name landed *beside* the first and the tool
+said so. Both readers wrote the same sentence unprompted: **two names at one
+address was not the failure mode, it was the mechanism that made the
+disagreement visible.** One conceded three readings, `set_primary_name`'d to the
+other's, and kept their own reasoning as a comment recording which lost and why.
+
+The finding that matters most is one of them's summary: *in a session with two
+writers deliberately trying to collide, the API destroyed more of my work than my
+collaborator did, by roughly twenty to nothing.* Every one of those twenty was a
+defect introduced by the two days of work immediately before the run, and they
+are listed in the section above. The collaboration model held; the write path had
+one old road left in it.
+
+**Nobody named a target once, in 724 calls.** Each project had exactly one, so
+there was no reason to — which means the norm-rather-than-rule choice is
+untested rather than vindicated. The next run with two targets is what answers
+it.
+
+**What they reached for that is not there**, which is the list worth more than
+the prose: `bind_decoder` (twice over, by both readers, when `view: "snippet:"`
+turned out to be a no-op), `find_strings`, `render_screen`, `screen_address`,
+`describe_character`, `find_char_uses`, `list_routines`, `list_hygiene`,
+`list_warnings` guessed as `warnings` and `hygiene`, `remove_entry_point`,
+`compare_spans`, `list_tools`. Three of those cluster: on a program whose entire
+state lives in screen memory, converting `$0592` to row 10 column 2 was the most
+repeated arithmetic of both runs, and no tool does it.
+
+**Two things worked better than either reader expected**, and both are worth
+knowing. `is: "bitmap"` with `view: "char:8"` renders a character set as legible
+glyphs *in the plain text listing* — one reader resolved two glyphs that way
+after the decoder path failed them. And `run_program` with the KERNAL linked in
+turned an inference into a photograph: five instructions without it, eight
+million and a drawn title screen with it, the captured screen matching the other
+reader's inferred reading line for line. That is a genuine cross-check rather
+than two readings of one piece of evidence.
+
+**And one trap worth recording.** `run_program`'s capture is a `.prg` with a load
+address in its first two bytes. Added back as `raw`, every address in it is out
+by two — a reader spent ten minutes about to report a layout bug in the game
+before the other spotted it. The tool's own hint says `prg`; nothing warns when
+you do otherwise.
+
 ### The experiments this is for
 
 Three, escalating, each adding one variable. The rare thing here is an
