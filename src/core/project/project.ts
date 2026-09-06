@@ -404,6 +404,14 @@ export interface ProjectClaim {
   root?: RootKind;
   /** What the name means, where somebody other than this project decided. */
   description?: string;
+  /**
+   * The target this claim belongs to, when no layer supplies its bytes.
+   *
+   * Zero-page variables, I/O registers, anything about an address the program
+   * uses but no file provides. Absolute, because a target *is* an address
+   * space — only a layer frame is relocatable.
+   */
+  target?: string;
   /** Who made it: a user id, an agent codename, or `cli`. */
   author?: string;
   /** How it arose. */
@@ -445,7 +453,11 @@ export function projectClaims(claims: readonly ProjectClaim[] = []): Claim[] {
       ...(says ? { says } : {}),
       ...(c.root !== undefined ? { root: c.root } : {}),
       ...(c.description !== undefined ? { description: c.description } : {}),
-      ...(c.layer !== undefined ? { frame: { space: "layer" as const, layer: c.layer } } : {}),
+      ...(c.layer !== undefined
+        ? { frame: { space: "layer" as const, layer: c.layer } }
+        : c.target !== undefined
+          ? { frame: { space: "target" as const, target: c.target } }
+          : {}),
       by: {
         author: c.author ?? "project",
         source: c.source ?? "user",

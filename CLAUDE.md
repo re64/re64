@@ -3609,7 +3609,7 @@ the project's own `layers` array, because the list was a set and order was
 ignored. Each target holds exactly one byte layer plus the symbols layer, so
 there is nothing to shadow and no analysis moves.
 
-### Where a claim lives, and who decides (settled, not yet built)
+### Where a claim lives, and who decides
 
 A claim is never global. It belongs to a **layer** or to a **target**, and
 nothing else — `platform` is the built-in C64 table and only that. An agent
@@ -3671,6 +3671,29 @@ invention disappears**, since naming a byteless address is a target claim rather
 than a reason to fabricate a layer to hold it; and the documented promise that
 reordering the stack moves annotations with the bytes they describe stops being
 a promise and becomes arithmetic.
+
+**Built.** Two things landed with it that are worth recording because neither
+was the point. `it.fails("keeps a layer's annotations with the target that shows
+it")` had been sitting in the suite as a marker; framing claims on their layers
+turned it green, which is the whole feature stated as one assertion. And the
+round-trip harness caught a real inverse bug the moment its fixture had a framed
+claim in it: `claim.add` over an existing claim restored only the fields the old
+one *had*, so anything the add introduced survived the undo — invisible until a
+frame was the field that differed. The fix names every field and clears the
+absent ones, which is what `ClaimEdit`'s `null` exists for.
+
+One consequence worth stating plainly: **removing a layer no longer keeps the
+names made against it.** They are framed on that layer, so with it gone there is
+no address to add their offsets to and they appear in no view — but they are not
+destroyed, and the export proves it. Same rule as a dangling type, a dangling
+constant and a dangling `primaryLabels` entry: the reference outlives what it
+points at, and heals if that comes back.
+
+The symbols-layer invention is gone from the claim path. It survives for
+**comments**, which still need an owning layer — left alone deliberately, since
+whether a comment belongs to a layer or a target is the kind of thing to settle
+with evidence, having already been burned once by `set_comment` being keyed by
+slot on a justification nobody revisited.
 
 **Settled by reasoning, and open to evidence, which is not the same as
 undecided.** Two rules here were justified for a single author and survived the

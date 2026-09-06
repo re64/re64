@@ -22,7 +22,7 @@ import { newId } from "../project/identity.js";
 import { parseProjectAddress } from "../project/project.js";
 import { resolveOwningLayer } from "../project/ownership.js";
 import { ClaimEdit, Op } from "./types.js";
-import { Claim, Interpretation, Provenance, RootKind } from "../claims/model.js";
+import { Claim, Frame, Interpretation, Provenance, RootKind, scopeFor } from "../claims/model.js";
 
 /**
  * Make sure some layer can own an annotation at this address.
@@ -156,6 +156,25 @@ const SAYS_FOR_KIND: Partial<Record<LegacyRegionKind, Interpretation["is"]>> = {
  */
 const AUTHOR: Provenance = { author: "project", source: "user" };
 
+/**
+ * Where a claim about this address belongs, as the file and document store it.
+ *
+ * The other half of the loader's resolution, and the only other place the two
+ * forms meet. Every builder below goes through it, so no writer has to know
+ * that a layer-framed claim holds an offset — and none of them can forget,
+ * which is the failure mode of a relocation step that lives in each consumer.
+ */
+export function placed(loaded: LoadedProject, address: number): { frame: Frame; at: number } {
+  const owner = loaded.map.layerAt(address);
+  return scopeFor(
+    address,
+    // A symbols layer supplies no bytes and has no address, so nothing can be
+    // an offset into one — `layerAt` already returns only byte layers.
+    owner ? { id: owner.id, start: owner.start } : undefined,
+    loaded.project.activeTarget
+  );
+}
+
 export const claimById = (loaded: LoadedProject, id: string): Claim | undefined =>
   loaded.claims.find((c) => c.id === id);
 
@@ -220,7 +239,7 @@ export function labelSetOps(
         op: "claim.add",
         claim: {
           id: newId("clm"),
-          at: address,
+          ...placed(loaded, address),
           name,
           ...(type && ROOT_FOR_TYPE[type] ? { root: ROOT_FOR_TYPE[type] } : {}),
           ...(extent !== undefined ? { extent } : {}),
@@ -303,7 +322,7 @@ export function labelAddOp(
     op: "claim.add",
     claim: {
       id: newId("clm"),
-      at: address,
+      ...placed(loaded, address),
       name,
       ...(type && ROOT_FOR_TYPE[type] ? { root: ROOT_FOR_TYPE[type] } : {}),
       ...(extent !== undefined ? { extent } : {}),
@@ -454,7 +473,7 @@ export function regionSetOp(
       op: "claim.set",
       id,
       fields: {
-        at: start,
+        ...placed(loaded, start),
         extent: end - start,
         says: interpretationOf(kind, encoding, view),
         ...(name === undefined ? {} : { name }),
@@ -472,7 +491,7 @@ export function regionSetOp(
       op: "claim.add",
       claim: {
         id: newId("clm"),
-        at: start,
+        ...placed(loaded, start),
         ...(name === undefined ? {} : { name }),
         root: "entry",
         by: AUTHOR,
@@ -499,7 +518,7 @@ export function regionSetOp(
     op: "claim.add",
     claim: {
       id: newId("clm"),
-      at: start,
+      ...placed(loaded, start),
       extent: end - start,
       says: interpretationOf(kind, encoding, view),
       ...(name === undefined ? {} : { name }),

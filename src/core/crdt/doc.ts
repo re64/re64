@@ -383,6 +383,7 @@ const CLAIM_FIELDS = [
   "at",
   "extent",
   "layer",
+  "target",
   "name",
   "is",
   "encoding",

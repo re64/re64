@@ -795,7 +795,11 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "which claim you meant, and a write keyed by one must not decide. " +
       "The id comes back; use it with set_claim to correct what you said, or " +
       "claims_at first to see what is already there. Which name an operand shows " +
-      "is set_primary_name, and that is the only thing anybody sets.",
+      "is set_primary_name, and that is the only thing anybody sets. " +
+      "The result also says the claim's `scope` — which layer or target it " +
+      "belongs to. That is derived from the address, never chosen, and it is " +
+      "what decides whether the claim follows its bytes if that layer is ever " +
+      "linked somewhere else.",
     {
       project,
       at: address,
@@ -809,6 +813,14 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
             "`record` is an array of a layout from list_types, and needs typeId."
         ),
       typeId: z.string().optional().describe("With is:\"record\": which layout, from list_types"),
+      target: z
+        .string()
+        .optional()
+        .describe(
+          "Make this claim as if you were looking at that view, without moving " +
+            "the shared selection. Rarely needed: by default the claim belongs " +
+            "to whatever supplies the bytes in the selected target."
+        ),
       extent: z
         .number()
         .int()
@@ -1025,6 +1037,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         .array(
           z.strictObject({
             at: address,
+            target: z.string().optional(),
             name: z.string().min(1).optional(),
             is: z
               .enum(["data", "text", "bitmap", "jumptable"])

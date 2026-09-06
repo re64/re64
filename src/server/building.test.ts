@@ -190,8 +190,14 @@ describe("building a project from a disk image", () => {
     // `layer.remove` used to refuse while the layer still held annotations, on
     // the grounds that removing it would destroy them. A layer holds none now —
     // it is a byte resource — so there is nothing to destroy and nothing to
-    // refuse. The name outlives the bytes, which is the honest outcome: it is a
-    // claim about an address, and the address is still there.
+    // refuse.
+    //
+    // What the name does is stop *resolving*, not stop existing. It is framed
+    // on that layer, so with the layer gone there is no address to add its
+    // offset to and it appears in no view. It is still in the project, and the
+    // export proves it: the same rule as a dangling type, a dangling constant
+    // and a dangling primaryLabels entry, where the reference outlives what it
+    // points at and heals if that comes back.
     ws.createProject("camels");
     const camels = upload("camels", "p.prg", new Uint8Array([0x01, 0x08, 0x60]));
     camels.addByteLayer(builder, { type: "prg", path: "p.prg", name: "scratch" });
@@ -201,7 +207,11 @@ describe("building a project from a disk image", () => {
     camels.removeLayer(builder, id);
 
     expect(camels.targets().layers.map((l) => l.name)).not.toContain("scratch");
-    expect(camels.labels({ namePattern: "keepMe" }).total).toBe(1);
+    expect(camels.labels({ namePattern: "keepMe" }).total).toBe(0);
+    // Not destroyed — which is the half that matters, because destroying
+    // somebody's work as a side effect of removing a layer is what this project
+    // refuses everywhere.
+    expect(camels.exportProject().text).toContain("keepMe");
   });
 
   it("adds beside a name somebody chose, and says so", () => {
@@ -369,14 +379,13 @@ describe("building a project from a disk image", () => {
     );
   });
 
-  // Marked failing on purpose. Claims are project-level and their *names* are
-  // not yet scoped, so a name declared against the loader shows in the runtime
-  // target too. The fix is to frame a claim on its layer — then it follows the
-  // layer into whichever targets link it, and out of those that do not.
-  //
-  // `it.fails` rather than `it.skip` so this breaks loudly the moment scoping
-  // lands, instead of sitting green and untested.
-  it.fails("keeps a layer's annotations with the target that shows it", () => {
+  // This was `it.fails` for exactly as long as claims were project-level and
+  // unscoped: a name declared against the loader showed in the runtime target
+  // too, because nothing tied it to the bytes it was about. Framing a claim on
+  // its layer is what fixed it — the claim follows the layer into whichever
+  // targets link it, and out of those that do not, which is the same rule that
+  // makes annotations follow the stack said once and in one place.
+  it("keeps a layer's annotations with the target that shows it", () => {
     ws.createProject("camels");
     const camels = upload("camels", "a.prg", new Uint8Array([0x00, 0x08, 0xa9, 0x01, 0x60]));
     camels.addByteLayer(builder, { type: "prg", path: "a.prg", name: "first" });

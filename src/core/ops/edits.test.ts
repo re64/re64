@@ -39,7 +39,14 @@ describe("naming an address", () => {
     expect(op.op).toBe("claim.add");
     if (op.op !== "claim.add") throw new Error("shape");
     expect(op.claim.id).toMatch(/^clm_/);
-    expect(op.claim.at).toBe(UNNAMED);
+
+    // Stored as an offset into the layer supplying those bytes, which is what
+    // makes the claim travel if that layer is ever linked somewhere else. The
+    // caller said `$8F00` and never sees this: the loader adds the layer's
+    // start back, and every tool answer is absolute.
+    const owner = loaded.map.layerAt(UNNAMED)!;
+    expect(op.claim.frame).toEqual({ space: "layer", layer: owner.id });
+    expect(op.claim.at).toBe(UNNAMED - owner.start);
   });
 
   it("never adopts a built-in platform name's identity", () => {

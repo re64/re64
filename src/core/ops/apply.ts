@@ -122,6 +122,12 @@ function projectClaimOf(claim: Claim): ProjectClaim {
     id: claim.id,
     at: addressHex(claim.at),
     ...(claim.extent !== undefined ? { extent: claim.extent } : {}),
+    // In `CLAIM_FIELDS` order, which is what makes replaying an operation
+    // forward a no-op — and undo checks exactly that before trusting a stored
+    // inverse. `layer` sat after `name` here and nothing noticed, because
+    // nothing set a frame until claims were scoped.
+    ...(claim.frame?.space === "layer" ? { layer: claim.frame.layer } : {}),
+    ...(claim.frame?.space === "target" ? { target: claim.frame.target } : {}),
     ...(claim.name !== undefined ? { name: claim.name } : {}),
     ...(claim.says ? { is: claim.says.is } : {}),
     ...(claim.says?.is === "text" && claim.says.encoding
@@ -135,7 +141,6 @@ function projectClaimOf(claim: Claim): ProjectClaim {
     ...(claim.says?.is === "record" ? { typeId: claim.says.typeId } : {}),
     ...(claim.root !== undefined ? { root: claim.root } : {}),
     ...(claim.description !== undefined ? { description: claim.description } : {}),
-    ...(claim.frame?.space === "layer" ? { layer: claim.frame.layer } : {}),
     author: claim.by.author,
     source: claim.by.source,
     ...(claim.by.when !== undefined ? { when: claim.by.when } : {}),
@@ -161,6 +166,22 @@ function fieldsOf(stored: ProjectClaim): ClaimEdit {
  * both are needed: `runOps` inverts every write, and the inverse of setting a
  * field that was absent is clearing it.
  */
+/**
+ * Every editable field of a claim, with `null` where it has none.
+ *
+ * The exact-restore form. `fieldsOf` says "these are its fields", which is what
+ * a partial revision needs; this says "this is the whole of it", which is what
+ * replacing one and taking that back needs.
+ */
+function allFieldsOf(stored: ProjectClaim): ClaimEdit {
+  const present = fieldsOf(stored) as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of EDITABLE) out[key] = key in present ? present[key] : null;
+  return out as ClaimEdit;
+}
+
+const EDITABLE = ["at", "frame", "extent", "name", "says", "root", "description", "by"] as const;
+
 function editedClaim(stored: ProjectClaim, fields: ClaimEdit): ProjectClaim {
   const next: Record<string, unknown> = { ...claimOf(stored) };
   for (const [key, value] of Object.entries(fields)) {
@@ -404,7 +425,11 @@ export function invertOp(raw: string, op: Op): Op {
       // Adding one that is already there is a retry; undoing it must put the
       // old fields back rather than remove somebody else's claim.
       if (!found) return { op: "claim.remove", id: op.claim.id };
-      return { op: "claim.set", id: op.claim.id, fields: fieldsOf(found) };
+      // Every field, not only the ones the old claim had — with `null` for the
+      // ones it did not. Restoring only what was present leaves behind whatever
+      // the add *introduced*, so undoing an add that gave a claim a frame left
+      // the frame in place and the claim resolved somewhere new.
+      return { op: "claim.set", id: op.claim.id, fields: allFieldsOf(found) };
     }
 
     case "claim.set": {

@@ -843,6 +843,52 @@ describe("editing as an agent", () => {
     expect(refused.text).toMatch(/once/i);
   });
 
+  it("says what a claim belongs to, without being asked to choose", async () => {
+    // Derived from the address, never chosen. It decides whether the claim
+    // follows its bytes if that layer is ever linked somewhere else, so a
+    // caller that could not see it would be holding shared state it did not
+    // know about — which is what an invisible extent cost two readers.
+    const inCode = await callTool("add_claim", { at: "$8250", name: "insideThePrg" });
+    expect((inCode.value as { scope: string }).scope).toMatch(/^layer:/);
+
+    // Nothing supplies zero page, so it is a fact about the arrangement rather
+    // than about any file's bytes.
+    const inZeroPage = await callTool("add_claim", { at: "$08", name: "aVariable" });
+    expect((inZeroPage.value as { scope: string }).scope).not.toMatch(/^layer:/);
+
+    // And the read that verifies the write can see the same thing.
+    const covering = (await callTool("claims_at", { at: "$8250" })).value as {
+      claims: { name?: string; scope: string }[];
+    };
+    expect(covering.claims.find((c) => c.name === "insideThePrg")!.scope).toMatch(/^layer:/);
+  });
+
+  it("names a byteless address without inventing a layer to hold it", async () => {
+    // Naming zero page used to fabricate a symbols layer so the annotation had
+    // an owner — machinery that existed only because there was no scope for "a
+    // fact about this arrangement". There is one now, so nothing is invented.
+    //
+    // Comments still create one, and that is left alone deliberately: whether a
+    // comment belongs to a layer or a target is exactly the kind of thing to
+    // settle with evidence, having already been burned once by `set_comment`
+    // being keyed by slot on a justification nobody revisited.
+    const before = (await callTool("list_targets", {})).value as { layers: unknown[] };
+    await callTool("add_claim", { at: "$FE", name: "scratchByte" });
+    const after = (await callTool("list_targets", {})).value as { layers: unknown[] };
+
+    expect(after.layers.length).toBe(before.layers.length);
+  });
+
+  it("refuses a target it does not have rather than guessing", async () => {
+    const refused = await callTool("add_claim", {
+      at: "$8250",
+      name: "elsewhere",
+      target: "no-such-view",
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/list_targets/);
+  });
+
   it("says where decoding starts, and which of those it can take back", async () => {
     const before = await callTool("list_roots", {});
     const listed = before.value as {

@@ -36,7 +36,7 @@ import {
 } from "./project.js";
 import { derivedId } from "./identity.js";
 import { needsMigration, migrateToClaims } from "../claims/migrate.js";
-import { Claim, Interpretation, arrayExtent } from "../claims/model.js";
+import { Claim, Interpretation, arrayExtent, resolveAt } from "../claims/model.js";
 
 /** How the loader gets at file bytes, so core stays free of node:fs. */
 export interface FileLoader {
@@ -290,7 +290,19 @@ export function buildMemoryMap(
   // decides which reading of a shadowed address wins. Labels may land anywhere,
   // since `getLabels()` concatenates, so they go to the map rather than to a
   // layer that would only be arbitrary.
-  const claims = projectClaims(project.claims);
+  // Stored form to domain form, and the one place it happens.
+  //
+  // A layer-framed claim holds an offset into its layer's bytes, so this adds
+  // back where that layer landed *in this target* — which is what makes a claim
+  // travel when a layer is relinked, by arithmetic rather than by promise.
+  // A claim on a layer this target does not link resolves to nothing and is not
+  // in this view at all, which is the same rule that makes annotations follow
+  // linking, said once rather than in each consumer.
+  const layerStart = new Map(layers.map((l) => [l.id, l.start] as const));
+  const claims = projectClaims(project.claims).flatMap((claim) => {
+    const at = resolveAt(claim.at, claim.frame, (id) => layerStart.get(id));
+    return at === undefined ? [] : [at === claim.at ? claim : { ...claim, at }];
+  });
   for (const claim of claims) {
     // One claim, two things it may say, and both are read here.
     //

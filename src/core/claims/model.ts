@@ -110,9 +110,29 @@ export interface Provenance {
  * copies itself to the stack page can be annotated once and appear at both
  * addresses — which the address-keyed model cannot express at all.
  */
+/**
+ * What a claim belongs to. A claim is never global.
+ *
+ * `layer` is the common one and the only relocatable one: the claim is stored
+ * as an **offset into that layer's bytes**, so relinking the layer somewhere
+ * else moves the claim with it by arithmetic rather than by promise. The
+ * alternative — absolute against a remembered default — fails the offline test,
+ * because editing that default while somebody else names an address offline
+ * silently repoints their claim after the merge.
+ *
+ * `target` is for what a layer cannot own: zero-page variables, I/O registers,
+ * anything about an address no layer supplies. Absolute, because a target *is*
+ * an address space.
+ *
+ * `address` is the machine — the built-in C64 table and nothing else. A project
+ * claim never has it: naming `$D020` `borderDuringExplosion` is not amending
+ * the machine definition, it is saying what this program does with the
+ * register, which is a fact about the arrangement.
+ */
 export type Frame =
   | { readonly space: "address" }
-  | { readonly space: "layer"; readonly layer: string };
+  | { readonly space: "layer"; readonly layer: string }
+  | { readonly space: "target"; readonly target: string };
 
 export interface Claim {
   /**
@@ -122,7 +142,16 @@ export interface Claim {
    * label: several sit at one address and the whole design depends on that.
    */
   readonly id: string;
-  /** Absolute address, or an offset into a layer — see `frame`. */
+  /**
+   * **Absolute, always, in the domain.**
+   *
+   * The file and the document store a layer-framed claim's position as an
+   * offset instead, and the loader is the one place that adds the layer's start
+   * back. Writers go the other way with `storedAt`. Everything between those
+   * two boundaries — the row builder, the analysis, every tool answer — sees
+   * one kind of number, which is the same split the file already has between
+   * `"$8400"` and `33792`.
+   */
   readonly at: number;
   /** Absolute unless a layer frame says otherwise. */
   readonly frame?: Frame;
@@ -204,4 +233,48 @@ export function compareClaims(a: Claim, b: Claim): number {
  */
 export function claimSpan(claim: Claim): { start: number; end: number } {
   return { start: claim.at, end: claim.at + (claim.extent ?? 1) };
+}
+
+/**
+ * Where a claim about this address belongs, and what to store for it.
+ *
+ * Derived, never chosen. The topmost layer supplying the byte, else the target.
+ * It is total, so no write can fail on it — and there is deliberately no way
+ * for a caller to override it, because the only thing an override could reach
+ * is binding a claim to a layer that does *not* supply its bytes, which is
+ * exactly the bug layer ownership exists to prevent.
+ */
+export function scopeFor(
+  address: number,
+  owner: { id: string; start: number } | undefined,
+  target: string | undefined
+): { frame: Frame; at: number } {
+  if (owner) {
+    return { frame: { space: "layer", layer: owner.id }, at: address - owner.start };
+  }
+  // No layer supplies it, so it is a fact about this arrangement. With no
+  // target selected there is one implicit arrangement and the address space is
+  // the whole of it.
+  return target === undefined
+    ? { frame: { space: "address" }, at: address }
+    : { frame: { space: "target", target }, at: address };
+}
+
+/** The absolute address of a stored claim, given where its layer landed. */
+export function resolveAt(
+  stored: number,
+  frame: Frame | undefined,
+  layerStart: (id: string) => number | undefined
+): number | undefined {
+  if (frame?.space !== "layer") return stored;
+  const start = layerStart(frame.layer);
+  // A claim on a layer this target does not link is not in this view at all —
+  // which is the same rule that makes annotations follow linking, said once.
+  return start === undefined ? undefined : start + stored;
+}
+
+/** How a scope reads to somebody who has to know whether a claim travels. */
+export function describeScope(frame: Frame | undefined): string {
+  if (frame === undefined || frame.space === "address") return "machine";
+  return frame.space === "layer" ? `layer:${frame.layer}` : `target:${frame.target}`;
 }

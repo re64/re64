@@ -58,6 +58,14 @@ const BASE = `{
     { "id": "lay_b", "type": "symbols", "name": "zp" }
   ],
   "claims": [
+    {
+      "id": "clm_framed",
+      "at": "$0002",
+      "layer": "lay_a",
+      "name": "insideTheLayer",
+      "author": "m",
+      "source": "user"
+    },
     { "id": "clm_1", "at": "$8000", "name": "Start", "root": "routine", "author": "marcus", "source": "user" },
     { "id": "clm_2", "at": "$8080", "extent": 32, "name": "copyright", "is": "text", "encoding": "petscii", "root": "data", "author": "marcus", "source": "user" },
     { "id": "clm_3", "at": "$8100", "name": "Loop", "author": "marcus", "source": "user" }
@@ -102,10 +110,16 @@ const CASES: { [K in Op["op"]]: Case } = {
   "claim.add": {
     op: {
       op: "claim.add",
+      // Framed on a layer, so `at` is an offset into its bytes rather than an
+      // address. Nothing in this table carried a frame until claims were
+      // scoped, and a field written in the wrong position then went unnoticed
+      // through every assertion here — which broke undo, since replaying an
+      // operation forward stopped being a no-op.
       claim: {
         id: "clm_2",
-        at: 0x8400,
+        at: 4,
         extent: 0x40,
+        frame: { space: "layer", layer: "lay_a" },
         name: "spriteBank",
         says: { is: "bitmap", view: "sprite" },
         by: { author: "gfx", source: "user" },

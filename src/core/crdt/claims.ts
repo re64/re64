@@ -73,6 +73,7 @@ export function encodeClaim(claim: Claim): Record<string, unknown> {
   if (claim.by.when !== undefined) out.when = claim.by.when;
   if (claim.by.confidence !== undefined) out.confidence = claim.by.confidence;
   if (claim.frame?.space === "layer") out.layer = claim.frame.layer;
+  if (claim.frame?.space === "target") out.target = claim.frame.target;
   if (claim.says !== undefined) {
     out.is = claim.says.is;
     if (claim.says.is === "text" && claim.says.encoding) out.encoding = claim.says.encoding;
@@ -106,6 +107,7 @@ export function decodeClaim(entry: Y.Map<unknown>): Claim {
   };
 
   const layer = get<string>("layer");
+  const target = get<string>("target");
   const at = get<number | string>("at")!;
   return {
     id: get<string>("id")!,
@@ -117,7 +119,11 @@ export function decodeClaim(entry: Y.Map<unknown>): Claim {
       : {}),
     ...(says ? { says } : {}),
     ...(get<RootKind>("root") ? { root: get<RootKind>("root") } : {}),
-    ...(layer ? { frame: { space: "layer" as const, layer } } : {}),
+    ...(layer
+      ? { frame: { space: "layer" as const, layer } }
+      : target
+        ? { frame: { space: "target" as const, target } }
+        : {}),
     by,
   };
 }
@@ -187,6 +193,7 @@ export function applyClaimOp(doc: Y.Doc, op: ClaimOp, origin: unknown = "local")
         }
         if (frame !== undefined) {
           if (frame.space === "layer") entry.set("layer", frame.layer);
+          else if (frame.space === "target") entry.set("target", frame.target);
           else entry.delete("layer");
         }
         if (by !== undefined) {

@@ -58,6 +58,7 @@ import {
   newId,
   makeFileLoader,
   claimById,
+  placed,
   markFunctionOps,
   parseProject,
   parseProjectAddress,
@@ -76,7 +77,14 @@ import { runDecoder } from "../sandbox/run.js";
 import { renderTextWith } from "../sandbox/sync.js";
 import { databaseFileBytes } from "../store/load.js";
 import { CommentPlacement, TextEncoding, describeWarning } from "../core/index.js";
-import { Claim, Interpretation, RootKind, claimSpan, compareClaims } from "../core/claims/model.js";
+import {
+  Claim,
+  Interpretation,
+  RootKind,
+  claimSpan,
+  compareClaims,
+  describeScope,
+} from "../core/claims/model.js";
 import { NamedClaim, labelTypeOf } from "../core/claims/names.js";
 import { fieldSize, formatFieldType, parseFieldType } from "../core/memory/type.js";
 import { ClaimEdit } from "../core/ops/types.js";
@@ -97,6 +105,16 @@ export interface ClaimInput {
   is?: Interpretation["is"];
   /** Which layout, when `is` is `record`. From `list_types`. */
   typeId?: string;
+  /**
+   * Decide the scope against this view rather than the selected one.
+   *
+   * The escape hatch, and deliberately a *view* rather than a scope: naming
+   * which arrangement you mean is a concept a caller already has, and the scope
+   * still derives by the same rule. There is no way to name a scope directly,
+   * because the only thing that could reach is binding a claim to a layer that
+   * does not supply its bytes.
+   */
+  target?: string;
   encoding?: TextEncoding;
   view?: string;
   root?: RootKind;
@@ -416,6 +434,32 @@ export class Workspace {
     });
     this.cachedRows = { key, rows };
     return rows;
+  }
+
+/**
+   * The memory map of a target that is not the selected one.
+   *
+   * Only for deciding a claim's scope, so it stops at the map and never
+   * analyses — which keeps it cheap enough to be the ordinary way to annotate
+   * another view. A write carrying its own target does not move the shared
+   * selection, and that matters: experiment 7 left a whole target unread for a
+   * run because changing the selection changes it for everybody and nobody was
+   * willing to.
+   */
+  private loadTarget(name: string): LoadedProject {
+    const project = projectFromDoc(this.room.store.document());
+    if (!(project.targets ?? []).some((t) => t.name === name)) {
+      throw new Error(`No target "${name}". list_targets shows what this project has.`);
+    }
+    const { storage, projectPath } = this.room;
+    const bytes =
+      storage instanceof SqliteStorage
+        ? databaseFileBytes(storage)
+        : nodeFileBytes(dirname(projectPath));
+    return buildMemoryMap(
+      projectForTarget({ ...project, activeTarget: name }),
+      makeFileLoader(bytes)
+    );
   }
 
   private load(): LoadedProject {
@@ -1316,6 +1360,8 @@ export class Workspace {
       name: label.name,
       type: labelTypeOf(label),
       source: label.by.source,
+      // What it belongs to, so a reader can see whether it follows its bytes.
+      scope: describeScope(label.frame),
       references: program.xrefs.count(label.at),
       writable: !invented && !builtIn,
       // An extent reshapes every operand in its range and any writer can set
@@ -2497,6 +2543,9 @@ export class Workspace {
 
   addClaim(caller: Caller, claim: ClaimInput): EditResult {
     this.checkClaim(claim);
+    // Resolved once for the reported scope; `claimOps` resolves it again inside
+    // the edit, where the document may have moved under us.
+    const view = claim.target === undefined ? undefined : this.loadTarget(claim.target);
     const made: string[] = [];
     const result = this.edit(
       caller,
@@ -2515,6 +2564,7 @@ export class Workspace {
     return {
       ...result,
       ...(made.length ? { claims: made } : {}),
+      scope: describeScope(placed(view ?? this.program().loaded, claim.at).frame),
       ...(claim.extent !== undefined
         ? {
             covers:
@@ -2551,6 +2601,8 @@ export class Workspace {
       return;
     }
     if (claim.is !== undefined) {
+      // Target-independent: this checks the span's shape and that a named
+      // decoder exists, and a decoder is project-level.
       this.checkedRegion(claim.at, claim.at + (claim.extent ?? 1), KIND_FOR_IS[claim.is], claim.view);
     }
   }
@@ -2562,7 +2614,12 @@ export class Workspace {
    * and `add_comments` disagreed about their own contract precisely because the
    * batch restated what the single call did rather than calling it.
    */
-  private claimOps(loaded: LoadedProject, claim: ClaimInput): Op[] {
+  private claimOps(view: LoadedProject, claim: ClaimInput): Op[] {
+    // One view decides everything about a write — where the claim belongs, what
+    // names are already there, which layer supplies the bytes. Mixing the named
+    // target for one of those and the selected one for the rest would be a
+    // write nobody could reason about.
+    const loaded = claim.target === undefined ? view : this.loadTarget(claim.target);
     const end = claim.at + (claim.extent ?? 1);
 
     // A record has no legacy region kind to be written as — there was never one
@@ -2575,7 +2632,7 @@ export class Workspace {
           op: "claim.add",
           claim: {
             id: newId("clm"),
-            at: claim.at,
+            ...placed(loaded, claim.at),
             extent: claim.extent,
             says: { is: "record", typeId: claim.typeId! },
             root: "data",
@@ -2636,6 +2693,8 @@ export class Workspace {
       name?: string;
       is?: string;
       root?: string;
+      /** `layer:<id>`, `target:<name>` or `machine` — what this claim belongs to. */
+      scope: string;
       by: string;
     }[];
   } {
@@ -2652,6 +2711,10 @@ export class Workspace {
         ...(c.name !== undefined ? { name: c.name } : {}),
         ...(c.says ? { is: c.says.is } : {}),
         ...(c.root !== undefined ? { root: c.root } : {}),
+        // The read that verifies the write can see what the write chose. It is
+        // not something the caller picks, but it decides whether the claim
+        // follows its bytes when a layer is relinked.
+        scope: describeScope(c.frame),
         by: c.by.author,
       })),
     };
@@ -4173,6 +4236,8 @@ export interface LabelSummary {
   name: string;
   type: LabelType;
   source: string;
+  /** `layer:<id>`, `target:<name>` or `machine` — what this name belongs to. */
+  scope: string;
   references: number;
   writable: boolean;
   /** How many bytes the name covers, when it names an array rather than a spot. */
@@ -4202,6 +4267,17 @@ export interface EditResult {
    * made the same decoder twice because of it.
    */
   claims?: string[];
+  /**
+   * What the claims this edit made belong to: `layer:<id>`, `target:<name>`, or
+   * `machine`.
+   *
+   * Derived, never chosen — the topmost layer supplying the byte, else the
+   * target. Reported because it decides whether a claim travels when the stack
+   * is reordered or a layer is relinked, and a property only the writer can
+   * observe is one that gets fought over. That is what an invisible extent cost
+   * two readers in experiment 7.
+   */
+  scope?: string;
   /**
    * Instructions this edit stopped decoding, when it stopped any.
    *
