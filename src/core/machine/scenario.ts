@@ -29,7 +29,7 @@ import { REG } from "../il/pcode.js";
 export interface Capture {
   /** The step that made it. */
   step: string;
-  kind: "ram" | "screen" | "frames" | "trace" | "sid";
+  kind: "ram" | "screen" | "frames" | "trace" | "sid" | "devices";
   name: string;
   /** For `ram` and `screen`, a `.prg`: load address first. For the rest, JSON. */
   bytes: Uint8Array;
@@ -399,6 +399,36 @@ function take(
     }
     case "sid":
       return { ...base, bytes: encode(machine.bus.sid.writes satisfies SidWrite[]) };
+    case "devices": {
+      // **What the chips hold, which no other capture can reach.** `ram` reads
+      // `cpu.memory`, and $D000-$DFFF there is the RAM *under* I/O — all zeros
+      // on this program — so experiment 10's editor could not read the video
+      // chip's state after a run at all. That is exactly the state `where` has
+      // to assume when it says "screen base $0400, bank $0000, pass these if
+      // your program moved them": the machine knows, and had no way to say.
+      const vic = machine.bus.vic;
+      return {
+        ...base,
+        bytes: encode({
+          vic: {
+            screenBase: vic.screenBase,
+            characterBase: vic.characterBase,
+            borderColour: vic.borderColour,
+            backgroundColour: vic.backgroundColour,
+            raster: vic.raster,
+            sprites: vic.sprites,
+            spriteMulticolour: vic.spriteMulticolour,
+          },
+          // The bank the VIC sees, which decides what every address above
+          // means and lives on the *other* chip.
+          vicBank: machine.bus.cia2.vicBank,
+          keys: machine.bus.keys,
+          frames: machine.bus.frames,
+          cycles: machine.cycles,
+          instructions: machine.instructions,
+        }),
+      };
+    }
     case "trace":
       return {
         ...base,

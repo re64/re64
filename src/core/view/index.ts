@@ -25,4 +25,5 @@ export {
   decodeBitmap,
 } from "./bitmap-view.js";
 export { encodePng, encodeApng } from "./png.js";
+export { fieldValue } from "./rows.js";
 export { encodeWav } from "./wav.js";

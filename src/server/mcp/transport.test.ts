@@ -376,6 +376,79 @@ describe("a layer nobody links supplies nothing", () => {
   });
 });
 
+describe("reading a span without saying what it is", () => {
+  /**
+   * The most repeated workaround of experiment 10. Reader one decoded about
+   * twenty strings by hand across six script runs; reader two a dozen more, and
+   * probed undecoded spans by force-adding a root, reading, and reverting —
+   * twenty times, six of which had to be undone. `render` had always done this
+   * for pictures; text and code had no equivalent, so the only way to find out
+   * was to write a claim in a document somebody else is reading.
+   */
+  it("shows all three encodings when none is named", async () => {
+    const { value, isError } = await callTool("preview", {
+      start: "$8E00",
+      length: 16,
+      as: "text",
+    });
+    expect(isError, "preview text").toBe(false);
+    const seen = value as { alternatives?: Record<string, string>; text: string };
+    expect(Object.keys(seen.alternatives ?? {}).sort()).toEqual(["ascii", "petscii", "screen"]);
+  });
+
+  it("takes one encoding when named, and offers no alternatives", async () => {
+    const { value } = await callTool("preview", {
+      start: "$8E00",
+      length: 16,
+      as: "text",
+      encoding: "screen",
+    });
+    const seen = value as { encoding: string; alternatives?: unknown };
+    expect(seen.encoding).toBe("screen");
+    expect(seen.alternatives).toBeUndefined();
+  });
+
+  it("counts what did not decode and what is undocumented, without deciding", async () => {
+    // The evidence for "is this code", not the verdict: data read as code
+    // usually shows both, real code usually shows neither.
+    const code = (await callTool("preview", { start: "$8000", length: 32, as: "code" }))
+      .value as { lines: string[]; undecodable: number; illegal: number; note: string };
+    expect(code.lines.length).toBeGreaterThan(0);
+    expect(code.undecodable).toBeGreaterThanOrEqual(0);
+    expect(code.note).toContain("Nothing has been written");
+  });
+
+  it("hands a record back decoded, which is the read side of add_type", async () => {
+    const type = await callTool("add_type", {
+      name: "PreviewProbe",
+      size: 4,
+      fields: { 0: { name: "first", type: "u8" }, 1: { name: "word", type: "ptr" } },
+    });
+    expect(type.isError, type.text).toBe(false);
+    const typeId = (type.value as { type: string }).type;
+
+    const { value, isError, text } = await callTool("preview", {
+      start: "$8000",
+      length: 12,
+      as: "record",
+      typeId,
+    });
+    expect(isError, text).toBe(false);
+    const seen = value as {
+      count: number;
+      records: { at: string; fields: Record<string, string> }[];
+    };
+    expect(seen.count).toBe(3);
+    expect(Object.keys(seen.records[0].fields).sort()).toEqual(["first", "word"]);
+  });
+
+  it("refuses a record read with no layout, and one too short for a record", async () => {
+    const noType = await callTool("preview", { start: "$8000", length: 8, as: "record" });
+    expect(noType.isError).toBe(true);
+    expect(noType.text).toContain("typeId");
+  });
+});
+
 describe("the three claim writers carry the same fields", () => {
   /**
    * They did not. `add_claim` took `typeId` and `method`; the batch took

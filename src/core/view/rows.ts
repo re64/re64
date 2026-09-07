@@ -940,7 +940,7 @@ function hexBytes(bytes: readonly (number | undefined)[]): string {
  * A byte nothing supplies renders `??`. Reading it as zero would let a field
  * look like a real value when the project simply does not load that address.
  */
-function fieldValue(
+export function fieldValue(
   map: MemoryMap,
   at: number,
   type: FieldType,

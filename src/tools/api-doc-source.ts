@@ -45,6 +45,7 @@ export const SECTIONS: { title: string; blurb: string; tools: string[] }[] = [
       "read_disassembly",
       "read_bytes",
       "render",
+      "preview",
       "where",
       "list_claims",
       "claims_at",

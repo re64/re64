@@ -37,6 +37,7 @@ import {
   REGISTER_NAMES,
   Bitmap,
   bitmapToText,
+  fieldValue,
   bytesPerCell,
   cellCount,
   decodeBitmap,
@@ -141,6 +142,9 @@ import { CheckpointCache, runScenario as coreRunScenario } from "../core/machine
 import { EvidenceKind, ProjectStep } from "../core/project/project.js";
 import { listDirectory } from "../core/c64/d64.js";
 import { renderSid } from "../core/c64/sid-audio.js";
+import { decodeText } from "../core/c64/text.js";
+import { decode as decodeInstruction } from "../core/arch/mos6502/decoder.js";
+import { formatInstruction } from "../core/arch/mos6502/instruction.js";
 import type { ByteReading } from "../core/memory/region.js";
 import { DEFAULT_SCREEN_BASE, screenCell, spriteAt } from "../core/c64/geometry.js";
 import type { SidWrite } from "../core/c64/devices/sid.js";
@@ -2597,6 +2601,142 @@ export class Workspace {
       hash,
       exact: "when each note starts and stops, and its pitch — both read from the log",
       approximated: audio.approximated,
+    };
+  }
+
+  /**
+   * Read a span *as* something, without saying it is that.
+   *
+   * **The most repeated workaround of experiment 10.** Reader one decoded about
+   * twenty strings by hand across six script runs before committing text
+   * claims; reader two did a dozen more the same way, *and* probed undecoded
+   * spans by force-adding `root: "routine"`, reading the result, and reverting
+   * — twenty times, six of which had to be undone. Both asked for the same
+   * thing independently: try a reading on a span without committing to it.
+   *
+   * `render` already did this for pictures, which is why nobody had to guess at
+   * a bitmap. Text and code had no equivalent, so the only way to find out was
+   * to write a claim and look — and a probe that writes is a probe that has to
+   * be cleaned up, in a document somebody else is reading.
+   *
+   * It is also the read side of `add_type`, which both readers wanted from the
+   * other direction: a declared layout could be shown in a listing and never
+   * handed back decoded, so every question about a record meant re-parsing hex.
+   *
+   * Writes nothing, and says nothing about what the bytes *are* — that is what
+   * `add_claim` is for, once you have looked.
+   */
+  preview(
+    start: number,
+    length: number,
+    as: "text" | "code" | "record",
+    options: { encoding?: TextEncoding; typeId?: string } = {}
+  ): Record<string, unknown> {
+    const program = this.program();
+    const map = program.loaded.map;
+    const read = map.readBytes(start, length);
+    const missing = read.filter((b) => b === undefined).length;
+    const common = {
+      from: hex4(start),
+      bytes: length,
+      as,
+      ...(missing ? { unmapped: missing } : {}),
+      target: this.room.target ?? "default",
+    };
+
+    if (as === "text") {
+      const encoding = options.encoding ?? "petscii";
+      const bytes = read.map((b) => b ?? 0);
+      const text = decodeText(bytes, encoding);
+      // Every encoding at once when none was named, because the question is
+      // usually "which of these is it" and answering one costs three round
+      // trips to answer three.
+      return {
+        ...common,
+        encoding,
+        text,
+        ...(options.encoding === undefined
+          ? {
+              alternatives: {
+                petscii: decodeText(bytes, "petscii"),
+                screen: decodeText(bytes, "screen"),
+                ascii: decodeText(bytes, "ascii"),
+              },
+              note:
+                "No encoding named, so all three are shown. A program with its own " +
+                "character set is unreadable by any of them — that is what a decoder is for.",
+            }
+          : {}),
+      };
+    }
+
+    if (as === "code") {
+      // A *linear* decode, deliberately: the question a probe asks is "would
+      // these bytes be plausible instructions", not "where does control go".
+      // Following flow would need a root, which is the write this exists to
+      // avoid.
+      const lines: string[] = [];
+      let at = start;
+      let undecodable = 0;
+      let illegal = 0;
+      while (at < start + length && lines.length < 200) {
+        const decoded = decodeInstruction({ readByte: (a: number) => map.readByte(a) }, at);
+        if (!decoded.ok) {
+          lines.push(`${hex4(at)}  ??`);
+          undecodable += 1;
+          at += 1;
+          continue;
+        }
+        const instruction = decoded.instruction;
+        if (instruction.illegal) illegal += 1;
+        lines.push(`${hex4(at)}  ${formatInstruction(instruction)}`);
+        at += instruction.bytes.length;
+      }
+      return {
+        ...common,
+        lines,
+        undecodable,
+        illegal,
+        // The honest summary, because the answer to "is this code" is a
+        // judgement and this is the evidence for it rather than the verdict.
+        note:
+          `${undecodable} byte(s) did not decode and ${illegal} instruction(s) are ` +
+          `undocumented opcodes. Data read as code usually shows both; real code ` +
+          `usually shows neither. Nothing has been written — add_claim root: decides.`,
+      };
+    }
+
+    const typeId = options.typeId;
+    if (!typeId) throw new Error('Reading a span as a record needs a typeId. list_types has them.');
+    const type = program.loaded.types.get(typeId);
+    if (!type) throw new Error(`No type ${typeId}. list_types shows what this project declares.`);
+
+    const count = Math.floor(length / type.size);
+    if (count === 0) {
+      throw new Error(
+        `${length} bytes is less than one ${type.name}, which is ${type.size}.`
+      );
+    }
+
+    const laid = program.loaded.types.layout(type.id);
+    const records = Array.from({ length: Math.min(count, 64) }, (_unused, index) => {
+      const at = start + index * type.size;
+      const fields: Record<string, string> = {};
+      for (const { offset, field } of laid) {
+        const width = fieldSize(field.type, program.loaded.types.sizeOf) ?? 1;
+        fields[field.name] = fieldValue(map, at + offset, field.type, width, program.labels);
+      }
+      return { at: hex4(at), index, fields };
+    });
+
+    return {
+      ...common,
+      type: type.name,
+      size: type.size,
+      // Derived, never stored — the same rule the listing follows.
+      count,
+      ...(count > records.length ? { shown: records.length } : {}),
+      records,
     };
   }
 

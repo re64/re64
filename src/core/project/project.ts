@@ -518,7 +518,7 @@ export type ProjectStep =
   | {
       id?: string;
       kind: "capture";
-      what: "ram" | "screen" | "frames" | "trace" | "sid";
+      what: "ram" | "screen" | "frames" | "trace" | "sid" | "devices";
       /** For `ram`, the span to keep. */
       from?: number | string;
       to?: number | string;
@@ -542,7 +542,7 @@ export interface ProjectCapture {
   /** The scenario that made it, and the step within it. */
   scenario: string;
   step: string;
-  kind: "ram" | "screen" | "frames" | "trace" | "sid";
+  kind: "ram" | "screen" | "frames" | "trace" | "sid" | "devices";
   /** The file in this project's store, which is how the bytes are reached. */
   file: string;
   /** Milliseconds since the epoch, supplied by the writer. */

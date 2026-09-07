@@ -90,7 +90,7 @@ what was declined in `rejected`, and fail only when nothing was applicable.
 
 ## The tools
 
-87 tools.
+88 tools.
 
 ### Orienting
 
@@ -152,6 +152,18 @@ Draw a span and get a picture back, without touching the project. This is how yo
 | `view` | `string` | optional | bits:<n> \| char:<n> \| sprite:<n> \| sprite-multi:<n> — n is per row. With a claim, overrides the claim's own view without editing it. |
 | `as` | `grid` \| `frames` | optional | grid: one sheet (default). frames: an animated PNG, one cell per frame |
 | `delayMs` | `integer` | optional | Frame delay for `as: frames`; default 120 |
+
+#### `preview`
+
+Read a span **as** something, without saying it is that. Writes nothing. `as: "text"` decodes it — name an encoding or get all three, which is usually the question. `as: "code"` decodes it linearly as instructions and reports how many bytes did not decode and how many opcodes are undocumented: data read as code usually shows both, real code usually shows neither. `as: "record"` with a typeId hands back the fields decoded, which is the read side of add_type. `render` has always done this for pictures. This is the same thing for the readings you cannot see: previously the only way to find out was to add a claim, look, and take it back — a probe that writes, in a document somebody else is reading. What the bytes *are* is still add_claim's to say, once you have looked.
+
+| argument | type | | |
+|---|---|---|---|
+| `start` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `length` | `integer` | **required** | How many bytes |
+| `as` | `text` \| `code` \| `record` | **required** |  |
+| `encoding` | `petscii` \| `screen` \| `ascii` | optional | For as:"text"; omit to see all three |
+| `typeId` | `string` | optional | For as:"record", from list_types |
 
 #### `where`
 

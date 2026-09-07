@@ -431,6 +431,53 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "preview",
+    "Read a span **as** something, without saying it is that. Writes nothing. " +
+      "`as: \"text\"` decodes it — name an encoding or get all three, which is " +
+      "usually the question. `as: \"code\"` decodes it linearly as instructions " +
+      "and reports how many bytes did not decode and how many opcodes are " +
+      "undocumented: data read as code usually shows both, real code usually " +
+      "shows neither. `as: \"record\"` with a typeId hands back the fields " +
+      "decoded, which is the read side of add_type. " +
+      "`render` has always done this for pictures. This is the same thing for " +
+      "the readings you cannot see: previously the only way to find out was to " +
+      "add a claim, look, and take it back — a probe that writes, in a document " +
+      "somebody else is reading. What the bytes *are* is still add_claim's to " +
+      "say, once you have looked.",
+    {
+      project,
+      start: address,
+      length: z.number().int().min(1).max(8192).describe("How many bytes"),
+      as: z.enum(["text", "code", "record"]),
+      encoding: z
+        .enum(["petscii", "screen", "ascii"])
+        .optional()
+        .describe("For as:\"text\"; omit to see all three"),
+      typeId: z.string().optional().describe("For as:\"record\", from list_types"),
+    },
+    ({
+      project: id,
+      target,
+      start,
+      length,
+      as,
+      encoding,
+      typeId,
+    }: {
+      project?: string;
+      target?: string;
+      start: number;
+      length: number;
+      as: "text" | "code" | "record";
+      encoding?: TextEncoding;
+      typeId?: string;
+    }) =>
+      context()
+        .workspace(id, target)
+        .preview(start, length, as, { ...(encoding ? { encoding } : {}), ...(typeId ? { typeId } : {}) })
+  );
+
+  tool(
     "where",
     "What an address is, in the units the machine uses: which screen cell, " +
       "which sprite pointer, and where its colour byte is. " +
@@ -2022,7 +2069,14 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     }),
     z.strictObject({
       kind: z.literal("capture"),
-      what: z.enum(["ram", "screen", "frames", "trace", "sid"]),
+      what: z
+        .enum(["ram", "screen", "frames", "trace", "sid", "devices"])
+        .describe(
+          "devices: what the chips hold — screen and character base, the VIC bank, " +
+            "sprite registers, held keys. `ram` over $D000 reads the RAM *under* I/O, " +
+            "not the chips, so this is the only way to read the video state a run " +
+            "produced — which is exactly what `where` otherwise has to assume."
+        ),
       from: address.optional().describe("For `ram`"),
       to: address.optional().describe("For `ram`"),
       count: z.number().int().min(1).optional().describe("For `frames`"),
