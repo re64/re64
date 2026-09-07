@@ -134,12 +134,16 @@ Each independently checkable, and together they say what kind of binary this is.
    banks, parity in `$30` — but `FindFreeObjectSlot` searches up to `$42`, and
    `$42` is 8 in 41 zones and 6 in one. Nothing ever allocates above slot 7. Bank
    1 is written by nothing and read by nothing.
-4. **The bullet's hardware-collision gate is stubbed.** `$9AB3` is `LDA #$FF / AND
-   #$02` and `$9ABC` is `LDA #$FF / AND printChar` — both always pass. Put `A5 44`
-   where `A9 FF` is and they become exactly the camel test at `$9B1B`. Two bytes,
-   twice. The reason is visible elsewhere in the program: a multiplexed sprite
-   registers no hardware collision on a frame it is not drawn, so the bullet was
-   moved to a coordinate test and the dead gate left behind.
+4. ~~**The bullet's hardware-collision gate is stubbed.**~~ **Wrong, and worth
+   keeping to say why.** `$9AB3` is `LDA #$FF / AND #$02` on the disk build and
+   both gates do always pass. The inference — that this is 1984 code the author
+   built and left dead — is backwards. The 1984 build has `LDA $44` there, and
+   `$44` is that frame's snapshot of `$D01E`, the sprite-to-sprite collision
+   register. **The stub is the fix**, made by Jeff Minter in May 2021, and he
+   said why: "Bypassed the hardware collision detection, which I probably wasn't
+   doing right." Two builds were being read as one. See
+   `reference/PROVENANCE.md` and `src/server/camels-patch.test.ts`, which names
+   all 36 patched bytes and proves the overlay.
 
 ### The cheat code is GOATS
 
