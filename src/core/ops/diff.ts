@@ -25,7 +25,7 @@ import {
   ProjectType,
   targetLinks,
 } from "../project/project.js";
-import { ClaimEdit, Op, TypeField } from "./types.js";
+import { ClaimEdit, LayerAddOp, Op, TypeField } from "./types.js";
 import { Claim } from "../claims/model.js";
 
 /** A stored claim as the model sees it, via the loader's own parser. */
@@ -174,23 +174,26 @@ export function diffProjects(from: Project, to: Project): Op[] {
 
   for (const [id, layer] of toLayers) {
     if (fromLayers.has(id)) continue;
-    // Every kind an operation can express, not only symbols. This said
-    // `!== "symbols"` from when that was the only kind `layer.add` could make,
-    // and the filter outlived the limit: a byte layer reached the document, was
-    // reported by describe_project, and never reached the exported file — so
-    // the next write naming that layer failed against a text project that had
-    // never heard of it. The same shape as `meta.set`, which had an operation
-    // and an inverse and nothing that emitted one.
-    if (layer.type !== "symbols" && layer.type !== "prg" && layer.type !== "raw") continue;
+    // Every kind, keyed by the *file* type so the compiler notices when the two
+    // vocabularies drift. This was a list of three from when `layer.add` could
+    // only make a symbols layer, and the filter outlived the limit twice: a byte
+    // layer reached the document and never the exported file, so the next write
+    // naming it failed against a text project that had never heard of it — and
+    // when that was fixed for `prg` and `raw` the same hole stayed open under
+    // `rom`, which is the one kind the `machine` target cannot do without.
+    const layerType: LayerAddOp["layerType"] = layer.type;
     ops.push({
       op: "layer.add",
       id,
-      layerType: layer.type,
+      layerType,
       name: layer.name ?? id,
+      ...(layer.rom === undefined ? {} : { rom: layer.rom }),
       ...(layer.path === undefined ? {} : { path: layer.path }),
       ...(layer.address === undefined
         ? {}
         : { address: parseProjectAddress(layer.address) }),
+      ...(layer.bytes === undefined ? {} : { bytes: layer.bytes }),
+      ...(layer.length === undefined ? {} : { length: layer.length }),
       index: to.layers.findIndex((l) => l.id === id),
     });
   }

@@ -336,10 +336,9 @@ export interface ConstantUnbindOp {
 /**
  * Add a layer, at a position in the declaration order.
  *
- * Only `symbols` for now, which is what naming an address outside the loaded
- * bytes needs — zero page, I/O registers, KERNAL entry points. A layer that
- * supplies bytes would have to say where they come from, and nothing needs
- * that through an operation yet.
+ * Every kind the project file can hold, because the file format and the
+ * operation vocabulary drifting apart is how a layer ends up in a document that
+ * cannot be written back out.
  */
 export interface LayerAddOp {
   op: "layer.add";
@@ -352,14 +351,24 @@ export interface LayerAddOp {
    * declared in a file by hand. A byte layer is what lets an agent handed a
    * disk image end up with something to disassemble.
    */
-  layerType: "symbols" | "prg" | "raw" | "rom";
+  layerType: "symbols" | "prg" | "raw" | "rom" | "bytes";
   /** Which machine ROM, for a `rom` layer. */
   rom?: "basic" | "kernal" | "characters";
   name: string;
   /** For a byte layer: the file it reads, as `name` or `disk.d64:NAME`. */
   path?: string;
-  /** For a `raw` layer, which carries no load address of its own. */
+  /** For a `raw` or `bytes` layer, which carries no load address of its own. */
   address?: number;
+  /**
+   * The bytes themselves, in hex, for a `bytes` layer.
+   *
+   * The one layer kind whose content is *in* the project rather than beside it,
+   * which is what a patch, a poked value or a hand-assembled shim needs: no
+   * file to upload, and the diff shows the bytes changing.
+   */
+  bytes?: string;
+  /** Repeat or pad a `bytes` layer to this width. */
+  length?: number;
   /** Where in declaration order; the bottom of the stack when omitted. */
   index?: number;
 }

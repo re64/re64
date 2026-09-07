@@ -4496,25 +4496,72 @@ export class Workspace {
     return { ...result, ...advice };
   }
 
+  /**
+   * A layer over bytes: a file this project holds, or bytes given inline.
+   *
+   * `bytes` is the kind whose content lives *in* the project. That is what a
+   * patch wants — a handful of bytes at a known address, on top of the build
+   * they change — and there is no file to upload, so the diff shows the change
+   * itself rather than a new hash.
+   */
   addByteLayer(
     caller: Caller,
-    options: { type: "prg" | "raw"; path: string; name?: string; address?: number }
+    options: {
+      type: "prg" | "raw" | "bytes";
+      path?: string;
+      bytes?: string;
+      name?: string;
+      address?: number;
+      length?: number;
+    }
   ): EditResult {
-    const { type, path } = options;
-    if (type === "raw" && options.address === undefined) {
+    const { type } = options;
+    if (type !== "prg" && options.address === undefined) {
       throw new Error(
-        "A raw layer has no load address of its own, so it needs one. A .prg " +
-          "carries its own in the first two bytes; use type \"prg\" for those."
+        `A ${type} layer has no load address of its own, so it needs one. A .prg ` +
+          'carries its own in the first two bytes; use type "prg" for those.'
       );
     }
 
-    const held = this.program().loaded.project.files ?? [];
-    const image = path.includes(":") ? path.slice(0, path.indexOf(":")) : path;
-    if (!held.some((f) => f.name === image)) {
-      throw new Error(
-        `This project holds no file called "${image}". describe_project lists ` +
-          `what it has, and prepare_upload adds one.`
-      );
+    let hex: string | undefined;
+    let name = options.name;
+    if (type === "bytes") {
+      if (options.path !== undefined) {
+        throw new Error(
+          'A "bytes" layer carries its own bytes and reads no file, so it takes ' +
+            'no path. Use type "raw" to lay a file at an address.'
+        );
+      }
+      hex = (options.bytes ?? "").replace(/[\s$]/g, "").toUpperCase();
+      if (hex.length === 0) {
+        throw new Error('A "bytes" layer needs its bytes, as hex — "A9 01 8D 20 D0".');
+      }
+      // Refused here rather than parsed into NaN and stored: it is a fact about
+      // the request, which is the one thing a write is entitled to refuse over.
+      if (!/^(?:[0-9A-F]{2})+$/.test(hex)) {
+        throw new Error(
+          `"${options.bytes}" is not whole bytes of hex. Two hex digits per byte, ` +
+            "spaces optional."
+        );
+      }
+      name ??= `patch at ${hex4(options.address!)}`;
+    } else {
+      if (options.path === undefined) {
+        throw new Error(
+          `A ${type} layer reads a file, so it needs a path. describe_project ` +
+            'lists what this project holds; use type "bytes" to give bytes inline.'
+        );
+      }
+      const held = this.program().loaded.project.files ?? [];
+      const path = options.path;
+      const image = path.includes(":") ? path.slice(0, path.indexOf(":")) : path;
+      if (!held.some((f) => f.name === image)) {
+        throw new Error(
+          `This project holds no file called "${image}". describe_project lists ` +
+            `what it has, and prepare_upload adds one.`
+        );
+      }
+      name ??= image;
     }
 
     // The stack is declared bottom-up and a byte layer is the foundation, so a
@@ -4526,9 +4573,11 @@ export class Workspace {
         op: "layer.add",
         id: newId("lay"),
         layerType: type,
-        name: options.name ?? image,
-        path,
+        name,
+        ...(options.path === undefined ? {} : { path: options.path }),
+        ...(hex === undefined ? {} : { bytes: hex }),
         ...(options.address === undefined ? {} : { address: options.address }),
+        ...(options.length === undefined ? {} : { length: options.length }),
         index,
       } as Op,
     ]);

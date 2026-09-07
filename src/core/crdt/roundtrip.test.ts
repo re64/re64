@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as Y from "yjs";
-import { Op } from "../ops/types.js";
+import { LayerAddOp, Op } from "../ops/types.js";
 import { applyOp, invertOp } from "../ops/apply.js";
 import { diffProjects } from "../ops/diff.js";
 import { parseProject, formatProject } from "../project/index.js";
@@ -216,8 +216,18 @@ const CASES: { [K in Op["op"]]: Case } = {
     },
   },
   "type.remove": { op: { op: "type.remove", id: "typ_1" } },
+  // The widest variant, because it is the one that carries fields: `bytes` and
+  // `length` reach the document, the file and back only if every path knows
+  // about them. The narrow variants are covered below, one per layer kind.
   "layer.add": {
-    op: { op: "layer.add", id: "lay_c", layerType: "symbols", name: "io" },
+    op: {
+      op: "layer.add",
+      id: "lay_c",
+      layerType: "bytes",
+      name: "patch",
+      address: 0x9000,
+      bytes: "A9018D20D0",
+    },
   },
   "layer.set": { op: { op: "layer.set", id: "lay_b", fields: { name: "renamed" } } },
   "layer.remove": { op: { op: "layer.remove", id: "lay_b" } },
@@ -433,6 +443,40 @@ describe("every operation reaches every path", () => {
         undo.undo();
         expect(canonical(projectFromDoc(doc))).toBe(before);
       });
+    });
+  }
+});
+
+/**
+ * Every layer kind, through the diff.
+ *
+ * The table above proves one variant of `layer.add`; this proves the *set*. The
+ * filter in `diffProjects` was a hand-written list of layer kinds, and it went
+ * stale twice — first excluding every byte layer, then, once that was fixed for
+ * `prg` and `raw`, still excluding `rom`, which is the one kind the machine view
+ * cannot do without. A ROM layer reached the document, was reported by
+ * `describe_project`, and vanished on export.
+ */
+describe("a layer of every kind reaches the file", () => {
+  const LAYERS: Record<LayerAddOp["layerType"], Omit<LayerAddOp, "op" | "id">> = {
+    symbols: { layerType: "symbols", name: "io" },
+    prg: { layerType: "prg", name: "game", path: "game.prg" },
+    raw: { layerType: "raw", name: "chars", path: "game.prg", address: 0x3000 },
+    rom: { layerType: "rom", rom: "kernal", name: "kernal rom" },
+    bytes: { layerType: "bytes", name: "patch", address: 0x9000, bytes: "EAEA" },
+  };
+
+  for (const [kind, fields] of Object.entries(LAYERS)) {
+    it(`emits a \`layer.add\` for a ${kind} layer`, () => {
+      const op: Op = { op: "layer.add", id: "lay_new", ...fields };
+      const before = parseProject(BASE);
+      const after = parseProject(applyOp(BASE, op));
+
+      const emitted = diffProjects(before, after);
+      expect(emitted.filter((o) => o.op === "layer.add")).toHaveLength(1);
+
+      const replayed = emitted.reduce((text, o) => applyOp(text, o), BASE);
+      expect(canonical(parseProject(replayed))).toBe(canonical(after));
     });
   }
 });

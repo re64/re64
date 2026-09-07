@@ -116,6 +116,70 @@ describe("building a project from a disk image", () => {
     expect(exported.layers[0]).toMatchObject({ type: "prg", path: "tiny.prg" });
   });
 
+  it("puts a rom layer in the export too", () => {
+    // The same hole as the test above, one layer kind along: when `diffProjects`
+    // was widened from symbols to prg and raw, `rom` stayed outside the list.
+    // So a project could declare the ROMs, run against them, report them from
+    // describe_project — and export a file that had never heard of them, which
+    // is exactly the machine view that two experiments had to invent by hand.
+    ws.createProject("camels");
+    const camels = upload("camels", "tiny.prg", new Uint8Array([0x00, 0x80, 0xa9, 0x01, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "tiny.prg" });
+    camels.addRomLayer(builder, "kernal");
+
+    const exported = JSON.parse(camels.exportProject().text);
+    expect(exported.layers).toContainEqual(
+      expect.objectContaining({ type: "rom", rom: "kernal" })
+    );
+  });
+
+  it("lays bytes given inline over the build they patch", () => {
+    // The layer kind whose content is in the project rather than beside it. The
+    // file format has always had it and no operation could make one, so a patch
+    // meant uploading a file of three bytes and losing what it changed.
+    ws.createProject("camels");
+    const camels = upload("camels", "p.prg", new Uint8Array([0x00, 0x80, 0xa9, 0x01, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "p.prg", name: "build" });
+    camels.addByteLayer(builder, {
+      type: "bytes",
+      address: 0x8000,
+      bytes: "A9 02",
+      name: "patch",
+    });
+
+    const ids = Object.fromEntries(camels.targets().layers.map((l) => [l.name, l.id]));
+    camels.addTarget(builder, "stock", [{ layer: ids.build }]);
+    camels.addTarget(builder, "patched", [{ layer: ids.build }, { layer: ids.patch }]);
+
+    expect(camels.view("stock").bytes(0x8000, 3).hex.toUpperCase()).toBe("A9 01 60");
+    expect(camels.view("patched").bytes(0x8000, 3).hex.toUpperCase()).toBe("A9 02 60");
+
+    // And it survives the export, bytes and all — there is no file to fall back
+    // on, so a layer.add that dropped them would lose the patch itself.
+    const exported = JSON.parse(camels.exportProject().text);
+    expect(exported.layers).toContainEqual(
+      expect.objectContaining({ type: "bytes", address: "$8000", bytes: "A902" })
+    );
+  });
+
+  it("refuses bytes that are not whole bytes of hex", () => {
+    // A fact about the request, which is the one thing a write may refuse over.
+    // `parseHexBytes` would have taken "A9 1" and stored a NaN.
+    ws.createProject("camels");
+    const camels = upload("camels", "p.prg", new Uint8Array([0x00, 0x80, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "p.prg" });
+
+    expect(() =>
+      camels.addByteLayer(builder, { type: "bytes", address: 0x8000, bytes: "A9 1" })
+    ).toThrow(/not whole bytes of hex/);
+    expect(() =>
+      camels.addByteLayer(builder, { type: "bytes", address: 0x8000, bytes: "" })
+    ).toThrow(/needs its bytes/);
+    expect(() =>
+      camels.addByteLayer(builder, { type: "bytes", bytes: "EA" })
+    ).toThrow(/no load address of its own/);
+  });
+
   it("reads one project as the bytes load, or as the program runs", () => {
     // The problem both builders hit on roughly their fifth call: the decrunched
     // image must shadow the packed file, so the project could show one or the

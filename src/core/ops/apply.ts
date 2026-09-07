@@ -462,6 +462,8 @@ export function applyOp(raw: string, op: Op): string {
           // starts with an empty label list to put names in.
           ...(op.layerType === "symbols" ? { labels: [] } : {}),
           ...(op.rom === undefined ? {} : { rom: op.rom }),
+          ...(op.bytes === undefined ? {} : { bytes: op.bytes }),
+          ...(op.length === undefined ? {} : { length: op.length }),
         },
         op.index
       );

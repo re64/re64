@@ -2339,25 +2339,40 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
 
   tool(
     "add_byte_layer",
-    "Add a layer over bytes the project holds — which is what turns an " +
-      "uploaded binary into something to disassemble. `path` is the file's " +
-      'name, or "image.d64:FILE" for one inside a disk image. A .prg carries ' +
-      "its load address in its first two bytes; a raw layer needs one given.",
+    "Add a layer over bytes — which is what turns an uploaded binary into " +
+      "something to disassemble. `path` is the file's name, or " +
+      '"image.d64:FILE" for one inside a disk image. A .prg carries its load ' +
+      "address in its first two bytes; a raw layer needs one given. Type " +
+      '"bytes" takes the bytes inline instead of a file, at an address you ' +
+      "give: a patch, a poked value, a hand-assembled shim. Link the layer " +
+      "into a target with set_target, or nothing reads it.",
     {
       project,
-      type: z.enum(["prg", "raw"]),
-      path: z.string().min(1),
+      type: z.enum(["prg", "raw", "bytes"]),
+      path: z.string().min(1).optional().describe("The file, for prg and raw"),
+      bytes: z
+        .string()
+        .optional()
+        .describe('For type "bytes": hex, spaces optional — "A9 01 8D 20 D0"'),
       name: z.string().optional().describe("Defaults to the file's name"),
-      address: address.optional().describe("Required for raw, ignored for prg"),
+      address: address.optional().describe("Required for raw and bytes, ignored for prg"),
+      length: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe('For type "bytes": repeat them to this width'),
       expectVersion: z.string().optional(),
     },
     (args: {
       project?: string;
       target?: string;
-      type: "prg" | "raw";
-      path: string;
+      type: "prg" | "raw" | "bytes";
+      path?: string;
+      bytes?: string;
       name?: string;
       address?: number;
+      length?: number;
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
@@ -2365,9 +2380,11 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       space.expect(args.expectVersion);
       return space.addByteLayer(caller, {
         type: args.type,
-        path: args.path,
+        ...(args.path === undefined ? {} : { path: args.path }),
+        ...(args.bytes === undefined ? {} : { bytes: args.bytes }),
         ...(args.name === undefined ? {} : { name: args.name }),
         ...(args.address === undefined ? {} : { address: args.address }),
+        ...(args.length === undefined ? {} : { length: args.length }),
       });
     }
   );

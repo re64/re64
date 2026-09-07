@@ -467,6 +467,8 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         entry.set("name", op.name);
         if (op.path !== undefined) entry.set("path", op.path);
         if (op.address !== undefined) entry.set("address", hex4(op.address));
+        if (op.bytes !== undefined) entry.set("bytes", op.bytes);
+        if (op.length !== undefined) entry.set("length", op.length);
         entry.set("labels", new Y.Map<Y.Map<unknown>>());
         entry.set("regions", new Y.Map<Y.Map<unknown>>());
         entry.set("comments", new Y.Map<Y.Map<unknown>>());

@@ -460,6 +460,8 @@ const EVIDENCE_FIELDS = ["id", "claim", "kind", "scenario", "capture", "other", 
 const LAYER_FIELDS = [
   "id",
   "type",
+  "rom",
+  "reference",
   "path",
   "address",
   "bytes",

@@ -818,14 +818,16 @@ The directory of a .d64 disk image this project holds — what is on the disk, a
 
 #### `add_byte_layer`
 
-Add a layer over bytes the project holds — which is what turns an uploaded binary into something to disassemble. `path` is the file's name, or "image.d64:FILE" for one inside a disk image. A .prg carries its load address in its first two bytes; a raw layer needs one given.
+Add a layer over bytes — which is what turns an uploaded binary into something to disassemble. `path` is the file's name, or "image.d64:FILE" for one inside a disk image. A .prg carries its load address in its first two bytes; a raw layer needs one given. Type "bytes" takes the bytes inline instead of a file, at an address you give: a patch, a poked value, a hand-assembled shim. Link the layer into a target with set_target, or nothing reads it.
 
 | argument | type | | |
 |---|---|---|---|
-| `type` | `prg` \| `raw` | **required** |  |
-| `path` | `string` | **required** |  |
+| `type` | `prg` \| `raw` \| `bytes` | **required** |  |
+| `path` | `string` | optional | The file, for prg and raw |
+| `bytes` | `string` | optional | For type "bytes": hex, spaces optional — "A9 01 8D 20 D0" |
 | `name` | `string` | optional | Defaults to the file's name |
-| `address` | `string,number` | optional | Required for raw, ignored for prg |
+| `address` | `string,number` | optional | Required for raw and bytes, ignored for prg |
+| `length` | `integer` | optional | For type "bytes": repeat them to this width |
 | `expectVersion` | `string` | optional |  |
 
 #### `add_layer`

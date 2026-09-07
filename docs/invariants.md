@@ -381,11 +381,20 @@ migration never deletes somebody's claims to make a layout fit.
 
 **F1 · The vocabulary being closed is checked by the compiler. Whether anything
 *emits* or *reads* a member of it is not.** This file's most repeated failure, now
-**six** instances: `meta.set` with no emitter; `layer.add` filtered to symbols;
+**eight** instances: `meta.set` with no emitter; `layer.add` filtered to symbols;
 `decoders` missing from `withIds`; `constants` missing from the undo whitelist; 382
-platform `description`s reaching no consumer; and `Provenance.confidence`, which
-round-trips through five layers and is exposed by **no tool, no UI and no CLI**.
-*Pinned:* `core/crdt/roundtrip.test.ts` covers the ops, and
+platform `description`s reaching no consumer; `Provenance.confidence`, which
+round-trips through five layers and is exposed by **no tool, no UI and no CLI**;
+and then the same `layer.add` filter twice more — widened from symbols to `prg`
+and `raw` and left stale under `rom`, so the machine view could be declared, run
+against and reported, and vanished on export; and `bytes`, a layer kind the file
+format always had and no operation could make.
+*Note:* the last two are the instance that proves the shape is about *hand-written
+lists*, not about new features. The fix is the one that could not go stale: the
+diff now assigns `layer.type` to `LayerAddOp["layerType"]`, so the two
+vocabularies are the same set or it does not compile.
+*Pinned:* `core/crdt/roundtrip.test.ts` covers the ops — including a case per
+layer kind through the diff — and
 `server/mcp/api-doc.test.ts` covers the other half — it diffs what the document
 persists on a claim against what a tool can write, asserting the orphaned set
 *exactly*, so a seventh instance fails it and settling one fails it too. It found

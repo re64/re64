@@ -1120,6 +1120,33 @@ describe("editing as an agent", () => {
     expect(refused.text).toMatch(/holds no file/i);
   });
 
+  it("takes a patch as bytes, with no file to upload", async () => {
+    // The schema half of the layer kind the file format has always had. `path`
+    // had to stop being required for this to be sayable at all, so the two
+    // refusals below are what keeps the looser schema honest.
+    const made = await callTool("add_byte_layer", {
+      type: "bytes",
+      address: "$C000",
+      bytes: "A9 00 8D 20 D0 60",
+      name: "collision patch",
+    });
+    expect(made.isError).toBe(false);
+    expect((made.value as { note?: string }).note).toMatch(/linked into no target/i);
+
+    const listed = (await callTool("list_targets", {})).value as {
+      layers: { id: string; name: string }[];
+    };
+    expect(listed.layers.map((l) => l.name)).toContain("collision patch");
+
+    const noPath = await callTool("add_byte_layer", { type: "raw", address: "$C000" });
+    expect(noPath.isError).toBe(true);
+    expect(noPath.text).toMatch(/needs a path/i);
+
+    const noAddress = await callTool("add_byte_layer", { type: "bytes", bytes: "EA" });
+    expect(noAddress.isError).toBe(true);
+    expect(noAddress.text).toMatch(/no load address of its own/i);
+  });
+
   it("says several things at once and reports what it declined", async () => {
     const { isError, value } = await callTool("add_claims", {
       claims: [
