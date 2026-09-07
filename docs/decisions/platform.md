@@ -25,6 +25,46 @@ too. That is the single deepest coupling and the one to fix first if a second
 machine ever arrives — as an open set of encoding names the platform supplies,
 rather than a union the model spells out.
 
+## Correction: a codec is not a platform coupling
+
+*Added the same day, and the entry above keeps its text because the value of a
+corrected decision is the correction.*
+
+The table above calls `c64/text.js` the deepest coupling on the grounds that
+seven platform-agnostic files import it. That miscounts what kind of thing it
+is, and the distinction is worth having in general:
+
+| | is | depends on | a second machine needs |
+|---|---|---|---|
+| **a codec or a layout** — `petscii`, `screen`, `ascii`; `char`, `sprite`, `sprite-multi`, `bits` | a fixed table from bytes to meaning | nothing | another entry in an open set |
+| **a place** — `screen(row,column)`, `sprite(pointer)` | arithmetic over machine state | `$D018`, `$DD00`, and the hardware having such a thing at all | its own, behind the seam |
+| **a machine fact** — symbol tables, entry vectors, devices, frame composition | what the hardware *is* | the machine | its own module |
+
+PETSCII is always PETSCII. A claim saying `encoding: "petscii"` is carrying a
+data format name, exactly as it would carry `utf-8`; it is true of those bytes
+wherever they sit and whatever is running. `screen(10,2)` is not true of
+anything until you say which machine, in which state.
+
+**The type says so itself:** `TextEncoding` is `"ascii" | "petscii" | "screen"`,
+and `ascii` was in it from the start. That set was never machine-scoped — it
+happens to contain two Commodore tables.
+
+So those seven imports are one **vocabulary** decision, not a boundary: whether
+the union should be open. That is cheap, local, and does not need doing until a
+machine wants a fourth codec.
+
+The same reclassification applies to `BitmapFormat` in `view/`. `sprite` there
+is "24 by 21 one-bit pixels, three bytes a row" — a byte layout, not a place.
+NES 2bpp planar tiles would be another entry in the same set rather than
+evidence the set is in the wrong directory. What genuinely sat in the wrong
+place was the palette, and that is fixed.
+
+**What that leaves as actually platform-shaped**, and it is a shorter list than
+the table above suggests: the built-in symbol table the loader reaches for, the
+entry vectors the analysis reads to know where a machine re-enters its own code,
+the devices and frame composition the scenario runner uses, and the places —
+which are already behind `core/platform.ts`.
+
 ## What transfers unchanged, which is most of it
 
 The claims model, the operation algebra and its inverses, the CRDT and the
