@@ -1175,3 +1175,69 @@ result: the whole value is that a reader can follow it to what was wrong.
 open-question queue. Both agents asked for them and both are probably a claim
 with `method: "guessed"` and no supporting evidence, so nothing was built until
 somebody trips over the absence rather than predicts it.
+
+## Parked: what a field's *value* refers to
+
+**Not built, and the interesting part is why the usual signal cannot decide it.**
+
+`add_type` answered "these 8,400 bytes are 42 records of 200" — the shape that
+was missing when experiment 7 finished its analysis of `zoneDataTable` and had
+to put it in prose. Experiment 9 then used it, declaring `ZoneRecord` with 41
+fields. One evidence-driven slice, one for one.
+
+The next thing the same table wants is a way for a field to say **what its value
+refers to**, and Revenge of the Mutant Camels needs exactly three:
+
+| | example | today |
+|---|---|---|
+| an **index** into another table | `+$10` is a sprite pointer: value × 64 + bank, not a literal address | `ptr` cannot say it |
+| a **bitmask** over another field's index space | `+$9A` bit *n* means creature type *n* is double-width | prose |
+| an **enum**: values drawn from a named set | `$C0` means the camel | constants exist and bind per *address*, not per field |
+
+Its appeal is that it makes aggregation **derived rather than stored**. Declare
+`+$38` an index into this zone's creature types and the transformation graph
+falls out; declare `+$9A` a bitmask over them and "which creatures stretch"
+falls out; declare `+$10` a sprite index and the pictures resolve. A relation
+noun — triples, a semantic graph — would store those same facts a second time,
+beside the bytes that already say them, and the two can disagree. That is the
+failure this model exists to avoid, and it is why the shape here is a field type
+rather than an edge.
+
+It also gives a name to the thing a program actually manipulates. The code never
+writes `$3000`; it writes `$C0`. A label names an address, a constant names a
+value, and a sprite number is a value — so the handle wants to be
+`sprite(CAMEL)` rather than a label on the bytes. Letting a place take a
+constant is the small piece that would finish it. (A sprite pointer is unique
+only within a bank — `$0801` and `$1001` hold identical artwork because *p* and
+*p*+`$20` fetch the same image — so such a name is a fact about a bank, exactly
+as `screen(10,2)` is a fact about a screen base, and wants stating the same way.)
+
+### Why this is parked, and what would unpark it
+
+The evidence is **weak and of the wrong kind**. What there is:
+
+- Experiment 7, deep coverage on this binary: 400 labels, 114 regions, 18
+  constants, 210 comments. It named sprite *banks* — `spriteBank0..3`,
+  `residentSprites` — and never named a single sprite.
+- Experiment 9, editorial over the same program: 41 type fields, and **zero
+  constants**.
+
+That is absence of use, and absence of use is not demand. Nobody asked for an
+enum, an index type or a bitmask field.
+
+**And the signal that decides everything else here cannot fire for this one.**
+The rule is that when an agent invents a tool name, the finding is usually that
+the general mechanism is missing something — `bind_decoder`, `find_strings`,
+`screen_address`, `play_sid` all arrived that way. But an agent invents a name
+for something *adjacent to what it already has*. It does not invent a category
+it has never seen. So waiting for three readers to ask for enum fields is
+waiting for a signal that is structurally unavailable, and reading the silence
+as "not needed" would be reading a limitation of the method as a finding.
+
+So the evidence has to be **manufactured deliberately**, and that is cheap: brief
+a run to record *structure* rather than names, point it at types and constants,
+and read the log for the workarounds rather than the wishes — binding constants
+site by site, writing a mask's meaning into a comment, re-deriving the same
+graph in a throwaway script on each question. Those are what "finished analysis,
+discarded for want of a shape" looks like from the outside, and they are what
+justified `add_type`. A wish is not required and, here, is not to be expected.
