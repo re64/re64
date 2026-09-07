@@ -31,11 +31,15 @@ export const CYCLES_PER_FRAME = CYCLES_PER_LINE * LINES_PER_FRAME;
 const FIRST = 0xd000;
 const LAST = 0xd3ff;
 
-/** The sixteen colours, as the machine mixes them. */
-export const PALETTE: readonly string[] = [
-  "#000000", "#ffffff", "#813338", "#75cec8", "#8e3c97", "#56ac4d", "#2e2c9b", "#edf171",
-  "#8e5029", "#553800", "#c46c71", "#4a4a4a", "#7b7b7b", "#a9ff9f", "#706deb", "#b2b2b2",
-];
+/**
+ * The sixteen colours, from the one place they are defined.
+ *
+ * Re-exported under this name because the bus and everything composing a
+ * frame reach for it here. It used to be a second copy with different values
+ * from the one in `view/`, so a screenshot and a sprite plate of the same
+ * program came out in different colours.
+ */
+export { C64_PALETTE as PALETTE } from "../palette.js";
 
 /**
  * One sprite's registers, gathered.

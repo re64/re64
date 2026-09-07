@@ -15,31 +15,12 @@
  * while the only implementations are ours.
  */
 
-/**
- * The C64's sixteen colours.
- *
- * Pepto's measurements, which is what VICE and every modern emulator use. The
- * machine has no palette register — these are fixed in the VIC-II — so this is
- * a constant rather than something a project configures.
- */
-export const C64_PALETTE: readonly string[] = [
-  "#000000", // 0  black
-  "#ffffff", // 1  white
-  "#68372b", // 2  red
-  "#70a4b2", // 3  cyan
-  "#6f3d86", // 4  purple
-  "#588d43", // 5  green
-  "#352879", // 6  blue
-  "#b8c76f", // 7  yellow
-  "#6f4f25", // 8  orange
-  "#433900", // 9  brown
-  "#9a6759", // 10 light red
-  "#444444", // 11 dark grey
-  "#6c6c6c", // 12 grey
-  "#9ad284", // 13 light green
-  "#6c5eb5", // 14 light blue
-  "#959595", // 15 light grey
-];
+// The sixteen colours live with the chip that has them, in `c64/palette.ts`,
+// and are re-exported here because every consumer of a `Bitmap` reaches for
+// them through this module. There were two copies with different values,
+// which is why they are now defined once.
+import { C64_PALETTE } from "../c64/palette.js";
+export { C64_PALETTE };
 
 /**
  * A decoded picture: one palette index per pixel, row-major.
