@@ -39,6 +39,35 @@ const INSTRUCTIONS = [
   "Anything a tool cannot determine, it says so rather than guessing. Read " +
     "the caveats on an answer: they are the difference between a fact about " +
     "the program and an assumption that happened to render.",
+  // **How to say what you find**, which no per-tool description can carry
+  // because it is about choosing between tools rather than using one.
+  //
+  // Written from what three runs did instead. `sprite(...)` and `where` went
+  // unused while a reader computed sprite addresses by hand eight times and
+  // then asked for "sprite-index-aware addressing". `find_immediates` was
+  // called six times and `add_constant` never, across two runs that declared
+  // zero constants where the run before them declared eighteen. And a reader
+  // carved forty-two level names out of a table as nested text claims, which
+  // is what a record field is for.
+  //
+  // In every case the mechanism existed. What was missing was anything saying
+  // which question it answers.
+  "Four different things can be said about a program, and reaching for the " +
+    "wrong one is the usual reason something will not go in. " +
+    "An **address** is a claim: add_claim names it and says what its bytes " +
+    "are. " +
+    "A **value** is a constant: a sprite number, a creature type, a colour — " +
+    "the program writes $C0, never $3000, so the number is the thing it " +
+    "manipulates. add_constant names one and bind_constants attaches it to the " +
+    "sites that mean it; find_immediates finds those sites. " +
+    "A **shape** is a type: add_type declares fields at offsets, and a claim " +
+    "with is:\"record\" says a span is instances of it. If you are about to " +
+    "nest a claim inside another to express structure — text inside data, a " +
+    "name inside a table — you want a field instead. " +
+    "A **place** is written into any address argument: screen(row,column), " +
+    "screen(cell) and sprite(pointer), each taking an optional base or VIC " +
+    "bank, since both depend on where the program put them. `where` goes the " +
+    "other way and tells you which cell or sprite an address is.",
 ].join("\n\n");
 
 export interface McpContext {

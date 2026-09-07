@@ -75,6 +75,35 @@ describe("speaking the protocol", () => {
     expect(reply.result.capabilities.tools).toBeDefined();
   });
 
+  it("says which mechanism answers which question", async () => {
+    /**
+     * The instructions carry what no per-tool description can, because this is
+     * about choosing *between* tools. Three runs did the wrong thing with the
+     * right one available: `sprite(...)` and `where` unused while a reader
+     * computed sprite addresses by hand eight times; `find_immediates` called
+     * six times and `add_constant` never, in two runs that declared zero
+     * constants where the run before declared eighteen; and forty-two level
+     * names carved out of a table as nested claims, which is a record field.
+     *
+     * Asserted so it cannot quietly rot back to describing only the system.
+     */
+    const { result } = (await rpc("initialize", {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "test", version: "0" },
+    })) as { result: { instructions?: string } };
+
+    const said = result.instructions ?? "";
+    for (const mechanism of ["add_claim", "add_constant", "bind_constants", "add_type", "where"]) {
+      expect(said, mechanism).toContain(mechanism);
+    }
+    // The place forms, which nothing found on its own in three runs.
+    expect(said).toContain("sprite(pointer)");
+    expect(said).toContain("screen(row,column)");
+    // And the one that says nesting is the wrong tool for structure.
+    expect(said.toLowerCase()).toContain("field instead");
+  });
+
   it("answers more than one request, which a shared transport would not", async () => {
     // A transport carries the state of one request-response cycle. Reusing one
     // silently answers nothing after the first.

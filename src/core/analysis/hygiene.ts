@@ -56,7 +56,9 @@ export type HygieneKind =
   /** A record claim's extent is not a whole number of records. */
   | "type.extentMismatch"
   /** A claim describes bytes a record layout already describes. */
-  | "type.redundantClaim";
+  | "type.redundantClaim"
+  /** One span says these bytes are X and a span inside it says they are Y. */
+  | "claim.interpretationsDiffer";
 
 export interface HygieneFinding {
   kind: HygieneKind;
@@ -323,6 +325,60 @@ export function checkHygiene(
         `the second and later ones are indented under the first.`,
       subjects: ids.map((id) => ({ id, address: hex4(address) })),
     });
+  }
+
+  /**
+   * A span inside another, where the two say the bytes are different things.
+   *
+   * **This reverses a rule, and the numbers are why.** `docs/decisions/claims.md`
+   * says containment is refinement and only partial overlap is contradiction,
+   * on the strength of a measurement: reporting nesting as a conflict fired 43
+   * times on one real project. That was true, and its justification has since
+   * expired.
+   *
+   * Counted again on the same project: **44 of those 45 contained pairs are one
+   * shape** — forty-two level names carved out of `zoneDataTable` as `text`
+   * inside `data`, because in that model there was nowhere else to put them. A
+   * record field is where they go now, and `add_type` did not exist when the
+   * rule was written.
+   *
+   * On every project built since types arrived it fires **zero** times, which
+   * is the resting state a hygiene check has to have. Gridrunner has no
+   * contained pairs at all; experiment 10 has three, and all three are a *name*
+   * inside a span, which is somebody naming a place rather than contradicting
+   * anyone.
+   *
+   * That is the line: an inner claim saying **nothing** about the bytes is
+   * naming a place inside a structure. An inner claim saying they are something
+   * **else** is a disagreement, and two people annotating one document will
+   * produce those. Reported rather than refused — a write that refuses has
+   * taken a decision it was not entitled to, and this one converges, is
+   * visible, and is somebody's to tidy.
+   */
+  const spans = loaded.claims.filter((c) => c.says && c.extent !== undefined);
+  for (const outer of spans) {
+    const end = outer.at + outer.extent!;
+    for (const inner of loaded.claims) {
+      if (inner.id === outer.id || inner.says === undefined) continue;
+      if (inner.at < outer.at || inner.at + (inner.extent ?? 1) > end) continue;
+      // The same span twice is duplication, which is a different finding.
+      if (inner.at === outer.at && inner.extent === outer.extent) continue;
+      if (inner.says.is === outer.says!.is) continue;
+
+      found.push({
+        kind: "claim.interpretationsDiffer",
+        message:
+          `${hex4(inner.at)} says these bytes are ${inner.says.is}, inside ` +
+          `${hex4(outer.at)} which says they are ${outer.says!.is}. Both render. ` +
+          `If the inner one is part of the outer's layout, add_type says so as a ` +
+          `field and the overlap goes away; if the two of you disagree, this is ` +
+          `where to settle it.`,
+        subjects: [
+          { id: inner.id, address: hex4(inner.at) },
+          { id: outer.id, address: hex4(outer.at) },
+        ],
+      });
+    }
   }
 
   return found;

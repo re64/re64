@@ -23,12 +23,28 @@ session="${RE64_SESSION:-run-1}"
 tool="${1:?usage: mcp-call.sh <tool> '<json arguments>'}"
 args="${2:-{\}}"
 
+# `tools/list` and `initialize` are methods, not tools — and every experiment so
+# far has begun by writing a four-line script to reach them, because this
+# wrapper only ever issued `tools/call`. Naming one as the tool sends it
+# directly, so "list the tools" is the first thing a reader can do rather than
+# the first thing it has to build.
+case "$tool" in
+  tools/list|initialize|list|tools)
+    method="${tool/#list/tools\/list}"
+    method="${method/#tools$/tools\/list}"
+    body="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$method\",\"params\":${args:-\{\}}}"
+    ;;
+  *)
+    body="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$tool\",\"arguments\":$args}}"
+    ;;
+esac
+
 curl -s -X POST "http://127.0.0.1:$port/mcp" \
   -H 'content-type: application/json' \
   -H 'accept: application/json, text/event-stream' \
   -H "x-re64-user: $user" \
   -H "x-re64-session: $session" \
-  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$tool\",\"arguments\":$args}}" \
+  -d "$body" \
   | sed -n 's/^data: //p' \
   | node -e '
     let raw = "";
@@ -38,6 +54,11 @@ curl -s -X POST "http://127.0.0.1:$port/mcp" \
       let reply;
       try { reply = JSON.parse(raw); } catch { console.log(raw); return; }
       if (reply.error) { console.log("ERROR: " + reply.error.message); return; }
+      if (reply.result?.tools) {
+        for (const t of reply.result.tools) console.log(t.name);
+        console.log("(" + reply.result.tools.length + " tools)");
+        return;
+      }
       const text = reply.result?.content?.[0]?.text ?? JSON.stringify(reply.result);
       if (reply.result?.isError) console.log("REFUSED: " + text);
       else console.log(text);

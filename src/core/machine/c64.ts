@@ -33,6 +33,8 @@ export type StopReason =
   | "unmodelled"
   /** Bytes that do not decode. */
   | "undecodable"
+  /** An interrupt vectored somewhere no layer supplies: no ROMs in this view. */
+  | "vectorless"
   /** The instruction budget ran out, so this is a program mid-flight. */
   | "budget"
   /**
@@ -105,8 +107,19 @@ export class C64 {
   /** Which the run has written, because code the program wrote is still the program. */
   private readonly written = new Uint8Array(0x10000);
 
+  /**
+   * Whether this machine was filled from a view, rather than poked directly.
+   *
+   * The vector check below asks "does this view supply the handler", which is a
+   * question about a *project*. A machine built by writing bytes into memory —
+   * a test, a hand-made probe — has no view to be missing anything, and
+   * `supplied` would say nothing is there at all.
+   */
+  private fromMap = false;
+
   /** Fill memory from a project's layers, honouring the target's z-order. */
   load(map: MemoryMap): void {
+    this.fromMap = true;
     for (let address = 0; address <= 0xffff; address++) {
       const byte = map.readByte(address);
       if (byte === undefined) continue;
@@ -168,13 +181,48 @@ export class C64 {
     // NMI first, and it cannot be refused. CIA 2 is wired to it, which is why
     // a timer there and the RESTORE key are the two things a program cannot
     // mask away.
+    //
+    // **A vector into nothing stops the run and says so.** Experiment 10's
+    // editor ran five scenarios before working out that its machine had no
+    // operating system: with no ROM linked, `$FFFE` reads as zero, and the
+    // first interrupt after `CLI` — about 430 instructions in — took the
+    // program to $0000, where it ran whatever was there and came back as a
+    // black screen with `reason: frames`. Refusing to start somewhere
+    // unsupplied is not enough, because this program starts somewhere real and
+    // *arrives* somewhere that is not.
     if (this.bus.nmi) {
+      const to = this.vector(0xfffa);
+      if (this.fromMap && !this.supplies(to)) return this.vectorless("nmi", 0xfffa, to);
       deliverInterrupt(this.cpu, "nmi");
       this.spend(INTERRUPT_CYCLES);
-    } else if (this.bus.irq && deliverInterrupt(this.cpu, "irq")) {
-      this.spend(INTERRUPT_CYCLES);
+    } else if (this.bus.irq && !this.cpu.register(REG.I)) {
+      const to = this.vector(0xfffe);
+      if (this.fromMap && !this.supplies(to)) return this.vectorless("irq", 0xfffe, to);
+      if (deliverInterrupt(this.cpu, "irq")) this.spend(INTERRUPT_CYCLES);
     }
     return { ok: true };
+  }
+
+  /**
+   * An interrupt whose vector points where no layer supplies bytes.
+   *
+   * Reported as its own stop reason rather than as a crash, because the caller
+   * can act on it: the machine is fine and the *view* is missing its ROMs.
+   */
+  private vectorless(
+    line: string,
+    from: number,
+    to: number
+  ): { ok: boolean; reason: StopReason; detail: string } {
+    return {
+      ok: false,
+      reason: "vectorless",
+      detail:
+        `An ${line.toUpperCase()} vectored through ${hex(from)} to ${hex(to)}, which no ` +
+        `layer in this view supplies — so there is no handler to run. A view needs its ` +
+        `ROMs linked to boot through a vector; list_targets shows which layers each ` +
+        `links.`,
+    };
   }
 
   /** Advance the clock and the chips together, so they never disagree. */
