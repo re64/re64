@@ -364,6 +364,33 @@ ever emits a member of it is not.
 Both are why the round-trip harness exists, and why it is now the first thing a
 new root has to pass.
 
+### And the work itself moved, in a shape worth naming
+
+Read across the nine, the *question* being asked changes, and each phase's
+completion is what exposes the next one's poverty:
+
+| | the question | what ended it |
+|---|---|---|
+| **identification** | what is this address? | labels and regions became one claim |
+| **coverage** | what is unexplained? | run 7 took unexplained bytes from 40,359 to 13 — and proved coverage is not understanding, because `zoneDataTable` was "covered" by one 8,400-byte `data` claim |
+| **structure** | explained *as what*? | `add_type`; run 9 declared `ZoneRecord` with 41 fields |
+| **relations** | what does this field's value *refer to*? | open — see "Parked" in `decisions/claims.md` |
+
+The tell each time is the same, and it is not a complaint anybody makes. It is
+**where the good material ends up**. Run 7's account of the zone table was
+finished analysis with nowhere to go, so it went into prose. Run 9's best
+findings — the transformation graph, the three bitmasks over creature types,
+zone 8's name explaining its own sprites — are *all relational*, and all of them
+went into an article, because an article was the only thing that could hold
+them.
+
+That is the signature to watch for, one level up each time: analysis that is
+complete, agreed and unstorable.
+
+It also predicts the phase after relations, which is **behaviour** — "this
+routine implements the zone transition", "this is the spawn path" — where
+`effects`, the block graph and scenarios already point without quite meeting.
+
 Run 9 added a third, and it is the one with no harness behind it: **a derived
 answer that is almost right.** A reconstruction with the correct sprites in the
 correct order at the correct heights, wrong about width and about a third of the
