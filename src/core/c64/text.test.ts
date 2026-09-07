@@ -96,6 +96,15 @@ describe("keycodes, which are positions rather than characters", () => {
     expect(decodeText(bytes, "ascii")).not.toBe("GOATS");
   });
 
+  it("decodes the keys whose cap really is a character", () => {
+    // The matrix table names positions, so these are `pound`, `arrow-up` and
+    // `arrow-left` — but the caps are ordinary C64 glyphs, and returning a gap
+    // where an exact answer exists is the one thing this file will not do.
+    expect(decodeText([0x30], "keycode")).toBe("£");
+    expect(decodeText([0x36], "keycode")).toBe("↑");
+    expect(decodeText([0x39], "keycode")).toBe("←");
+  });
+
   it("gives a gap for a key with no single character", () => {
     // f1, run-stop and either shift are keys, not letters. A name spliced into
     // a string would make the run unreadable exactly where it is interesting,

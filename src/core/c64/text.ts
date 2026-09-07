@@ -157,9 +157,30 @@ export function fromAscii(byte: number): string {
 export function fromKeycode(byte: number): string {
   const name = KEY_NAME[byte & 0x3f];
   if (name === undefined) return UNKNOWN;
-  if (name === "space") return " ";
+  const printed = KEY_CAP[name];
+  if (printed !== undefined) return printed;
   return name.length === 1 ? name.toUpperCase() : UNKNOWN;
 }
+
+/**
+ * Keys whose cap really is a character, spelled as a word in the matrix table.
+ *
+ * `KEY_MATRIX` names positions, so it calls these `pound`, `arrow-up` and
+ * `arrow-left` — but the keys are `£`, `↑` and `←`, and all three are ordinary
+ * C64 glyphs that appear in text. Without this they decode as `·`, which is a
+ * gap where an exact answer was available. Space is here for the same reason.
+ *
+ * Deliberately only the keys that *are* one character. A function key or a
+ * shift has no glyph, and inventing a symbol for it would break the one
+ * property that makes a decoded run readable: one character per byte, so the
+ * string lines up with the hex beside it.
+ */
+const KEY_CAP: Readonly<Record<string, string>> = {
+  space: " ",
+  pound: "£",
+  "arrow-up": "↑",
+  "arrow-left": "←",
+};
 
 /** Matrix code to key name, inverted from the table the scan uses. */
 const KEY_NAME: Readonly<Record<number, string>> = Object.fromEntries(
