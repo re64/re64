@@ -65,6 +65,32 @@ entry vectors the analysis reads to know where a machine re-enters its own code,
 the devices and frame composition the scenario runner uses, and the places —
 which are already behind `core/platform.ts`.
 
+### A layout is independent; its *name* is not
+
+The correction above says a byte layout is a table rather than a place, and that
+stands. But `sprite` is an under-specified name for one: a C64 sprite is always
+a VIC-II sprite — 24 by 21, one bit a pixel, three bytes a row — and an NES
+sprite is 8 by 8 or 8 by 16, two bits a pixel, planar. Both communities call
+theirs "sprite" and neither is wrong.
+
+So the shape, when it is ever needed, is **specific names with a per-platform
+generic alias**: `vic2-sprite` and `nes-8x8` are unambiguous everywhere, and
+`sprite` is what a caller on that project may type. Which is the rule already
+settled for places one level down — accept the alias on the way in, store the
+resolved form — so that a stored project means the same thing to whoever opens
+it, and the convenience stays at the surface where it belongs.
+
+**Checked, because it decides whether waiting is free:** it is. A specific name
+would be *added* beside the generic one rather than replacing it, so nothing
+stored has to migrate. And a project is single-platform, so `view: "sprite"` in
+a C64 project is unambiguous today and stays unambiguous after a second machine
+arrives — the alias resolves against the project's own platform, not against
+whatever is reading.
+
+That is the useful conclusion rather than the naming itself: there is no cost to
+being carried by not deciding this now, which is what makes deferring it a
+decision rather than a debt.
+
 ## What transfers unchanged, which is most of it
 
 The claims model, the operation algebra and its inverses, the CRDT and the
