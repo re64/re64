@@ -1734,7 +1734,11 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     "Every instruction loading an immediate value, optionally just one value, " +
       "with whatever constant is already bound there. The question after " +
       "naming one site: where else is this value loaded, and does it mean the " +
-      "same thing there? Only a reader can answer the second part.",
+      "same thing there? Only a reader can answer the second part. " +
+      "**This is the on-ramp to naming values**: what comes back is the batch " +
+      "`bind_constants` takes, once `add_constant` has declared a name and " +
+      "returned its id. A value with no name renders as `#$08` forever, and " +
+      "the answer says how many of these sites are in that state.",
     {
       project,
       value: address.optional().describe("Only sites loading this byte"),

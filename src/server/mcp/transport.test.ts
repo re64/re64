@@ -302,6 +302,55 @@ describe("drawing a span", () => {
   });
 });
 
+describe("naming a value has an on-ramp", () => {
+  /**
+   * `find_immediates` exists to be the way in to constants — "the query behind
+   * a dropdown for a person and a batch for an agent". Both readers in
+   * experiment 10 called it six times between them, saw the sites, and declared
+   * **zero** constants; the run before the claims model declared eighteen.
+   *
+   * The tool answered its question and stopped, which is out of step with a
+   * surface where a nested claim names how to replace it and an indirect jump
+   * names `mark_function`. So the answer now says what to do next, and this
+   * asserts it rather than trusting a description to stay written.
+   */
+  it("says how many values are unnamed, and what to call next", async () => {
+    const { value, isError } = await callTool("find_immediates", {});
+    expect(isError).toBe(false);
+    const found = value as { total: number; unnamed?: number; next?: string };
+    expect(found.total).toBeGreaterThan(0);
+    expect(found.unnamed).toBeGreaterThan(0);
+    expect(found.next).toContain("add_constant");
+    expect(found.next).toContain("bind_constants");
+  });
+
+  it("stops saying it once every site is named", async () => {
+    // The hint is a work queue, not decoration: an answer where nothing is left
+    // to name should not still be telling somebody to name something.
+    const sites = (
+      (await callTool("find_immediates", { value: "$01" })).value as {
+        sites: { address: string }[];
+      }
+    ).sites.slice(0, 2);
+    expect(sites.length).toBeGreaterThan(0);
+
+    const made = await callTool("add_constant", { name: "ONE_THING", value: "$01" });
+    expect(made.isError, made.text).toBe(false);
+    const id = (made.value as { constant: string }).constant;
+
+    const bound = await callTool("bind_constants", {
+      bindings: sites.map((s) => ({ address: s.address, constant: id })),
+    });
+    expect(bound.isError, bound.text).toBe(false);
+
+    const after = (await callTool("find_immediates", { value: "$01" })).value as {
+      sites: { address: string; boundTo?: string }[];
+    };
+    const named = after.sites.filter((s) => s.boundTo === "ONE_THING");
+    expect(named.length).toBe(sites.length);
+  });
+});
+
 describe("what counts as explained", () => {
   /**
    * `find_undecoded` is a work queue, so a kind it does not recognise tells a

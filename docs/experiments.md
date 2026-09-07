@@ -364,6 +364,46 @@ ever emits a member of it is not.
 Both are why the round-trip harness exists, and why it is now the first thing a
 new root has to pass.
 
+### Open: is the claims interface worse at naming than the three nouns were?
+
+Raised while run 10 was in flight, and recorded because it is a question about a
+**foundational** decision and the evidence to hand does not settle it.
+
+The observation: before claims, the surface had `set_label`, `set_region` and
+`set_constant` — three nouns, each naming a kind of thing you could say. Run 7,
+on that surface, produced 400 labels, 114 regions and 18 constants. On the
+claims model, run 9 produced 34 claims and **zero** constants, and run 10's
+coverage stage 80 claims, four types and **zero** constants again.
+
+| | run 7 | run 10, stage one |
+|---|---|---|
+| readers | 3 | 2 |
+| tool calls | 648 | 317 |
+| objects made | 400 labels + 114 regions + 18 constants | 80 claims + 4 types |
+| per call | 0.79 | 0.25 |
+| the brief asked for | coverage | coverage **and structure and relations** |
+
+The per-call gap survives normalising for readers and for calls, which is the
+part of the hypothesis with weight behind it. What it does not survive is the
+**brief**: attention spent proving a 52-byte record layout is attention not spent
+naming forty addresses, and run 10's brief redirected it deliberately. Run 10
+also produced four proved record types, which run 7's model could not express at
+all — that is the `zoneDataTable` finding running the other way.
+
+**The constants half is not confounded, and it has been diagnosed.**
+`find_immediates` was called six times by the two readers and `add_constant`
+zero. So they were not unaware that values existed and did not fail to look —
+they used the tool built to lead there, saw the sites, and stopped. The answer
+returned a list and named no next call, which is out of step with a surface
+where a nested claim names how to replace it and an indirect jump names
+`mark_function`. Fixed: the answer now reports how many sites load a value
+nothing has named, and names `add_constant` then `bind_constants`.
+
+**What would settle the rest, with one variable in it:** run experiment 7's
+coverage-only brief against the claims model and compare with run 7 directly.
+The old interface is gone, so the interface cannot be varied — but the
+instruction can be held still, which is the confound that actually matters here.
+
 ### And the work itself moved, in a shape worth naming
 
 Read across the nine, the *question* being asked changes, and each phase's

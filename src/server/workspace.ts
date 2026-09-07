@@ -4026,6 +4026,8 @@ export class Workspace {
     limit = 100
   ): {
     total: number;
+    unnamed?: number;
+    next?: string;
     sites: {
       address: string;
       value: string;
@@ -4043,8 +4045,32 @@ export class Workspace {
         (i) => i.operand.type === "immediate" && (value === undefined || i.operand.value === value)
       );
 
+    const unnamed = found.filter(
+      (i) => program.loaded.constants.nameAt(i.address) === undefined
+    ).length;
+
     return {
       total: found.length,
+      // **The next call, because this one is an on-ramp and had no exit.**
+      // Both readers in experiment 10 called this six times between them, saw
+      // the sites, and declared no constants at all — where the run before the
+      // claims model declared eighteen. The tool answered its question and
+      // stopped, which is out of step with the rest of this surface: a nested
+      // claim names how to replace it, an indirect jump names `mark_function`,
+      // an orphaned decode names the region that restores it. The one tool
+      // whose entire purpose is to lead somewhere led nowhere.
+      ...(unnamed === 0
+        ? {}
+        : {
+            unnamed,
+            next:
+              `${unnamed} of these load a value nothing has named. ` +
+              `add_constant declares the name and returns its id; bind_constants ` +
+              `takes {address, constant} for each site it means — the list above is ` +
+              `that batch. Naming the value is a judgement: the same byte is ` +
+              `LEFT_ZAPPER in one routine and WHITE in another, so bind the sites ` +
+              `you have read rather than all of them.`,
+          }),
       sites: found.slice(0, limit).map((i) => {
         const immediate = i.operand as { value: number };
         return {
