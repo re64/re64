@@ -45,6 +45,25 @@ export interface Watcher {
   write(address: number, size: number, value: number): void;
 }
 
+/**
+ * A chip on the bus, which may answer a read and may absorb a write.
+ *
+ * The difference from a `Watcher` is the whole reason this exists: a watcher is
+ * *told* what happened and cannot change it, so a VIC register read came back as
+ * whatever had last been written to that cell of RAM. `$D012` is the raster
+ * line, and no amount of observing produces it.
+ *
+ * **Asked one byte at a time**, so a device never has to reason about a 16-bit
+ * access straddling its edge — which is also what the hardware does. Returning
+ * `undefined` means "not mine": the byte comes from memory as before.
+ */
+export interface Device {
+  /** The byte at this address, or `undefined` to let memory answer. */
+  readByte(address: number): number | undefined;
+  /** True if this absorbed the write, in which case memory is left alone. */
+  writeByte(address: number, value: number): boolean;
+}
+
 /** Everything a 6502 program can observe. */
 export class Machine {
   readonly memory = new Uint8Array(0x10000);
@@ -53,6 +72,16 @@ export class Machine {
 
   /** Set to observe memory traffic; left unset it costs one comparison. */
   watch?: Watcher;
+
+  /**
+   * Set to put chips on the bus. Left unset, this machine is flat 64K.
+   *
+   * The no-device path below is deliberately the same code it always was rather
+   * than a special case of the device path: flat memory is what a decruncher
+   * needs and what every existing measurement was taken against, so it must not
+   * merely *behave* identically — it must be the same instructions.
+   */
+  bus?: Device;
 
   get(node: Varnode): number {
     switch (node.space) {
@@ -87,14 +116,33 @@ export class Machine {
   /** Little-endian, which is what this machine is. */
   read(address: number, size: number): number {
     let value = 0;
-    for (let i = size - 1; i >= 0; i--) value = (value << 8) | this.memory[(address + i) & 0xffff];
+    if (this.bus) {
+      for (let i = size - 1; i >= 0; i--) {
+        const at = (address + i) & 0xffff;
+        value = (value << 8) | (this.bus.readByte(at) ?? this.memory[at]);
+      }
+    } else {
+      for (let i = size - 1; i >= 0; i--) value = (value << 8) | this.memory[(address + i) & 0xffff];
+    }
     value = value >>> 0;
     this.watch?.read(address & 0xffff, size, value);
     return value;
   }
 
   write(address: number, value: number, size: number): void {
-    for (let i = 0; i < size; i++) this.memory[(address + i) & 0xffff] = (value >>> (8 * i)) & 0xff;
+    if (this.bus) {
+      for (let i = 0; i < size; i++) {
+        const at = (address + i) & 0xffff;
+        const byte = (value >>> (8 * i)) & 0xff;
+        // A device that takes the write keeps it: writing to memory as well
+        // would leave a shadow that a later read past the device would find.
+        if (!this.bus.writeByte(at, byte)) this.memory[at] = byte;
+      }
+    } else {
+      for (let i = 0; i < size; i++) this.memory[(address + i) & 0xffff] = (value >>> (8 * i)) & 0xff;
+    }
+    // Told either way, absorbed or not: an observer counting hardware traffic
+    // wants to see a write the VIC took, and `runProgram` already does.
     this.watch?.write(address & 0xffff, size, value & mask(size));
   }
 

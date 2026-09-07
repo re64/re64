@@ -26,6 +26,7 @@
 
 import { Instruction, formatInstruction } from "../arch/mos6502/instruction.js";
 import { decode } from "../arch/mos6502/decoder.js";
+import { OPCODES } from "../arch/mos6502/opcodes.js";
 import { BasicBlock } from "../analysis/blocks.js";
 import { Flow, Machine, execute } from "./interpret.js";
 import { lift } from "./lift.js";
@@ -166,11 +167,15 @@ const readerFor = (machine: Machine) => ({
 export function stepMachine(
   machine: Machine,
   address: number
-): { instruction: Instruction; flow: Flow; next: number } | undefined {
+): { instruction: Instruction; flow: Flow; next: number; cycles: number } | undefined {
   const decoded = decode(readerFor(machine), address);
   if (!decoded.ok) return undefined;
 
   const instruction = decoded.instruction;
+  // Read before the instruction runs: an indexed read crosses a page according
+  // to the index it *had*, and `INC X` style instructions would otherwise be
+  // judged on the value they left behind.
+  const crossed = crossesPage(machine, instruction);
   // Lifted as though decimal mode were in doubt, which is the right call for
   // *execution*: the machine holds a real `D` flag, so the select resolves it
   // exactly. A static caller has no such luxury and takes the binary default,
@@ -184,7 +189,68 @@ export function stepMachine(
     flow.kind === "goto" || flow.kind === "call" || flow.kind === "return"
       ? flow.address
       : after;
-  return { instruction, flow, next };
+  return { instruction, flow, next, cycles: cyclesTaken(instruction, flow, after, crossed) };
+}
+
+/**
+ * What this instruction cost, penalties included.
+ *
+ * The table carries what an instruction always takes; the two conditional
+ * cycles can only be known by running it. Cycles are what put a raster
+ * interrupt in the right scanline, so a branch counted as two when it was
+ * taken drifts the whole frame.
+ */
+function cyclesTaken(
+  instruction: Instruction,
+  flow: Flow,
+  after: number,
+  crossed: boolean
+): number {
+  const info = OPCODES[instruction.bytes[0]];
+  let cycles = info.cycles;
+
+  // A branch costs one more when taken, and one more again when the target is
+  // on another page — the relative offset is added to the *next* address, so
+  // that is what the page is measured from.
+  if (instruction.flow === "branch") {
+    if (flow.kind === "goto") {
+      cycles += 1;
+      if ((flow.address & 0xff00) !== (after & 0xff00)) cycles += 1;
+    }
+    return cycles;
+  }
+
+  return info.pageCross && crossed ? cycles + 1 : cycles;
+}
+
+/**
+ * Whether an indexed read carried into the high byte.
+ *
+ * Only asked where the opcode table says it can matter, so a store — which
+ * always pays the fix-up and has it in its base — never reaches here.
+ */
+function crossesPage(machine: Machine, instruction: Instruction): boolean {
+  const info = OPCODES[instruction.bytes[0]];
+  if (!info.pageCross) return false;
+
+  const operand = instruction.operand;
+  const index = (offset: number) => machine.register(offset) & 0xff;
+  switch (operand.type) {
+    case "absoluteX":
+      return ((operand.address + index(REG.X)) & 0xff00) !== (operand.address & 0xff00);
+    case "absoluteY":
+      return ((operand.address + index(REG.Y)) & 0xff00) !== (operand.address & 0xff00);
+    case "indirectIndexed": {
+      // The pointer lives in zero page and wraps inside it, which is the same
+      // rule the lifter models for `($ff),Y`.
+      const low = machine.memory[operand.address & 0xff];
+      const high = machine.memory[(operand.address + 1) & 0xff];
+      const base = (high << 8) | low;
+      return ((base + index(REG.Y)) & 0xff00) !== (base & 0xff00);
+    }
+    default:
+      return false;
+  }
 }
 
 /**

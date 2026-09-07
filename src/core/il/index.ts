@@ -18,7 +18,7 @@ export {
   flagsWritten,
 } from "./pcode.js";
 export { Machine, Flow, execute } from "./interpret.js";
-export { Watcher } from "./interpret.js";
+export { Watcher, Device } from "./interpret.js";
 export { lift, isLifted } from "./lift.js";
 export { BlockEffects, blockEffects, describeEffects, stackDelta } from "./effects.js";
 export {

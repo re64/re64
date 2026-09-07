@@ -30,6 +30,24 @@ export interface OpcodeInfo {
   bytes: number;
   flow: FlowType;
   illegal?: boolean;
+  /**
+   * Cycles this instruction always takes.
+   *
+   * Derived from the addressing mode and what the instruction *does* with the
+   * operand rather than typed out 256 times, because the machine works that way
+   * and a hand-copied column is 256 chances to be wrong about one entry that
+   * nothing would ever notice. The overrides below are the instructions that
+   * genuinely do not follow from their mode.
+   */
+  cycles: number;
+  /**
+   * True where crossing a page costs one more.
+   *
+   * Only reads pay it. A store through `abs,X` always fixes up the high byte
+   * and so always takes the extra cycle, which is why its base is one higher
+   * and this is false — the penalty is not conditional, it is included.
+   */
+  pageCross?: boolean;
 }
 
 /** Bytes per addressing mode */
@@ -49,6 +67,57 @@ export const MODE_BYTES: Record<AddressingMode, number> = {
   rel: 2,
 };
 
+/**
+ * Instructions that read, modify and write back — two extra cycles over a plain
+ * read, because the value goes out again.
+ */
+const READ_MODIFY_WRITE = new Set([
+  "ASL", "LSR", "ROL", "ROR", "INC", "DEC",
+  // The illegal ones are a documented read-modify-write fused with an ALU op,
+  // and take the same time as the RMW half.
+  "SLO", "RLA", "SRE", "RRA", "DCP", "ISC",
+]);
+
+/** Instructions that only write, and therefore never pay a page-cross penalty. */
+const STORES = new Set(["STA", "STX", "STY", "SAX", "SHA", "SHX", "SHY", "TAS"]);
+
+/** Cycles by addressing mode for a plain read. */
+const MODE_CYCLES: Record<AddressingMode, number> = {
+  imp: 2, acc: 2, imm: 2, zp: 3, zpx: 4, zpy: 4,
+  abs: 4, abx: 4, aby: 4, ind: 5, izx: 6, izy: 5, rel: 2,
+};
+
+/** What a store costs, where it differs: the high-byte fix-up is unconditional. */
+const STORE_CYCLES: Partial<Record<AddressingMode, number>> = { abx: 5, aby: 5, izy: 6 };
+
+/** The instructions whose timing does not follow from their addressing mode. */
+const EXACT: Record<string, number> = {
+  BRK: 7, JSR: 6, RTI: 6, RTS: 6,
+  PHA: 3, PHP: 3, PLA: 4, PLP: 4,
+  "JMP:abs": 3, "JMP:ind": 5,
+  // Every documented illegal instruction that does nothing still costs its
+  // mode; JAM stops the processor, and a cycle count for it is meaningless.
+  JAM: 2,
+};
+
+function cyclesFor(mnemonic: string, mode: AddressingMode): number {
+  const exact = EXACT[`${mnemonic}:${mode}`] ?? EXACT[mnemonic];
+  if (exact !== undefined) return exact;
+  if (READ_MODIFY_WRITE.has(mnemonic) && mode !== "acc" && mode !== "imp") {
+    // Two more than the read, and the indexed forms never take a conditional
+    // penalty because the fix-up is already in the count.
+    return MODE_CYCLES[mode] + (mode === "abx" || mode === "aby" ? 3 : 2);
+  }
+  if (STORES.has(mnemonic)) return STORE_CYCLES[mode] ?? MODE_CYCLES[mode];
+  return MODE_CYCLES[mode];
+}
+
+/** Only a read through an indexed mode pays for crossing a page. */
+function crossesPage(mnemonic: string, mode: AddressingMode): boolean {
+  if (mode !== "abx" && mode !== "aby" && mode !== "izy") return false;
+  return !STORES.has(mnemonic) && !READ_MODIFY_WRITE.has(mnemonic);
+}
+
 /** Create opcode info helper */
 function op(
   mnemonic: string,
@@ -56,7 +125,17 @@ function op(
   flow: FlowType = "next",
   illegal = false
 ): OpcodeInfo {
-  return { mnemonic, mode, bytes: MODE_BYTES[mode], flow, illegal };
+  const cycles = cyclesFor(mnemonic, mode);
+  const pageCross = crossesPage(mnemonic, mode);
+  return {
+    mnemonic,
+    mode,
+    bytes: MODE_BYTES[mode],
+    flow,
+    illegal,
+    cycles,
+    ...(pageCross ? { pageCross } : {}),
+  };
 }
 
 /** Illegal opcode helper */

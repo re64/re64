@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { InstructionIndex, describeWarning, disassemble } from "./disassembler.js";
 import { ByteReader } from "./decoder.js";
+import { OPCODES } from "./opcodes.js";
 import { MemoryMap } from "../../memory/memory-map.js";
 import { BytesLayer } from "../../memory/layer.js";
 import { buildBlocks } from "../../analysis/blocks.js";
@@ -231,5 +232,91 @@ describe("BRK, which is a jump through a vector", () => {
     );
     expect(warning && "target" in warning).toBe(false);
     expect(describeWarning(warning!)).toContain("nothing to read");
+  });
+});
+
+/**
+ * Instruction timing.
+ *
+ * Derived from the addressing mode and what the instruction does with its
+ * operand rather than typed out 256 times — so the thing worth asserting is a
+ * spread of known values across every rule the derivation encodes, plus the
+ * cases that break it. A hand-copied column would need 256 assertions; this
+ * needs the rules.
+ *
+ * Cycles are what put a raster interrupt in the right scanline. Nothing in the
+ * machine model works without them being right.
+ */
+describe("what an instruction costs", () => {
+  const at = (opcode: number) => OPCODES[opcode];
+
+  it("charges by addressing mode for an ordinary read", () => {
+    expect(at(0xa9)).toMatchObject({ mnemonic: "LDA", mode: "imm", cycles: 2 });
+    expect(at(0xa5)).toMatchObject({ mnemonic: "LDA", mode: "zp", cycles: 3 });
+    expect(at(0xb5)).toMatchObject({ mnemonic: "LDA", mode: "zpx", cycles: 4 });
+    expect(at(0xad)).toMatchObject({ mnemonic: "LDA", mode: "abs", cycles: 4 });
+    expect(at(0xa1)).toMatchObject({ mnemonic: "LDA", mode: "izx", cycles: 6 });
+    expect(at(0xb1)).toMatchObject({ mnemonic: "LDA", mode: "izy", cycles: 5 });
+  });
+
+  it("charges two more where the value goes back out", () => {
+    // Read, modify, write: the operand is fetched and stored again.
+    expect(at(0x06)).toMatchObject({ mnemonic: "ASL", mode: "zp", cycles: 5 });
+    expect(at(0x16)).toMatchObject({ mnemonic: "ASL", mode: "zpx", cycles: 6 });
+    expect(at(0x0e)).toMatchObject({ mnemonic: "ASL", mode: "abs", cycles: 6 });
+    expect(at(0x1e)).toMatchObject({ mnemonic: "ASL", mode: "abx", cycles: 7 });
+    // On the accumulator there is no memory access at all.
+    expect(at(0x0a)).toMatchObject({ mnemonic: "ASL", mode: "acc", cycles: 2 });
+  });
+
+  it("makes a store pay the index fix-up unconditionally", () => {
+    // `STA $1234,X` always takes 5, where `LDA $1234,X` takes 4 and only pays a
+    // fifth when the index carries into the high byte. A store cannot skip the
+    // fix-up because it has to know where to put the byte.
+    expect(at(0x9d)).toMatchObject({ mnemonic: "STA", mode: "abx", cycles: 5 });
+    expect(at(0x99)).toMatchObject({ mnemonic: "STA", mode: "aby", cycles: 5 });
+    expect(at(0x91)).toMatchObject({ mnemonic: "STA", mode: "izy", cycles: 6 });
+    expect(at(0x9d).pageCross).toBeUndefined();
+    expect(at(0x99).pageCross).toBeUndefined();
+  });
+
+  it("marks exactly the reads that can cost one more", () => {
+    // The conditional penalty, which the run adds when the index actually
+    // carries. Only indexed *reads* have it.
+    expect(at(0xbd)).toMatchObject({ mnemonic: "LDA", mode: "abx", pageCross: true });
+    expect(at(0xb9)).toMatchObject({ mnemonic: "LDA", mode: "aby", pageCross: true });
+    expect(at(0xb1)).toMatchObject({ mnemonic: "LDA", mode: "izy", pageCross: true });
+    // Not zero page: it wraps inside the page rather than crossing one.
+    expect(at(0xb5).pageCross).toBeUndefined();
+    // Not a read-modify-write, whose fix-up is already counted.
+    expect(at(0x1e).pageCross).toBeUndefined();
+  });
+
+  it("knows the instructions whose timing follows from nothing", () => {
+    expect(at(0x00)).toMatchObject({ mnemonic: "BRK", cycles: 7 });
+    expect(at(0x20)).toMatchObject({ mnemonic: "JSR", cycles: 6 });
+    expect(at(0x60)).toMatchObject({ mnemonic: "RTS", cycles: 6 });
+    expect(at(0x40)).toMatchObject({ mnemonic: "RTI", cycles: 6 });
+    expect(at(0x48)).toMatchObject({ mnemonic: "PHA", cycles: 3 });
+    expect(at(0x68)).toMatchObject({ mnemonic: "PLA", cycles: 4 });
+    // Two jumps, one mode apart, three cycles apart — and neither follows the
+    // read timing its mode would give.
+    expect(at(0x4c)).toMatchObject({ mnemonic: "JMP", mode: "abs", cycles: 3 });
+    expect(at(0x6c)).toMatchObject({ mnemonic: "JMP", mode: "ind", cycles: 5 });
+  });
+
+  it("gives a branch its two, and leaves the rest to the run", () => {
+    // A branch not taken is two. Taken is three, and taken across a page is
+    // four — both decided when it runs, not here.
+    expect(at(0xd0)).toMatchObject({ mnemonic: "BNE", mode: "rel", cycles: 2 });
+  });
+
+  it("gives every opcode in the table a cost", () => {
+    // Including the illegal ones: a program that runs one still spends time,
+    // and a hole here would silently stop the clock.
+    const missing = OPCODES.map((o, i) => ({ i, o }))
+      .filter(({ o }) => !Number.isInteger(o.cycles) || o.cycles < 2)
+      .map(({ i }) => `$${i.toString(16).toUpperCase().padStart(2, "0")}`);
+    expect(missing).toEqual([]);
   });
 });
