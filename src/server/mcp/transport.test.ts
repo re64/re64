@@ -302,6 +302,59 @@ describe("drawing a span", () => {
   });
 });
 
+describe("what counts as explained", () => {
+  /**
+   * `find_undecoded` is a work queue, so a kind it does not recognise tells a
+   * reader their finished work is unfinished.
+   *
+   * It was a hand-written list of four interpretation kinds and `record` was
+   * added to the union afterwards without being added to it. Both readers in
+   * experiment 10 hit it independently: one declared four 52-byte records and
+   * watched all 208 bytes stay in the queue, then cross-checked every record
+   * claim by hand rather than trust the count. That is the tool actively
+   * punishing the deepest work available.
+   */
+  it("counts a record claim as explaining its bytes", async () => {
+    const before = await callTool("find_undecoded", { limit: 200 });
+    const covering = (value: unknown, at: number) =>
+      (value as { spans: { start: string; end: string }[] }).spans.filter(
+        (s) => parseInt(s.start.slice(1), 16) <= at && at <= parseInt(s.end.slice(1), 16)
+      );
+    // The largest span still unexplained, so the assertion has something to
+    // move whatever else this file has already claimed.
+    const spans = (before.value as { spans: { start: string; bytes: number }[] }).spans;
+    expect(spans.length, "nothing left unexplained to probe with").toBeGreaterThan(0);
+    const span = spans[0];
+    const size = Math.min(16, span.bytes);
+    const at = parseInt(span.start.slice(1), 16);
+
+    const type = await callTool("add_type", {
+      name: "Probe",
+      size,
+      // Keyed by offset: two fields cannot share one, so the key *is* the
+      // identity and two people adding different fields both survive.
+      fields: { 0: { name: "whole", type: `bytes(${size})` } },
+    });
+    expect(type.isError, type.text).toBe(false);
+    const typeId = (type.value as { type: string }).type;
+
+    const claim = await callTool("add_claim", {
+      at: span.start,
+      is: "record",
+      typeId,
+      extent: size,
+      name: "probeRecord",
+    });
+    expect(claim.isError, claim.text).toBe(false);
+
+    const after = await callTool("find_undecoded", { limit: 200 });
+    // The span is either gone or shortened — what must not happen is that the
+    // same bytes are still reported as saying nothing.
+    const still = covering(after.value, at);
+    expect(still, "record claim did not explain its own bytes").toEqual([]);
+  });
+});
+
 describe("reading a named view", () => {
   /**
    * The behavioural half of `target.test.ts`. Two tools shipped answering for

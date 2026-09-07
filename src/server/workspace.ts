@@ -140,6 +140,7 @@ import { CheckpointCache, runScenario as coreRunScenario } from "../core/machine
 import { EvidenceKind, ProjectStep } from "../core/project/project.js";
 import { listDirectory } from "../core/c64/d64.js";
 import { renderSid } from "../core/c64/sid-audio.js";
+import type { ByteReading } from "../core/memory/region.js";
 import { DEFAULT_SCREEN_BASE, screenCell, spriteAt } from "../core/c64/geometry.js";
 import type { SidWrite } from "../core/c64/devices/sid.js";
 
@@ -2979,15 +2980,7 @@ export class Workspace {
         }
 
         const kind = loaded.map.getKindAt(address);
-        // Explained: something decoded here, or a claim said what it holds.
-        // `unknown` is the *absence* of a claim rather than a kind somebody
-        // chose, so it does not explain anything and must not close a run.
-        const explained =
-          covered.has(address) ||
-          kind === "data" ||
-          kind === "text" ||
-          kind === "jumptable" ||
-          kind === "bitmap";
+        const explained = covered.has(address) || explainsBytes(kind);
         if (explained) close(address);
         else if (run === undefined) run = address;
       }
@@ -4885,4 +4878,43 @@ function rowContaining(rows: readonly { address: number }[], address: number): n
   let first = last;
   while (first > 0 && rows[first - 1].address === rows[last].address) first--;
   return first;
+}
+
+/**
+ * Whether a byte reading explains the bytes it covers.
+ *
+ * **Exhaustive on purpose.** This was a hand-written list of four kinds, and
+ * `record` — added to `Interpretation` afterwards — was never added to it. So a
+ * reader who did the deepest kind of work available, proving a 52-byte record
+ * layout and declaring four instances of it, was told by the work queue that
+ * all 208 bytes were still unexplained. Both readers in experiment 10 hit it
+ * independently and one cross-checked every record claim by hand rather than
+ * trust the count.
+ *
+ * That is this project's most-repeated defect: the vocabulary being closed is
+ * checked by the compiler, and whether anything *reads* a member of it is not.
+ * A `switch` with a `never` default makes the next interpretation a compile
+ * error here rather than a silent omission.
+ *
+ * `code` and `unknown` are the two readings that explain nothing — the first
+ * because code is what bytes are when nobody has said otherwise, the second
+ * because it is the absence of a claim wearing the name of a kind.
+ */
+function explainsBytes(kind: ByteReading | undefined): boolean {
+  switch (kind) {
+    case undefined:
+    case "code":
+    case "unknown":
+      return false;
+    case "data":
+    case "text":
+    case "bitmap":
+    case "jumptable":
+    case "record":
+      return true;
+    default: {
+      const unhandled: never = kind;
+      return unhandled;
+    }
+  }
 }
