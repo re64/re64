@@ -6,7 +6,6 @@
   "main": "./dist/core/index.js",
   "types": "./dist/core/index.d.ts",
   "bin": {
-    "re64": "./dist/cli/index.js",
     "re64-server": "./dist/server/index.js"
   },
   "exports": {
@@ -29,7 +28,8 @@
     "gen:kernal": "tsc && node dist/tools/gen-kernal-effects.js",
     "experiments:collisions": "tsc && node dist/tools/experiment-collisions.js",
     "gen:basic": "tsc && node dist/tools/gen-basic-effects.js",
-    "experiments:transcript": "tsc && node dist/tools/experiment-transcript.js"
+    "experiments:transcript": "tsc && node dist/tools/experiment-transcript.js",
+    "gen:api": "tsc && node dist/tools/gen-api-doc.js"
   },
   "keywords": [
     "c64",

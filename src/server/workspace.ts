@@ -18,7 +18,6 @@ import {
   ProgramAnalysis,
   Reference,
   Row,
-  LegacyRegionKind,
   BasicBlock,
   BlockRun,
   analyze,
@@ -36,7 +35,15 @@ import {
   formatVarnode,
   runBlock,
   REGISTER_NAMES,
+  Bitmap,
   bitmapToText,
+  bytesPerCell,
+  cellCount,
+  decodeBitmap,
+  parseBitmapView,
+  encodePng,
+  encodeApng,
+  encodeWav,
   blobPaths,
   isBitmapView,
   buildMemoryMap,
@@ -49,9 +56,7 @@ import {
   commentEditOp,
   ensureOwningLayer,
   labelAddOp,
-  labelSetOp,
   claimAddOps,
-  renameLabelOp,
   owningLayerId,
   ownsAddress,
   newId,
@@ -63,7 +68,7 @@ import {
   parseProjectAddress,
   targetLinks,
   regionDeleteOp,
-  regionSetOp,
+  ROOT_FOR_TYPE,
   unmarkFunctionOps,
 } from "../core/index.js";
 import {
@@ -76,9 +81,11 @@ import { runDecoder } from "../sandbox/run.js";
 import { renderTextWith } from "../sandbox/sync.js";
 import { databaseFileBytes } from "../store/load.js";
 import { CommentPlacement, TextEncoding, describeWarning } from "../core/index.js";
+import { TypeField } from "../core/ops/types.js";
 import {
   Claim,
   Interpretation,
+  Provenance,
   RootKind,
   claimSpan,
   compareClaims,
@@ -99,6 +106,8 @@ import { ClaimSet, disagreements, describeDisagreement } from "../core/claims/se
  */
 export interface ClaimInput {
   at: number;
+  /** How the claimer knows. Not how sure they are — see `ClaimMethod`. */
+  method?: Provenance["method"];
   name?: string;
   extent?: number;
   is?: Interpretation["is"];
@@ -122,25 +131,17 @@ export interface ClaimInput {
  * finished analysis of `zoneDataTable` had nowhere to go. It writes a claim op
  * directly, which is what the rest of this should eventually do too.
  */
-/** The root a label type asks for; `address` is a name and asks for none. */
-const ROOT_FOR_LABEL_TYPE: Partial<Record<LabelType, RootKind>> = {
-  entry: "entry",
-  function: "routine",
-  code: "location",
-};
-
-const KIND_FOR_IS: Record<Exclude<Interpretation["is"], "record">, LegacyRegionKind> = {
-  data: "data",
-  text: "text",
-  bitmap: "bitmap",
-  jumptable: "jumptable",
-};
 
 import { FileStorage, ProjectStore, SqliteStorage } from "../store/index.js";
 import { nodeFileBytes, nodeRomBytes } from "../node-files.js";
 import { MAX_UPLOAD_BYTES, uploadTokens } from "./uploads.js";
 import { runProgram } from "../core/il/program.js";
+import { CheckpointCache, runScenario as coreRunScenario } from "../core/machine/scenario.js";
+import { EvidenceKind, ProjectStep } from "../core/project/project.js";
 import { listDirectory } from "../core/c64/d64.js";
+import { renderSid } from "../core/c64/sid-audio.js";
+import { DEFAULT_SCREEN_BASE, screenCell, spriteAt } from "../core/c64/geometry.js";
+import type { SidWrite } from "../core/c64/devices/sid.js";
 
 /**
  * Who is asking, and under which lease.
@@ -177,6 +178,15 @@ export interface Room {
   projectId: string;
   projectPath: string;
   /**
+   * Machines part-way through a scenario, so "continue from step five" is cheap.
+   *
+   * A cache of a derived thing and nothing more: it is keyed on the project
+   * version plus a step prefix, held per room, and lost on restart. A miss
+   * re-runs from the beginning, which is always correct — which is why this is
+   * optional and why nothing depends on it being there.
+   */
+  machines?: CheckpointCache;
+  /**
    * Where this server answers, for handing out a URL a caller can PUT to.
    *
    * The server knows its own address; the MCP context does not carry the
@@ -204,6 +214,7 @@ const claimIds = (ops: readonly Op[]): string[] =>
     .map((op) => (op.op === "claim.add" ? op.claim.id : op.id));
 
 const hex4 = (address: number) => `$${address.toString(16).toUpperCase().padStart(4, "0")}`;
+const hex2 = (value: number) => `$${value.toString(16).toUpperCase().padStart(2, "0")}`;
 
 /**
  * Where an inline comment stops fitting beside an instruction.
@@ -913,7 +924,7 @@ export class Workspace {
     targets: {
       name: string;
       /** The linked layers, bottom-up: the last one shadows the ones before. */
-      layers: { layer: string; name?: string; at?: string }[];
+      layers: { id: string; layer: string; name?: string; at?: string }[];
       entryPoints?: string[];
       order?: number;
       description?: string;
@@ -943,6 +954,10 @@ export class Workspace {
           // address. Reported because it is what decides shadowing, and because
           // a layer-scoped claim's absolute address is this plus its offset.
           layers: targetLinks(t).map((link) => ({
+            // The link's own id, because a link is addressed on its own and a
+            // write you cannot name again is one the caller has to go looking
+            // for.
+            id: link.id,
             layer: link.layer,
             ...(byId.get(link.layer) ? { name: byId.get(link.layer)!.name } : {}),
             ...(link.at === undefined ? {} : { at: hex4(link.at) }),
@@ -962,21 +977,22 @@ export class Workspace {
     };
   }
 
-  /** Declare or revise a view over the layer stack. */
-  setTarget(
-    caller: Caller,
-    name: string,
-    layers?: readonly (string | { layer: string; at?: number })[],
-    entryPoints?: readonly number[],
-    order?: number,
-    description?: string
-  ): EditResult {
+  /**
+   * Check the layer links a caller gave, and mint an id for each.
+   *
+   * A link is addressed on its own — "move this layer to $0100" — so it carries
+   * an id like everything else. Minted here rather than taken from the caller,
+   * which is the rule for every `add` on this surface.
+   */
+  private checkedLinks(
+    layers: readonly { layer: string; at?: number }[]
+  ): { id: string; layer: string; at?: number }[] {
     const known = new Set(
       projectFromDoc(this.room.store.document())
         .layers.filter((l) => l.id)
         .map((l) => l.id!)
     );
-    const named = (layers ?? []).map((l) => (typeof l === "string" ? l : l.layer));
+    const named = layers.map((l) => l.layer);
     const unknown = named.filter((id) => !known.has(id));
     if (unknown.length) {
       throw new Error(
@@ -984,14 +1000,7 @@ export class Workspace {
           `ids a target is defined in terms of.`
       );
     }
-    // Only when the caller is saying what the layers are. Revising a target's
-    // description must not have to restate its layers, or two people editing
-    // one target would revert each other.
-    const held = projectFromDoc(this.room.store.document()).targets ?? [];
-    const exists = held.some((t) => t.name === name);
-    if (layers !== undefined && layers.length === 0) {
-      throw new Error("A target with no layers shows nothing.");
-    }
+    if (layers.length === 0) throw new Error("A target with no layers shows nothing.");
     // A layer linked twice is a stack that shadows itself, which has no reading
     // — and unlike most things here it is a fact about the request rather than
     // a judgement about the result, so refusing is right.
@@ -1001,32 +1010,81 @@ export class Workspace {
           "it shadow itself, which has no reading."
       );
     }
-    if (!exists && layers === undefined) {
-      throw new Error(
-        `"${name}" does not exist yet, so it needs its layers. list_targets shows ` +
-          `the ids a target is defined in terms of.`
-      );
-    }
+    return layers.map((l) => ({
+      id: newId("lnk"),
+      layer: l.layer,
+      ...(l.at === undefined ? {} : { at: l.at }),
+    }));
+  }
 
-    return this.edit(caller, () => [
+  /** Declare a view over the layer stack. **Always adds**, and returns the id. */
+  addTarget(
+    caller: Caller,
+    name: string,
+    layers: readonly { layer: string; at?: number }[],
+    entryPoints?: readonly number[],
+    order?: number,
+    description?: string
+  ): EditResult & { target: string } {
+    const links = this.checkedLinks(layers);
+    const id = newId("tgt");
+    const result = this.edit(caller, () => [
       {
-        op: "target.set",
+        op: "target.add",
+        id,
         name,
-        ...(layers === undefined ? {} : { layers: [...layers] }),
+        layers: links,
         ...(entryPoints === undefined ? {} : { entryPoints: [...entryPoints] }),
         ...(order === undefined ? {} : { order }),
         ...(description === undefined ? {} : { description }),
-      } as Op,
+      },
     ]);
+    return { ...result, target: id };
   }
 
-  removeTarget(caller: Caller, name: string): EditResult {
-    const held = projectFromDoc(this.room.store.document()).targets ?? [];
-    if (!held.some((t) => t.name === name)) {
-      throw new Error(`No target called "${name}". list_targets shows what there is.`);
+  /** Revise a view by id. An id nothing holds is not found; it never creates. */
+  editTarget(
+    caller: Caller,
+    id: string,
+    fields: {
+      name?: string;
+      layers?: readonly { layer: string; at?: number }[];
+      entryPoints?: readonly number[];
+      order?: number;
+      description?: string;
     }
-    return this.edit(caller, () => [{ op: "target.remove", name } as Op]);
+  ): EditResult & { target: string } {
+    this.mustHold(projectFromDoc(this.room.store.document()).targets ?? [], id, "target", "list_targets");
+    if (Object.values(fields).every((v) => v === undefined)) {
+      throw new Error("Give at least one field to change: name, layers, entryPoints, order, description.");
+    }
+    // Only when the caller is saying what the layers are. Revising a target's
+    // description must not have to restate its layers, or two people editing
+    // one target would revert each other.
+    const links = fields.layers === undefined ? undefined : this.checkedLinks(fields.layers);
+    const result = this.edit(caller, () => [
+      {
+        op: "target.set",
+        id,
+        fields: {
+          ...(fields.name === undefined ? {} : { name: fields.name }),
+          ...(links === undefined ? {} : { layers: links }),
+          ...(fields.entryPoints === undefined
+            ? {}
+            : { entryPoints: [...fields.entryPoints] }),
+          ...(fields.order === undefined ? {} : { order: fields.order }),
+          ...(fields.description === undefined ? {} : { description: fields.description }),
+        },
+      },
+    ]);
+    return { ...result, target: id };
   }
+
+  removeTarget(caller: Caller, id: string): EditResult {
+    this.mustHold(projectFromDoc(this.room.store.document()).targets ?? [], id, "target", "list_targets");
+    return this.edit(caller, () => [{ op: "target.remove", id }]);
+  }
+
 
 
   /**
@@ -1360,8 +1418,12 @@ export class Workspace {
     // Both were reported writable, which is worse than either gap: it is the
     // field a reader uses to decide what it may edit, so it was planned
     // against and then refused.
+    // Three sources have no stored claim behind them, so their ids are derived
+    // and a write carrying one names nothing. `layer` was missing here and
+    // reported `writable: true` — a PRG layer names its own load address, and
+    // the project cannot edit that any more than it can edit a platform name.
     const invented = label.by.source === "auto";
-    const builtIn = label.by.source === "platform";
+    const builtIn = label.by.source === "platform" || label.by.source === "layer";
     return {
       ...(invented || builtIn ? {} : { id: label.id }),
       address: hex4(label.at),
@@ -1763,6 +1825,316 @@ export class Workspace {
   }
 
   /** The decoders this project carries, with their source. */
+  /**
+   * Where a captured file's bytes actually are.
+   *
+   * The route has existed since the browser needed binaries; nothing told a
+   * caller about it. That is experiment 4's finding repeating — an agent went
+   * looking for `save_project`, found nothing, and located `POST /api/export`
+   * by reading the server's source — so a capture now says where to GET it
+   * rather than leaving it to be discovered.
+   *
+   * A URL rather than the bytes, for the reason `prepare_upload` takes one: a
+   * captured screen is a few hundred kilobytes of pixel data, and base64 of it
+   * through a tool result is tens of thousands of tokens for something the
+   * caller is going to hand to an image library anyway.
+   */
+  private blobUrl(name: string): string {
+    return (
+      `${this.room.baseUrl ?? ""}/api/blob?project=${encodeURIComponent(this.room.projectId)}` +
+      `&path=${encodeURIComponent(name)}`
+    );
+  }
+
+  /**
+   * What has been said about a claim: evidence for it, against it, or replacing it.
+   *
+   * The read half of the thing experiment-0's agents could not express. Filtered
+   * by claim, because "what backs this" is the question — "everything anybody
+   * has ever noted" is not.
+   */
+  evidenceFor(claim?: string): {
+    total: number;
+    evidence: {
+      id: string;
+      claim: string;
+      kind: string;
+      scenario?: string;
+      capture?: string;
+      other?: string;
+      note?: string;
+    }[];
+  } {
+    const all = this.program().loaded.project.evidence ?? [];
+    const found = claim === undefined ? all : all.filter((e) => e.claim === claim);
+    return {
+      total: found.length,
+      evidence: found.map((e) => ({
+        id: e.id ?? "",
+        claim: e.claim,
+        kind: e.kind,
+        ...(e.scenario === undefined ? {} : { scenario: e.scenario }),
+        ...(e.capture === undefined ? {} : { capture: e.capture }),
+        ...(e.other === undefined ? {} : { other: e.other }),
+        ...(e.note === undefined ? {} : { note: e.note }),
+      })),
+    };
+  }
+
+  addEvidence(
+    caller: Caller,
+    claim: string,
+    kind: EvidenceKind,
+    about: { scenario?: string; capture?: string; other?: string; note?: string }
+  ): EditResult & { evidence: string } {
+    const loaded = this.program().loaded;
+    if (!claimById(loaded, claim)) {
+      throw new Error(`No claim ${claim}. claims_at reports what covers an address, with ids.`);
+    }
+    if (about.other !== undefined && !claimById(loaded, about.other)) {
+      throw new Error(`No claim ${about.other} to point at. list_claims shows the ids.`);
+    }
+    if (
+      about.scenario !== undefined &&
+      !(loaded.project.scenarios ?? []).some((x) => x.id === about.scenario)
+    ) {
+      throw new Error(`No scenario ${about.scenario}. list_scenarios shows what there is.`);
+    }
+    // A refutation or a supersession that names nothing is an opinion with no
+    // handle on it: the whole point is that a reader can follow it.
+    if (
+      (kind === "refutes" || kind === "supersedes") &&
+      about.other === undefined &&
+      about.note === undefined
+    ) {
+      throw new Error(
+        `A ${kind} needs something to point at: another claim (\`other\`), or a note ` +
+          `saying why. Otherwise nobody reading it can tell what was wrong.`
+      );
+    }
+
+    const id = newId("evd");
+    const result = this.edit(caller, () => [
+      {
+        op: "evidence.add",
+        id,
+        claim,
+        kind,
+        ...(about.scenario === undefined ? {} : { scenario: about.scenario }),
+        ...(about.capture === undefined ? {} : { capture: about.capture }),
+        ...(about.other === undefined ? {} : { other: about.other }),
+        ...(about.note === undefined ? {} : { note: about.note }),
+      },
+    ]);
+    return { ...result, evidence: id };
+  }
+
+  editEvidence(
+    caller: Caller,
+    id: string,
+    fields: {
+      kind?: EvidenceKind;
+      scenario?: string | null;
+      capture?: string | null;
+      other?: string | null;
+      note?: string | null;
+    }
+  ): EditResult & { evidence: string } {
+    this.mustHold(this.program().loaded.project.evidence ?? [], id, "evidence", "list_evidence");
+    if (Object.values(fields).every((v) => v === undefined)) {
+      throw new Error("Give at least one field to change: kind, scenario, capture, other, note.");
+    }
+    const result = this.edit(caller, () => [{ op: "evidence.set", id, fields }]);
+    return { ...result, evidence: id };
+  }
+
+  removeEvidence(caller: Caller, id: string): EditResult {
+    this.mustHold(this.program().loaded.project.evidence ?? [], id, "evidence", "list_evidence");
+    return this.edit(caller, () => [{ op: "evidence.remove", id }]);
+  }
+
+  /** Every workflow this project carries, and what each produced. */
+  scenarios(): {
+    total: number;
+    scenarios: {
+      id: string;
+      name: string;
+      description?: string;
+      steps: ProjectStep[];
+      captures: { id: string; step: string; kind: string; file: string; url: string }[];
+    }[];
+  } {
+    const project = this.program().loaded.project;
+    const captures = project.captures ?? [];
+    const all = project.scenarios ?? [];
+    return {
+      total: all.length,
+      scenarios: all.map((x) => ({
+        id: x.id ?? "",
+        name: x.name,
+        ...(x.description === undefined ? {} : { description: x.description }),
+        steps: x.steps,
+        // The captures beside the scenario that made them, because a workflow
+        // whose output you have to go looking for is one nobody re-runs.
+        captures: captures
+          .filter((c) => c.scenario === x.id)
+          .map((c) => ({
+            id: c.id ?? "",
+            step: c.step,
+            kind: c.kind,
+            file: c.file,
+            url: this.blobUrl(c.file),
+          })),
+      })),
+    };
+  }
+
+  addScenario(
+    caller: Caller,
+    name: string,
+    steps: ProjectStep[],
+    description?: string
+  ): EditResult & { scenario: string } {
+    if (steps.length === 0) throw new Error("A scenario with no steps does nothing.");
+    const id = newId("scn");
+    // Steps are minted here, like every other id on this surface: a caller
+    // never supplies one for a thing that does not exist.
+    const withIds = steps.map((step) => ({ ...step, id: step.id ?? newId("stp") }));
+    const result = this.edit(caller, () => [
+      {
+        op: "scenario.add",
+        id,
+        name,
+        ...(description === undefined ? {} : { description }),
+        steps: withIds,
+      },
+    ]);
+    return { ...result, scenario: id };
+  }
+
+  editScenario(
+    caller: Caller,
+    id: string,
+    fields: { name?: string; description?: string | null; steps?: ProjectStep[] }
+  ): EditResult & { scenario: string } {
+    this.mustHold(this.program().loaded.project.scenarios ?? [], id, "scenario", "list_scenarios");
+    if (Object.values(fields).every((v) => v === undefined)) {
+      throw new Error("Give at least one field to change: name, description, steps.");
+    }
+    const result = this.edit(caller, () => [
+      {
+        op: "scenario.set",
+        id,
+        fields: {
+          ...(fields.name === undefined ? {} : { name: fields.name }),
+          ...(fields.description === undefined ? {} : { description: fields.description }),
+          ...(fields.steps === undefined
+            ? {}
+            : { steps: fields.steps.map((step) => ({ ...step, id: step.id ?? newId("stp") })) }),
+        },
+      },
+    ]);
+    return { ...result, scenario: id };
+  }
+
+  removeScenario(caller: Caller, id: string): EditResult {
+    this.mustHold(this.program().loaded.project.scenarios ?? [], id, "scenario", "list_scenarios");
+    return this.edit(caller, () => [{ op: "scenario.remove", id }]);
+  }
+
+  /**
+   * Run a scenario, and keep what it produced.
+   *
+   * **One method, not twenty.** Everything the machine can be asked to do is a
+   * step in the scenario rather than a tool of its own, which is what stops this
+   * surface growing a call per capability — and it is why the scenario had to be
+   * a list of typed steps rather than a script.
+   *
+   * The bytes of a capture go through `putBlob`, exactly as `run_program`'s
+   * capture already does, so the document holds a reference and the blob store
+   * dedups. A `capture` record then says which step made which file.
+   */
+  runScenario(caller: Caller, id: string): Record<string, unknown> {
+    const loaded = this.program().loaded;
+    const scenario = this.mustHold(
+      loaded.project.scenarios ?? [],
+      id,
+      "scenario",
+      "list_scenarios"
+    );
+
+    const storage = this.room.storage;
+    const characters =
+      storage instanceof SqliteStorage ? nodeRomBytes()("characters") : undefined;
+
+    const run = coreRunScenario(loaded.map, scenario, {
+      // The same fingerprint the analysis cache keys on, so a changed project
+      // can never read a stale machine.
+      fingerprint: this.version(),
+      cache: this.room.machines,
+      ...(characters ? { characters } : {}),
+    });
+
+    const kept: {
+      id: string;
+      step: string;
+      kind: string;
+      file: string;
+      bytes: number;
+      url: string;
+    }[] = [];
+    if (run.captures.length) {
+      if (!(storage instanceof SqliteStorage)) {
+        throw new Error("Capturing needs a database; this server holds one file.");
+      }
+      const ops: Op[] = [];
+      for (const capture of run.captures) {
+        const hash = storage.putBlob(capture.name, capture.bytes);
+        const captureId = newId("cap");
+        ops.push(
+          { op: "file.add", name: capture.name, hash, size: capture.bytes.length },
+          {
+            op: "capture.add",
+            id: captureId,
+            scenario: id,
+            step: capture.step,
+            kind: capture.kind,
+            file: capture.name,
+            when: Date.now(),
+          }
+        );
+        kept.push({
+          id: captureId,
+          step: capture.step,
+          kind: capture.kind,
+          file: capture.name,
+          bytes: capture.bytes.length,
+          url: this.blobUrl(capture.name),
+        });
+      }
+      this.edit(caller, () => ops);
+    }
+
+    return {
+      scenario: id,
+      did: run.did,
+      // A probe's verdict. A claim pointing at this scenario as evidence is
+      // backed by a check that can be re-run, rather than by a sentence
+      // somebody wrote in a document once.
+      ...(run.checks.length ? { checks: run.checks, passed: run.passed } : {}),
+      stopped: {
+        reason: run.outcome.reason,
+        at: hex4(run.outcome.at),
+        frames: run.outcome.frames,
+        cycles: run.outcome.cycles,
+        instructions: run.outcome.instructions,
+        ...(run.outcome.detail ? { detail: run.outcome.detail } : {}),
+      },
+      ...(kept.length ? { captured: kept } : {}),
+      ...(run.warnings.length ? { warnings: run.warnings } : {}),
+    };
+  }
+
   decoders(): { total: number; decoders: { id: string; name: string; source: string }[] } {
     const all = this.program().loaded.project.decoders ?? [];
     return {
@@ -1779,26 +2151,31 @@ export class Workspace {
    * is reordered. A *use* — a region's `view: "snippet:<id>"` — does belong to a
    * layer, because that is about those bytes.
    */
-  setDecoder(
-    caller: Caller,
-    name: string,
-    source: string,
-    id?: string
-  ): EditResult & { decoder: string } {
-    // By id only. Falling back to a name match made the write's identity depend
-    // on what the caller had synced — a reader who had seen somebody else's
-    // decoder of that name replaced it, one who had not made a second — which is
-    // the offline/online asymmetry `set_region` and `set_constant` each had.
-    const existing = id === undefined
-      ? undefined
-      : (this.program().loaded.project.decoders ?? []).find((d) => d.id === id);
-    // Minted here so it can be returned. A region refers to a decoder by id
-    // (`view: "snippet:<id>"`), so writing one and then having to call
-    // list_decoders to find out what it was called is a round trip for
-    // something this call already knew.
-    const decoder = existing?.id ?? newId("dec");
-    const result = this.edit(caller, () => [{ op: "decoder.set", id: decoder, name, source }]);
+  addDecoder(caller: Caller, name: string, source: string): EditResult & { decoder: string } {
+    // Minted here and returned. A claim refers to a decoder by id
+    // (`view: "snippet:<id>"`), so writing one and then calling list_decoders to
+    // find out what it was called is a round trip for something this call
+    // already knew — and two agents in one run made the same decoder twice
+    // looking for it.
+    const decoder = newId("dec");
+    const result = this.edit(caller, () => [
+      { op: "decoder.add", id: decoder, name, source },
+    ]);
     return { ...result, decoder };
+  }
+
+  /** Revise a decoder by id. An id nothing holds is not found; it never creates. */
+  editDecoder(
+    caller: Caller,
+    id: string,
+    fields: { name?: string; source?: string }
+  ): EditResult & { decoder: string } {
+    this.mustHold((this.program().loaded.project.decoders ?? []), id, "decoder", "list_decoders");
+    if (fields.name === undefined && fields.source === undefined) {
+      throw new Error("Give at least one field to change: name, source.");
+    }
+    const result = this.edit(caller, () => [{ op: "decoder.set", id, fields }]);
+    return { ...result, decoder: id };
   }
 
 /**
@@ -1838,7 +2215,7 @@ export class Workspace {
     // declined in one shape and the shape is the contract. The value is spelled
     // as an offset — `+$A0` — so nobody reads it as an address in memory.
     const rejected: { address: string; reason: string }[] = [];
-    const fields: Record<number, { name: string; type: string; description?: string }> = {};
+    const fields: Record<number, TypeField> = {};
 
     for (const [key, field] of Object.entries(type.fields)) {
       const offset = parseProjectAddress(key);
@@ -1858,7 +2235,9 @@ export class Workspace {
         rejected.push({ address: key, reason: parsed.error });
         continue;
       }
-      fields[offset] = field;
+      // Minted here: a field is addressed on its own, and no caller supplies
+      // an id for something that does not exist yet.
+      fields[offset] = { ...field, id: existing?.fields?.[String(offset)]?.id ?? newId("fld") };
     }
 
     if (Object.keys(fields).length === 0 && Object.keys(type.fields).length > 0) {
@@ -1868,10 +2247,21 @@ export class Workspace {
       );
     }
 
+    // `add` mints and returns; `set` revises the id it was given and never
+    // creates one. Fields merge by offset, so revising a layout does not
+    // silently drop a field a collaborator added at another offset.
     const id = existing?.id ?? newId("typ");
-    const result = this.edit(caller, () => [
-      { op: "type.set", id, name: type.name, size: type.size, fields },
-    ]);
+    const result = this.edit(caller, () =>
+      existing
+        ? [
+            {
+              op: "type.set" as const,
+              id,
+              fields: { name: type.name, size: type.size, fields },
+            },
+          ]
+        : [{ op: "type.add" as const, id, name: type.name, size: type.size, fields }]
+    );
     return { ...result, type: id, ...(rejected.length ? { rejected } : {}) };
   }
 
@@ -1881,7 +2271,7 @@ export class Workspace {
     // A claim referencing a type that has gone renders its bytes, exactly as a
     // dangling constant renders the literal — so there is no sweep to do, and a
     // delete racing a reference heals itself.
-    return this.edit(caller, () => [{ op: "type.delete", id }]);
+    return this.edit(caller, () => [{ op: "type.remove", id }]);
   }
 
   /**
@@ -1938,7 +2328,305 @@ export class Workspace {
   removeDecoder(caller: Caller, id: string): EditResult {
     const found = (this.program().loaded.project.decoders ?? []).find((d) => d.id === id);
     if (!found) throw new Error(`No decoder ${id}. list_decoders shows what this project has.`);
-    return this.edit(caller, () => [{ op: "decoder.delete", id }]);
+    return this.edit(caller, () => [{ op: "decoder.remove", id }]);
+  }
+
+  /**
+   * What an address *is*, in the units the machine uses.
+   *
+   * The direction the address sugar cannot serve. `screen(10,2)` gets you to
+   * `$0592`; reading a listing and asking "which cell is this" is the question
+   * experiment 8's readers actually repeated, and it has no answer you can
+   * write into an argument.
+   *
+   * It is also where the assumptions get said out loud. Both conversions depend
+   * on runtime state — the screen base in `$D018`, the VIC bank in `$DD00` —
+   * which is not a property of the project, so an answer that did not name the
+   * bases it used would be a confident wrong answer for any program that moved
+   * its screen.
+   */
+  where(address: number, screenBase?: number, bank?: number): Record<string, unknown> {
+    const base = screenBase ?? DEFAULT_SCREEN_BASE;
+    const vicBank = bank ?? 0;
+    const cell = screenCell(address, base);
+    const sprite = spriteAt(address, vicBank);
+    const byte = this.program().loaded.map.readByte(address);
+
+    return {
+      address: hex4(address),
+      ...(byte === undefined
+        ? { unmapped: true, note: "No layer in this view supplies this address." }
+        : { byte: hex2(byte) }),
+      screen:
+        cell === undefined
+          ? undefined
+          : {
+              row: cell.row,
+              column: cell.column,
+              cell: cell.cell,
+              colourRam: hex4(cell.colourRam),
+            },
+      sprite:
+        sprite === undefined
+          ? undefined
+          : {
+              pointer: hex2(sprite.pointer),
+              offset: sprite.offset,
+              // Only offset zero is a sprite's start. Anything else is the
+              // middle of a picture, which is worth saying rather than leaving
+              // a caller to notice the number is not zero.
+              startsHere: sprite.offset === 0,
+            },
+      assumed: {
+        screenBase: hex4(base),
+        vicBank: hex4(vicBank),
+        note:
+          "Both are runtime state — $D018 and $DD00 — not facts about the project. " +
+          "Pass screenBase or bank if this program moved them.",
+      },
+    };
+  }
+
+  /**
+   * The span a claim covers, for a read that wants to be pointed at one.
+   *
+   * A named claim already holds where it starts, how far it runs and how to
+   * draw it — which is exactly what `render` and `export_listing` ask for in
+   * three arguments. Without this a name is a display string rather than a
+   * handle: you name a sprite, and then still look its address up to draw it.
+   *
+   * An id nothing holds is an error, never a fallback, like every other id on
+   * this surface. A claim with no extent is refused separately and by name,
+   * because "this claim has no span" and "there is no such claim" lead
+   * somewhere completely different.
+   */
+  private spanOf(claim: string): { at: number; extent: number; view?: string; name?: string } {
+    const found = this.program().loaded.claims.find((c) => c.id === claim);
+    if (!found) {
+      throw new Error(`No claim ${claim}. claims_at and list_claims give ids.`);
+    }
+    if (found.extent === undefined) {
+      throw new Error(
+        `Claim ${claim}${found.name ? ` (${found.name})` : ""} covers a single address, ` +
+          `not a span. Give it an extent with edit_claim, or pass start and length.`
+      );
+    }
+    // `view` belongs to the interpretation — a claim says what the bytes *are*
+    // and, for the two kinds that can be looked at, how to read them.
+    const says = found.says;
+    const view =
+      says && (says.is === "bitmap" || says.is === "text") ? says.view : undefined;
+
+    return {
+      at: found.at,
+      extent: found.extent,
+      ...(view === undefined ? {} : { view }),
+      ...(found.name === undefined ? {} : { name: found.name }),
+    };
+  }
+
+  /**
+   * Play a captured SID log, and hand back a recording.
+   *
+   * The last mile experiment 9 asked for by name. `capture: sid` was already
+   * the right primitive — the editor said so — but there was no path from a
+   * write log to something anyone could listen to, so it wrote its own
+   * synthesiser from its reading of the game's *stream format* and got every
+   * note the same length, wrong by a factor of seven. The log it needed was
+   * already captured and already downloaded; what was missing was this.
+   *
+   * So the durations here are not modelled, they are transcribed: gate on to
+   * gate off, at the cycle each write actually happened. `approximated` says
+   * what is not — the waveform shape, the envelope curve, and the filter, which
+   * is not modelled at all.
+   */
+  playSid(capture: string, seconds?: number): Record<string, unknown> {
+    const captures = this.program().loaded.project.captures ?? [];
+    const found = captures.find((c) => c.id === capture);
+    if (!found) throw new Error(`No capture ${capture}. list_scenarios shows them.`);
+    if (found.kind !== "sid") {
+      throw new Error(
+        `Capture ${capture} is ${found.kind}, not sid. Only a sound-chip log can be played.`
+      );
+    }
+
+    const storage = this.room.storage;
+    if (!(storage instanceof SqliteStorage)) {
+      throw new Error("Playing needs a database; this server holds one file.");
+    }
+    const bytes = storage.blob(found.file);
+    if (!bytes) throw new Error(`The bytes of ${found.file} are not in this database.`);
+
+    const writes = JSON.parse(new TextDecoder().decode(bytes)) as SidWrite[];
+    const audio = renderSid(writes, seconds === undefined ? {} : { seconds });
+    const name = `render/${capture}${seconds === undefined ? "" : `-${seconds}s`}.wav`;
+    const hash = storage.putBlob(name, encodeWav(audio.samples, audio.sampleRate));
+
+    return {
+      capture,
+      from: found.file,
+      writes: writes.length,
+      notes: audio.gated,
+      seconds: Number(audio.duration.toFixed(2)),
+      sampleRate: audio.sampleRate,
+      url: this.blobUrl(name),
+      hash,
+      exact: "when each note starts and stops, and its pitch — both read from the log",
+      approximated: audio.approximated,
+    };
+  }
+
+  /**
+   * Draw a span, and hand back a picture.
+   *
+   * **A read.** It writes nothing to the document, and that is the point: to
+   * find out whether a span is a font or a sprite sheet you previously had to
+   * add a claim, read the listing, then remove the claim and hunt down the
+   * comments it made — which reader one in experiment 9 did, and counted the
+   * calls. A person gets this loop for free in the explorer: point at an
+   * address, slide the width, stop when a picture appears. Nothing offered it
+   * to anyone else.
+   *
+   * **Two layouts of the same decode**, because they answer different
+   * questions. `grid` is a contact sheet — every cell at once, which is how you
+   * compare them and how experiment 9's editor found the camel walk cycle, the
+   * signature, the payphone, the Pac-Man ghosts and the peace symbol in one
+   * plate of 112 blocks. `frames` is the same cells as an animation, which is
+   * how you see a walk cycle *move*. Neither replaces the other: a sheet is
+   * evidence, an animation is the effect.
+   *
+   * The PNG goes through `putBlob` and comes back as a URL, for the reason a
+   * capture does — an image inline is tens of thousands of tokens for something
+   * the caller hands to an image viewer anyway. It is stored without a
+   * `file.add`, so a preview costs the document nothing; the blob store is
+   * content-addressed, so drawing the same span twice keeps one copy.
+   */
+  render(request: {
+    start?: number;
+    length?: number;
+    view?: string;
+    claim?: string;
+    as?: "grid" | "frames";
+    delayMs?: number;
+  }): Record<string, unknown> {
+    const as = request.as ?? "grid";
+    const delayMs = request.delayMs ?? 120;
+
+    // Either a claim or a span, and saying both is a fact about the request
+    // rather than a judgement about the result — so it is one of the few things
+    // a read here refuses.
+    if (request.claim !== undefined && request.start !== undefined) {
+      throw new Error("Give either a claim or a start, not both.");
+    }
+
+    let start: number;
+    let length: number;
+    let view: string;
+    let named: string | undefined;
+
+    if (request.claim !== undefined) {
+      const span = this.spanOf(request.claim);
+      start = span.at;
+      length = span.extent;
+      named = span.name;
+      // The claim's own view unless the caller overrides it, which is the case
+      // worth having: hires and multicolour is a per-sprite bit the program
+      // sets at run time and is not in the data, so trying the other one must
+      // not mean editing the claim first.
+      const chosen = request.view ?? span.view;
+      if (chosen === undefined) {
+        throw new Error(
+          `Claim ${request.claim}${named ? ` (${named})` : ""} says nothing about how to ` +
+            `draw it. Pass a view, or give the claim one with edit_claim.`
+        );
+      }
+      view = chosen;
+    } else {
+      if (request.start === undefined || request.length === undefined || request.view === undefined) {
+        throw new Error("Give a claim, or a start, a length and a view.");
+      }
+      start = request.start;
+      length = request.length;
+      view = request.view;
+    }
+
+    const options = parseBitmapView(view);
+    if (!options) {
+      throw new Error(
+        `${view} is not a view this can draw. Use bits:<bytes-per-row>, char:<columns>, ` +
+          `sprite:<columns> or sprite-multi:<columns>.`
+      );
+    }
+
+    const bytes = this.program().loaded.map.readBytes(start, length);
+    const supplied = bytes.filter((byte) => byte !== undefined).length;
+    const format = options.format ?? "bits";
+    const cells = format === "bits" ? 1 : cellCount(format, length);
+    if (cells === 0) {
+      throw new Error(
+        `${length} bytes is not enough for one ${format}; it needs at least ` +
+          `${format === "char" ? 8 : 63}.`
+      );
+    }
+
+    const name = `render/${this.room.target ?? "default"}-${hex4(start)}-${length}-${view.replace(/:/g, "-")}-${as}.png`;
+    const storage = this.room.storage;
+    if (!(storage instanceof SqliteStorage)) {
+      throw new Error("Drawing needs a database; this server holds one file.");
+    }
+
+    let picture: Bitmap;
+    let png: Uint8Array;
+    if (as === "frames" && format !== "bits") {
+      // One cell per frame, each decoded on its own so the animation is the
+      // cells in order rather than a sheet that happens to move.
+      const pitch = bytesPerCell(options);
+      const frames = Array.from({ length: cells }, (_unused, index) =>
+        decodeBitmap(bytes.slice(index * pitch, index * pitch + pitch), {
+          ...options,
+          columns: 1,
+        })
+      );
+      picture = frames[0];
+      png = encodeApng(frames, delayMs);
+    } else {
+      picture = decodeBitmap(bytes, options);
+      png = encodePng(picture);
+    }
+
+    const hash = storage.putBlob(name, png);
+
+    // Text art only while it is small enough to be worth the tokens. A contact
+    // sheet of a hundred sprites as shaded characters is a hundred thousand
+    // characters of output nobody reads, and the URL is the answer for that
+    // case — said rather than silently omitted.
+    const drawable = picture.width * picture.height <= 24 * 21 * 4;
+
+    return {
+      from: hex4(start),
+      bytes: length,
+      view,
+      as,
+      cells,
+      width: picture.width,
+      height: picture.height,
+      ...(as === "frames" ? { frames: cells, delayMs } : {}),
+      url: this.blobUrl(name),
+      hash,
+      ...(request.claim === undefined ? {} : { claim: request.claim }),
+      ...(named === undefined ? {} : { name: named }),
+      target: this.room.target ?? "default",
+      ...(supplied < length
+        ? { unmapped: length - supplied, note: "Bytes no layer supplies were drawn as zero." }
+        : {}),
+      ...(drawable
+        ? { picture: bitmapToText(picture) }
+        : {
+            note2:
+              "Too big to draw as text; fetch the url. " +
+              "A sheet this size is meant to be looked at rather than read.",
+          }),
+    };
   }
 
   /**
@@ -2481,7 +3169,7 @@ export class Workspace {
     // A positional array is what the first batch reader got, and it silently
     // destroyed three unrelated claims: one entry produced no `claim.add` — a
     // name that revised an existing claim rather than adding one — so every id
-    // after it lined up with the wrong input, and six `set_claim` calls landed
+    // after it lined up with the wrong input, and six `claim.set` calls landed
     // on claims the reader had never looked at. Every call returned `ok`.
     //
     // An index cannot be checked and an address can, which is the whole of why
@@ -2533,12 +3221,29 @@ export class Workspace {
       // A caller changing only how to *read* the bytes — an encoding, a decoder
       // — means to change that and not to un-say what the bytes are, so the
       // parts it did not mention come from what is already there. Without this,
-      // `set_claim view:` turned a text span back into a hex dump and clearing
+      // `edit_claim view:` turned a text span back into a hex dump and clearing
       // the view did not bring it back.
-      const edit: ClaimEdit =
+      const merged: ClaimEdit =
         fields.says && fields.says !== null && held.says && !("is" in (fields.says as object))
           ? { ...fields, says: { ...held.says, ...fields.says } as Claim["says"] }
           : fields;
+
+      // **`at` is absolute here, as it is in every tool, and is converted.**
+      // A claim is stored relative to the layer that supplies its bytes, so a
+      // raw absolute address written straight into the field would be read back
+      // as a layer *offset* and put the claim somewhere nobody chose. That is
+      // why there was no way to move one at all: rather than get it wrong, the
+      // field was simply not offered, and repositioning meant remove-and-re-add
+      // — which loses the id, and dangles every primary and every use bound to
+      // it.
+      //
+      // `placed` writes the position and the frame together, which is the same
+      // pair `add_claim` computes. Moving a claim can therefore move it between
+      // layers, and the answer reports the scope it ended up in.
+      const edit: ClaimEdit =
+        merged.at === undefined || merged.at === null
+          ? merged
+          : { ...merged, ...placed(loaded, merged.at) };
 
       return [{ op: "claim.set", id, fields: edit }];
     });
@@ -2559,6 +3264,24 @@ export class Workspace {
 
   addClaim(caller: Caller, claim: ClaimInput): EditResult {
     this.checkClaim(claim);
+
+    // Worked out before the edit, because afterwards the enclosing claim is no
+    // longer the one that was there first. Declaring 32 bytes of a 512-byte
+    // span *nests* — the outer claim is untouched and still explains the bytes
+    // either side — and "I declared 32 bytes and a 512-byte claim is still
+    // there" is exactly the kind of thing a caller should not have to discover
+    // by reading the map afterwards.
+    const enclosing =
+      claim.extent === undefined
+        ? undefined
+        : this.program().loaded.map.getRegionAt(claim.at);
+    const enclosingSpan = enclosing ? claimSpan(enclosing) : undefined;
+    const nests =
+      claim.extent !== undefined &&
+      enclosingSpan !== undefined &&
+      enclosingSpan.start <= claim.at &&
+      claim.at + claim.extent < enclosingSpan.end;
+
     const made: { at: string; claim: string }[] = [];
     const result = this.edit(
       caller,
@@ -2585,6 +3308,15 @@ export class Workspace {
               `(${claim.extent} bytes)`,
           }
         : {}),
+      ...(nests && enclosing && enclosingSpan
+        ? {
+            nestedInside:
+              `${enclosing.name ?? enclosing.says?.is ?? "code"} ` +
+              `(${hex4(enclosingSpan.start)}-${hex4(enclosingSpan.end - 1)}), which is ` +
+              `unchanged and still explains the bytes either side. To shrink it ` +
+              `instead, remove_claim ${enclosing.id} first.`,
+          }
+        : {}),
     };
   }
 
@@ -2592,6 +3324,25 @@ export class Workspace {
    * What a claim must say to be worth storing, checked before any of it is
    * written — so a batch can decline one entry and keep the rest.
    */
+  /**
+   * The record an id names, or a refusal that says what to call to find one.
+   *
+   * **An unknown id is not found. It never creates.** A write that creates on
+   * an unrecognised id is an upsert wearing a different spelling, and it is
+   * what made `set_decoder` and `set_constant` fail the offline/online test:
+   * the same call did two different things depending on what had reached you.
+   */
+  private mustHold<T extends { id?: string }>(
+    held: readonly T[],
+    id: string,
+    noun: string,
+    lister: string
+  ): T {
+    const found = held.find((x) => x.id === id);
+    if (!found) throw new Error(`No ${noun} ${id}. ${lister} shows what this project has.`);
+    return found;
+  }
+
   private checkClaim(claim: ClaimInput): void {
     if (claim.name === undefined && claim.is === undefined && claim.root === undefined) {
       throw new Error(
@@ -2616,7 +3367,7 @@ export class Workspace {
     if (claim.is !== undefined) {
       // Target-independent: this checks the span's shape and that a named
       // decoder exists, and a decoder is project-level.
-      this.checkedRegion(claim.at, claim.at + (claim.extent ?? 1), KIND_FOR_IS[claim.is], claim.view);
+      this.checkedRegion(claim.at, claim.at + (claim.extent ?? 1), claim.is, claim.view);
     }
   }
 
@@ -2661,6 +3412,7 @@ export class Workspace {
               : { is: claim.is };
 
     const { ops } = claimAddOps(loaded, claim.at, {
+      ...(claim.method === undefined ? {} : { method: claim.method }),
       ...(claim.name === undefined ? {} : { name: claim.name }),
       ...(says === undefined ? {} : { says }),
       // An interpretation is surfaced whether or not anything reaches it, which
@@ -2739,6 +3491,11 @@ export class Workspace {
           : {}),
         ...(c.says?.is === "record" ? { typeId: c.says.typeId } : {}),
         ...(c.root !== undefined ? { root: c.root } : {}),
+        // **How the author knows.** Reported because two claims agreeing is
+        // only evidence when the methods differ — a reader looking at several
+        // claims here has to be able to tell corroboration from one account
+        // arriving twice. See invariant E10.
+        ...(c.by.method !== undefined ? { method: c.by.method } : {}),
         // The read that verifies the write can see what the write chose. It is
         // not something the caller picks, but it decides whether the claim
         // follows its bytes when a layer is relinked.
@@ -2761,7 +3518,7 @@ export class Workspace {
    */
   disagreements(): { total: number; findings: { kind: string; what: string }[] } {
     const set = new ClaimSet(this.program().loaded.claims);
-    const found = disagreements(set);
+    const found = disagreements(set, this.program().loaded.project.evidence ?? []);
     return {
       total: found.length,
       findings: found.map((d) => ({ kind: d.kind, what: describeDisagreement(d) })),
@@ -2782,7 +3539,7 @@ export class Workspace {
     const result = this.edit(caller, (loaded) => {
       const built = claimAddOps(loaded, address, {
         name,
-        ...(type && ROOT_FOR_LABEL_TYPE[type] ? { root: ROOT_FOR_LABEL_TYPE[type] } : {}),
+        ...(type && ROOT_FOR_TYPE[type] ? { root: ROOT_FOR_TYPE[type] } : {}),
         ...(extent === undefined ? {} : { extent }),
       });
       if (built.addedBeside) beside = [{ address, from: built.addedBeside }];
@@ -2809,179 +3566,36 @@ export class Workspace {
   }
 
   /**
-   * Correct a label's name, by the only thing that identifies it.
+   * Choose which of several names at an address renders, by claim id.
    *
-   * The gap that made every address-keyed write destructive: renaming could only
-   * be done through `add_label`, which is keyed by address — and an address
-   * cannot identify a label, since several can share one. That is this project's
-   * first identity rule, stated for labels, and labels were the one object it
-   * had never been applied to. Comments got `edit_comment` after experiment 3;
-   * this is the same tool, three experiments later.
+   * It took a *name*, which is the thing this whole surface stopped keying
+   * writes on: two claims at one address may share a name — the reference file
+   * has ten such pairs — so the same call chose different claims depending on
+   * which arrived first.
    */
-  renameLabel(
-    caller: Caller,
-    id: string,
-    name: string,
-    type?: LabelType,
-    extent?: number
-  ): EditResult {
-    return this.edit(caller, (loaded) => [renameLabelOp(loaded, id, name, type, extent)]);
-  }
-
-  /**
-   * Name several addresses as one action.
-   *
-   * The reference disassembly has hundreds of labels, and one call each is
-   * hundreds of round trips returning an instruction delta nobody asked for.
-   * One action means one changeset, so undo takes the batch back whole.
-   *
-   * At most one symbols layer is created however many unowned addresses are in
-   * the batch: the per-address helper is asked once, and later addresses reuse
-   * what the first one made — otherwise naming forty zero-page variables would
-   * build forty layers.
-   */
-  addLabels(
-    caller: Caller,
-    labels: readonly {
-      address: number;
-      name: string;
-      type?: LabelType;
-      comment?: string;
-      extent?: number;
-    }[]
-  ): EditResult {
-    if (labels.length === 0) throw new Error("Give at least one label.");
-
-    let beside: { address: number; from: string }[] = [];
-    const result = this.edit(caller, (loaded) => {
-      beside = this.chosenNamesAt(
-        loaded,
-        labels.map((l) => l.address)
-      ).filter((r) => !labels.some((l) => l.address === r.address && l.name === r.from));
-      const ops: Op[] = [];
-      let madeLayer: string | undefined;
-
-      for (const entry of labels) {
-        // No layer at all for the name: a claim names an address whether or not
-        // anything supplies its bytes, which is what the symbols layer existed
-        // to fake.
-        ops.push(
-          ...claimAddOps(loaded, entry.address, {
-            name: entry.name,
-            ...(entry.type && ROOT_FOR_LABEL_TYPE[entry.type]
-              ? { root: ROOT_FOR_LABEL_TYPE[entry.type] }
-              : {}),
-            ...(entry.extent === undefined ? {} : { extent: entry.extent }),
-          }).ops
-        );
-
-        // A comment still needs one, so it is created here and only here.
-        if (entry.comment) {
-          const owning = ensureOwningLayer(loaded, entry.address, this.room.projectId);
-          if (owning.create && owning.layerId !== madeLayer) {
-            ops.push(owning.create);
-            madeLayer = owning.layerId;
-          }
-          ops.push(commentAddOp(loaded, entry.address, "before", entry.comment));
-        }
-      }
-
-      return ops;
-    });
-
-    return this.warnIfAddedBesideAChosenName(result, beside);
-  }
-
-  /**
-   * Declare several regions as one action.
-   *
-   * The last write with no batch form, and the most used of all of them: three
-   * readers on one project spent 129 of their 648 calls on `set_region`, one
-   * round trip each, while every other write had taken a list for months.
-   *
-   * Same contract as the others: apply what you can, report what you declined,
-   * fail only when nothing was applicable. Losing forty regions to one typo is
-   * the opposite of why a batch exists.
-   */
-  setRegions(
-    caller: Caller,
-    regions: readonly {
-      start: number;
-      end: number;
-      kind: LegacyRegionKind;
-      name?: string;
-      comment?: string;
-      encoding?: TextEncoding;
-      view?: string;
-      id?: string;
-    }[]
-  ): EditResult {
-    if (regions.length === 0) throw new Error("Give at least one region.");
-
-    // `address` rather than `start`, so every batch tool's rejection list has
-    // one shape — the contract is the point of having one.
-    const rejected: { address: string; reason: string }[] = [];
-    const usable: { entry: (typeof regions)[number]; view?: string }[] = [];
-    for (const entry of regions) {
-      try {
-        usable.push({
-          entry,
-          view: this.checkedRegion(entry.start, entry.end, entry.kind, entry.view),
-        });
-      } catch (err) {
-        rejected.push({
-          address: hex4(entry.start),
-          reason: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
-
-    if (usable.length === 0) {
-      throw new Error(
-        `None of the ${regions.length} regions could be written. ` +
-          rejected.map((r) => `${r.address}: ${r.reason}`).join(" ")
-      );
-    }
-
-    const span = {
-      start: Math.min(...usable.map((u) => u.entry.start)),
-      end: Math.max(...usable.map((u) => u.entry.end)),
-    };
-    const result = this.edit(
-      caller,
-      (loaded) =>
-        usable.map(({ entry, view }) =>
-          regionSetOp(
-            loaded,
-            entry.start,
-            entry.end,
-            entry.kind,
-            entry.name,
-            entry.comment,
-            entry.encoding,
-            view,
-            entry.id
-          )
-        ),
-      span
-    );
-
-    return {
-      ...result,
-      ...(rejected.length ? { rejected } : {}),
-    };
-  }
-
-  /** Choose which of several names at an address is shown by default. */
-  setPrimaryLabel(caller: Caller, address: number, name: string): EditResult {
+  bindPrimaryName(caller: Caller, address: number, claimId: string): EditResult {
     return this.edit(caller, (loaded) => {
-      const found = loaded.map
-        .getLabels()
-        .getLabelsAt(address)
-        .find((l) => l.name === name);
-      if (!found) throw new Error(`${hex4(address)} has no label called ${name}.`);
-      return [{ op: "primary.set", address, labelId: found.id }];
+      const here = loaded.map.getLabels().getLabelsAt(address);
+      const found = here.find((l) => l.id === claimId);
+      if (!found) {
+        throw new Error(
+          `No claim ${claimId} at ${hex4(address)}. claims_at reports every claim ` +
+            `covering an address, with ids.`
+        );
+      }
+      return [{ op: "primary.bind", address, labelId: found.id }];
     });
+  }
+
+  /**
+   * Stop choosing, and fall back to rank.
+   *
+   * There was no way to do this: a primary could be set and never taken off,
+   * which is the `null`-clears gap arriving one level up. Unbinding a key is
+   * half of what a binding is.
+   */
+  unbindPrimaryName(caller: Caller, address: number): EditResult {
+    return this.edit(caller, () => [{ op: "primary.unbind", address }]);
   }
 
   /**
@@ -3024,7 +3638,7 @@ export class Workspace {
       return sites.map((site) => {
         const layerId = owningLayerId(loaded, site.address);
         return {
-          op: "label.bind",
+          op: "labelUse.bind",
           id: newId("lbl"),
           layerId,
           address: site.address,
@@ -3040,7 +3654,7 @@ export class Workspace {
       const layer = loaded.project.layers.find((l) => l.id === layerId);
       const use = layer?.labelUses?.find((u) => parseProjectAddress(u.address) === address);
       if (!use?.id) throw new Error(`No label is bound at ${hex4(address)}.`);
-      return [{ op: "label.unbind", id: use.id, layerId }];
+      return [{ op: "labelUse.unbind", id: use.id, layerId }];
     });
   }
 
@@ -3056,12 +3670,31 @@ export class Workspace {
    * construction. A declared constant nobody used does not appear, which is
    * why this is a listing and the `.re64` is the export that round-trips.
    */
-  listing(start?: number, lines?: number, end?: number): {
+  listing(
+    start?: number,
+    lines?: number,
+    end?: number,
+    claim?: string
+  ): {
     start: string;
     text: string;
     truncated: boolean;
     nextStart?: string;
+    claim?: string;
+    name?: string;
   } {
+    // A claim is a span with a name on it, which is what "list this thing" has
+    // always meant — so pointing this at one costs nothing and stops a name
+    // being a display string you then have to look the address up from.
+    let named: string | undefined;
+    if (claim !== undefined) {
+      if (start !== undefined) throw new Error("Give either a claim or a start, not both.");
+      const span = this.spanOf(claim);
+      start = span.at;
+      end = span.at + span.extent - 1;
+      lines = undefined;
+      named = span.name;
+    }
     const { rows } = this.rows();
     // The row *containing* the address, not the first one past it. A data row
     // covers eight bytes, so asking for $808C used to skip to $8090 and leave
@@ -3098,6 +3731,8 @@ export class Workspace {
       text,
       truncated: after !== undefined,
       ...(after ? { nextStart: hex4(after.address) } : {}),
+      ...(claim === undefined ? {} : { claim }),
+      ...(named === undefined ? {} : { name: named }),
     };
   }
 
@@ -3135,7 +3770,7 @@ export class Workspace {
     // agents collided over it in experiment 3; a write whose result cannot be
     // named again is a write the caller has to go looking for.
     const id = newId("cst");
-    const result = this.edit(caller, () => [{ op: "constant.set", id, name, value }]);
+    const result = this.edit(caller, () => [{ op: "constant.add", id, name, value }]);
     return { ...result, constant: id };
   }
 
@@ -3144,15 +3779,24 @@ export class Workspace {
     if (value !== undefined && (value < 0 || value > 0xff)) {
       throw new Error(`A constant names a byte, so its value must be $00-$FF; got ${value}.`);
     }
+    if (name === undefined && value === undefined) {
+      throw new Error("Give at least one field to change: name, value.");
+    }
     return this.edit(caller, (loaded) => {
-      const existing = loaded.constants.byId(id);
-      if (!existing) throw new Error(`No constant with id ${id}.`);
+      // Not found, never created — see `mustHold`.
+      if (!loaded.constants.byId(id)) {
+        throw new Error(`No constant ${id}. list_constants shows what this project has.`);
+      }
+      // Only what was named. Resending the other field is how an edit reasserts
+      // a value a collaborator had just corrected.
       return [
         {
           op: "constant.set",
           id,
-          name: name ?? existing.name,
-          value: value ?? existing.value,
+          fields: {
+            ...(name === undefined ? {} : { name }),
+            ...(value === undefined ? {} : { value }),
+          },
         },
       ];
     });
@@ -3181,38 +3825,41 @@ export class Workspace {
     );
   }
 
-  removeConstant(caller: Caller, nameOrId: string): EditResult {
+  /**
+   * Forget a declared constant, by id.
+   *
+   * It took a name too, resolved when exactly one constant held it. That is a
+   * write keyed on something that is not an identity, and "exactly one" is a
+   * property of *what you have synced*: a name that reaches one constant for
+   * you reaches two for a peer who has seen somebody else's declaration, so the
+   * same call does different things depending on what arrived. Reads may still
+   * resolve a name; writes name the thing they change.
+   */
+  removeConstant(caller: Caller, id: string): EditResult {
     return this.edit(caller, (loaded) => {
-      const existing = this.resolveConstant(loaded, nameOrId);
+      if (!loaded.constants.byId(id)) {
+        throw new Error(`No constant ${id}. list_constants shows what this project has.`);
+      }
+      const existing = { id };
       // Sites bound to it are left alone: a use pointing at nothing renders the
       // literal, so deleting needs no sweep and a delete racing a bind heals.
-      return [{ op: "constant.delete", id: existing.id }];
+      return [{ op: "constant.remove", id: existing.id }];
     });
   }
 
+
+
   /**
-   * Which declared constant a bind means, given the value the operand loads.
+   * Say that the immediate at this address means a constant, by id.
+   *
+   * It took a name, resolved against the operand's value on the reasoning that
+   * two constants sharing a name necessarily differ in value. Clever, and still
+   * a write keyed on something that is not an identity: which constants exist
+   * under a name is a property of what you have synced, so the same call bound
+   * different things for two peers. Names resolve on reads; writes name what
+   * they change.
    */
-  private bindTarget(loaded: LoadedProject, nameOrId: string, loads: number) {
-    const byId = loaded.constants.byId(nameOrId);
-    if (byId) return byId;
-
-    const held = loaded.constants.allByName(nameOrId);
-    if (held.length === 0) {
-      throw new Error(`No constant called ${nameOrId}. Declare it first with add_constant.`);
-    }
-    const matching = held.filter((c) => c.value === loads);
-    if (matching.length === 1) return matching[0];
-    if (matching.length === 0) return held[0];
-    throw new Error(
-      `${matching.length} constants are called ${nameOrId} with the same value: ` +
-        matching.map((c) => c.id).join(", ") +
-        `. Say which by id.`
-    );
-  }
-
-  /** Say that the immediate at this address means a constant. */
-  bindConstant(caller: Caller, address: number, name: string): EditResult {
+  bindConstant(caller: Caller, address: number, constantId: string): EditResult {
     return this.edit(caller, (loaded) => {
       const instruction = this.program().instructions.get(address);
       if (!instruction) {
@@ -3224,22 +3871,20 @@ export class Workspace {
         );
       }
 
-      // Resolved against the operand, which disambiguates for free: two
-      // constants sharing a name necessarily differ in value, and only one of
-      // them can be what this instruction loads. So `bind_constant $8100 WHITE`
-      // keeps working even where `WHITE` is held twice, and an id is needed only
-      // when two constants share a name *and* a value — which hygiene reports as
-      // duplication rather than ambiguity.
-      const constant = this.bindTarget(loaded, name, instruction.operand.value);
-      // Still checked: `bindTarget` falls back to the first constant of that
-      // name when none matches the operand, so this is what turns "you meant a
-      // different one" into a message rather than a silent wrong binding.
+      const constant = loaded.constants.byId(constantId);
+      if (!constant) {
+        throw new Error(
+          `No constant ${constantId}. list_constants shows what this project has, with ids.`
+        );
+      }
+      // The one check worth keeping: binding a site to a constant it does not
+      // load is a wrong answer that renders as a right one.
       if (instruction.operand.value !== constant.value) {
         throw new Error(
           `${hex4(address)} loads $${instruction.operand.value
             .toString(16)
             .toUpperCase()
-            .padStart(2, "0")}, but ${name} is $${constant.value
+            .padStart(2, "0")}, but ${constant.name} is $${constant.value
             .toString(16)
             .toUpperCase()
             .padStart(2, "0")}.`
@@ -3249,7 +3894,7 @@ export class Workspace {
       const { layerId, create } = ensureOwningLayer(loaded, address, this.room.projectId);
       return [
         ...(create ? [create] : []),
-        { op: "constant.bind", id: newId("cst"), layerId, address, constantId: constant.id },
+        { op: "constantUse.bind", id: newId("cst"), layerId, address, constantId: constant.id },
       ];
     });
   }
@@ -3264,7 +3909,7 @@ export class Workspace {
    */
   bindConstants(
     caller: Caller,
-    bindings: readonly { address: number; name: string }[]
+    bindings: readonly { address: number; constant: string }[]
   ): EditResult {
     if (bindings.length === 0) throw new Error("Give at least one binding.");
 
@@ -3283,9 +3928,9 @@ export class Workspace {
         const reject = (reason: string) =>
           rejected.push({ address: hex4(entry.address), reason });
 
-        const constant = loaded.constants.byName(entry.name);
+        const constant = loaded.constants.byId(entry.constant);
         if (!constant) {
-          reject(`No constant called ${entry.name}. Declare it first.`);
+          reject(`No constant ${entry.constant}. list_constants shows the ids.`);
           continue;
         }
 
@@ -3295,12 +3940,12 @@ export class Workspace {
           continue;
         }
         if (instruction.operand.value !== constant.value) {
-          reject(`Loads a different value from ${entry.name}.`);
+          reject(`Loads a different value from ${constant.name}.`);
           continue;
         }
 
         ops.push({
-          op: "constant.bind",
+          op: "constantUse.bind",
           id: newId("cst"),
           layerId: owningLayerId(loaded, entry.address),
           address: entry.address,
@@ -3343,7 +3988,7 @@ export class Workspace {
         (u) => parseProjectAddress(u.address) === address
       );
       if (!use?.id) throw new Error(`No constant is bound at ${hex4(address)}.`);
-      return [{ op: "constant.unbind", id: use.id, layerId }];
+      return [{ op: "constantUse.unbind", id: use.id, layerId }];
     });
   }
 
@@ -3605,7 +4250,7 @@ export class Workspace {
       `Added ${beside.length} name(s) beside one somebody had chosen: ${list}` +
         (beside.length > 6 ? `, and ${beside.length - 6} more` : "") +
         `. Both names are kept and the older one still renders. To correct a name ` +
-        `rather than add to it, use set_claim with its id; changes_since says ` +
+        `rather than add to it, use edit_claim with its id; changes_since says ` +
         `who chose the first.`,
     ];
     return result;
@@ -3662,7 +4307,7 @@ export class Workspace {
 
     const result = this.edit(caller, (loaded) => {
       const { layerId, create } = ensureOwningLayer(loaded, address, this.room.projectId);
-      const add: Op = { op: "comment.set", id: comment, layerId, address, placement, text };
+      const add: Op = { op: "comment.add", id: comment, layerId, address, placement, text };
       return create ? [create, add] : [add];
     });
 
@@ -3791,7 +4436,7 @@ export class Workspace {
         const placement = entry.placement ?? "before";
         if (madeLayer !== undefined && !ownsAddress(loaded, entry.address)) {
           ops.push({
-            op: "comment.set",
+            op: "comment.add",
             id: newId("cmt"),
             layerId: madeLayer,
             address: entry.address,
@@ -3806,7 +4451,7 @@ export class Workspace {
           ops.push(owning.create);
           madeLayer = owning.layerId;
           ops.push({
-            op: "comment.set",
+            op: "comment.add",
             id: newId("cmt"),
             layerId: owning.layerId,
             address: entry.address,
@@ -3843,7 +4488,7 @@ export class Workspace {
     // matched would be the obvious way to get back the behaviour just removed.
     return this.edit(caller, () =>
       constants.map((entry) => ({
-        op: "constant.set",
+        op: "constant.add" as const,
         id: newId("cst"),
         name: entry.name,
         value: entry.value,
@@ -3863,71 +4508,14 @@ export class Workspace {
     return this.edit(caller, (loaded) => {
       for (const layer of loaded.project.layers) {
         if (layer.id && layer.comments?.some((c) => c.id === id)) {
-          return [{ op: "comment.delete", id, layerId: layer.id } as Op];
+          return [{ op: "comment.remove", id, layerId: layer.id } as Op];
         }
       }
       throw new Error(`No comment ${id}. list_comments shows what this project has.`);
     });
   }
 
-  /**
-   * Remove a label, by id or by an address that names exactly one.
-   *
-   * An address does not identify a label — several share one — so this used to
-   * take the first the owning layer listed and delete it silently, leaving the
-   * other unreachable because nothing handed out ids. Both builders in
-   * experiment 5 lost a label that way and ended with an orphan they could not
-   * delete.
-   *
-   * An address still works where it is unambiguous, because that is the common
-   * case and a caller reading a listing sees an address rather than an id. Where
-   * it is not, the refusal names the candidates — which is also how a caller
-   * learns the ids it should have passed, exactly as `remove_region` does.
-   */
-  removeLabel(caller: Caller, target: number | string): EditResult {
-    if (typeof target === "string") {
-      return this.edit(caller, (loaded) => {
-        const op = labelDeleteByIdOp(loaded, target);
-        if (!op) throw new Error(`No claim ${target}. list_claims shows what this project has.`);
-        return [op];
-      });
-    }
 
-    const address = target;
-    return this.edit(caller, (loaded) => {
-      // Claims, not layer labels: a claim has no owning layer to look it up in,
-      // and asking for one threw on every address outside the loaded bytes.
-      const here = loaded.claims.filter(
-        (c) => c.at === address && c.name !== undefined && c.says === undefined
-      );
-      if (here.length > 1) {
-        throw new Error(
-          `${hex4(address)} carries ${here.length} labels — ` +
-            here.map((c) => `${c.name} (${c.id})`).join(", ") +
-            `. Give the id of the one to remove.`
-        );
-      }
-
-      const op = labelDeleteOp(loaded, address);
-      if (op) return [op];
-
-      // "No label here" contradicts a listing that plainly shows one. Say
-      // where the name actually comes from, since that is the fact the caller
-      // is missing — a layer's own entry point or the built-in C64 table
-      // belongs to nothing this project can edit.
-      const showing = loaded.map.getLabels().getLabelsAt(address);
-      if (showing.length > 0) {
-        const sources = [...new Set(showing.map((l) => l.by.source))].join(", ");
-        throw new Error(
-          `${hex4(address)} is named ${showing.map((l) => l.name).join(", ")}, ` +
-            `but that comes from ${sources} rather than from this project, so ` +
-            `there is nothing here to remove. Use set_label to give it a name ` +
-            `of your own.`
-        );
-      }
-      throw new Error(`This project has no label at ${hex4(address)}`);
-    });
-  }
 
   /**
    * Declare an address a subroutine, optionally saying how far it runs.
@@ -3977,7 +4565,7 @@ export class Workspace {
   private checkedRegion(
     start: number,
     end: number,
-    kind: LegacyRegionKind,
+    kind: Interpretation["is"],
     view?: string
   ): string | undefined {
     if (end <= start) {
@@ -4022,7 +4610,7 @@ export class Workspace {
       if (!known.some((d) => d.id === snippet)) {
         throw new Error(
           `No decoder ${snippet} in this project. list_decoders shows what it has, ` +
-            `and set_decoder adds one.`
+            `and add_decoder adds one.`
         );
       }
     } else if (viewOrCleared !== undefined && !isBitmapView(viewOrCleared)) {
@@ -4046,115 +4634,7 @@ export class Workspace {
     return viewOrCleared;
   }
 
-  /**
-   * Declare what a span holds.
-   *
-   * `end` is exclusive, and a caller that reads it as inclusive gets a region
-   * one byte short. That is silent for most kinds and fatal for a jumptable,
-   * where every entry is two bytes: `$8000-$8001` is one byte, contains no
-   * address, decodes nothing, and returns ok. On a project with nothing else
-   * reachable that is the difference between the whole program and five
-   * instructions.
-   *
-   * So the span it actually took is reported back, and an odd-length jumptable
-   * is refused. Odd rather than merely too-short, because the off-by-one is the
-   * same mistake at every size and the extractor drops a trailing odd byte
-   * without saying so.
-   */
-  setRegion(
-    caller: Caller,
-    start: number,
-    end: number,
-    kind: LegacyRegionKind,
-    name?: string,
-    comment?: string,
-    encoding?: TextEncoding,
-    view?: string,
-    id?: string
-  ): EditResult {
-    const viewOrCleared = this.checkedRegion(start, end, kind, view);
 
-    // Worked out before the edit, because afterwards the enclosing region is no
-    // longer the one that was there first.
-    const enclosing = this.program().loaded.map.getRegionAt(start);
-    const enclosingSpan = enclosing ? claimSpan(enclosing) : undefined;
-    const nests =
-      id === undefined &&
-      enclosingSpan !== undefined &&
-      enclosingSpan.start <= start &&
-      end < enclosingSpan.end;
-
-    // Captured so the caller gets it back. `set_decoder` returned no id and two
-    // agents collided over it in experiment 3: a write whose result cannot be
-    // named again is one the caller has to go looking for — and with declaring
-    // now additive, the id is the only way to revise what you just wrote.
-    let claimId = id;
-    const result = this.edit(
-      caller,
-      (loaded) => [
-        ...(() => {
-          const op = regionSetOp(loaded, start, end, kind, name, comment, encoding, viewOrCleared, id);
-          if (op.op === "claim.add") claimId = op.claim.id;
-          return [op];
-        })(),
-        // A comment given here is a comment *about the address*, not a field on
-        // the claim. A claim's `description` is what a name means on this
-        // machine; this is what somebody wrote about these bytes in this
-        // project, and the two are deliberately different objects.
-        ...(comment ? [commentAddOp(loaded, start, "before", comment)] : []),
-      ],
-      { start, end }
-    );
-    return {
-      ...result,
-      ...(claimId ? { claim: claimId } : {}),
-      covers: `${hex4(start)}-${hex4(end - 1)} (${end - start} bytes)`,
-      // Said out loud, because "I declared 32 bytes and something else changed"
-      // is exactly the kind of thing a caller should not have to discover.
-      ...(nests && enclosing && enclosingSpan
-        ? {
-            nestedInside:
-              `${enclosing.name ?? enclosing.says?.is ?? "code"} ` +
-              `(${hex4(enclosingSpan.start)}-${hex4(enclosingSpan.end - 1)}), which is ` +
-              `unchanged and still explains the bytes either side. To shrink it ` +
-              `instead, remove_claim ${enclosing.id} first.`,
-          }
-        : {}),
-    };
-  }
-
-  /**
-   * Remove a region, by where it starts or by which one it is.
-   *
-   * An id was accepted only *alongside* the start address it exists to
-   * disambiguate — so the unambiguous handle had to be sent with the ambiguous
-   * one, which is the wrong way round and is what a reader in experiment 7
-   * complained about. Either identifies a region on its own now.
-   */
-  removeRegion(caller: Caller, start: number | undefined, id?: string): EditResult {
-    if (start === undefined && id === undefined) {
-      throw new Error("Give a start address or a region id; describe_project reports both.");
-    }
-    return this.edit(caller, (loaded) => {
-      const at =
-        start ??
-        loaded.project.layers
-          .flatMap((layer) => layer.regions ?? [])
-          .find((region) => region.id === id)?.start;
-      if (at === undefined) {
-        throw new Error(`No region has id ${id}. describe_project reports the ids.`);
-      }
-      const op = regionDeleteOp(loaded, parseProjectAddress(at), id);
-      if (!op) {
-        throw new Error(
-          start === undefined
-            ? `No region has id ${id}.`
-            : `No region starts at ${hex4(start)}.`
-        );
-      }
-      return [op];
-    });
-  }
 
   undo(caller: Caller): { undone: string | null; version: string } {
     const outcome = this.room.store.undo(caller.userId, caller.sessionId);

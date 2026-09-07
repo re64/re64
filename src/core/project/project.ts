@@ -233,12 +233,33 @@ export interface ProjectFile {
  */
 /** A layer, linked into a target, optionally somewhere other than its own address. */
 export interface ProjectLink {
+  /**
+   * Stable identity, derived from content when a file omits it.
+   *
+   * A link is a thing the API addresses on its own — "put this layer at $0100
+   * in the runtime view", "take it out of the stack" — so editing one must not
+   * mean rewriting the list. Without an id the only way to move one layer was a
+   * whole-array write, which is last-writer-wins over every other layer in the
+   * target.
+   */
+  id?: string;
   layer: string;
   /** Where it lands in this target. Absent means the layer's own address. */
   at?: number | string;
 }
 
 export interface ProjectTarget {
+  /**
+   * Stable identity, like every other entity here; derived from content when a
+   * file omits it.
+   *
+   * A target used to be keyed by its name, which made it the one thing in this
+   * model whose identity could be edited — and a name is a field somebody chose,
+   * never an identity. Lookup by name still works and is what tools take, the
+   * same way `remove_constant` accepts an unambiguous name; two targets sharing
+   * one name is a hygiene finding rather than something the write prevents.
+   */
+  id?: string;
   name: string;
   /**
    * The layers linked into this target, bottom-up, and where each one lands.
@@ -349,6 +370,9 @@ export interface Project {
    */
   decoders?: ProjectDecoder[];
   types?: ProjectType[];
+  scenarios?: ProjectScenario[];
+  captures?: ProjectCapture[];
+  evidence?: ProjectEvidence[];
 }
 
 /**
@@ -370,7 +394,228 @@ export interface ProjectType {
   fields: Record<string, ProjectField>;
 }
 
+/**
+ * A workflow for the machine: what to do, in order.
+ *
+ * **A list of typed steps rather than a script**, and that is what makes prefix
+ * caching possible at all — you cannot checkpoint inside a running function. It
+ * also makes the thing diffable and mergeable, and deterministic by
+ * construction. Snippets stay for `bytes → data`, where arbitrary code is the
+ * point.
+ *
+ * The machine a scenario describes is **never stored**. A machine state is
+ * derived from these steps and the project's bytes, and this project does not
+ * store derived things — so the script is the truth and the machine is a cache
+ * keyed on a prefix of it. See `docs/decisions/machine.md`.
+ */
+export interface ProjectScenario {
+  id?: string;
+  name: string;
+  description?: string;
+  /**
+   * In order, each carrying an id.
+   *
+   * Written as one list rather than as separately addressable objects, and the
+   * trade is stated rather than hidden: two people revising different steps of
+   * one scenario is last-writer-wins over the list. That is right for a script,
+   * which is one author's sequence of intentions, and would be wrong for
+   * annotations — which is why claims went the other way.
+   */
+  steps: ProjectStep[];
+}
+
+/** One thing to do. The whole vocabulary the machine understands. */
+export type ProjectStep =
+  /** Begin at an address, or at the address a vector holds. */
+  | { id?: string; kind: "start"; at: number | string; vector?: boolean }
+  /** Pin registers or memory before running. */
+  | {
+      id?: string;
+      kind: "set";
+      registers?: Record<string, number>;
+      memory?: Record<string, number>;
+    }
+  /** Point a joystick. Held until another `input` step changes it. */
+  | {
+      id?: string;
+      kind: "input";
+      port: 1 | 2;
+      up?: boolean;
+      down?: boolean;
+      left?: boolean;
+      right?: boolean;
+      fire?: boolean;
+    }
+  /**
+   * Hold these keys, and release everything else.
+   *
+   * Its own step rather than a field on `input`, because a keypress has no
+   * port: `input` names one of two joystick sockets and every one of its fields
+   * is about that socket, where the keyboard is a single matrix the whole
+   * machine shares. Folding them together would make `port` meaningless half
+   * the time, which is the "passing both, passing neither" pair that `extent`
+   * exists to have removed.
+   *
+   * **Held, not typed**, exactly as a joystick is pointed: the set replaces
+   * whatever was down, and `[]` releases. So a keystroke is a press, a run, and
+   * a release — which is not ceremony, it is what a program's own debounce is
+   * written against. Revenge of the Mutant Camels ignores a key matching the one
+   * it has already accepted, so four presses with no releases between them
+   * advance its cheat counter exactly once.
+   *
+   * Names, from `KEY_MATRIX` — `"o"`, `"f1"`, `"run-stop"`. A bare matrix code
+   * is accepted for a key the table does not name, and nothing else is: an
+   * unknown name is refused rather than pressing nothing, because a typo that
+   * quietly held no key looks exactly like a program that ignores the keyboard.
+   */
+  | {
+      id?: string;
+      kind: "key";
+      keys: (string | number)[];
+    }
+  /** Run until one of these, whichever comes first. */
+  | {
+      id?: string;
+      kind: "run";
+      frames?: number;
+      cycles?: number;
+      breakpoints?: (number | string)[];
+      watchpoints?: { from: number | string; to: number | string; on?: "read" | "write" | "any" }[];
+      /** Stop where control leaves the program — what a loader finishes by doing. */
+      leaves?: boolean;
+      maxInstructions?: number;
+    }
+  /**
+   * Check something, and say whether it held.
+   *
+   * **This is what makes a scenario a probe.** Both experiment-0 agents asked
+   * for the same thing in the same words — evidence as a named, re-runnable
+   * check rather than prose:
+   *
+   * > *"Every check should have been a named, re-runnable probe kept alongside
+   * > the artifacts: `probe_scoring.py` asserting the three award values."*
+   *
+   * > *"The claims and the experiments that back them should have been the same
+   * > object... Then 'how I know' is a filename and a line number, the whole
+   * > thing re-verifies after any change to the emulator, and my colleague can
+   * > trust the emulator because the checks pass rather than because I said so."*
+   *
+   * Both had run the checks and lost them to shell history, so `findings.md`
+   * said "verified in emulation" and the instrumentation was gone. A claim can
+   * point at one of these as evidence, and it re-verifies.
+   */
+  | {
+      id?: string;
+      kind: "assert";
+      /** Addresses that must hold these bytes. */
+      memory?: Record<string, number>;
+      /** Registers that must hold these values: `A`, `X`, `Y`, `C`, `Z`… */
+      registers?: Record<string, number>;
+      /** What this is checking, in words, for the report. */
+      note?: string;
+    }
+  /** Keep something. The bytes go to the blob store; a `capture` records it. */
+  | {
+      id?: string;
+      kind: "capture";
+      what: "ram" | "screen" | "frames" | "trace" | "sid";
+      /** For `ram`, the span to keep. */
+      from?: number | string;
+      to?: number | string;
+      /** For `frames`, how many and how far apart. */
+      count?: number;
+      every?: number;
+      /** What to call the file it produces. */
+      name: string;
+    };
+
+/**
+ * Something a run produced, and where it went.
+ *
+ * An entity because it is addressable — and because a claim's *evidence* will
+ * point at one. The bytes are not here: they go through `putBlob`, which is
+ * content-addressed and deduped, so the document holds the reference and a
+ * capture travels wherever the project travels.
+ */
+export interface ProjectCapture {
+  id?: string;
+  /** The scenario that made it, and the step within it. */
+  scenario: string;
+  step: string;
+  kind: "ram" | "screen" | "frames" | "trace" | "sid";
+  /** The file in this project's store, which is how the bytes are reached. */
+  file: string;
+  /** Milliseconds since the epoch, supplied by the writer. */
+  when?: number;
+}
+
+/**
+ * Something said *about a claim* rather than about an address.
+ *
+ * The gap both experiment-0 agents hit and neither could work around. One of
+ * them wrote out what they wanted and could not have:
+ *
+ * > *"I wanted to write `COMMENTS[0x8DF9] = ("contains $3B — so $3B IS drawn",
+ * > contradicts="findings.md §7", confidence="certain", by="A")`. Nothing in
+ * > either toolchain accepts that shape."*
+ *
+ * Three things follow from that example and none of them was expressible:
+ *
+ * **A refutation need not overlap.** `$8DF9` holding `$3B` refutes a claim about
+ * the *glyph* `$3B`, at a different address entirely — so `disagreements()`,
+ * which sweeps for claims covering the same bytes, could never find it.
+ *
+ * **A refutation attaches to a claim, not to an address.** The other agent said
+ * it exactly: *"it isn't a comment on an address, it's a comment on an
+ * interpretation."* A comment at `$19` cannot say "I already tried `SC` and it
+ * is wrong", because the thing being refuted is a reading, not a location.
+ *
+ * **Withdrawing is not deleting.** `remove_claim` destroys; a claim that was
+ * superseded is worth keeping with the reason, because *"the wrong model that
+ * led to the right place is worth keeping, and prose deliverables silently
+ * discard it."*
+ */
+export interface ProjectEvidence {
+  id?: string;
+  /** The claim this is about. */
+  claim: string;
+  kind: EvidenceKind;
+  /** A scenario that can be re-run to check it — the strongest form. */
+  scenario?: string;
+  /** A capture it produced, so the check does not have to be re-run to be read. */
+  capture?: string;
+  /** Another claim, for `refutes` and `supersedes`. */
+  other?: string;
+  /** Why, in prose, for the part no reference carries. */
+  note?: string;
+}
+
+/** What a piece of evidence does to the claim it names. */
+export type EvidenceKind =
+  /** Backs it up. */
+  | "supports"
+  /** Says it is wrong, and by what. */
+  | "refutes"
+  /** Replaces it: an earlier reading that led somewhere, kept rather than deleted. */
+  | "supersedes";
+
 export interface ProjectField {
+  /**
+   * Stable identity, derived from content when a file omits it.
+   *
+   * Fields used to be keyed by offset alone, argued on the grounds that two
+   * fields cannot share one so the key *is* the identity. True of the storage,
+   * and not enough for the API: an offset is a **property** of a field and a
+   * reader who has just worked out that a record is laid out differently is
+   * changing it, which under offset-keying is a delete plus a create — losing
+   * the description and everything else somebody wrote.
+   *
+   * The cost is stated rather than hidden: offset keys made two readers adding
+   * different fields merge for free, and two adding a field at the *same*
+   * offset now both stand. That is a hygiene finding, exactly as two claims at
+   * one address are, and it is the trade this project makes everywhere else.
+   */
+  id?: string;
   name: string;
   /**
    * `u8`, `i8`, `u16`, `u16be`, `ptr`, `ptrbe`, `char(n)`, `char(n,screen)`,
@@ -444,7 +689,7 @@ export interface ProjectClaim {
   /** Milliseconds since the epoch. */
   when?: number;
   /** How strongly it is meant. Absent means asserted. */
-  confidence?: Provenance["confidence"];
+  method?: Provenance["method"];
   /** The layer `at` is an offset into, for a claim that follows its bytes. */
   layer?: string;
 }
@@ -491,7 +736,7 @@ export function projectClaims(claims: readonly ProjectClaim[] = []): Claim[] {
         author: c.author ?? "project",
         source: c.source ?? "user",
         ...(c.when !== undefined ? { when: c.when } : {}),
-        ...(c.confidence !== undefined ? { confidence: c.confidence } : {}),
+        ...(c.method !== undefined ? { method: c.method } : {}),
       },
     };
   });
@@ -824,29 +1069,17 @@ export function parseProject(json: string): Project {
  * One reader for both forms, so nothing downstream has to know that a bare
  * string is the common case.
  */
-export function targetLinks(target: ProjectTarget): { layer: string; at?: number }[] {
+export function targetLinks(
+  target: ProjectTarget
+): { id: string; layer: string; at?: number }[] {
   return target.layers.map((entry) =>
     typeof entry === "string"
-      ? { layer: entry }
+      ? { id: derivedId("lnk", entry), layer: entry }
       : {
+          id: entry.id ?? derivedId("lnk", entry.layer),
           layer: entry.layer,
           ...(entry.at === undefined ? {} : { at: parseProjectAddress(entry.at) }),
         }
   );
 }
 
-/**
- * Links as they are written down: a bare id where the layer sits at its own
- * address, an object only where this target moves it.
- *
- * The inverse of `targetLinks`, and it exists so the short spelling survives a
- * round trip. Normalising everything to objects would rewrite every target in
- * every file into a form nobody typed, on the first edit that touched one.
- */
-export function linksAsWritten(
-  links: readonly { layer: string; at?: number }[]
-): (string | { layer: string; at: number })[] {
-  return links.map((link) =>
-    link.at === undefined ? link.layer : { layer: link.layer, at: link.at }
-  );
-}

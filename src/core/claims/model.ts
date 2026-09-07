@@ -79,6 +79,25 @@ export type Interpretation =
 export type RootKind = "entry" | "routine" | "location" | "data";
 
 /** Who made a claim, and how much weight it carries. */
+/**
+ * How somebody came to believe a claim.
+ *
+ * Ordered roughly by how much independent checking each represents, but the
+ * ordering is not the point — *difference* is. Two accounts reached by the same
+ * method are one account.
+ */
+export type ClaimMethod =
+  /** A hypothesis. Worth recording, and not yet evidence of anything. */
+  | "guessed"
+  /** Copied by hand from a listing, a book, or another project. */
+  | "transcribed"
+  /** Reasoned from the code by a person or an agent reading it. */
+  | "read"
+  /** Computed by an analysis pass here, so it is as good as that pass. */
+  | "derived"
+  /** Watched happening in the machine. */
+  | "ran";
+
 export interface Provenance {
   /** A user id, an agent codename, or `cli`. Never resolved on read. */
   readonly author: string;
@@ -93,13 +112,31 @@ export interface Provenance {
   /** Milliseconds since the epoch, supplied by the caller. */
   readonly when?: number;
   /**
-   * How strongly it is meant.
+   * **How the claimer knows** — the method, not the strength.
    *
-   * A weak commitment is the thing the old model had no way to spell: an agent
-   * that thinks a span is probably a sprite sheet had to either assert it and
-   * overwrite somebody, or say nothing. Absent means asserted.
+   * This was `confidence: asserted | inferred | guess`, and it was on the wrong
+   * axis. Experiment-0 settled it: neither agent asked for strength, both asked
+   * for method, and one of them said exactly why —
+   *
+   * > *"Agreement between two accounts is only evidence when the methods
+   * > differ, and nothing in either document records **method** at claim
+   * > granularity, so there is no way to tell an independent confirmation from
+   * > a correlated one."*
+   *
+   * That is not abstract. Both agents concluded glyphs `$03`/`$04` were never
+   * drawn, both were wrong, and the refutation was in one of their own screen
+   * dumps — they agreed because they used the *same* static reasoning and shared
+   * its blind spot. A confidence number cannot detect that. A method can.
+   *
+   * `transcribed` earns its place separately: it is the category both agents'
+   * own trust ledgers lacked, and the one that *"generated most of the errors on
+   * both sides"* — a fact copied by hand from a listing carries that listing's
+   * mistakes and none of its own checking.
+   *
+   * Absent means unstated, which is honest for the many claims nobody thought
+   * about. See `docs/invariants.md` **E10**.
    */
-  readonly confidence?: "asserted" | "inferred" | "guess";
+  readonly method?: ClaimMethod;
 }
 
 /**

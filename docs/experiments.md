@@ -1,6 +1,6 @@
 # The experiments, and what each one changed
 
-Eight runs. They exist to find gaps in re64 by watching agents hit them, rather
+Nine runs. They exist to find gaps in re64 by watching agents hit them, rather
 than by imagining what an agent would want — so what matters about each is not
 whether it "went well" but which line of code it moved.
 
@@ -230,6 +230,123 @@ optional-but-reported design is untested rather than vindicated.
 
 ---
 
+### 9 — Two readers, an editor, and an article as the deliverable
+
+**Question.** Not coverage. Two readers on Revenge of the Mutant Camels with the
+machine model and the evidence model, plus a third agent whose job was to write
+an accessible, evidence-rooted article about what they found — and who could
+refuse a claim, demand a picture, and would not release the readers until the
+piece was done.
+
+**The prior memo changed the run, and improved it.** The readers found 249 lines
+of findings from experiment 7 on the same binary within ninety seconds, and
+flagged it rather than transcribing it. The editor's response is the most
+productive instruction anybody gave in nine runs: *anything already in that memo
+is not news unless you can show it to me — a sentence I cannot photograph, play
+or watch happen is the weakest thing I can print.* Three of the article's best
+findings are **corrections** to that memo, and each came from somebody being made
+to demonstrate a claim rather than restate it. An answer key raised the floor
+instead of spoiling the run.
+
+**What it changed.**
+
+- **`composeScreen` drew no sprites**, found by a control experiment rather than
+  from documentation — poke a filled sprite into RAM, enable it, run, and watch
+  nothing appear. All eight sprites' registers were being stored and none was
+  ever read, which is the sixth instance of the shape this file already names:
+  the state was complete and no consumer reached it. Sprites now render, with
+  expansion, multicolour and priority; `src/core/c64/sprite.test.ts` is the
+  coverage, because Gridrunner turns out to enable no sprites at all and its
+  acceptance test therefore says nothing about them.
+- **The codename allocator handed out a name that was still in use.** The server
+  was rebuilt and restarted mid-run; the lease map is memory, so the pool began
+  again at the top and the editor was issued `basalt` while the reader holding
+  `basalt` was online. Two of its messages are recorded in that project's chat as
+  spoken by somebody else, permanently, because a message records how its author
+  was named *at the time* — the right rule, resting on an assumption that a
+  codename identifies one participant. `freeCodename` now excludes every name the
+  sessions table remembers.
+
+**An almost-faithful picture is worse than a broken one**, and the editor turned
+this project's own rule on itself. Unable to photograph sprites, it reconstructed
+them from the game's own object table and captioned the composite honestly. Set
+beside a true capture of the same frame, the reconstruction had the right sprite
+pointers, the right colours and the right Y for all eight — and was wrong about
+width, and about the X of five of them by exactly 256, because the ninth X bit
+lives in `$D010` and the expansion bits in `$D01D`/`$D017`, none of which the
+object table contains. *Nobody checks an image that looks correct.*
+
+Chasing that discrepancy decoded three per-zone fields nobody had: `+$98`,
+`+$99` and `+$9A` are bitmasks over the eight creature types for multicolour,
+double height and double width. And `+$9F`, previously written off as a reserved
+byte, is fetched by the loader and overwritten on the very next instruction —
+read once a wave since 1984 and discarded every time.
+
+**The restart is the first evidence for a property this repository only argued.**
+A live analysis survived replacing the binary underneath it: document, claims,
+scenarios, captures, targets and blobs all came back, and three agents carried on.
+Scope, stated rather than implied — it holds **between** calls, not during one;
+session leases are memory and were re-issued; agent undo is the persisted `ops`
+table and survived, while a browser's in-memory stack would not.
+
+**What they reached for and could not have:** an `input` step that can type,
+which cost the two most cinematic shots in the article and a whole line of
+reader-one's work; any way to get an *image* out of re64 rather than text art —
+four independent hand-written bitmap printers across two runs on this binary now;
+a read-side complement to `add_type`, so a declared record can be handed back
+decoded instead of re-parsed from hex every time; a range-versus-range compare in
+`find_bytes`; and `play_sid`, since a capture is a write log with no last mile to
+something audible.
+
+**`method` was never read**, having been asked for explicitly. Grading happened in
+chat, because the editor's questions were about *sentences somebody wrote* and
+`method` is a field on an address. What it wanted instead: **a claim carrying the
+call that reproduces it** — not a category but the literal invocation, so
+"verified" becomes something an editor can execute. Every time that arrived in
+chat, the claim went straight into the piece.
+
+**Two findings in this entry are guided, and are marked so rather than counted.**
+After the article was first finished, the person who commissioned it checked it
+against the running game and caught two things: the title letters are multicolour
+rather than hires, and every note in the rendered audio had the same length. Those
+observations are theirs. But the message relaying them also carried the diagnosis —
+where to look for a per-frame colour write, and that the cycle-stamped SID capture
+was a better source for durations than the stream format — so what came back is not
+evidence of what an agent reaches for unaided, and `docs/experiments.md` is the
+wrong place to let that blur.
+
+What the steer did **not** contain, and the editor found: the flicker is one
+instruction, `INC $D025` at `$8F7F`, sitting in an eight-instruction wait loop
+beside the joystick read — no target value, no colour table, and not video-synced,
+which is why it jumps rather than slides. It closes to the pixel: the four letter
+sprites hold 138 bit-pairs of `11` and 77 of `01`, and eighteen consecutive
+captured frames show exactly 1,104 pixels that never move and 616 that change
+every frame. And the audio was wrong by a factor of seven because `$11` is a tempo
+divider — written once at `$88C2`, read once at `$8907` — so a tick is 140ms and
+the title tune is 89 seconds rather than 12.5.
+
+**The self-criticism it volunteered is the finding worth keeping**: it had the SID
+capture from the beginning and used it only to check pitches. The first note is
+held 275,184 cycles, 13.97 frames against the 2 the stream format claims, and that
+ratio was in the first two rows of a file it had already downloaded. The evidence
+was captured, in the document and on disk, and the wrong answer was published
+anyway — because turning a log into sound meant writing a synthesiser, and the
+synthesiser was built from an interpretation of the format instead. That is the
+argument for rendering audio inside the framework rather than leaving it to
+callers: not that it cannot be done outside, but that outside it the cheap path
+and the true path are different paths.
+
+**And trust ran one way.** The editor asked twice for its own four claims to be
+audited; both readers stayed online and answered everything asked *of the program*
+and nothing asked *of the editor*. There was no object to attach it to —
+`add_evidence` supports or refutes a claim in the document, and the article was in
+a file only the editor could see. Nor is there anywhere to record that two claims
+conflict: the run's best unresolved question, whether cheat mode does anything
+beyond its banner, existed only as two chat messages that happened to be read by
+the same person.
+
+---
+
 ## What the sequence shows
 
 Every run found the same shape of defect at a different address: **a write that
@@ -246,3 +363,12 @@ ever emits a member of it is not.
 
 Both are why the round-trip harness exists, and why it is now the first thing a
 new root has to pass.
+
+Run 9 added a third, and it is the one with no harness behind it: **a derived
+answer that is almost right.** A reconstruction with the correct sprites in the
+correct order at the correct heights, wrong about width and about a third of the
+horizontal positions. A codename that identifies one participant except across a
+restart. Neither reports an error, both look correct, and the only thing that
+catches either is putting the derived answer beside the true one — which is why
+sprite capture is now the machine's job rather than a caller's, and why the
+allocator asks storage instead of memory.

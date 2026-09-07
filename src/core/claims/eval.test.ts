@@ -161,12 +161,15 @@ describe("what the claim model can express that the old one could not", () => {
     expect(set.all()[0].relativeTo).toEqual({ layer: "decruncher", offset: 0x10 });
   });
 
-  it("a claim can be a weak commitment", () => {
+  it("a claim records how its author knows, not how sure they are", () => {
+    // The axis changed: `confidence: guess` said how strongly it was meant and
+    // could not distinguish an independent confirmation from a correlated one.
+    // `method` says *how*, which can — see invariant E10.
     const claims: Claim[] = [
       { id: "g1", at: 0x2000, extent: 0x800, says: { is: "bitmap", view: "char:8" },
-        by: { author: "amber", source: "user", confidence: "guess" } },
+        by: { author: "amber", source: "user", method: "guessed" } },
     ];
     const set = new ClaimSet(claims);
-    expect(set.covering(0x2100)[0].by.confidence).toBe("guess");
+    expect(set.covering(0x2100)[0].by.method).toBe("guessed");
   });
 });

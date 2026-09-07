@@ -14,7 +14,7 @@
 import type { Project } from "./project.js";
 
 /** Prefix marks what an id refers to, so a stray id in a diff is readable. */
-export type IdPrefix = "lbl" | "rgn" | "cmt" | "cst" | "lay" | "fil" | "msg" | "dec" | "clm" | "typ";
+export type IdPrefix = "lbl" | "rgn" | "cmt" | "cst" | "lay" | "fil" | "msg" | "dec" | "clm" | "typ" | "tgt" | "lnk" | "fld" | "scn" | "stp" | "cap" | "evd";
 
 const ID_CHARS = "0123456789abcdefghijklmnopqrstuvwxyz";
 
@@ -99,7 +99,33 @@ export function withIds(project: Project, mint: (prefix: IdPrefix) => string = n
   // `diffProjects` drops entries without ids, which means such a decoder was
   // silently absent from every export.
   const decoders = project.decoders?.map((d) => give(d, "dec"));
-  const types = project.types?.map((t) => give(t, "typ"));
+  const types = project.types?.map((t) => {
+    const withId = give(t, "typ");
+    return {
+      ...withId,
+      fields: Object.fromEntries(
+        Object.entries(withId.fields).map(([offset, field]) => [offset, give(field, "fld")])
+      ),
+    };
+  });
+  // Targets were skipped for the same reason decoders were — they were keyed by
+  // name, so nothing needed an id until identity stopped being editable.
+  const scenarios = project.scenarios?.map((x) => {
+    const withId = give(x, "scn");
+    return { ...withId, steps: withId.steps.map((step) => give(step, "stp")) };
+  });
+  const captures = project.captures?.map((c) => give(c, "cap"));
+  const evidence = project.evidence?.map((e) => give(e, "evd"));
+
+  const targets = project.targets?.map((t) => {
+    const withId = give(t, "tgt");
+    return {
+      ...withId,
+      layers: withId.layers.map((link) =>
+        typeof link === "string" ? { id: mint("lnk"), layer: link } : give(link, "lnk")
+      ),
+    };
+  });
 
   return minted
     ? {
@@ -109,6 +135,10 @@ export function withIds(project: Project, mint: (prefix: IdPrefix) => string = n
         ...(decoders ? { decoders } : {}),
         ...(types ? { types } : {}),
         ...(claims ? { claims } : {}),
+        ...(targets ? { targets } : {}),
+        ...(scenarios ? { scenarios } : {}),
+        ...(captures ? { captures } : {}),
+        ...(evidence ? { evidence } : {}),
       }
     : project;
 }

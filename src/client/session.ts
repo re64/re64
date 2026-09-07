@@ -23,13 +23,15 @@ import {
   buildMemoryMap,
   describeOp,
   labelDeleteOp,
-  labelSetOp,
+  labelAddOp,
+  markFunctionOps,
+  unmarkFunctionOps,
   makeFileLoader,
-  LegacyRegionKind,
   regionDeleteOp,
-  regionSetOp,
+  claimAddOps,
   resolveOwningLayer,
 } from "../core/index.js";
+import { Claim, Interpretation, RootKind } from "../core/claims/model.js";
 import { ChatMessage, Participant, projectFromDoc } from "../core/crdt/index.js";
 import { ConnectionStatus, DocClient, OpenOptions } from "./doc-client.js";
 
@@ -227,6 +229,56 @@ export class ProjectSession {
     );
   }
 
+  /**
+   * Which target this session is reading, if not the project's own default.
+   *
+   * **Held here and never written to the document.** Which targets exist, and
+   * which one a project opens with, are facts about the project; which one *I*
+   * am looking at right now is a cursor — the same distinction presence draws,
+   * and the one the shared `select_target` got wrong. Experiment 7 measured the
+   * cost of getting it wrong: a whole target went unread for a run, because
+   * changing what everybody sees to glance at the packed loader is a price
+   * nobody would pay.
+   *
+   * A split view showing two targets at once is the case that settles it: two
+   * panes over one document, neither allowed to move the other.
+   */
+  private viewTarget?: string;
+
+  /** Every target the project declares, whichever one is being read. */
+  targets(): { name: string; description?: string; order?: number; isDefault: boolean }[] {
+    const project = projectFromDoc(this.client.doc);
+    return (project.targets ?? [])
+      .map((target) => ({
+        name: target.name,
+        ...(target.description === undefined ? {} : { description: target.description }),
+        ...(target.order === undefined ? {} : { order: target.order }),
+        isDefault: target.name === project.defaultTarget,
+      }))
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name));
+  }
+
+  /** The target being read, which is the project's default until one is chosen. */
+  get target(): string | undefined {
+    return this.viewTarget ?? projectFromDoc(this.client.doc).defaultTarget;
+  }
+
+  /**
+   * Read a different target. Rebuilds the model; writes nothing.
+   *
+   * Naming one that does not exist is refused rather than falling back to the
+   * default, for the reason every other surface refuses it: answering with a
+   * different stack than the caller asked for, with no way to tell, is worse
+   * than an error.
+   */
+  selectTarget(name: string | undefined): void {
+    if (name !== undefined && !this.targets().some((target) => target.name === name)) {
+      throw new Error(`no target called ${name}`);
+    }
+    this.viewTarget = name;
+    this.loaded = this.build();
+  }
+
   private build(): LoadedProject {
     const started = performance.now();
     try {
@@ -236,7 +288,11 @@ export class ProjectSession {
           const bytes = this.blobs.get(path);
           if (!bytes) throw new Error(`no bytes fetched for ${path}`);
           return bytes;
-        })
+        }),
+        // The supported seam, and the same one every tool uses — so the browser
+        // narrows a view exactly as an agent does, including refusing a name
+        // that reaches nothing.
+        this.viewTarget === undefined ? {} : { target: this.viewTarget }
       );
     } finally {
       this.lastBuildMs = performance.now() - started;
@@ -246,6 +302,20 @@ export class ProjectSession {
   /** The project as it would be exported, for the read-only view. */
   exportedText(): string {
     return JSON.stringify(projectFromDoc(this.client.doc), null, 2) + "\n";
+  }
+
+  /**
+   * Every claim covering an address, resolving nothing.
+   *
+   * The read that makes the writes usable: correcting and removing are both by
+   * id, so there has to be a way to find out what the ids are. Several claims
+   * cover any interesting address and this returns all of them, in the order
+   * `ClaimSet` holds them.
+   */
+  claimsAt(address: number): readonly Claim[] {
+    return this.loaded.claims.filter(
+      (c) => address >= c.at && address < c.at + (c.extent ?? 1)
+    );
   }
 
   /** Which layer owns an address, or undefined if nothing does. */
@@ -260,26 +330,70 @@ export class ProjectSession {
     this.client.apply(ops);
   }
 
+  /**
+   * Name an address. **Always adds**, like every other write here.
+   *
+   * It used to be an address-keyed upsert, which is how the browser performed a
+   * rename — and it is the write that destroyed 123 names across 74 addresses in
+   * experiment 7, on the object this project states the identity rule for first.
+   * An address cannot identify a claim, so renaming is `setClaim`, by id.
+   */
   addLabel(address: number, name: string, type: ProjectLabel["type"] | undefined): void {
-    // The identity rule lives in core/ops/edits, because it used to live here
-    // *and* in the CLI and the two disagreed: this one reused whatever label
-    // resolved at the address, which includes the built-in platform names.
-    this.run([labelSetOp(this.loaded, address, name, type)]);
+    this.run([labelAddOp(this.loaded, address, name, type)]);
   }
 
-  removeLabel(address: number): void {
-    const op = labelDeleteOp(this.loaded, address);
-    if (op) this.run([op]);
-  }
-
-  setRegion(
-    start: number,
-    end: number,
-    kind: LegacyRegionKind,
-    name?: string,
-    view?: string
+  /**
+   * Say what a span of bytes is. **Always adds.**
+   *
+   * Takes an `Interpretation` rather than a legacy region kind, so the browser
+   * speaks the model's own vocabulary — there is no `code` and no `unknown` to
+   * pass, which is the whole redesign in one signature.
+   */
+  addClaim(
+    at: number,
+    claim: { name?: string; says?: Interpretation; extent?: number }
   ): void {
-    this.run([regionSetOp(this.loaded, start, end, kind, name, undefined, undefined, view)]);
+    this.run(claimAddOps(this.loaded, at, claim).ops);
+  }
+
+  /**
+   * Correct a claim, by the only thing that identifies it.
+   *
+   * `undefined` leaves a field alone; `null` clears it — the distinction an
+   * optional field cannot make, and without it a root could be declared and
+   * never taken off.
+   */
+  setClaim(
+    id: string,
+    fields: { name?: string; root?: RootKind | null; extent?: number | null }
+  ): void {
+    this.run([{ op: "claim.set", id, fields }]);
+  }
+
+  /**
+   * Declare an address a routine, promoting the name already there if it can.
+   *
+   * The one place an address-keyed write is still right: "make *this* a
+   * function" means the claim already here, and the core builder is what knows
+   * that a promoted `loc_8100` has to become `sub_8100`.
+   */
+  markFunction(address: number, name?: string): void {
+    this.run(markFunctionOps(this.loaded, address, name));
+  }
+
+  /** Stop treating an address as a routine, by id. */
+  unmarkFunction(address: number): void {
+    this.run(unmarkFunctionOps(this.loaded, address));
+  }
+
+  /**
+   * Take a claim back, by id.
+   *
+   * It took an address, which cannot identify a claim — several share one, and
+   * the browser had no way to say which it meant.
+   */
+  removeClaim(id: string): void {
+    this.run([{ op: "claim.remove", id }]);
   }
 
   removeRegion(start: number): void {

@@ -26,7 +26,7 @@ run="${1:-$here/run}"
 port="${RE64_PORT:-5172}"
 call="$repo/experiments/mcp-call.sh"
 
-if [ ! -f "$repo/dist/cli/index.js" ]; then
+if [ ! -f "$repo/dist/server/index.js" ]; then
   echo "Building..." >&2
   (cd "$repo" && npm run build >/dev/null)
 fi
@@ -41,7 +41,7 @@ mkdir -p "$run"
 cp "$repo/assets/mutant-camels/revenge-of-the-mutant-camels.d64" "$run/"
 
 echo '{ "name": "camels", "layers": [] }' > "$run/camels.re64"
-node "$repo/dist/cli/index.js" import "$run/camels.re64" >/dev/null
+node "$repo/experiments/import.mjs" "$run/camels.re64" >/dev/null
 
 nohup node "$repo/dist/server/index.js" "$run/camels.re64db" \
   --port "$port" > "$run/server.log" 2>&1 &

@@ -30,7 +30,7 @@ repo="$(cd "$here/../.." && pwd)"
 run="${1:-$here/run}"
 port="${RE64_PORT:-5166}"
 
-if [ ! -f "$repo/dist/cli/index.js" ]; then
+if [ ! -f "$repo/dist/server/index.js" ]; then
   echo "Building..." >&2
   (cd "$repo" && npm run build >/dev/null)
 fi
@@ -56,7 +56,7 @@ node -e '
   fs.writeFileSync(process.argv[2], JSON.stringify(p, null, 2));
 ' "$repo/assets/gridrunner/gridrunner.re64" "$run/gridrunner-improved.re64"
 
-node "$repo/dist/cli/index.js" import "$run/gridrunner-improved.re64" >/dev/null
+node "$repo/experiments/import.mjs" "$run/gridrunner-improved.re64" >/dev/null
 
 nohup node "$repo/dist/server/index.js" "$run/gridrunner-improved.re64db" \
   --port "$port" > "$run/server.log" 2>&1 &
@@ -85,7 +85,7 @@ Call a tool:
 
 Read the run:
 
-  node $repo/dist/cli/index.js transcript "$run/gridrunner-improved.mcp.jsonl"
+  node $repo/dist/tools/experiment-transcript.js "$run/gridrunner-improved.mcp.jsonl"
 
 Stop the server:
 

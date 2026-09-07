@@ -80,7 +80,7 @@ describe("the CRDT boundary", () => {
   }
 
   it("is not reachable through a barrel the domain imports", () => {
-    // `src/ui` and `src/cli` import `../core/index.js`; if that carried the
+    // `src/ui` imports `../core/index.js`; if that carried the
     // adapter, every rule above would be bypassable by one re-export.
     expect(readFileSync(join("src", "core", "index.ts"), "utf-8")).not.toContain("crdt");
     // `src/store/index.ts` re-exports the project store, which does hold a

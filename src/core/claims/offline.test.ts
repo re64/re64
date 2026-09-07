@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { regionSetOp } from "../ops/edits.js";
+import { claimAddOps } from "../ops/edits.js";
+import { Op } from "../ops/types.js";
 import { loadProjectFile } from "../../node-files.js";
 import { ClaimSet, disagreements, describeDisagreement } from "./set.js";
 import { Claim } from "./model.js";
@@ -30,8 +31,16 @@ describe("two readers declaring the same span, offline", () => {
     // and replaced it, while a writer who had not seen it minted a second — the
     // same call with two outcomes, which is this project's own offline/online
     // test failing. Now there is one outcome, and it is additive.
-    const synced = regionSetOp(loaded, existing.at, existing.at + existing.extent!, "data", "levelTable");
-    const elsewhere = regionSetOp(loaded, 0x8a00, 0x8a20, "data", "levelTable");
+    const declare = (at: number, extent: number) =>
+      claimAddOps(loaded, at, {
+        name: "levelTable",
+        says: { is: "data" },
+        root: "data",
+        extent,
+      }).ops.find((o) => o.op === "claim.add")!;
+
+    const synced = declare(existing.at, existing.extent!);
+    const elsewhere = declare(0x8a00, 0x20);
 
     expect(synced.op).toBe("claim.add");
     expect(elsewhere.op).toBe("claim.add");
@@ -46,22 +55,21 @@ describe("two readers declaring the same span, offline", () => {
     const loaded = loadProjectFile(GRIDRUNNER);
     const existing = loaded.claims.find((c) => c.name === "characterSetData")!;
 
-    const revised = regionSetOp(
-      loaded,
-      existing.at,
-      existing.at + 0x20,
-      "bitmap",
-      "charSet",
-      undefined,
-      undefined,
-      undefined,
-      existing.id
-    );
+    // Structural rather than checked: there is no builder left that infers
+    // which claim a span means. Declaring adds — see above, where the identical
+    // span mints a second id — and the only way to say "this one" is `claim.set`
+    // with the id, which is why every write returns the ids it made.
+    const revised: Op = {
+      op: "claim.set",
+      id: existing.id,
+      fields: { extent: 0x20, says: { is: "bitmap", view: "char:8" } },
+    };
     expect(revised.op).toBe("claim.set");
     if (revised.op !== "claim.set") throw new Error("shape");
     expect(revised.id).toBe(existing.id);
     // Partial: it names the fields it changes and leaves the rest alone.
     expect(revised.fields.extent).toBe(0x20);
+    expect(revised.fields.name).toBeUndefined();
   });
 
   it("claims keep both, and the disagreement is the output", () => {
@@ -106,14 +114,11 @@ describe("two readers declaring the same span, offline", () => {
 
   it("a claim written offline about an address no layer supplies still lands", () => {
     // Zero page: every 6502 variable lives there and no layer supplies the bytes.
-    // The region write refuses this outright — "there is nothing there to
-    // interpret" — which is why naming a byteless address had to grow a whole
-    // symbols-layer apparatus to work around the ownership rule.
-    const loaded = loadProjectFile(GRIDRUNNER);
-    expect(() => regionSetOp(loaded, 0x0010, 0x0020, "data", "playerState")).toThrow(
-      /nothing there to interpret/
-    );
-
+    // This is what naming a byteless address needed a whole symbols-layer
+    // apparatus to work around: a claim frames on a layer *or* a target, so it
+    // simply lands. (Whether an *interpretation* over unsupplied bytes should
+    // be refused is a live question, recorded in `workspace.test.ts` under
+    // "a region where there are no bytes".)
     const claim: Claim = {
       id: "clm_zp",
       at: 0x0010,

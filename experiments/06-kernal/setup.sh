@@ -32,7 +32,7 @@ if [ ! -f "$rom" ]; then
   exit 1
 fi
 
-if [ ! -f "$repo/dist/cli/index.js" ]; then
+if [ ! -f "$repo/dist/server/index.js" ]; then
   echo "Building..." >&2
   (cd "$repo" && npm run build >/dev/null)
 fi
@@ -55,7 +55,7 @@ cat > "$run/kernal.re64" <<'JSON'
 }
 JSON
 
-node "$repo/dist/cli/index.js" import "$run/kernal.re64" >/dev/null
+node "$repo/experiments/import.mjs" "$run/kernal.re64" >/dev/null
 
 nohup node "$repo/dist/server/index.js" "$run/kernal.re64db" \
   --port "$port" > "$run/server.log" 2>&1 &

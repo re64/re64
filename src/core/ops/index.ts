@@ -1,7 +1,7 @@
 export {
   Op,
-  PrimarySetOp,
-  PrimaryClearOp,
+  PrimaryBindOp,
+  PrimaryUnbindOp,
   Change,
   describeOp,
   AddressResolver,

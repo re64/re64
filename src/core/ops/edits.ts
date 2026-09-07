@@ -16,7 +16,6 @@
 import { CommentPlacement } from "../memory/comment.js";
 import { LabelType } from "../memory/label-type.js";
 import { TextEncoding } from "../c64/text.js";
-import { LegacyRegionKind } from "../project/project.js";
 import { LoadedProject } from "../project/loader.js";
 import { newId } from "../project/identity.js";
 import { parseProjectAddress } from "../project/project.js";
@@ -128,7 +127,7 @@ export function labelDeleteByIdOp(loaded: LoadedProject, id: string): Op | undef
  * `address` maps to nothing: it was only ever "just a name", which is a claim
  * with no root at all.
  */
-const ROOT_FOR_TYPE: Partial<Record<LabelType, RootKind>> = {
+export const ROOT_FOR_TYPE: Partial<Record<LabelType, RootKind>> = {
   entry: "entry",
   function: "routine",
   code: "location",
@@ -139,12 +138,6 @@ const TYPE_FOR_ROOT: Partial<Record<RootKind, LabelType>> = {
   location: "code",
 };
 
-const SAYS_FOR_KIND: Partial<Record<LegacyRegionKind, Interpretation["is"]>> = {
-  data: "data",
-  text: "text",
-  bitmap: "bitmap",
-  jumptable: "jumptable",
-};
 
 /**
  * Who a claim records as its author.
@@ -201,7 +194,8 @@ const editOf = (claim: Claim): ClaimEdit => {
  *
  * So there is no "set" for a label at all: naming an address adds a name, and the
  * only thing anybody sets is which of them renders. Correcting a name is
- * `renameLabelOp`, by id, exactly as revising a comment is.
+ * `claim.set` by id, exactly as revising a comment is — there is no separate
+ * rename builder, because a name is one field of a claim like any other.
  *
  * An invented `dat_XXXX` is not a chosen name and not a stored object, so naming
  * such an address still mints, which is the overwhelmingly common act.
@@ -228,6 +222,8 @@ export function claimAddOps(
     says?: Interpretation;
     root?: RootKind;
     extent?: number;
+    /** How the claimer knows. See `ClaimMethod`. */
+    method?: Provenance["method"];
   }
 ): { ops: Op[]; addedBeside?: string } {
   const index = loaded.map.getLabels();
@@ -250,7 +246,7 @@ export function claimAddOps(
       // rank so the winner falls to id order, which is random: without this a
       // second name silently renames every reference to the address.
       ...(claim.name !== undefined && chosenHere.length > 0 && showing && !chosen
-        ? [{ op: "primary.set", address, labelId: showing.id } as Op]
+        ? [{ op: "primary.bind", address, labelId: showing.id } as Op]
         : []),
       {
         op: "claim.add",
@@ -261,7 +257,7 @@ export function claimAddOps(
           ...(claim.says === undefined ? {} : { says: claim.says }),
           ...(claim.root === undefined ? {} : { root: claim.root }),
           ...(claim.extent === undefined ? {} : { extent: claim.extent }),
-          by: AUTHOR,
+          by: claim.method === undefined ? AUTHOR : { ...AUTHOR, method: claim.method },
         },
       } as Op,
     ],
@@ -269,35 +265,16 @@ export function claimAddOps(
   };
 }
 
-/** Change a label's name, by the only thing that identifies it. */
-export function renameLabelOp(
-  loaded: LoadedProject,
-  id: string,
-  name: string,
-  type?: LabelType,
-  extent?: number
-): Op {
-  const found = claimById(loaded, id);
-  if (found) {
-    return {
-      op: "claim.set",
-      id,
-      fields: {
-        name,
-        // Named fields only, so a revision leaves alone what it does not
-        // mention — and `null` is how it clears, which an omitted key cannot.
-        ...(type === undefined ? {} : { root: ROOT_FOR_TYPE[type] ?? null }),
-        ...(extent === undefined ? {} : { extent }),
-      },
-    };
-  }
-  throw new Error(
-    `No claim has id ${id}. claims_at reports the id of every claim covering an ` +
-      `owns; an invented name has none, because nothing stored it.`
-  );
-}
-
-export function labelSetOp(
+/**
+ * Promote the name at an address, or add one if there is nothing to promote.
+ *
+ * **Deliberately not exported.** This is the address-keyed upsert every other
+ * write path was cured of, and it survives for exactly one caller:
+ * `markFunctionOps`, where "promote what is already here" is what the edit
+ * means. Anywhere else it is the bug — an address cannot identify a claim, so
+ * naming adds and correcting goes by id.
+ */
+function labelSetOp(
   loaded: LoadedProject,
   address: number,
   name: string,
@@ -384,7 +361,7 @@ export function commentAddOp(
   layerId?: string
 ): Op {
   return {
-    op: "comment.set",
+    op: "comment.add",
     id: newId("cmt"),
     layerId: layerId ?? owningLayerId(loaded, address),
     address,
@@ -402,16 +379,19 @@ export function commentEditOp(
   for (const layer of loaded.project.layers) {
     const existing = layer.comments?.find((c) => c.id === id);
     if (!existing || !layer.id) continue;
+    // Only what the caller asked to change. This used to resend the address,
+    // the placement and the text on every edit, because the operation was a
+    // whole-value write — so revising a comment's order silently reasserted
+    // text a collaborator had just corrected.
     return {
       op: "comment.set",
       id,
       layerId: layer.id,
-      address: parseProjectAddress(existing.address),
-      placement: changes.placement ?? existing.placement ?? "before",
-      text: changes.text ?? existing.text,
-      ...(changes.order ?? existing.order) === undefined
-        ? {}
-        : { order: changes.order ?? existing.order },
+      fields: {
+        ...(changes.text === undefined ? {} : { text: changes.text }),
+        ...(changes.placement === undefined ? {} : { placement: changes.placement }),
+        ...(changes.order === undefined ? {} : { order: changes.order }),
+      },
     };
   }
   throw new Error(`No comment ${id}. list_comments shows what this project has.`);
@@ -431,147 +411,13 @@ export function commentDeleteOp(
       (placement === undefined || (c.placement ?? "before") === placement)
   );
 
-  return existing?.id ? { op: "comment.delete", id: existing.id, layerId } : undefined;
+  return existing?.id ? { op: "comment.remove", id: existing.id, layerId } : undefined;
 }
 
 /** Undefined when there is no project label to delete; a built-in is not one. */
 export function labelDeleteOp(loaded: LoadedProject, address: number): Op | undefined {
   const here = namesAt(loaded, address);
   return here.length === 1 ? { op: "claim.remove", id: here[0].id } : undefined;
-}
-
-/**
- * A region needs bytes; a label does not.
- *
- * Ownership resolution falls back to a symbols layer for an address nothing
- * supplies, which is right for a label — that is what symbols layers are for —
- * and wrong for a region, which says how to *interpret* bytes that are not
- * there. The two shared one resolver, so declaring a region over `$0400` on a
- * project with a symbols layer attached it to that layer, wrote a document the
- * loader refuses, and left the project unwritable through every interface.
- */
-export function regionSetOp(
-  loaded: LoadedProject,
-  start: number,
-  end: number,
-  kind: LegacyRegionKind,
-  name?: string,
-  comment?: string,
-  encoding?: TextEncoding,
-  view?: string,
-  /**
-   * The region being revised, when the caller knows which.
-   *
-   * Everything below this is a guess made because it usually is not given, and
-   * an id makes the guess unnecessary: it says *this* region, whatever its span
-   * is now. `describe_project` reports them for exactly this.
-   */
-  id?: string
-): Op {
-  // No inference at all, which is the whole change.
-  //
-  // This used to guess which region a declaration *revised* from its span, in
-  // three cases: the same span exactly, the only region starting here, or a new
-  // nested one. That made a write's identity depend on what the caller had
-  // synced — a reader who had seen somebody else's region silently replaced it,
-  // one who had not produced a second — and the same call therefore had two
-  // outcomes. It is this project's own offline/online test failing, and the last
-  // of the four instances of upsert-by-inference, after `set_comment` keyed by
-  // slot, `set_label` keyed by address, and `set_constant` keyed by name.
-  //
-  // An id revises. No id adds. Two people declaring the same span now both
-  // stand, and `disagreements()` reports it rather than one of them losing.
-  if (id !== undefined) {
-    const found = claimById(loaded, id);
-    if (!found) {
-      throw new Error(
-        `No claim ${id} in this project. ` +
-          `describe_project lists what is declared, with ids.`
-      );
-    }
-    return {
-      op: "claim.set",
-      id,
-      fields: {
-        ...placed(loaded, start),
-        extent: end - start,
-        says: interpretationOf(kind, encoding, view),
-        ...(name === undefined ? {} : { name }),
-      },
-    };
-  }
-
-  // `code` is not an interpretation, it is a decode root — the whole of what a
-  // code region ever did was seed the queue at its start, since for the walk it
-  // was indistinguishable from `unknown` and from silence. So declaring one
-  // makes a root rather than refusing, and the span it came with is dropped
-  // because it never meant anything.
-  if (kind === "code") {
-    return {
-      op: "claim.add",
-      claim: {
-        id: newId("clm"),
-        ...placed(loaded, start),
-        ...(name === undefined ? {} : { name }),
-        root: "entry",
-        by: AUTHOR,
-      },
-    };
-  }
-
-  // A span still needs bytes to interpret. Unlike a *name*, which may reach an
-  // address nothing supplies, saying "these bytes are text" about bytes that do
-  // not exist describes nothing.
-  // Bytes, not ownership. `ownsAddress` asks which layer an annotation would
-  // belong to, and a symbols layer owns zero page while supplying nothing — so
-  // it answered yes for addresses with nothing to read. What matters here is
-  // whether any layer actually puts a byte there.
-  if (loaded.map.layerAt(start) === undefined) {
-    throw new Error(
-      `No loaded bytes at $${hex4(start)}, so there is nothing there to ` +
-        `interpret. A claim about bytes says how to read them; to name an ` +
-        `address outside the loaded ranges, add a label instead.`
-    );
-  }
-
-  return {
-    op: "claim.add",
-    claim: {
-      id: newId("clm"),
-      ...placed(loaded, start),
-      extent: end - start,
-      says: interpretationOf(kind, encoding, view),
-      ...(name === undefined ? {} : { name }),
-      // Rooted, because inclusion is reachability: a span nothing names would
-      // otherwise be declared and never rendered.
-      root: "data",
-      by: AUTHOR,
-    },
-  };
-}
-
-/** The interpretation a region kind and its rendering options project to. */
-function interpretationOf(
-  kind: LegacyRegionKind,
-  encoding?: TextEncoding,
-  view?: string
-): Interpretation {
-  const is = SAYS_FOR_KIND[kind];
-  if (!is) {
-    // `code` and `unknown` are not interpretations: code is what bytes are when
-    // nobody has said otherwise, and `unknown` is the absence of a claim.
-    throw new Error(
-      `"${kind}" is not something a claim can say about bytes. ` +
-        `Declare a root to have an address decoded, and remove a claim to leave ` +
-        `its bytes unexplained.`
-    );
-  }
-  if (is === "text") return { is, ...(encoding !== undefined ? { encoding } : {}) };
-  if (is === "bitmap") return { is, ...(view !== undefined ? { view } : {}) };
-  // `record` never arrives here: it has no legacy region kind to be written as,
-  // so it goes straight to a claim op rather than through this path.
-  if (is === "record") throw new Error("a record claim is written directly, not as a region");
-  return { is };
 }
 
 export function regionDeleteOp(

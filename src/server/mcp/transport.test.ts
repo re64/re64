@@ -105,7 +105,7 @@ describe("speaking the protocol", () => {
         "remove_type",
         "list_types",
         "disagreements",
-        "set_claim",
+        "edit_claim",
         "remove_claim",
         "list_claims",
         "mark_function",
@@ -167,7 +167,7 @@ describe("declaring constants over the wire", () => {
     expect(held.every((c) => typeof c.id === "string" && c.id.length > 0)).toBe(true);
   });
 
-  it("revises by id and refuses an ambiguous name", async () => {
+  it("revises by id, and a name reaches no write at all", async () => {
     const first = await callTool("add_constant", { name: "SHIELD_FLAG", value: "$04" });
     await callTool("add_constant", { name: "SHIELD_FLAG", value: "$08" });
 
@@ -177,13 +177,15 @@ describe("declaring constants over the wire", () => {
     });
     expect(edited.isError).toBe(false);
 
-    const refused = await callTool("remove_constant", { name: "SHIELD_FLAG" });
-    expect(refused.isError).toBe(false);
+    // A name reaches a write nowhere on this surface: whether it is
+    // "unambiguous" depends on what you have synced, so the same call would
+    // remove different things for two peers.
+    const byName = await callTool("remove_constant", { name: "SHIELD_FLAG" });
+    expect(byName.isError).toBe(true);
 
-    await callTool("add_constant", { name: "SHIELD_BIT", value: "$10" });
-    const ambiguous = await callTool("remove_constant", { name: "SHIELD_BIT" });
+    const ambiguous = await callTool("remove_constant", { id: "cst_nope" });
     expect(ambiguous.isError).toBe(true);
-    expect(ambiguous.text).toContain("Say which by id");
+    expect(ambiguous.text).toContain("No constant");
   });
 
   it("takes a hex string or a number for the value, like every other address", async () => {
@@ -194,6 +196,170 @@ describe("declaring constants over the wire", () => {
     const dec = await callTool("add_constant", { name: "AS_NUMBER", value: 15 });
     expect(hex.isError).toBe(false);
     expect(dec.isError).toBe(false);
+  });
+});
+
+describe("drawing a span", () => {
+  /**
+   * The schema, over the real transport — the only layer where this class of
+   * defect exists, and the rule this file was written for: if a tool grows an
+   * argument, it grows a transport test.
+   */
+  it("draws a sheet and hands back a url rather than the bytes", async () => {
+    const { value, isError } = await callTool("render", {
+      start: "$8E00",
+      length: 512,
+      view: "char:8",
+    });
+    expect(isError).toBe(false);
+    const sheet = value as { url: string; cells: number; width: number; height: number };
+    // Gridrunner's font: 64 glyphs of eight bytes, eight to a row.
+    expect(sheet.cells).toBe(64);
+    expect(sheet.width).toBe(64);
+    expect(sheet.height).toBe(64);
+    expect(sheet.url).toContain("/api/blob");
+    expect(sheet.url).toContain(".png");
+  });
+
+  it("animates the same cells when asked", async () => {
+    const { value, isError } = await callTool("render", {
+      start: "$8E00",
+      length: 64,
+      view: "char:1",
+      as: "frames",
+      delayMs: 200,
+    });
+    expect(isError).toBe(false);
+    const animation = value as { frames: number; delayMs: number; width: number };
+    expect(animation.frames).toBe(8);
+    expect(animation.delayMs).toBe(200);
+    expect(animation.width).toBe(8);
+  });
+
+  it("draws a claim by id, using the claim's own view", async () => {
+    // A name that addresses nothing is a display string. Naming a span once
+    // should make it drawable by name for ever after.
+    const made = await callTool("add_claim", {
+      at: "$8E00",
+      name: "characterSetData",
+      is: "bitmap",
+      view: "char:8",
+      extent: 512,
+    });
+    expect(made.isError).toBe(false);
+    // Every write returns the ids it minted, keyed `claim` beside the address.
+    const id = (made.value as { claims: { claim: string }[] }).claims[0].claim;
+
+    const { value, isError, text } = await callTool("render", { claim: id });
+    expect(isError, text).toBe(false);
+    const drawn = value as { cells: number; view: string; name: string; from: string };
+    expect(drawn.from).toBe("$8E00");
+    expect(drawn.cells).toBe(64);
+    expect(drawn.view).toBe("char:8");
+    expect(drawn.name).toBe("characterSetData");
+
+    // And the view can be overridden without editing the claim, because hires
+    // versus multicolour is a runtime bit that is not in the data.
+    const other = await callTool("render", { claim: id, view: "sprite" });
+    expect(other.isError).toBe(false);
+    expect((other.value as { view: string }).view).toBe("sprite");
+
+    // The listing can be pointed at the same claim.
+    const listed = await callTool("export_listing", { claim: id });
+    expect(listed.isError).toBe(false);
+    expect((listed.value as { name: string }).name).toBe("characterSetData");
+  });
+
+  it("refuses a claim and a span together, and an id nothing holds", async () => {
+    const both = await callTool("render", {
+      claim: "clm_whatever",
+      start: "$8E00",
+      length: 8,
+      view: "char:1",
+    });
+    expect(both.isError).toBe(true);
+    expect(both.text).toContain("not both");
+
+    const missing = await callTool("render", { claim: "clm_nothing" });
+    expect(missing.isError).toBe(true);
+    expect(missing.text).toContain("No claim");
+  });
+
+  it("refuses a view it cannot draw, and says what it takes", async () => {
+    // A refusal is prose for the model to read, so this asserts the prose.
+    const { text, isError } = await callTool("render", {
+      start: "$8E00",
+      length: 64,
+      view: "petscii",
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain("sprite-multi");
+  });
+
+  it("refuses a span too short for one cell rather than drawing nothing", async () => {
+    const { isError } = await callTool("render", { start: "$8E00", length: 4, view: "char:1" });
+    expect(isError).toBe(true);
+  });
+});
+
+describe("saying where something is", () => {
+  /**
+   * The arithmetic experiment 8's readers did by hand over and over, and asked
+   * for by name three times. Over the real transport, because the interesting
+   * half is the address *schema* — which every tool shares, so this reaches all
+   * of them at once.
+   */
+  it("accepts a place wherever an address goes", async () => {
+    const { value, isError } = await callTool("read_bytes", {
+      start: "screen(10,2)",
+      length: 1,
+    });
+    expect(isError).toBe(false);
+    expect((value as { start: string }).start).toBe("$0592");
+  });
+
+  it("accepts a sprite pointer the same way", async () => {
+    const { value, isError } = await callTool("read_bytes", { start: "sprite($9D)", length: 1 });
+    expect(isError).toBe(false);
+    expect((value as { start: string }).start).toBe("$2740");
+  });
+
+  it("goes the other way, and says what it assumed", async () => {
+    const { value, isError } = await callTool("where", { address: "$0592" });
+    expect(isError).toBe(false);
+    const at = value as {
+      screen: { row: number; column: number; colourRam: string };
+      sprite: { pointer: string; startsHere: boolean };
+      assumed: { screenBase: string; vicBank: string };
+    };
+    expect(at.screen.row).toBe(10);
+    expect(at.screen.column).toBe(2);
+    expect(at.screen.colourRam).toBe("$D992");
+    // The assumptions are the point: both bases are runtime state, so an answer
+    // that did not name them would be wrong for any program that moved them.
+    expect(at.assumed.screenBase).toBe("$0400");
+    expect(at.assumed.vicBank).toBe("$0000");
+  });
+
+  it("follows a screen the program moved", async () => {
+    const { value, isError } = await callTool("where", {
+      address: "$4192",
+      screenBase: "$4000",
+    });
+    expect(isError).toBe(false);
+    expect((value as { screen: { row: number } }).screen.row).toBe(10);
+  });
+
+  it("refuses a place that is not one, rather than guessing", async () => {
+    const { isError, text } = await callTool("read_bytes", { start: "screen(99,0)", length: 1 });
+    expect(isError).toBe(true);
+    expect(text).toContain("not on the screen");
+  });
+
+  it("is not an expression language", async () => {
+    // A call is a lookup with parentheses. Arithmetic would be a grammar.
+    const { isError } = await callTool("read_bytes", { start: "sprite($9D)+3", length: 1 });
+    expect(isError).toBe(true);
   });
 });
 
@@ -657,7 +823,7 @@ describe("editing as an agent", () => {
     });
     const id = (made.value as { claims: { claim: string }[] }).claims[0].claim;
 
-    const revised = await callTool("set_claim", { id, name: "afterCorrection" });
+    const revised = await callTool("edit_claim", { id, name: "afterCorrection" });
     expect(revised.isError).toBeFalsy();
 
     const { value } = await callTool("claims_at", { at: "$8250" });
@@ -670,11 +836,34 @@ describe("editing as an agent", () => {
     expect(claim?.extent).toBe(16);
   });
 
+  it("moves a claim, keeping the id everything else points at", async () => {
+    // There was no way to do this. `edit_claim` offered no `at`, because a raw
+    // absolute address written into a layer-framed claim is read back as an
+    // *offset* — so rather than get it wrong the field was left out, and
+    // repositioning meant remove-and-re-add, which loses the id and dangles
+    // every primary and every use bound to it.
+    const made = await callTool("add_claim", { at: "$8100", name: "MovedLater" });
+    const id = (made.value as { claims: { claim: string }[] }).claims[0].claim;
+
+    const moved = await callTool("edit_claim", { id, at: "$8104" });
+    expect(moved.isError).toBe(false);
+
+    const gone = (await callTool("claims_at", { at: "$8100" })).value as {
+      claims: { id?: string }[];
+    };
+    expect(gone.claims.some((c) => c.id === id)).toBe(false);
+
+    const now = (await callTool("claims_at", { at: "$8104" })).value as {
+      claims: { id?: string; name?: string }[];
+    };
+    expect(now.claims.find((c) => c.id === id)?.name).toBe("MovedLater");
+  });
+
   it("clears a field with null, which omitting it cannot say", async () => {
     const made = await callTool("add_claim", { at: "$8250", name: "hasAnExtent", extent: 16 });
     const id = (made.value as { claims: { claim: string }[] }).claims[0].claim;
 
-    const cleared = await callTool("set_claim", { id, extent: null });
+    const cleared = await callTool("edit_claim", { id, extent: null });
     expect(cleared.isError).toBeFalsy();
 
     const { value } = await callTool("claims_at", { at: "$8250" });
@@ -688,7 +877,7 @@ describe("editing as an agent", () => {
     const made = await callTool("add_claim", { at: "$8250", name: "untouched" });
     const id = (made.value as { claims: { claim: string }[] }).claims[0].claim;
 
-    const nothing = await callTool("set_claim", { id });
+    const nothing = await callTool("edit_claim", { id });
     expect(nothing.isError).toBe(true);
     expect(nothing.text).toMatch(/at least one field/i);
   });
@@ -811,7 +1000,7 @@ describe("editing as an agent", () => {
     };
     const layer = targets.layers[0].id;
 
-    const made = await callTool("set_target", {
+    const made = await callTool("add_target", {
       name: "relocated",
       layers: [{ layer, at: "$0100" }],
     });
@@ -823,16 +1012,21 @@ describe("editing as an agent", () => {
     const relocated = after.targets.find((t) => t.name === "relocated")!;
     // Reported, because it is what decides shadowing — and because a
     // layer-scoped claim's absolute address is this plus its offset.
-    expect(relocated.layers).toEqual([{ layer, name: expect.any(String), at: "$0100" }]);
+    expect(relocated.layers).toEqual([
+      { id: expect.any(String), layer, name: expect.any(String), at: "$0100" },
+    ]);
   });
 
-  it("keeps the short spelling for a layer at its own address", async () => {
+  it("says nothing about where a layer lands when the target does not move it", async () => {
     const targets = (await callTool("list_targets", {})).value as {
       layers: { id: string }[];
     };
     const layer = targets.layers[0].id;
 
-    await callTool("set_target", { name: "plain", layers: [layer] });
+    // A link is an object with an id now — the bare-string shorthand is gone,
+    // because a shorthand has nowhere to put one and a link is a thing the API
+    // addresses on its own.
+    await callTool("add_target", { name: "plain", layers: [{ layer }] });
     const after = (await callTool("list_targets", {})).value as {
       targets: { name: string; layers: { layer: string; at?: string }[] }[];
     };
@@ -845,7 +1039,10 @@ describe("editing as an agent", () => {
     const targets = (await callTool("list_targets", {})).value as { layers: { id: string }[] };
     const layer = targets.layers[0].id;
 
-    const refused = await callTool("set_target", { name: "doubled", layers: [layer, layer] });
+    const refused = await callTool("add_target", {
+      name: "doubled",
+      layers: [{ layer }, { layer }],
+    });
     expect(refused.isError).toBe(true);
     expect(refused.text).toMatch(/once/i);
   });
@@ -935,7 +1132,7 @@ describe("editing as an agent", () => {
     // decoder could be defined and run and never reach the span it was written
     // for — which is the one case it exists for, a program with its own
     // character set that no built-in encoding can read.
-    const decoder = await callTool("set_decoder", {
+    const decoder = await callTool("add_decoder", {
       name: "glyphs",
       source: "return { kind: 'text', lines: ['decoded'] };",
     });
@@ -1104,7 +1301,10 @@ describe("editing as an agent", () => {
     const { layers } = listed.value as { layers: { id: string; name: string }[] };
     expect(layers.length).toBeGreaterThan(0);
 
-    const made = await callTool("set_target", { name: "just-the-prg", layers: [layers[0].id] });
+    const made = await callTool("add_target", {
+      name: "just-the-prg",
+      layers: [{ layer: layers[0].id }],
+    });
     expect(made.isError).toBe(false);
 
     // Named per call, and nothing on the server remembers it — so this reads
@@ -1120,11 +1320,14 @@ describe("editing as an agent", () => {
     expect(missing.isError).toBe(true);
     expect(missing.text).toMatch(/No target/);
 
-    expect((await callTool("remove_target", { name: "just-the-prg" })).isError).toBe(false);
+    expect((await callTool("remove_target", { id: made.value ? (made.value as { target: string }).target : "" })).isError).toBe(false);
   });
 
   it("refuses a target over a layer that is not there", async () => {
-    const refused = await callTool("set_target", { name: "bad", layers: ["lay_nope"] });
+    const refused = await callTool("add_target", {
+      name: "bad",
+      layers: [{ layer: "lay_nope" }],
+    });
     expect(refused.isError).toBe(true);
     expect(refused.text).toMatch(/No layer/);
   });
@@ -1170,5 +1373,186 @@ describe("editing as an agent", () => {
     const { text, bytes } = written.value as { text: string; bytes: number };
     expect(bytes).toBeGreaterThan(0);
     expect(() => JSON.parse(text)).not.toThrow();
+  });
+});
+
+describe("running a scenario over the wire", () => {
+  it("declares a workflow, runs it, and keeps what it captured", async () => {
+    // The whole loop through the surface an agent actually uses. Gridrunner is
+    // a cartridge with no ROMs linked here, so this runs its own code without a
+    // KERNAL — enough to prove the path, and the machine model's real
+    // acceptance is `core/machine/gridrunner.test.ts`.
+    const made = await callTool("add_scenario", {
+      name: "first frames",
+      description: "boot the cartridge and keep the screen",
+      steps: [
+        { kind: "start", at: "$8000", vector: true },
+        { kind: "run", frames: 2 },
+        { kind: "capture", what: "ram", from: "$0400", to: "$0500", name: "screen.prg" },
+      ],
+    });
+    expect(made.isError).toBe(false);
+    const id = (made.value as { scenario: string }).scenario;
+
+    const run = (await callTool("run_scenario", { id })).value as {
+      did: { step: string; kind: string }[];
+      captured?: { id: string; step: string; kind: string; file: string; url: string }[];
+      stopped: { reason: string };
+    };
+
+    expect(run.did.map((d) => d.kind)).toEqual(["start", "run", "capture"]);
+    expect(run.captured).toHaveLength(1);
+    expect(run.captured![0].file).toBe("screen.prg");
+    // Where the bytes actually are. The route has existed since the browser
+    // needed binaries and nothing told a caller about it — which is experiment
+    // 4's `save_project` finding repeating.
+    expect(run.captured![0].url).toContain("/api/blob?");
+
+    // The capture is in the document beside the scenario that made it, so what
+    // a run produced can be found without running it again.
+    const listed = (await callTool("list_scenarios", {})).value as {
+      scenarios: { id: string; captures: { file: string }[] }[];
+    };
+    const found = listed.scenarios.find((x) => x.id === id)!;
+    expect(found.captures.map((c) => c.file)).toEqual(["screen.prg"]);
+  });
+
+  it("mints an id for every step, so a capture can name the one that made it", async () => {
+    const made = await callTool("add_scenario", {
+      name: "ids",
+      steps: [{ kind: "start", at: "$8000", vector: true }],
+    });
+    const id = (made.value as { scenario: string }).scenario;
+
+    const listed = (await callTool("list_scenarios", {})).value as {
+      scenarios: { id: string; steps: { id?: string }[] }[];
+    };
+    const found = listed.scenarios.find((x) => x.id === id)!;
+    expect(found.steps[0].id).toMatch(/^stp_/);
+  });
+
+  it("revises by id, and refuses an id nothing holds", async () => {
+    const made = await callTool("add_scenario", {
+      name: "before",
+      steps: [{ kind: "start", at: "$8000" }],
+    });
+    const id = (made.value as { scenario: string }).scenario;
+
+    expect((await callTool("edit_scenario", { id, name: "after" })).isError).toBe(false);
+    const missing = await callTool("edit_scenario", { id: "scn_nope", name: "x" });
+    expect(missing.isError).toBe(true);
+    expect(missing.text).toContain("No scenario");
+  });
+
+  it("refuses a scenario with no steps, which would do nothing", async () => {
+    const refused = await callTool("add_scenario", { name: "empty", steps: [] });
+    expect(refused.isError).toBe(true);
+  });
+});
+
+describe("evidence, and saying things about a claim", () => {
+  it("records a refutation that shares no bytes with what it refutes", async () => {
+    // The shape both experiment-0 agents hit and neither could express. `$8DF9`
+    // holding `$3B` refutes a claim about the *glyph* `$3B`, somewhere else
+    // entirely — so `disagreements`, which sweeps for claims covering the same
+    // bytes, could never find it.
+    const glyph = await callTool("add_claim", {
+      at: "$8E18",
+      name: "glyph3B",
+      comment: "never drawn",
+      method: "read",
+    });
+    const table = await callTool("add_claim", { at: "$8DF9", name: "levelText", method: "ran" });
+    const wrong = (glyph.value as { claims: { claim: string }[] }).claims[0].claim;
+    const right = (table.value as { claims: { claim: string }[] }).claims[0].claim;
+
+    const noted = await callTool("add_evidence", {
+      claim: right,
+      kind: "refutes",
+      other: wrong,
+      note: "$8DF9 holds $3B, so the glyph is drawn",
+    });
+    expect(noted.isError).toBe(false);
+
+    const contested = (await callTool("disagreements", {})).value as {
+      findings: { kind: string; what: string }[];
+    };
+    const declared = contested.findings.filter((f) => f.kind === "declared");
+    expect(declared).toHaveLength(1);
+    expect(declared[0].what).toContain("so the glyph is drawn");
+  });
+
+  it("refuses a refutation that points at nothing", async () => {
+    // An opinion with no handle on it: the whole point is that a reader can
+    // follow it to the thing that was wrong.
+    const made = await callTool("add_claim", { at: "$8F00", name: "Something" });
+    const claim = (made.value as { claims: { claim: string }[] }).claims[0].claim;
+
+    const refused = await callTool("add_evidence", { claim, kind: "refutes" });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/point at/);
+  });
+
+  it("keeps a superseded reading rather than deleting it", async () => {
+    // "The wrong model that led to the right place is worth keeping, and prose
+    // deliverables silently discard it."
+    const first = await callTool("add_claim", { at: "$8F10", name: "cipherTable", method: "guessed" });
+    const second = await callTool("add_claim", { at: "$8F10", name: "characterSet", method: "ran" });
+    const old = (first.value as { claims: { claim: string }[] }).claims[0].claim;
+    const now = (second.value as { claims: { claim: string }[] }).claims[0].claim;
+
+    await callTool("add_evidence", {
+      claim: now,
+      kind: "supersedes",
+      other: old,
+      note: "the substitution-cipher attack is what led here, and it was wrong",
+    });
+
+    const about = (await callTool("list_evidence", { claim: now })).value as {
+      evidence: { kind: string; other?: string }[];
+    };
+    expect(about.evidence[0]).toMatchObject({ kind: "supersedes", other: old });
+    // And the superseded claim is still there to be read.
+    const still = (await callTool("claims_at", { at: "$8F10" })).value as {
+      claims: { id?: string }[];
+    };
+    expect(still.claims.some((c) => c.id === old)).toBe(true);
+  });
+
+  it("says how a claim was reached, so agreement can be told from repetition", async () => {
+    const made = await callTool("add_claim", { at: "$8F20", name: "watched", method: "ran" });
+    expect(made.isError).toBe(false);
+
+    const here = (await callTool("claims_at", { at: "$8F20" })).value as {
+      claims: { name?: string; method?: string }[];
+    };
+    expect(here.claims.find((c) => c.name === "watched")?.method).toBe("ran");
+  });
+
+  it("backs a claim with a scenario, which re-verifies rather than asserting", async () => {
+    // The form both agents asked for: evidence as a named re-runnable probe.
+    // Theirs lived in shell history and was gone by the time anybody read the
+    // finding it supported.
+    const probe = await callTool("add_scenario", {
+      name: "the header is a cartridge",
+      steps: [
+        { kind: "start", at: "$8000", vector: true },
+        { kind: "assert", memory: { "$8004": 0xc3 }, note: "CBM80 signature" },
+      ],
+    });
+    const scenario = (probe.value as { scenario: string }).scenario;
+
+    const claim = await callTool("add_claim", { at: "$8004", name: "cartridgeHeader", method: "ran" });
+    const id = (claim.value as { claims: { claim: string }[] }).claims[0].claim;
+    expect((await callTool("add_evidence", { claim: id, kind: "supports", scenario })).isError)
+      .toBe(false);
+
+    // And running it says pass or fail, which is what makes it evidence.
+    const run = (await callTool("run_scenario", { id: scenario })).value as {
+      passed?: boolean;
+      checks?: { ok: boolean; said: string }[];
+    };
+    expect(run.passed).toBe(true);
+    expect(run.checks![0].said).toContain("CBM80 signature");
   });
 });

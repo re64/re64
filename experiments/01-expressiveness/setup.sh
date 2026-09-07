@@ -14,7 +14,7 @@ repo="$(cd "$here/../.." && pwd)"
 run="${1:-$here/run}"
 port="${RE64_PORT:-5164}"
 
-if [ ! -f "$repo/dist/cli/index.js" ]; then
+if [ ! -f "$repo/dist/server/index.js" ]; then
   echo "Building..." >&2
   (cd "$repo" && npm run build >/dev/null)
 fi
@@ -49,7 +49,7 @@ cat > "$run/gridrunner-blank.re64" <<'JSON'
 }
 JSON
 
-node "$repo/dist/cli/index.js" import "$run/gridrunner-blank.re64" >/dev/null
+node "$repo/experiments/import.mjs" "$run/gridrunner-blank.re64" >/dev/null
 node "$repo/dist/server/index.js" "$run/gridrunner-blank.re64db" --port "$port" &
 server=$!
 trap 'kill $server 2>/dev/null || true' EXIT INT TERM
@@ -84,7 +84,7 @@ path above.
 
 Read the run:
 
-  node $repo/dist/cli/index.js transcript "$run/gridrunner-blank.mcp.jsonl"
+  node $repo/dist/tools/experiment-transcript.js "$run/gridrunner-blank.mcp.jsonl"
 
 Ctrl-C stops the server.
 EOF

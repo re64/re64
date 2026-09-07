@@ -154,7 +154,7 @@ describe("two peers on one claims root", () => {
         id: "clm_1", at: 0x8e00, extent: 0x200, name: "characterSet",
         says: { is: "bitmap", view: "char:8" },
         description: "the game's own glyphs",
-        by: { author: "amber", source: "user", when: 1_700_000_000_000, confidence: "guess" },
+        by: { author: "amber", source: "user", when: 1_700_000_000_000, method: "guessed" },
       }),
       claim({
         id: "clm_2", at: 0x10, frame: { space: "layer", layer: "decruncher" },

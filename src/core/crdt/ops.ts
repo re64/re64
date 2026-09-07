@@ -41,6 +41,41 @@ function assign(entry: Y.Map<unknown>, fields: Record<string, unknown>): void {
 }
 
 /**
+ * Write only the fields a partial `set` named.
+ *
+ * The difference from `assign` is the whole reason `set` is partial: **omitted
+ * means leave alone**, where `assign` reads absence as "clear it". Writing only
+ * the named keys is also what makes the merge right — two peers revising
+ * different fields of one record touch different keys and both survive, where a
+ * whole-value write would make the later one win over fields it never read.
+ *
+ * `null` is the explicit clear, which is the distinction an optional field
+ * cannot make.
+ */
+function revise(entry: Y.Map<unknown>, fields: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === undefined) continue;
+    if (value === null) entry.delete(key);
+    else entry.set(key, value);
+  }
+}
+
+/** A type's field map, made on first use. Nested, so offsets merge separately. */
+function fieldsOf(entry: Y.Map<unknown>): Y.Map<unknown> {
+  let fields = entry.get("fields") as Y.Map<unknown> | undefined;
+  if (!(fields instanceof Y.Map)) {
+    fields = new Y.Map<unknown>();
+    entry.set("fields", fields);
+  }
+  return fields;
+}
+
+/** The record a partial `set` names, or nothing if it is gone. */
+function entryFor(map: Y.Map<Y.Map<unknown>>, id: string): Y.Map<unknown> | undefined {
+  return map.get(id);
+}
+
+/**
  * Apply one operation.
  *
  * `origin` identifies who is editing — a user id, an agent name — and decides
@@ -69,7 +104,7 @@ export function applyOpsToDoc(doc: Y.Doc, ops: readonly Op[], origin: unknown = 
 function applyOpInTransaction(doc: Y.Doc, op: Op): void {
   {
     switch (op.op) {
-      case "comment.set": {
+      case "comment.add": {
         const comments = childMap(layerById(doc, op.layerId), "comments");
         let entry = comments.get(op.id);
         if (!entry) {
@@ -91,7 +126,24 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         break;
       }
 
-      case "comment.delete":
+      case "comment.set": {
+        const entry = entryFor(childMap(layerById(doc, op.layerId), "comments"), op.id);
+        if (entry) {
+          revise(entry, {
+            ...(op.fields.address === undefined ? {} : { address: hex4(op.fields.address) }),
+            // "before" is the default and is recorded by absence, matching the
+            // project file so a flatten produces the same text.
+            ...(op.fields.placement === undefined
+              ? {}
+              : { placement: op.fields.placement === "before" ? null : op.fields.placement }),
+            ...(op.fields.text === undefined ? {} : { text: op.fields.text }),
+            ...(op.fields.order === undefined ? {} : { order: op.fields.order }),
+          });
+        }
+        break;
+      }
+
+      case "comment.remove":
         childMap(layerById(doc, op.layerId), "comments").delete(op.id);
         break;
 
@@ -102,7 +154,7 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         break;
       }
 
-      case "label.bind": {
+      case "labelUse.bind": {
         const uses = childMap(layerById(doc, op.layerId), "labelUses");
         let entry = uses.get(op.id);
         if (!entry) {
@@ -113,11 +165,11 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         break;
       }
 
-      case "label.unbind":
+      case "labelUse.unbind":
         childMap(layerById(doc, op.layerId), "labelUses").delete(op.id);
         break;
 
-      case "constant.set": {
+      case "constant.add": {
         const constants = doc.getMap<Y.Map<unknown>>("constants");
         let entry = constants.get(op.id);
         if (!entry) {
@@ -132,39 +184,66 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         break;
       }
 
-      case "constant.delete":
+      case "constant.set": {
+        const entry = entryFor(doc.getMap<Y.Map<unknown>>("constants"), op.id);
+        if (entry) {
+          revise(entry, {
+            ...(op.fields.name === undefined ? {} : { name: op.fields.name }),
+            ...(op.fields.value === undefined
+              ? {}
+              : { value: `$${op.fields.value.toString(16).toUpperCase().padStart(2, "0")}` }),
+          });
+        }
+        break;
+      }
+
+      case "constant.remove":
         doc.getMap<Y.Map<unknown>>("constants").delete(op.id);
         break;
 
-      case "target.set": {
+      case "target.add": {
         const targets = doc.getMap<Y.Map<unknown>>("targets");
-        let entry = targets.get(op.name);
+        let entry = targets.get(op.id);
         if (!entry) {
           entry = new Y.Map<unknown>();
-          targets.set(op.name, entry);
+          targets.set(op.id, entry);
         }
-        // Only the fields this operation carries. `assign` deletes on
-        // undefined, and an omitted field means "leave it alone" — so two
-        // people revising different parts of one target both survive, which
-        // whole-object writes would not allow.
         assign(entry, {
+          id: op.id,
           name: op.name,
-          ...(op.layers !== undefined ? { layers: op.layers } : {}),
-          ...(op.entryPoints !== undefined
-            ? { entryPoints: op.entryPoints.length ? op.entryPoints.map(hex4) : undefined }
-            : {}),
-          ...(op.order !== undefined ? { order: op.order } : {}),
-          ...(op.description !== undefined ? { description: op.description } : {}),
+          layers: op.layers ?? [],
+          entryPoints: op.entryPoints?.length ? op.entryPoints.map(hex4) : undefined,
+          order: op.order,
+          description: op.description,
         });
         break;
       }
 
+      case "target.set": {
+        // Only the fields this operation carries, so two people revising
+        // different parts of one target both survive.
+        const entry = entryFor(doc.getMap<Y.Map<unknown>>("targets"), op.id);
+        if (entry) {
+          const f = op.fields;
+          revise(entry, {
+            ...(f.name === undefined ? {} : { name: f.name }),
+            ...(f.layers === undefined ? {} : { layers: f.layers }),
+            ...(f.entryPoints === undefined
+              ? {}
+              : { entryPoints: f.entryPoints?.length ? f.entryPoints.map(hex4) : null }),
+            ...(f.order === undefined ? {} : { order: f.order }),
+            ...(f.description === undefined ? {} : { description: f.description }),
+          });
+        }
+        break;
+      }
+
       case "target.remove": {
-        doc.getMap<Y.Map<unknown>>("targets").delete(op.name);
+        doc.getMap<Y.Map<unknown>>("targets").delete(op.id);
         // A selection pointing at nothing reads as a filter that silently does
         // nothing, which is worse than no selection at all.
         const meta = doc.getMap<unknown>("meta");
-        if (meta.get("defaultTarget") === op.name) meta.delete("defaultTarget");
+        if (meta.get("defaultTarget") === op.id) meta.delete("defaultTarget");
         break;
       }
 
@@ -184,7 +263,7 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         break;
       }
 
-      case "decoder.set": {
+      case "decoder.add": {
         const decoders = doc.getMap<Y.Map<unknown>>("decoders");
         let entry = decoders.get(op.id);
         if (!entry) {
@@ -195,11 +274,17 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         break;
       }
 
-      case "decoder.delete":
+      case "decoder.set": {
+        const entry = entryFor(doc.getMap<Y.Map<unknown>>("decoders"), op.id);
+        if (entry) revise(entry, { ...op.fields });
+        break;
+      }
+
+      case "decoder.remove":
         doc.getMap<Y.Map<unknown>>("decoders").delete(op.id);
         break;
 
-      case "type.set": {
+      case "type.add": {
         const types = doc.getMap<Y.Map<unknown>>("types");
         let entry = types.get(op.id);
         if (!entry) {
@@ -207,37 +292,143 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
           types.set(op.id, entry);
         }
         assign(entry, { id: op.id, name: op.name, size: op.size });
+        const fields = fieldsOf(entry);
+        for (const [offset, field] of Object.entries(op.fields)) fields.set(offset, field);
+        break;
+      }
 
-        // The fields are a map of their own, written key by key, so two readers
-        // adding different fields to one record both survive. Replacing the
-        // whole map — which is what writing it as a value would do — is
-        // last-writer-wins over the lot, and losing a field somebody proved
-        // from a copy routine is exactly the silent destruction this project
-        // has now been caught by three times.
-        let fields = entry.get("fields") as Y.Map<unknown> | undefined;
-        if (!(fields instanceof Y.Map)) {
-          fields = new Y.Map<unknown>();
-          entry.set("fields", fields);
-        }
-        const wanted = new Set(Object.keys(op.fields));
-        // A key the operation does not mention is one it removed: a whole-value
-        // op says "the record looks like this", and leaving a stale field would
-        // make a removal silently fail.
-        for (const key of [...fields.keys()]) {
-          if (!wanted.has(key)) fields.delete(key);
-        }
-        for (const [offset, field] of Object.entries(op.fields)) {
-          const held = fields.get(offset);
-          if (JSON.stringify(held) !== JSON.stringify(field)) fields.set(offset, field);
+      /**
+       * Revise a layout. Fields **merge by offset**; `null` removes one.
+       *
+       * The fields are a map of their own, written key by key, so two readers
+       * adding different fields to one record both survive. This used to delete
+       * any offset the operation did not mention — whole-value semantics
+       * reaching into the one structure that exists specifically not to have
+       * them, so a concurrent addition was lost the next time anybody renamed
+       * the type. Losing a field somebody proved from a copy routine is exactly
+       * the silent destruction this project has been caught by three times.
+       */
+      case "type.set": {
+        const entry = entryFor(doc.getMap<Y.Map<unknown>>("types"), op.id);
+        if (entry) {
+          revise(entry, {
+            ...(op.fields.name === undefined ? {} : { name: op.fields.name }),
+            ...(op.fields.size === undefined ? {} : { size: op.fields.size }),
+          });
+          if (op.fields.fields) {
+            const fields = fieldsOf(entry);
+            for (const [offset, field] of Object.entries(op.fields.fields)) {
+              if (field === null) fields.delete(offset);
+              else if (JSON.stringify(fields.get(offset)) !== JSON.stringify(field)) {
+                fields.set(offset, field);
+              }
+            }
+          }
         }
         break;
       }
 
-      case "type.delete":
+      case "type.remove":
         doc.getMap<Y.Map<unknown>>("types").delete(op.id);
         break;
 
-      case "constant.bind": {
+      case "scenario.add": {
+        const scenarios = doc.getMap<Y.Map<unknown>>("scenarios");
+        let entry = scenarios.get(op.id);
+        if (!entry) {
+          entry = new Y.Map<unknown>();
+          scenarios.set(op.id, entry);
+        }
+        assign(entry, {
+          id: op.id,
+          name: op.name,
+          description: op.description,
+          // One value, unlike a type's fields. A scenario is one author's
+          // sequence and the order is the meaning, so there is no key to merge
+          // on — the trade is written down in `ProjectScenario`.
+          steps: JSON.stringify(op.steps),
+        });
+        break;
+      }
+
+      case "scenario.set": {
+        const entry = entryFor(doc.getMap<Y.Map<unknown>>("scenarios"), op.id);
+        if (entry) {
+          revise(entry, {
+            ...(op.fields.name === undefined ? {} : { name: op.fields.name }),
+            ...(op.fields.description === undefined
+              ? {}
+              : { description: op.fields.description }),
+            ...(op.fields.steps === undefined
+              ? {}
+              : { steps: JSON.stringify(op.fields.steps) }),
+          });
+        }
+        break;
+      }
+
+      case "scenario.remove":
+        doc.getMap<Y.Map<unknown>>("scenarios").delete(op.id);
+        break;
+
+      case "capture.add": {
+        const captures = doc.getMap<Y.Map<unknown>>("captures");
+        let entry = captures.get(op.id);
+        if (!entry) {
+          entry = new Y.Map<unknown>();
+          captures.set(op.id, entry);
+        }
+        assign(entry, {
+          id: op.id,
+          scenario: op.scenario,
+          step: op.step,
+          kind: op.kind,
+          file: op.file,
+          when: op.when,
+        });
+        break;
+      }
+
+      case "capture.set": {
+        const entry = entryFor(doc.getMap<Y.Map<unknown>>("captures"), op.id);
+        if (entry) revise(entry, { ...op.fields });
+        break;
+      }
+
+      case "capture.remove":
+        doc.getMap<Y.Map<unknown>>("captures").delete(op.id);
+        break;
+
+      case "evidence.add": {
+        const all = doc.getMap<Y.Map<unknown>>("evidence");
+        let entry = all.get(op.id);
+        if (!entry) {
+          entry = new Y.Map<unknown>();
+          all.set(op.id, entry);
+        }
+        assign(entry, {
+          id: op.id,
+          claim: op.claim,
+          kind: op.kind,
+          scenario: op.scenario,
+          capture: op.capture,
+          other: op.other,
+          note: op.note,
+        });
+        break;
+      }
+
+      case "evidence.set": {
+        const entry = entryFor(doc.getMap<Y.Map<unknown>>("evidence"), op.id);
+        if (entry) revise(entry, { ...op.fields });
+        break;
+      }
+
+      case "evidence.remove":
+        doc.getMap<Y.Map<unknown>>("evidence").delete(op.id);
+        break;
+
+      case "constantUse.bind": {
         const uses = childMap(layerById(doc, op.layerId), "constantUses");
         let entry = uses.get(op.id);
         if (!entry) {
@@ -248,9 +439,16 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         break;
       }
 
-      case "constant.unbind":
+      case "constantUse.unbind":
         childMap(layerById(doc, op.layerId), "constantUses").delete(op.id);
         break;
+
+      case "layer.set": {
+        const layers = doc.getArray<Y.Map<unknown>>("layers");
+        const held = layers.toArray().find((l) => l.get("id") === op.id);
+        if (held) revise(held, { ...op.fields });
+        break;
+      }
 
       case "layer.add": {
         const layers = doc.getArray<Y.Map<unknown>>("layers");
@@ -283,7 +481,7 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         break;
       }
 
-      case "primary.set":
+      case "primary.bind":
         doc.getMap<string>("primaryLabels").set(hex4(op.address), op.labelId);
         break;
 
@@ -323,7 +521,7 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         claimsRoot(doc).delete(op.id);
         break;
 
-      case "primary.clear":
+      case "primary.unbind":
         doc.getMap<string>("primaryLabels").delete(hex4(op.address));
         break;
 
@@ -365,6 +563,9 @@ export function undoManagerFor(doc: Y.Doc, origin: unknown = "local"): Y.UndoMan
       doc.getMap("files"),
       doc.getMap("targets"),
       doc.getMap("claims"),
+      doc.getMap("scenarios"),
+      doc.getMap("captures"),
+      doc.getMap("evidence"),
     ],
     {
       trackedOrigins: new Set([origin]),

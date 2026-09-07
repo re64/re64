@@ -4,7 +4,6 @@ import {
   labelDeleteOp,
   claimAddOps,
   markFunctionOps,
-  regionSetOp,
   unmarkFunctionOps,
 } from "./edits.js";
 import { loadProjectFile } from "../../node-files.js";
@@ -65,7 +64,7 @@ describe("naming an address", () => {
     expect(built.addedBeside).toBe("initializeDataJumpAddress");
     // And pins what was showing, so a second name does not silently rename
     // every reference to the address.
-    expect(built.ops.some((o) => o.op === "primary.set")).toBe(true);
+    expect(built.ops.some((o) => o.op === "primary.bind")).toBe(true);
   });
 
   it("names an address no layer supplies, with no symbols layer to invent", () => {
@@ -117,27 +116,22 @@ describe("declaring what a span holds", () => {
     // what the caller had synced, so the same call had two outcomes.
     const loaded = gridrunner();
     const existing = loaded.claims.find((c) => c.name === "characterSetData")!;
-    const op = regionSetOp(loaded, existing.at, existing.at + existing.extent!, "data", "same");
+    const { ops } = claimAddOps(loaded, existing.at, {
+      name: "same",
+      says: { is: "data" },
+      // An interpretation is surfaced whether or not anything reaches it, or a
+      // span nothing names would stop rendering once inclusion is reachability.
+      root: "data",
+      extent: existing.extent!,
+    });
+    const op = ops.find((o) => o.op === "claim.add")!;
 
     expect(op.op).toBe("claim.add");
     if (op.op !== "claim.add") throw new Error("shape");
+    // The identical span, declared by somebody who had already synced the first
+    // one: it still adds. There is no builder left that infers which claim a
+    // span revises — revising is `claim.set`, and it takes an id.
     expect(op.claim.id).not.toBe(existing.id);
-    // Rooted, or a span nothing names would stop rendering once inclusion is
-    // reachability.
     expect(op.claim.root).toBe("data");
-  });
-
-  it("revises only when told which, by id", () => {
-    const loaded = gridrunner();
-    const existing = loaded.claims.find((c) => c.name === "characterSetData")!;
-    const op = regionSetOp(
-      loaded, existing.at, existing.at + 0x20, "bitmap", "charSet",
-      undefined, undefined, undefined, existing.id
-    );
-    expect(op).toMatchObject({ op: "claim.set", id: existing.id });
-  });
-
-  it("refuses a span no layer supplies, since there are no bytes to read", () => {
-    expect(() => regionSetOp(gridrunner(), 0x00fe, 0x0100, "data")).toThrow(/nothing there to/);
   });
 });

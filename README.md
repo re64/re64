@@ -1,22 +1,23 @@
 # re64
 
-An agentic-first C64 disassembler. Reverse engineering a game is a long grind of
-recognising a routine, naming it and moving on, and that is work an agent can do
-alongside a person rather than instead of one.
+An **agentic-first, collaborative C64 reverse engineering framework**. Reverse
+engineering a game is a long grind of recognising a routine, naming it and moving
+on, and that is work an agent can do alongside a person rather than instead of
+one.
 
-Four consumers sit over one document, and none of them is the primary: a CLI, an
-HTTP API, a web UI, and an MCP surface for agents. They share a document rather
-than a file format, so an agent naming a subroutine and a person reading the same
-code see each other's work as it happens.
+Three consumers over one document: an **MCP surface** for agents, a **web UI** for
+people, and the **HTTP API** both sit on. They share a document rather than a file
+format, so an agent naming a subroutine and a person reading the same code see
+each other's work as it happens.
 
 ## Status
 
 In active development.
 
-**Reading a binary.** PRG files and D64 disk images; stacked memory layers;
-a work-queue 6502 disassembler with control-flow analysis; text, bitmap and
-record rendering; a cross-reference arrow gutter drawn identically in the CLI and
-the browser.
+**Reading a binary.** PRG files and D64 disk images; stacked memory layers; a
+work-queue 6502 disassembler with control-flow analysis; text, bitmap and record
+rendering; a cross-reference arrow gutter drawn from the model, so every surface
+draws the same one.
 
 **Saying things about it.** One noun — a *claim* — carries a name, what the bytes
 are, how far it reaches, and whether to decode from there. Adding always adds and
@@ -32,17 +33,21 @@ analysis for proving flags. `run_program` executes the program's own decruncher.
 participant list, per-session undo, and an append-only operation log every
 surface writes through.
 
-**Agents.** 72 MCP tools inside the same server, so an agent's edit lands in an
+**Agents.** 75 MCP tools inside the same server, so an agent's edit lands in an
 open browser without a reload.
 
 ## Documentation
 
 | | |
 |---|---|
-| `docs/model.md` | the document model as it stands — read this first |
-| `docs/api.md` | the MCP surface, from the live schema |
-| `docs/experiments.md` | eight agent runs, and what each one changed |
-| `CLAUDE.md` | why any of it is shaped the way it is |
+| `docs/purpose.md` | what this is for |
+| `docs/developer-guide.md` | **start here** — the model and the API, end to end |
+| `docs/model.md` | the model as reference |
+| `docs/algebra.md` | the operation rules |
+| `docs/api.md` | the MCP surface, generated from the live schema |
+| `docs/invariants.md` | what must not break, and what pins it |
+| `docs/experiments.md` | nine agent runs, and what each one changed |
+| `docs/decisions/` | why any of it is shaped the way it is |
 
 ## Development
 
@@ -52,143 +57,45 @@ npm run build
 npm test
 ```
 
-## Usage
+`npm run typecheck` covers both tsconfigs; `npm run build:ui` bundles the
+browser.
 
-### Basic commands
-
-```bash
-npx re64 version              # Show version
-npx re64 dump --help          # Show dump command help
-npx re64 disasm --help        # Show disassemble command help
-```
-
-### Project files
-
-The recommended way to work with re64 is through project files (`.re64` JSON files):
-
-```json
-{
-  "name": "My Game",
-  "layers": [
-    { "id": "lay_game", "type": "prg", "path": "game.prg" }
-  ],
-  "claims": [
-    { "id": "clm_1", "at": "$02", "name": "playerX" },
-    { "id": "clm_2", "at": "$0810", "name": "MainLoop", "root": "routine" },
-    { "id": "clm_3", "at": "$2000", "extent": 4096,
-      "name": "spriteData", "is": "data", "layer": "lay_game" }
-  ],
-  "entryPoints": ["$0810"]
-}
-```
-
-A **claim** is anything anybody says about an address: a name, what the bytes
-are (`is`), how far it reaches (`extent`), whether to decode from there
-(`root`), or any combination. What used to be a "label" is a claim with a name;
-what used to be a "region" is one with an extent and an `is`.
-
-A claim belongs to the layer supplying its bytes — stored as an offset, so
-relinking that layer moves the claim with it — or to the target, for addresses
-no file supplies. That is derived from the address; you never say it, and the
-tools speak absolute addresses throughout.
-
-Standard C64 hardware registers and KERNAL entry points (`$D020 EXTCOL`,
-`$FFD2 CHROUT`, …) are built in, so projects only declare names they want to
-override. Older files carrying `labels` and `regions` inside layers still load;
-`re64 migrate` converts one.
+## Running it
 
 ```bash
-# Disassemble using project file
-npx re64 disasm -p game.re64
-
-# Disassemble specific range
-npx re64 disasm -p game.re64 -r '$0800:$0900'
-
-# Without the cross-reference arrow gutter
-npx re64 disasm -p game.re64 --no-arrows
+npm run build && npm run build:ui
+npm run serve                      # http://127.0.0.1:5164
 ```
 
-### Editing
-
-Edits go through an operation layer shared with the web UI, and are recorded
-beside the project so undo survives the process exiting.
+Open the browser at that address for the web UI, and point an agent at the same
+server:
 
 ```bash
-npx re64 label set game.re64 '$81A2' DrawGrid --type function
-npx re64 label rm  game.re64 '$81A2'
-npx re64 region set game.re64 '$8080:$80A0' text --name copyright
-npx re64 apply game.re64 ops.json --author agent-1   # a batch
-npx re64 undo game.re64
-npx re64 redo game.re64
-
-npx re64 migrate game.re64    # write stable ids into an older project
+claude mcp add --transport http re64 http://127.0.0.1:5164/mcp \
+  --header "X-Re64-User: <user id>"
 ```
 
-`apply` takes a JSON array of operations, which is how an agent edits a project
-without a browser:
+The user id is one from `list_projects`; the server does not verify it.
 
-```json
-[
-  { "op": "claim.add",
-    "claim": { "id": "clm_a1b2c3", "at": 33186, "name": "DrawGrid",
-               "root": "routine",
-               "by": { "author": "agent-1", "source": "user" } } }
-]
-```
+### Starting from a binary
 
-The CLI's `label` and `region` subcommands are the old vocabulary over the new
-model — they write claims. Agents use the MCP surface, where the vocabulary is
-`add_claim`, `set_claim` and `remove_claim`; see `docs/api.md`.
+There is no separate import step and no save step — a project is built through
+the API and every edit is durable when the call returns:
 
-### Loading files directly
+1. `create_project`
+2. `prepare_upload`, then PUT the bytes to the URL it returns — a disk image is
+   ~175KB, and base64 of it through a tool argument would be tens of thousands of
+   tokens for a file nothing reads
+3. `list_disk_files` if it is a `.d64`
+4. `add_byte_layer` over the file, or `add_rom_layer` for a KERNAL or BASIC ROM
+5. `mark_function` at the entry point
 
-```bash
-# Load a PRG file (address from 2-byte header)
-npx re64 dump -l game.prg
+On Revenge of the Mutant Camels that sequence takes the decode from five
+instructions — a BASIC stub — to forty-four, which is the moment a project stops
+being a file and starts being a program.
 
-# Load a PRG from a D64 disk image
-npx re64 dump -l 'disk.d64:filename'
-
-# Load a raw file at a specific address
-npx re64 dump -l '$e000,kernal.rom'
-```
-
-### Memory layers
-
-Layers are stacked - later layers shadow earlier ones:
-
-```bash
-# Zero-fill $1000-$2000, then overlay with PRG
-npx re64 dump -l '$1000+$1000,#00' -l game.prg
-
-# Fill with a repeating pattern
-npx re64 dump -l '$d000+$100,#deadbeef'
-```
-
-### Specifying ranges
-
-Addresses use `$` (or `0x`) prefix for hex. Ranges can be:
-- `start+length` - e.g., `$1000+$100` (256 bytes from $1000)
-- `start:end` - e.g., `$1000:$1100` (same range, end exclusive)
-
-```bash
-# Dump specific range
-npx re64 dump -l game.prg -r '$0800+$100'
-
-# Disassemble specific range
-npx re64 disasm -l game.prg -r '$0800:$0900'
-```
-
-### Layer syntax summary
-
-```
-<file.prg>                - PRG file (address from header)
-<image.d64:name>          - PRG from D64 disk image
-<addr>,<file>             - raw file at address
-<range>,<file>            - raw file repeated to fill range
-<addr>,#<hex>             - inline bytes
-<range>,#<hex>            - inline bytes repeated to fill range
-```
+A `.re64` file is an **import source or an export target**, never the truth.
+`export_project` returns one.
 
 ## Architecture
 
@@ -244,24 +151,24 @@ src/
 │   ├── crdt/         # the Yjs document; the only place yjs is imported
 │   ├── analysis/     # blocks, call graph, routines, effects, hygiene
 │   └── view/         # view model: rows, tokens, arrow lanes, gutter
+├── tools/            # generators: KERNAL and BASIC effects, the API docs
 ├── sandbox/          # SES compartments for decoders somebody else wrote
-├── cli/              # Node I/O; renders rows as text
 ├── ui/               # browser; renders rows as CodeMirror decorations
 ├── store/            # SQLite persistence, the update log, the ops history
 └── server/           # HTTP, WebSocket sync, and server/mcp/ for agents
 ```
 
 **Analysis runs client-side, and also on the server.** The core library is free
-of Node APIs, so the same disassembly runs in the CLI, in the browser and on the
-server. The browser holds its own `Y.Doc` and analyses locally, which is why a
-rename shows instantly and only the sync crosses the wire. The server analyses
-too — an agent has no local analysis — cached per document version and computed
-only when a tool asks.
+of Node APIs, so the same disassembly runs in the browser and on the server. The
+browser holds its own `Y.Doc` and analyses locally, which is why a rename shows
+instantly and only the sync crosses the wire. The server analyses too — an agent
+has no local analysis — cached per document version and computed only when a tool
+asks.
 
-**The CLI and the web UI share one render walk.** Both consume the same rows —
-the CLI prints them and ignores the interaction spans, while the UI turns those
-spans into clickable decorations. The cross-reference arrow gutter is drawn in
-both.
+**Every surface shares one render walk.** Wrapping, the arrow gutter, field rows
+and bitmap art are in the row model rather than in the view, so the browser turns
+the interaction spans into clickable decorations while `export_listing` prints
+the same rows as text.
 
 ## License
 

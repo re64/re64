@@ -1,6 +1,6 @@
 # The re64 document model, as it stands
 
-What the model *is*, with no account of how it got here. `CLAUDE.md` carries the
+What the model *is*, with no account of how it got here. `docs/decisions/` carries the
 reasoning and the history; this carries the shape. Where the two disagree, read
 the code — but this file is meant to be checked against it and kept true.
 
@@ -19,7 +19,7 @@ an import source or an export target and is never synced to.
 |---|---|---|
 | `layers` | byte resources | array, order is declaration order |
 | `claims` | everything anybody says about an address | map by id, flat |
-| `targets` | named arrangements of layers | map by name |
+| `targets` | named arrangements of layers | map by id |
 | `constants` | `{id, name, value}` | map by id |
 | `decoders` | `{id, name, source}` | map by id |
 | `types` | `{id, name, size, fields}` | map by id, fields nested by offset |
@@ -170,8 +170,11 @@ describes no bytes, so there is no layer for it to travel with.
 | type | `{id, name, size, fields}` | `says: {is: "record", typeId}` on a claim |
 
 **Types.** `size` is bytes per record, declared rather than summed, so holes are
-legal. `fields` is keyed by offset and carries no ids — two fields cannot share
-an offset, so the key is the identity. Field types: `u8`, `i8`, `u16`, `u16be`,
+legal. `fields` is keyed by offset and each carries an **id**: two fields cannot
+share an offset, so the key is enough for *storage*, but an offset is a property
+of a field and moving one would otherwise be a delete plus a create, losing its
+description. Fields merge by offset, so two readers adding different fields to
+one record both survive. Field types: `u8`, `i8`, `u16`, `u16be`,
 `ptr`, `ptrbe`, `char(n)`, `char(n,encoding)`, `bytes(n)`, or another type's
 name. How many records a claim holds is `extent / size`, derived.
 
@@ -210,8 +213,8 @@ a neighbour's value. That is a discriminated union flattened into a record. The
 flattening buys one-line diffs and costs comprehensibility.
 
 **One concept, two spellings.** The model says `claim.says.is`; the file and API
-say `is`. `primaryLabels` is named for an object that no longer exists and is
-indexed by claim id; the tool that sets it is `set_primary_name`.
+say `is`. `primaryLabels` is named for an object that no longer exists — it is
+indexed by claim id, and the tools are `bind_primary_name` / `unbind_primary_name`.
 
 **"View" means two things.** `view` on a claim is a rendering format
 (`char:8`). A *target* is also routinely called a view, including in tool

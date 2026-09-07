@@ -22,7 +22,6 @@ import {
   parseProject,
   parseProjectAddress,
   targetLinks,
-  linksAsWritten,
 } from "../project/project.js";
 import {
   bindConstant,
@@ -31,8 +30,15 @@ import {
   deleteConstant,
   deleteDecoder,
   deleteType,
+  upsertScenario,
+  deleteScenario,
+  upsertCapture,
+  deleteCapture,
+  upsertEvidence,
+  deleteEvidence,
   insertLayer,
   removeLayer,
+  renameLayer,
   setPrimaryLabel,
   setProjectMeta,
   unbindConstant,
@@ -40,7 +46,8 @@ import {
   upsertComment,
   upsertFile,
   deleteFile,
-  upsertTarget,
+  addTarget,
+  setTarget,
   deleteTarget,
   upsertConstant,
   upsertDecoder,
@@ -48,9 +55,9 @@ import {
   upsertClaim,
   deleteClaim,
 } from "../project/serialize.js";
-import { ClaimEdit, Op, TypeSetOp } from "./types.js";
+import { ClaimEdit, EvidenceSetOp, Op, TypeAddOp, TypeField } from "./types.js";
 import { Claim } from "../claims/model.js";
-import { ProjectClaim, projectClaims } from "../project/project.js";
+import { ProjectClaim, ProjectEvidence, ProjectField, projectClaims } from "../project/project.js";
 
 /** Position of a layer in the project, by id. */
 function layerIndexOf(project: Project, layerId: string): number {
@@ -144,7 +151,7 @@ function projectClaimOf(claim: Claim): ProjectClaim {
     author: claim.by.author,
     source: claim.by.source,
     ...(claim.by.when !== undefined ? { when: claim.by.when } : {}),
-    ...(claim.by.confidence !== undefined ? { confidence: claim.by.confidence } : {}),
+    ...(claim.by.method !== undefined ? { method: claim.by.method } : {}),
   };
 }
 
@@ -192,11 +199,29 @@ function editedClaim(stored: ProjectClaim, fields: ClaimEdit): ProjectClaim {
 }
 
 /** Apply one operation, returning the updated project text. */
+/**
+ * What a partial `set` is revising, or a refusal that says which id was wrong.
+ *
+ * The text path has to materialise a merge the document does structurally, so
+ * every `set` reads the record first. A missing id is a fact about the request,
+ * which is one of the two things a write may legitimately refuse on.
+ */
+function held0<T extends { id?: string }>(
+  held: readonly T[] | undefined,
+  id: string,
+  noun: string,
+  shown: string
+): T {
+  const found = held?.find((x) => x.id === id);
+  if (!found) throw new Error(`No ${noun} ${shown} in this project.`);
+  return found;
+}
+
 export function applyOp(raw: string, op: Op): string {
   const project = parseProject(raw);
 
   switch (op.op) {
-    case "comment.set":
+    case "comment.add":
       return upsertComment(raw, layerIndexOf(project, op.layerId), {
         id: op.id,
         address: addressHex(op.address),
@@ -207,7 +232,27 @@ export function applyOp(raw: string, op: Op): string {
         ...(op.order === undefined ? {} : { order: op.order }),
       });
 
-    case "comment.delete":
+    // A partial write, materialised. The op carries only what changed — which
+    // is what lets two peers revise different fields of one comment and both
+    // survive — so the text path reads what is there and merges. Every `set`
+    // below has the same shape for the same reason.
+    case "comment.set": {
+      const index = layerIndexOf(project, op.layerId);
+      const held = held0(project.layers[index].comments, op.id, "comment", op.id);
+      const placement = op.fields.placement ?? held.placement ?? "before";
+      const order = op.fields.order === null ? undefined : op.fields.order ?? held.order;
+      return upsertComment(raw, index, {
+        id: op.id,
+        address: addressHex(
+          op.fields.address ?? (typeof held.address === "number" ? held.address : parseInt(String(held.address).replace(/^\$/, ""), 16))
+        ),
+        ...(placement === "before" ? {} : { placement }),
+        text: op.fields.text ?? held.text,
+        ...(order === undefined ? {} : { order }),
+      });
+    }
+
+    case "comment.remove":
       return deleteComment(raw, layerIndexOf(project, op.layerId), op.id);
 
     case "meta.set":
@@ -219,24 +264,30 @@ export function applyOp(raw: string, op: Op): string {
     case "file.remove":
       return deleteFile(raw, op.name);
 
-    case "target.set":
-      return upsertTarget(raw, {
+    case "target.add":
+      return addTarget(raw, {
+        id: op.id,
         name: op.name,
-        layers: op.layers,
+        ...(op.layers === undefined ? {} : { layers: op.layers }),
         ...(op.entryPoints === undefined ? {} : { entryPoints: op.entryPoints }),
+        ...(op.order === undefined ? {} : { order: op.order }),
+        ...(op.description === undefined ? {} : { description: op.description }),
       });
 
-    case "target.remove":
-      return deleteTarget(raw, op.name);
+    case "target.set":
+      return setTarget(raw, op.id, op.fields);
 
-    case "label.bind":
+    case "target.remove":
+      return deleteTarget(raw, op.id);
+
+    case "labelUse.bind":
       return bindLabel(raw, layerIndexOf(project, op.layerId), {
         id: op.id,
         address: addressHex(op.address),
         label: op.labelId,
       });
 
-    case "label.unbind":
+    case "labelUse.unbind":
       return unbindLabel(raw, layerIndexOf(project, op.layerId), op.id);
 
     case "claim.add":
@@ -251,19 +302,40 @@ export function applyOp(raw: string, op: Op): string {
     case "claim.remove":
       return deleteClaim(raw, op.id);
 
-    case "constant.set":
+    case "constant.add":
       return upsertConstant(raw, { id: op.id, name: op.name, value: addressHex8(op.value) });
 
-    case "constant.delete":
+    case "constant.set": {
+      const held = held0(project.constants, op.id, "constant", op.id);
+      const value =
+        op.fields.value ??
+        (typeof held.value === "number" ? held.value : parseInt(String(held.value).replace(/^\$/, ""), 16));
+      return upsertConstant(raw, {
+        id: op.id,
+        name: op.fields.name ?? held.name,
+        value: addressHex8(value),
+      });
+    }
+
+    case "constant.remove":
       return deleteConstant(raw, op.id);
 
-    case "decoder.set":
+    case "decoder.add":
       return upsertDecoder(raw, { id: op.id, name: op.name, source: op.source });
 
-    case "decoder.delete":
+    case "decoder.set": {
+      const held = held0(project.decoders, op.id, "decoder", op.id);
+      return upsertDecoder(raw, {
+        id: op.id,
+        name: op.fields.name ?? held.name,
+        source: op.fields.source ?? held.source,
+      });
+    }
+
+    case "decoder.remove":
       return deleteDecoder(raw, op.id);
 
-    case "type.set":
+    case "type.add":
       return upsertType(raw, {
         id: op.id,
         name: op.name,
@@ -273,17 +345,108 @@ export function applyOp(raw: string, op: Op): string {
         ),
       });
 
-    case "type.delete":
+    // Fields merge **by offset**, and `null` at an offset removes that one.
+    // Never a whole-map write: two people adding different fields to one record
+    // touch different keys and both survive, which is the merge property the
+    // offset keys exist for.
+    case "type.set": {
+      const held = held0(project.types, op.id, "type", op.id);
+      const fields = { ...held.fields };
+      for (const [offset, field] of Object.entries(op.fields.fields ?? {})) {
+        if (field === null) delete fields[String(offset)];
+        else fields[String(offset)] = field;
+      }
+      return upsertType(raw, {
+        id: op.id,
+        name: op.fields.name ?? held.name,
+        size: op.fields.size ?? held.size,
+        fields,
+      });
+    }
+
+    case "type.remove":
       return deleteType(raw, op.id);
 
-    case "constant.bind":
+    case "scenario.add":
+      return upsertScenario(raw, {
+        id: op.id,
+        name: op.name,
+        ...(op.description === undefined ? {} : { description: op.description }),
+        steps: op.steps,
+      });
+
+    case "scenario.set": {
+      const held = held0(project.scenarios, op.id, "scenario", op.id);
+      const description =
+        op.fields.description === null ? undefined : op.fields.description ?? held.description;
+      return upsertScenario(raw, {
+        id: op.id,
+        name: op.fields.name ?? held.name,
+        ...(description === undefined ? {} : { description }),
+        steps: op.fields.steps ?? held.steps,
+      });
+    }
+
+    case "scenario.remove":
+      return deleteScenario(raw, op.id);
+
+    case "capture.add":
+      return upsertCapture(raw, {
+        id: op.id,
+        scenario: op.scenario,
+        step: op.step,
+        kind: op.kind,
+        file: op.file,
+        ...(op.when === undefined ? {} : { when: op.when }),
+      });
+
+    case "capture.set": {
+      const held = held0(project.captures, op.id, "capture", op.id);
+      const when = op.fields.when === null ? undefined : op.fields.when ?? held.when;
+      return upsertCapture(raw, {
+        ...held,
+        id: op.id,
+        file: op.fields.file ?? held.file,
+        ...(when === undefined ? {} : { when }),
+      });
+    }
+
+    case "capture.remove":
+      return deleteCapture(raw, op.id);
+
+    case "evidence.add":
+      return upsertEvidence(raw, {
+        id: op.id,
+        claim: op.claim,
+        kind: op.kind,
+        ...(op.scenario === undefined ? {} : { scenario: op.scenario }),
+        ...(op.capture === undefined ? {} : { capture: op.capture }),
+        ...(op.other === undefined ? {} : { other: op.other }),
+        ...(op.note === undefined ? {} : { note: op.note }),
+      });
+
+    case "evidence.set": {
+      const held = held0(project.evidence, op.id, "evidence", op.id);
+      const merged: Record<string, unknown> = { ...held };
+      for (const [key, value] of Object.entries(op.fields)) {
+        if (value === undefined) continue;
+        if (value === null) delete merged[key];
+        else merged[key] = value;
+      }
+      return upsertEvidence(raw, merged as unknown as ProjectEvidence);
+    }
+
+    case "evidence.remove":
+      return deleteEvidence(raw, op.id);
+
+    case "constantUse.bind":
       return bindConstant(raw, layerIndexOf(project, op.layerId), {
         id: op.id,
         address: addressHex(op.address),
         constant: op.constantId,
       });
 
-    case "constant.unbind":
+    case "constantUse.unbind":
       return unbindConstant(raw, layerIndexOf(project, op.layerId), op.id);
 
     case "layer.add":
@@ -303,13 +466,19 @@ export function applyOp(raw: string, op: Op): string {
         op.index
       );
 
+    case "layer.set": {
+      const index = project.layers.findIndex((l) => l.id === op.id);
+      if (index < 0) throw new Error(`No layer ${op.id} in this project.`);
+      return renameLayer(raw, index, op.fields.name ?? project.layers[index].name ?? "");
+    }
+
     case "layer.remove":
       return removeLayer(raw, op.id);
 
-    case "primary.set":
+    case "primary.bind":
       return setPrimaryLabel(raw, op.address, op.labelId);
 
-    case "primary.clear":
+    case "primary.unbind":
       return setPrimaryLabel(raw, op.address, undefined);
   }
 }
@@ -324,31 +493,45 @@ export function invertOp(raw: string, op: Op): Op {
   const project = parseProject(raw);
 
   switch (op.op) {
+    // Adding inverts to removing, and revising inverts to revising back the
+    // *same fields* — not to a whole-value write, or an undo would revert
+    // fields the edit never touched.
+    case "comment.add":
+      return { op: "comment.remove", id: op.id, layerId: op.layerId };
+
     case "comment.set": {
       const found = findComment(project, op.id);
-      // Setting an id that does not exist creates it, so its inverse deletes.
-      if (!found) return { op: "comment.delete", id: op.id, layerId: op.layerId };
+      if (!found) return op;
+      const was = found.entry;
       return {
         op: "comment.set",
         id: op.id,
         layerId: project.layers[found.layerIndex].id!,
-        address: parseProjectAddress(found.entry.address),
-        placement: found.entry.placement ?? "before",
-        text: found.entry.text,
+        fields: {
+          ...(op.fields.address === undefined
+            ? {}
+            : { address: parseProjectAddress(was.address) }),
+          ...(op.fields.placement === undefined
+            ? {}
+            : { placement: was.placement ?? "before" }),
+          ...(op.fields.text === undefined ? {} : { text: was.text }),
+          ...(op.fields.order === undefined ? {} : { order: was.order ?? null }),
+        },
       };
     }
 
-    case "comment.delete": {
+    case "comment.remove": {
       const found = findComment(project, op.id);
-      // Deleting something absent is a no-op, and so is undoing it.
+      // Removing something absent is a no-op, and so is undoing it.
       if (!found) return op;
       return {
-        op: "comment.set",
+        op: "comment.add",
         id: op.id,
         layerId: project.layers[found.layerIndex].id!,
         address: parseProjectAddress(found.entry.address),
         placement: found.entry.placement ?? "before",
         text: found.entry.text,
+        ...(found.entry.order === undefined ? {} : { order: found.entry.order }),
       };
     }
 
@@ -370,38 +553,57 @@ export function invertOp(raw: string, op: Op): Op {
       return { op: "file.add", name: held.name, hash: held.hash, size: held.size };
     }
 
-    case "target.set": {
-      const held = project.targets?.find((t) => t.name === op.name);
-      return held
-        ? {
-            op: "target.set",
-            name: held.name,
-            layers: linksAsWritten(targetLinks(held)),
-            ...(held.entryPoints === undefined
-              ? {}
-              : { entryPoints: held.entryPoints.map((a) => parseProjectAddress(a)) }),
-          }
-        : { op: "target.remove", name: op.name };
-    }
+    case "target.add":
+      return project.targets?.some((t) => t.id === op.id)
+        ? op
+        : { op: "target.remove", id: op.id };
 
-    case "target.remove": {
-      const held = project.targets?.find((t) => t.name === op.name);
-      if (!held) return { op: "target.remove", name: op.name };
+    case "target.set": {
+      const held = project.targets?.find((t) => t.id === op.id);
+      if (!held) return op;
+      const f = op.fields;
       return {
         op: "target.set",
-        name: held.name,
-        layers: linksAsWritten(targetLinks(held)),
-        ...(held.entryPoints === undefined
-          ? {}
-          : { entryPoints: held.entryPoints.map((a) => parseProjectAddress(a)) }),
+        id: op.id,
+        fields: {
+          ...(f.name === undefined ? {} : { name: held.name }),
+          ...(f.layers === undefined ? {} : { layers: targetLinks(held) }),
+          // `null` where the field was absent, so undoing "describe this"
+          // removes the description rather than leaving an empty string.
+          ...(f.entryPoints === undefined
+            ? {}
+            : {
+                entryPoints: held.entryPoints
+                  ? held.entryPoints.map((a) => parseProjectAddress(a))
+                  : null,
+              }),
+          ...(f.order === undefined ? {} : { order: held.order ?? null }),
+          ...(f.description === undefined ? {} : { description: held.description ?? null }),
+        },
       };
     }
 
-    case "label.bind": {
-      const found = findLabelUse(project, op.id);
-      if (!found) return { op: "label.unbind", id: op.id, layerId: op.layerId };
+    case "target.remove": {
+      const held = project.targets?.find((t) => t.id === op.id);
+      if (!held) return op;
       return {
-        op: "label.bind",
+        op: "target.add",
+        id: op.id,
+        name: held.name,
+        layers: targetLinks(held),
+        ...(held.entryPoints === undefined
+          ? {}
+          : { entryPoints: held.entryPoints.map((a) => parseProjectAddress(a)) }),
+        ...(held.order === undefined ? {} : { order: held.order }),
+        ...(held.description === undefined ? {} : { description: held.description }),
+      };
+    }
+
+    case "labelUse.bind": {
+      const found = findLabelUse(project, op.id);
+      if (!found) return { op: "labelUse.unbind", id: op.id, layerId: op.layerId };
+      return {
+        op: "labelUse.bind",
         id: op.id,
         layerId: project.layers[found.layerIndex].id!,
         address: parseProjectAddress(found.entry.address),
@@ -409,11 +611,11 @@ export function invertOp(raw: string, op: Op): Op {
       };
     }
 
-    case "label.unbind": {
+    case "labelUse.unbind": {
       const found = findLabelUse(project, op.id);
       if (!found) return op;
       return {
-        op: "label.bind",
+        op: "labelUse.bind",
         id: op.id,
         layerId: project.layers[found.layerIndex].id!,
         address: parseProjectAddress(found.entry.address),
@@ -455,61 +657,184 @@ export function invertOp(raw: string, op: Op): Op {
       return { op: "claim.add", claim: claimOf(found) };
     }
 
+    case "constant.add":
+      return { op: "constant.remove", id: op.id };
+
     case "constant.set": {
       const found = project.constants?.find((c) => c.id === op.id);
-      if (!found) return { op: "constant.delete", id: op.id };
+      if (!found) return op;
       return {
         op: "constant.set",
+        id: op.id,
+        fields: {
+          ...(op.fields.name === undefined ? {} : { name: found.name }),
+          ...(op.fields.value === undefined
+            ? {}
+            : { value: parseProjectAddress(found.value) }),
+        },
+      };
+    }
+
+    case "constant.remove": {
+      const found = project.constants?.find((c) => c.id === op.id);
+      if (!found) return op;
+      return {
+        op: "constant.add",
         id: op.id,
         name: found.name,
         value: parseProjectAddress(found.value),
       };
     }
 
-    case "constant.delete": {
-      const found = project.constants?.find((c) => c.id === op.id);
-      if (!found) return op;
-      return {
-        op: "constant.set",
-        id: op.id,
-        name: found.name,
-        value: parseProjectAddress(found.value),
-      };
-    }
+    case "decoder.add":
+      return { op: "decoder.remove", id: op.id };
 
     case "decoder.set": {
       const found = project.decoders?.find((d) => d.id === op.id);
-      // Undoing the creation of a decoder is removing it; undoing an edit is
-      // putting the old source back.
-      if (!found) return { op: "decoder.delete", id: op.id };
-      return { op: "decoder.set", id: op.id, name: found.name, source: found.source };
+      if (!found) return op;
+      return {
+        op: "decoder.set",
+        id: op.id,
+        fields: {
+          ...(op.fields.name === undefined ? {} : { name: found.name }),
+          ...(op.fields.source === undefined ? {} : { source: found.source }),
+        },
+      };
     }
 
-    case "decoder.delete": {
+    case "decoder.remove": {
       const found = project.decoders?.find((d) => d.id === op.id);
       if (!found) return op;
-      return { op: "decoder.set", id: op.id, name: found.name, source: found.source };
+      return { op: "decoder.add", id: op.id, name: found.name, source: found.source };
     }
+
+    case "type.add":
+      return { op: "type.remove", id: op.id };
 
     case "type.set": {
       const found = project.types?.find((t) => t.id === op.id);
-      // Undoing a declaration is removing it; undoing a revision is putting the
-      // previous layout back.
-      if (!found) return { op: "type.delete", id: op.id };
-      return typeSetOpFor(found);
+      if (!found) return op;
+      // Per offset, so undoing a merge restores exactly the fields it touched:
+      // one that was there comes back, one that was not is removed with `null`.
+      const fields: Record<number, TypeField | null> = {};
+      for (const offset of Object.keys(op.fields.fields ?? {})) {
+        const was = found.fields[String(offset)];
+        fields[Number(offset)] = was ? { ...was, id: was.id! } : null;
+      }
+      return {
+        op: "type.set",
+        id: op.id,
+        fields: {
+          ...(op.fields.name === undefined ? {} : { name: found.name }),
+          ...(op.fields.size === undefined
+            ? {}
+            : { size: parseProjectAddress(found.size) }),
+          ...(op.fields.fields === undefined ? {} : { fields }),
+        },
+      };
     }
 
-    case "type.delete": {
+    case "type.remove": {
       const found = project.types?.find((t) => t.id === op.id);
       if (!found) return op;
-      return typeSetOpFor(found);
+      return typeAddOpFor(found);
     }
 
-    case "constant.bind": {
-      const found = findConstantUse(project, op.id);
-      if (!found) return { op: "constant.unbind", id: op.id, layerId: op.layerId };
+    case "scenario.add":
+      return { op: "scenario.remove", id: op.id };
+
+    case "scenario.set": {
+      const found = project.scenarios?.find((x) => x.id === op.id);
+      if (!found) return op;
       return {
-        op: "constant.bind",
+        op: "scenario.set",
+        id: op.id,
+        fields: {
+          ...(op.fields.name === undefined ? {} : { name: found.name }),
+          ...(op.fields.description === undefined
+            ? {}
+            : { description: found.description ?? null }),
+          ...(op.fields.steps === undefined ? {} : { steps: found.steps }),
+        },
+      };
+    }
+
+    case "scenario.remove": {
+      const found = project.scenarios?.find((x) => x.id === op.id);
+      if (!found) return op;
+      return {
+        op: "scenario.add",
+        id: op.id,
+        name: found.name,
+        ...(found.description === undefined ? {} : { description: found.description }),
+        steps: found.steps,
+      };
+    }
+
+    case "capture.add":
+      return { op: "capture.remove", id: op.id };
+
+    case "capture.set": {
+      const found = project.captures?.find((x) => x.id === op.id);
+      if (!found) return op;
+      return {
+        op: "capture.set",
+        id: op.id,
+        fields: {
+          ...(op.fields.file === undefined ? {} : { file: found.file }),
+          ...(op.fields.when === undefined ? {} : { when: found.when ?? null }),
+        },
+      };
+    }
+
+    case "evidence.add":
+      return { op: "evidence.remove", id: op.id };
+
+    case "evidence.set": {
+      const found = project.evidence?.find((x) => x.id === op.id);
+      if (!found) return op;
+      const was = found as unknown as Record<string, unknown>;
+      const fields: Record<string, unknown> = {};
+      for (const key of Object.keys(op.fields)) {
+        fields[key] = was[key] ?? null;
+      }
+      return { op: "evidence.set", id: op.id, fields: fields as EvidenceSetOp["fields"] };
+    }
+
+    case "evidence.remove": {
+      const found = project.evidence?.find((x) => x.id === op.id);
+      if (!found) return op;
+      return {
+        op: "evidence.add",
+        id: op.id,
+        claim: found.claim,
+        kind: found.kind,
+        ...(found.scenario === undefined ? {} : { scenario: found.scenario }),
+        ...(found.capture === undefined ? {} : { capture: found.capture }),
+        ...(found.other === undefined ? {} : { other: found.other }),
+        ...(found.note === undefined ? {} : { note: found.note }),
+      };
+    }
+
+    case "capture.remove": {
+      const found = project.captures?.find((x) => x.id === op.id);
+      if (!found) return op;
+      return {
+        op: "capture.add",
+        id: op.id,
+        scenario: found.scenario,
+        step: found.step,
+        kind: found.kind,
+        file: found.file,
+        ...(found.when === undefined ? {} : { when: found.when }),
+      };
+    }
+
+    case "constantUse.bind": {
+      const found = findConstantUse(project, op.id);
+      if (!found) return { op: "constantUse.unbind", id: op.id, layerId: op.layerId };
+      return {
+        op: "constantUse.bind",
         id: op.id,
         layerId: project.layers[found.layerIndex].id!,
         address: parseProjectAddress(found.entry.address),
@@ -517,11 +842,11 @@ export function invertOp(raw: string, op: Op): Op {
       };
     }
 
-    case "constant.unbind": {
+    case "constantUse.unbind": {
       const found = findConstantUse(project, op.id);
       if (!found) return op;
       return {
-        op: "constant.bind",
+        op: "constantUse.bind",
         id: op.id,
         layerId: project.layers[found.layerIndex].id!,
         address: parseProjectAddress(found.entry.address),
@@ -549,12 +874,24 @@ export function invertOp(raw: string, op: Op): Op {
       };
     }
 
-    case "primary.set":
-    case "primary.clear": {
+    case "layer.set": {
+      const held = project.layers.find((l) => l.id === op.id);
+      if (!held) return op;
+      return {
+        op: "layer.set",
+        id: op.id,
+        fields: { ...(op.fields.name === undefined ? {} : { name: held.name ?? "" }) },
+      };
+    }
+
+    // Re-binding a key is how a binding is updated, so both invert the same
+    // way: put back whatever the key held, or clear it if it held nothing.
+    case "primary.bind":
+    case "primary.unbind": {
       const previous = project.primaryLabels?.[addressHex(op.address)];
       return previous === undefined
-        ? { op: "primary.clear", address: op.address }
-        : { op: "primary.set", address: op.address, labelId: previous };
+        ? { op: "primary.unbind", address: op.address }
+        : { op: "primary.bind", address: op.address, labelId: previous };
     }
   }
 }
@@ -565,14 +902,14 @@ export function applyOps(raw: string, ops: readonly Op[]): string {
 }
 
 /** A stored type, as the operation that would recreate it. */
-function typeSetOpFor(found: ProjectType): Op {
+function typeAddOpFor(found: ProjectType): Op {
   return {
-    op: "type.set",
+    op: "type.add",
     id: found.id!,
     size: typeof found.size === "string" ? parseProjectAddress(found.size) : found.size,
     name: found.name,
     fields: Object.fromEntries(
       Object.entries(found.fields).map(([offset, field]) => [Number(offset), field])
-    ) as TypeSetOp["fields"],
+    ) as TypeAddOp["fields"],
   };
 }

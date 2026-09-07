@@ -78,13 +78,26 @@ const BASE = `{
       "name": "Sprite",
       "size": 4,
       "fields": {
-        "0": { "name": "x", "type": "u8" },
-        "2": { "name": "frame", "type": "u16" }
+        "0": { "id": "fld_x", "name": "x", "type": "u8" },
+        "2": { "id": "fld_f", "name": "frame", "type": "u16" }
       }
     }
   ],
   "files": [{ "name": "game.prg", "hash": "abc123", "size": 16 }],
-  "targets": [{ "name": "loader", "layers": ["lay_a"] }],
+  "targets": [{ "id": "tgt_1", "name": "loader", "layers": [{ "id": "lnk_1", "layer": "lay_a" }] }],
+  "scenarios": [
+    {
+      "id": "scn_1",
+      "name": "boot",
+      "steps": [{ "id": "stp_1", "kind": "start", "at": "$8000", "vector": true }]
+    }
+  ],
+  "captures": [
+    { "id": "cap_1", "scenario": "scn_1", "step": "stp_1", "kind": "screen", "file": "title.prg" }
+  ],
+  "evidence": [
+    { "id": "evd_1", "claim": "clm_1", "kind": "supports", "note": "watched it" }
+  ],
   "primaryLabels": { "$8000": "clm_1" }
 }
 `;
@@ -137,9 +150,9 @@ const CASES: { [K in Op["op"]]: Case } = {
     },
   },
   "claim.remove": { op: { op: "claim.remove", id: "clm_1" } },
-  "comment.set": {
+  "comment.add": {
     op: {
-      op: "comment.set",
+      op: "comment.add",
       id: "cmt_2",
       layerId: "lay_a",
       address: 0x8100,
@@ -147,45 +160,138 @@ const CASES: { [K in Op["op"]]: Case } = {
       text: "loops here",
     },
   },
-  "comment.delete": { op: { op: "comment.delete", id: "cmt_1", layerId: "lay_a" } },
-  "meta.set": { op: { op: "meta.set", key: "description", value: "a harness project" } },
-  "label.bind": {
-    op: { op: "label.bind", id: "lbl_u2", layerId: "lay_a", address: 0x8000, labelId: "clm_1" },
-  },
-  "label.unbind": { op: { op: "label.unbind", id: "lbl_u1", layerId: "lay_a" } },
-  "constant.set": { op: { op: "constant.set", id: "cst_2", name: "RED", value: 0x02 } },
-  "constant.delete": { op: { op: "constant.delete", id: "cst_1" } },
-  "constant.bind": {
-    op: { op: "constant.bind", id: "cst_u2", layerId: "lay_a", address: 0x8100, constantId: "cst_1" },
-  },
-  "constant.unbind": { op: { op: "constant.unbind", id: "cst_u1", layerId: "lay_a" } },
-  "decoder.set": { op: { op: "decoder.set", id: "dec_2", name: "swap", source: "return bytes;" } },
-  "decoder.delete": { op: { op: "decoder.delete", id: "dec_1" } },
-  "type.set": {
+  // Names one field and clears another, which is what a partial `set` is for:
+  // the inverse must restore the text and put `order` back to absent, and it
+  // must leave the address alone because this op never mentioned it.
+  "comment.set": {
     op: {
-      op: "type.set",
+      op: "comment.set",
+      id: "cmt_1",
+      layerId: "lay_a",
+      fields: { text: "reworded", order: null },
+    },
+  },
+  "comment.remove": { op: { op: "comment.remove", id: "cmt_1", layerId: "lay_a" } },
+  "meta.set": { op: { op: "meta.set", key: "description", value: "a harness project" } },
+  "labelUse.bind": {
+    op: { op: "labelUse.bind", id: "lbl_u2", layerId: "lay_a", address: 0x8000, labelId: "clm_1" },
+  },
+  "labelUse.unbind": { op: { op: "labelUse.unbind", id: "lbl_u1", layerId: "lay_a" } },
+  "constant.add": { op: { op: "constant.add", id: "cst_2", name: "RED", value: 0x02 } },
+  "constant.set": { op: { op: "constant.set", id: "cst_1", fields: { name: "RENAMED" } } },
+  "constant.remove": { op: { op: "constant.remove", id: "cst_1" } },
+  "constantUse.bind": {
+    op: { op: "constantUse.bind", id: "cst_u2", layerId: "lay_a", address: 0x8100, constantId: "cst_1" },
+  },
+  "constantUse.unbind": { op: { op: "constantUse.unbind", id: "cst_u1", layerId: "lay_a" } },
+  "decoder.add": { op: { op: "decoder.add", id: "dec_2", name: "swap", source: "return bytes;" } },
+  "decoder.set": { op: { op: "decoder.set", id: "dec_1", fields: { name: "renamed" } } },
+  "decoder.remove": { op: { op: "decoder.remove", id: "dec_1" } },
+  "type.add": {
+    op: {
+      op: "type.add",
       id: "typ_2",
       name: "Zone",
       size: 200,
       // A hole between the fields, which is the point of declaring `size`
       // rather than deriving it: a reader who has proved two fields of a
       // 200-byte record should not have to invent padding for the rest.
-      fields: { 0: { name: "kind", type: "u8" }, 160: { name: "label", type: "char(40,screen)" } },
+      fields: {
+        0: { id: "fld_a", name: "kind", type: "u8" },
+        160: { id: "fld_b", name: "label", type: "char(40,screen)" },
+      },
     },
   },
-  "type.delete": { op: { op: "type.delete", id: "typ_1" } },
+  // A rename and a field merge in one op, with a `null` removing an offset.
+  // The inverse has to put that field back *and* leave every other offset
+  // alone — which a whole-map write cannot do, and is why `fields` merges.
+  "type.set": {
+    op: {
+      op: "type.set",
+      id: "typ_1",
+      fields: {
+        name: "Renamed",
+        fields: { 0: null, 8: { id: "fld_c", name: "added", type: "u8" } },
+      },
+    },
+  },
+  "type.remove": { op: { op: "type.remove", id: "typ_1" } },
   "layer.add": {
     op: { op: "layer.add", id: "lay_c", layerType: "symbols", name: "io" },
   },
+  "layer.set": { op: { op: "layer.set", id: "lay_b", fields: { name: "renamed" } } },
   "layer.remove": { op: { op: "layer.remove", id: "lay_b" } },
-  "primary.set": { op: { op: "primary.set", address: 0x8100, labelId: "lbl_2" } },
-  "primary.clear": { op: { op: "primary.clear", address: 0x8000 } },
+  "primary.bind": { op: { op: "primary.bind", address: 0x8100, labelId: "lbl_2" } },
+  "primary.unbind": { op: { op: "primary.unbind", address: 0x8000 } },
   "file.add": {
     op: { op: "file.add", name: "extra.prg", hash: "def456", size: 32 },
   },
   "file.remove": { op: { op: "file.remove", name: "game.prg" } },
-  "target.set": { op: { op: "target.set", name: "runtime", layers: ["lay_a", "lay_b"] } },
-  "target.remove": { op: { op: "target.remove", name: "loader" } },
+  "target.add": {
+    op: {
+      op: "target.add",
+      id: "tgt_2",
+      name: "runtime",
+      layers: [{ id: "lnk_x", layer: "lay_a" }, { id: "lnk_y", layer: "lay_b" }],
+    },
+  },
+  "target.set": {
+    op: { op: "target.set", id: "tgt_1", fields: { description: "the loader" } },
+  },
+  "target.remove": { op: { op: "target.remove", id: "tgt_1" } },
+  "scenario.add": {
+    op: {
+      op: "scenario.add",
+      id: "scn_2",
+      name: "play",
+      steps: [
+        { id: "stp_a", kind: "start", at: 0x8000, vector: true },
+        { id: "stp_b", kind: "run", frames: 220 },
+        { id: "stp_c", kind: "input", port: 1, fire: true },
+        { id: "stp_d", kind: "capture", what: "screen", name: "playing.prg" },
+      ],
+    },
+  },
+  // A rename and a rewritten step list at once. Steps go whole rather than
+  // merging by key, which is what `ProjectScenario` argues for and what this
+  // asserts stays true.
+  "scenario.set": {
+    op: {
+      op: "scenario.set",
+      id: "scn_1",
+      fields: { name: "renamed", steps: [{ id: "stp_1", kind: "run", frames: 5 }] },
+    },
+  },
+  "scenario.remove": { op: { op: "scenario.remove", id: "scn_1" } },
+  "capture.add": {
+    op: {
+      op: "capture.add",
+      id: "cap_2",
+      scenario: "scn_1",
+      step: "stp_1",
+      kind: "frames",
+      file: "playing.gif.prg",
+    },
+  },
+  "capture.set": { op: { op: "capture.set", id: "cap_1", fields: { file: "renamed.prg" } } },
+  "capture.remove": { op: { op: "capture.remove", id: "cap_1" } },
+  // A refutation that shares no bytes with what it refutes — the shape
+  // `disagreements()` sweeps for and can never find, because `$8DF9` holding
+  // `$3B` is about the *glyph* `$3B`, somewhere else entirely.
+  "evidence.add": {
+    op: {
+      op: "evidence.add",
+      id: "evd_2",
+      claim: "clm_2",
+      kind: "refutes",
+      other: "clm_1",
+      note: "$8DF9 holds $3B, so it is drawn",
+    },
+  },
+  "evidence.set": {
+    op: { op: "evidence.set", id: "evd_1", fields: { note: "reworded", capture: "cap_1" } },
+  },
+  "evidence.remove": { op: { op: "evidence.remove", id: "evd_1" } },
 };
 
 const kinds = Object.keys(CASES) as Op["op"][];
@@ -261,7 +367,7 @@ describe("every operation reaches every path", () => {
   it("covers the whole vocabulary", () => {
     // The table is exhaustive by type; this only reports the count, so a
     // vocabulary that grows is visible in the output rather than only in a diff.
-    expect(kinds.length).toBe(24);
+    expect(kinds.length).toBe(39);
   });
 
   for (const kind of kinds) {
@@ -329,4 +435,124 @@ describe("every operation reaches every path", () => {
       });
     });
   }
+});
+
+/**
+ * The algebra itself, asserted rather than described.
+ *
+ * `docs/algebra.md` says every low-level type is one of two shapes and each
+ * shape has exactly one set of verbs. That held by care until this existed, and
+ * care is what let three different update semantics live in one vocabulary
+ * without anybody noticing: a full PUT for four types, a partial write for
+ * claims, a partial-by-name for targets, and nothing at all for layers.
+ *
+ * `kinds` comes from `CASES`, which is keyed by `Op["op"]` and therefore
+ * exhaustive by construction — so a new operation cannot reach the vocabulary
+ * without passing through here.
+ */
+describe("the operation algebra", () => {
+  /** Has an id, lives in a collection: add mints, set revises, remove takes back. */
+  const ENTITIES = [
+    "claim",
+    "comment",
+    "constant",
+    "decoder",
+    "type",
+    "layer",
+    "target",
+    "scenario",
+    "capture",
+    "evidence",
+  ] as const;
+
+  /** A key-to-id map. Binding a key again is how a binding is updated. */
+  const BINDINGS = ["labelUse", "constantUse", "primary"] as const;
+
+  /** Content-addressed, so there is nothing to revise. */
+  const ATTACHMENTS = ["file"] as const;
+
+  const verbsOf = (noun: string) =>
+    kinds.filter((k) => k.startsWith(`${noun}.`)).map((k) => k.split(".")[1]).sort();
+
+  it("spells every operation as noun.verb", () => {
+    for (const kind of kinds) expect(kind).toMatch(/^[a-z][a-zA-Z]*\.[a-z]+$/);
+  });
+
+  it("gives every entity exactly add, set and remove", () => {
+    for (const noun of ENTITIES) {
+      expect({ noun, verbs: verbsOf(noun) }).toEqual({
+        noun,
+        verbs: ["add", "remove", "set"],
+      });
+    }
+  });
+
+  it("gives every binding exactly bind and unbind", () => {
+    for (const noun of BINDINGS) {
+      expect({ noun, verbs: verbsOf(noun) }).toEqual({ noun, verbs: ["bind", "unbind"] });
+    }
+  });
+
+  it("keeps a declaration and a use under different nouns", () => {
+    // They were both `constant.*`, so `constant.set` and `constant.bind` were
+    // about different objects under one name — and `label.bind` named an entity
+    // that no longer exists at all, since a label is a claim.
+    expect(verbsOf("constant")).toEqual(["add", "remove", "set"]);
+    expect(verbsOf("constantUse")).toEqual(["bind", "unbind"]);
+    expect(verbsOf("label")).toEqual([]);
+    expect(verbsOf("labelUse")).toEqual(["bind", "unbind"]);
+  });
+
+  it("gives an immutable attachment add and remove, and no update", () => {
+    for (const noun of ATTACHMENTS) {
+      expect(verbsOf(noun)).toEqual(["add", "remove"]);
+    }
+  });
+
+  it("uses one word for taking something back, not two", () => {
+    // `claim.remove` and `comment.delete` were the same verb spelled two ways,
+    // split down no principle at all.
+    expect(kinds.filter((k) => k.endsWith(".delete"))).toEqual([]);
+    expect(kinds.filter((k) => k.endsWith(".clear"))).toEqual([]);
+  });
+
+  it("accounts for every operation, so nothing sits outside the shapes", () => {
+    const claimed = new Set<string>();
+    for (const noun of [...ENTITIES, ...BINDINGS, ...ATTACHMENTS]) {
+      for (const kind of kinds) if (kind.startsWith(`${noun}.`)) claimed.add(kind);
+    }
+    // `meta.set` is the project's own scalars — a closed key set rather than a
+    // collection, and the one deliberate singleton.
+    const unaccounted = kinds.filter((k) => !claimed.has(k) && k !== "meta.set");
+    expect(unaccounted).toEqual([]);
+  });
+
+  it("carries the fields of a partial write under `fields`, never inline", () => {
+    // The shape that distinguishes a revision from a whole-value PUT: a `set`
+    // names what changed, so an omitted field is left alone and a merge does
+    // not revert what the writer never read.
+    for (const kind of kinds.filter((k) => k.endsWith(".set") && k !== "meta.set")) {
+      const { op } = CASES[kind];
+      expect({ kind, hasFields: "fields" in op }).toEqual({ kind, hasFields: true });
+    }
+  });
+
+  it("mints an identity on every add", () => {
+    for (const kind of kinds.filter((k) => k.endsWith(".add"))) {
+      const op = CASES[kind].op as unknown as Record<string, unknown>;
+      // Where the identity sits. `file` is keyed by the name layers reference
+      // it as — it is content-addressed and has nothing else to be. `claim.add`
+      // nests its id inside the payload because the payload *is* the domain
+      // `Claim`, which every reader already knows the shape of; that is a
+      // spelling, not a second rule, and it is asserted here rather than left
+      // to be discovered.
+      const identity =
+        kind === "file.add"
+          ? op.name
+          : kind === "claim.add"
+            ? (op.claim as { id?: string }).id
+            : op.id;
+      expect({ kind, keyed: typeof identity === "string" }).toEqual({ kind, keyed: true });
+    }
+  });
 });

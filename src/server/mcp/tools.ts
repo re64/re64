@@ -18,6 +18,8 @@ import type { McpContext } from "./transport.js";
 import type { Claim, Interpretation, RootKind } from "../../core/claims/model.js";
 import type { ClaimEdit } from "../../core/ops/types.js";
 import type { TextEncoding } from "../../core/c64/text.js";
+import { parsePlace } from "../../core/platform.js";
+import type { ProjectStep } from "../../core/project/project.js";
 import type { ClaimInput } from "../workspace.js";
 
 /** One entry of `add_claims`, which is one claim. */
@@ -34,7 +36,12 @@ type ClaimArg = ClaimInput;
  */
 const address = z
   .union([z.string(), z.number()])
-  .describe("An address, as $8100, 0x8100, decimal text, or a number")
+  .describe(
+    "An address, as $8100, 0x8100, decimal text, or a number — or a place: " +
+      "screen(row,column), screen(cell) and sprite(pointer), each taking an " +
+      "optional base or VIC bank as a last argument since both depend on " +
+      "where the program put them"
+  )
   .transform((value, ctx) => {
     if (typeof value === "number") {
       if (!Number.isInteger(value) || value < 0 || value > 0xffff) {
@@ -44,6 +51,27 @@ const address = z
       return value;
     }
     const text = value.trim();
+
+    // `screen(10,2)` and `sprite($9D)` before anything else, because they are
+    // the arithmetic three runs of readers did by hand — and putting them here
+    // rather than in a tool of their own gives every tool the capability at
+    // once, since they all share this schema. Sugar, resolved to a number and
+    // never stored.
+    //
+    // Through `core/platform.ts` rather than straight into `core/c64/`: this
+    // schema is shared by every tool and must not learn which machine it is
+    // talking about. See `parseGeometry` for why it stops short of arithmetic.
+    try {
+      const place = parsePlace(text);
+      if (place !== undefined) return place;
+    } catch (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return z.NEVER;
+    }
+
     const parsed = text.startsWith("$")
       ? parseInt(text.slice(1), 16)
       : text.startsWith("0x")
@@ -368,6 +396,146 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "play_sid",
+    "Turn a captured sound-chip log into a recording you can listen to. " +
+      "Takes the id of a `capture` whose `what` was `sid`, and returns a WAV " +
+      "as a url. " +
+      "The notes are not modelled, they are transcribed: a note starts and " +
+      "stops where the gate bit went on and off, at the cycle it happened, and " +
+      "its pitch is the frequency register, which is a divider and nothing " +
+      "else. What is ours is the waveform shape and the envelope curve, and " +
+      "the filter is not modelled at all — the answer says so, on every " +
+      "recording, because audio that sounds plausible is the easiest kind of " +
+      "confident wrong answer to publish.",
+    {
+      project,
+      capture: z.string().describe("A capture id from list_scenarios, of kind sid"),
+      seconds: z
+        .number()
+        .min(0.1)
+        .max(600)
+        .optional()
+        .describe("Stop after this long, for a log longer than you want to hear"),
+    },
+    ({
+      project: id,
+      target,
+      capture,
+      seconds,
+    }: {
+      project?: string;
+      target?: string;
+      capture: string;
+      seconds?: number;
+    }) => context().workspace(id, target).playSid(capture, seconds)
+  );
+
+  tool(
+    "where",
+    "What an address is, in the units the machine uses: which screen cell, " +
+      "which sprite pointer, and where its colour byte is. " +
+      "The inverse of the `screen(...)` and `sprite(...)` forms every address " +
+      "argument accepts — you can write `screen(10,2)` to get to `$0592`, and " +
+      "this is how you go the other way while reading a listing. " +
+      "Both conversions depend on runtime state rather than on the project — " +
+      "the screen base in `$D018`, the VIC bank in `$DD00` — so the answer " +
+      "names the bases it assumed, and you can override them.",
+    {
+      project,
+      address,
+      screenBase: address
+        .optional()
+        .describe("Where this program keeps its screen; $0400 at power-on"),
+      bank: address.optional().describe("The VIC's 16K bank; $0000 at power-on"),
+    },
+    ({
+      project: id,
+      target,
+      address: at,
+      screenBase,
+      bank,
+    }: {
+      project?: string;
+      target?: string;
+      address: number;
+      screenBase?: number;
+      bank?: number;
+    }) => context().workspace(id, target).where(at, screenBase, bank)
+  );
+
+  tool(
+    "render",
+    "Draw a span and get a picture back, without touching the project. " +
+      "This is how you find out what data *is*: point at an address, pick a " +
+      "layout, look. Sliding the width until an image snaps into focus is how " +
+      "graphics have always been found in a memory dump, and until now nothing " +
+      "offered it — you had to add a claim, read the listing, then remove the " +
+      "claim and the comments it made. This writes nothing. " +
+      "`view` is `bits:<bytes-per-row>` for exploring, or the machine's own " +
+      "layouts: `char:<columns>` for an 8x8 font, `sprite:<columns>` and " +
+      "`sprite-multi:<columns>` for hardware sprites — which are addressed in " +
+      "64-byte blocks, so a bank of them is 64 bytes apart and this steps that " +
+      "way. Which of hires and multicolour a sprite uses is a per-sprite bit " +
+      "the program sets at run time and is not in the data, so try both. " +
+      "`as: \"grid\"` is a contact sheet, every cell at once, which is what you " +
+      "want for finding things; `as: \"frames\"` is the same cells as an " +
+      "animated PNG, which is what you want for a walk cycle. " +
+      "The image comes back as a url to fetch, because an image inline is tens " +
+      "of thousands of tokens; small ones also come back as text art.",
+    {
+      project,
+      claim: z
+        .string()
+        .optional()
+        .describe(
+          "A claim id from claims_at or list_claims. Draws exactly what that claim " +
+            "covers, using its own view — so naming a sprite once makes it drawable " +
+            "by name afterwards. Give this or start/length/view, not both."
+        ),
+      start: address.optional(),
+      length: z
+        .number()
+        .int()
+        .min(1)
+        .max(65536)
+        .optional()
+        .describe("How many bytes to draw"),
+      view: z
+        .string()
+        .optional()
+        .describe(
+          "bits:<n> | char:<n> | sprite:<n> | sprite-multi:<n> — n is per row. " +
+            "With a claim, overrides the claim's own view without editing it."
+        ),
+      as: z
+        .enum(["grid", "frames"])
+        .optional()
+        .describe("grid: one sheet (default). frames: an animated PNG, one cell per frame"),
+      delayMs: z
+        .number()
+        .int()
+        .min(10)
+        .max(5000)
+        .optional()
+        .describe("Frame delay for `as: frames`; default 120"),
+    },
+    ({
+      project: id,
+      target,
+      ...request
+    }: {
+      project?: string;
+      target?: string;
+      claim?: string;
+      start?: number;
+      length?: number;
+      view?: string;
+      as?: "grid" | "frames";
+      delayMs?: number;
+    }) => context().workspace(id, target).render(request)
+  );
+
+  tool(
     "run_decoder",
     "Run a decoder you write over a span of bytes, and see what it produces. " +
       "For data whose layout is not one of the built-in ones — a packed screen, " +
@@ -518,17 +686,16 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
-    "set_decoder",
+    "add_decoder",
     "Keep a decoder in the project so it can be used again and by somebody " +
-      "else. Give an id to revise one, or leave it out to add one. " +
-      "It lives at project level rather than on a layer, because a way of " +
-      "*reading* bytes describes none of its own — the same reason a constant " +
-      "declaration does.",
+      "else. **Always adds**, and returns the id — `edit_decoder` revises by " +
+      "that id. It lives at project level rather than on a layer, because a way " +
+      "of *reading* bytes describes none of its own — the same reason a " +
+      "constant declaration does.",
     {
       project,
       name: z.string().min(1).describe("What it is for, shown in a listing and a menu"),
       source: z.string().min(1).max(20000).describe("The body of a function taking (bytes, params)"),
-      id: z.string().optional().describe("Which decoder to revise; omit to add one"),
       expectVersion: z.string().optional(),
     },
     (args: {
@@ -536,13 +703,42 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       target?: string;
       name: string;
       source: string;
-      id?: string;
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project, args.target);
       space.expect(args.expectVersion);
-      return space.setDecoder(caller, args.name, args.source, args.id);
+      return space.addDecoder(caller, args.name, args.source);
+    }
+  );
+
+  tool(
+    "edit_decoder",
+    "Revise a decoder by id. Omitted fields are left alone, so changing the " +
+      "name does not resend a source somebody else has corrected. An id " +
+      "nothing holds is an error — this never creates one.",
+    {
+      project,
+      id: z.string().describe("From add_decoder or list_decoders"),
+      name: z.string().min(1).optional(),
+      source: z.string().min(1).max(20000).optional(),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      target?: string;
+      id: string;
+      name?: string;
+      source?: string;
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project, args.target);
+      space.expect(args.expectVersion);
+      return space.editDecoder(caller, args.id, {
+        ...(args.name === undefined ? {} : { name: args.name }),
+        ...(args.source === undefined ? {} : { source: args.source }),
+      });
     }
   );
 
@@ -731,9 +927,17 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     {
       project,
       source: z
-        .enum(["user", "layer", "region", "platform", "auto"])
+        // `Provenance["source"]`, exactly. It listed `region`, which has not
+        // been a source since regions became claims, and omitted `analysis` —
+        // so one value matched nothing and one real value could not be asked
+        // for. The schema in front of a tool is the layer no other test sees.
+        .enum(["user", "layer", "platform", "auto", "analysis"])
         .optional()
-        .describe("user = someone chose it; auto = the disassembler invented it"),
+        .describe(
+          "user = somebody chose it; layer = the file named it; platform = the " +
+            "built-in C64 table; auto = the disassembler invented it; analysis = " +
+            "a pass concluded it"
+        ),
       type: z.enum(["entry", "function", "code", "address"]).optional(),
       namePattern: z.string().optional().describe("Case-insensitive substring"),
       // The description promised an address range and the schema did not have
@@ -856,9 +1060,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "disassembly calls $08 a scratch byte in most of a program and something " +
       "specific in one routine, and both are true. So an address cannot say " +
       "which claim you meant, and a write keyed by one must not decide. " +
-      "The id comes back; use it with set_claim to correct what you said, or " +
+      "The id comes back; use it with edit_claim to correct what you said, or " +
       "claims_at first to see what is already there. Which name an operand shows " +
-      "is set_primary_name, and that is the only thing anybody sets. " +
+      "is bind_primary_name, by claim id. " +
       "The result also says the claim's `scope` — which layer or target it " +
       "belongs to. That is derived from the address, never chosen, and it is " +
       "what decides whether the claim follows its bytes if that layer is ever " +
@@ -897,6 +1101,17 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       encoding: z.enum(["petscii", "screen", "ascii"]).optional(),
       view: z.string().optional().describe("For a bitmap: char:8, bits:3, sprite, snippet:<id>"),
       comment: z.string().optional(),
+      method: z
+        .enum(["guessed", "transcribed", "read", "derived", "ran"])
+        .optional()
+        .describe(
+          "**How you know**, not how sure you are. guessed = a hypothesis; " +
+            "transcribed = copied by hand from a listing or another project; " +
+            "read = reasoned from the code; derived = an analysis here computed it; " +
+            "ran = watched happening in the machine. Two accounts that agree are " +
+            "one account unless the methods differ — which is why this is the axis " +
+            "rather than a confidence score."
+        ),
       expectVersion: z
         .string()
         .optional()
@@ -913,6 +1128,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       encoding?: "petscii" | "screen" | "ascii";
       view?: string;
       comment?: string;
+      method?: "guessed" | "transcribed" | "read" | "derived" | "ran";
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
@@ -1082,7 +1298,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "reaches them — a load address, an entry point, a routine nothing calls " +
       "because it is reached through a jump table. " +
       "There is no add_root or remove_root: a root is a field on a claim, so " +
-      "add_claim with `root` declares one and set_claim with `root: null` takes " +
+      "add_claim with `root` declares one and edit_claim with `root: null` takes " +
       "it back. A root reported without an id is inherent to a file rather than " +
       "something this project said, so there is nothing to take back.",
     { project },
@@ -1157,7 +1373,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
-    "set_claim",
+    "edit_claim",
     "Correct a claim, by its id. " +
       "The way to change what you said rather than say something else: adding is " +
       "never keyed by an address, because several claims cover any interesting " +
@@ -1171,6 +1387,12 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     {
       project,
       id: z.string().describe("Claim id, from claims_at or add_claim"),
+      at: address
+        .optional()
+        .describe(
+          "Move it. Absolute, like every address here — a claim is stored " +
+            "relative to the layer holding its bytes, and this is converted"
+        ),
       name: z.string().min(1).nullable().optional(),
       is: z.enum(["data", "text", "bitmap", "jumptable"]).nullable().optional(),
       extent: z.number().int().min(1).max(0x10000).nullable().optional(),
@@ -1183,6 +1405,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       project?: string;
       target?: string;
       id: string;
+      at?: number;
       name?: string | null;
       is?: Interpretation["is"] | null;
       extent?: number | null;
@@ -1206,6 +1429,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       let saysCleared = false;
       for (const [key, value] of Object.entries({
         name: args.name,
+        // Absolute; `setClaim` converts it to the layer-relative pair, which is
+        // why this can be offered at all.
+        at: args.at,
         extent: args.extent,
         root: args.root,
       })) {
@@ -1228,15 +1454,40 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
-    "set_primary_name",
-    "Choose which of several names at an address is shown where nothing says " +
-      "otherwise.",
-    { project, address, name: z.string().min(1), expectVersion: z.string().optional() },
-    (args: { project?: string; target?: string; address: number; name: string; expectVersion?: string }) => {
+    "bind_primary_name",
+    "Choose which of several claims at an address gives the name that renders " +
+      "where nothing says otherwise. By claim id: two claims at one address may " +
+      "share a name, so a name cannot say which you mean.",
+    {
+      project,
+      address,
+      claim: z.string().describe("From claims_at or list_claims"),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      target?: string;
+      address: number;
+      claim: string;
+      expectVersion?: string;
+    }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project, args.target);
       space.expect(args.expectVersion);
-      return space.setPrimaryLabel(caller, args.address, args.name);
+      return space.bindPrimaryName(caller, args.address, args.claim);
+    }
+  );
+
+  tool(
+    "unbind_primary_name",
+    "Stop choosing, so the name at this address falls back to rank. There was " +
+      "no way to do this: a primary could be set and never taken off.",
+    { project, address, expectVersion: z.string().optional() },
+    (args: { project?: string; target?: string; address: number; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project, args.target);
+      space.expect(args.expectVersion);
+      return space.unbindPrimaryName(caller, args.address);
     }
   );
 
@@ -1301,11 +1552,33 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       // round trip to find out otherwise. Both are accepted; `lines` wins when
       // somebody passes both.
       end: address.optional().describe("Alternative to `lines`: stop at this address"),
+      claim: z
+        .string()
+        .optional()
+        .describe(
+          "A claim id from claims_at or list_claims: lists exactly what it covers. " +
+            "Give this or start, not both."
+        ),
     },
-    (args: { project?: string; target?: string; start?: number; lines?: number; end?: number }) =>
+    (args: {
+      project?: string;
+      target?: string;
+      start?: number;
+      lines?: number;
+      end?: number;
+      claim?: string;
+    }) =>
       context()
-        .workspace(args.project)
-        .listing(args.start, args.lines ?? (args.end === undefined ? 200 : undefined), args.end)
+        // `target` was dropped here and nowhere else, so this one tool always
+        // answered for the project's default view — which on a project built by
+        // running a loader is the packed file rather than the program.
+        .workspace(args.project, args.target)
+        .listing(
+          args.start,
+          args.lines ?? (args.end === undefined && args.claim === undefined ? 200 : undefined),
+          args.end,
+          args.claim
+        )
   );
 
   tool(
@@ -1362,15 +1635,15 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
 
   tool(
     "remove_constant",
-    "Forget a declared constant, by id or by a name that reaches exactly one. " +
+    "Forget a declared constant, by id. " +
       "Operands bound to it go back to showing the literal; nothing needs " +
       "unbinding first.",
-    { project, name: z.string().min(1).describe("An id, or an unambiguous name"), expectVersion: z.string().optional() },
-    (args: { project?: string; target?: string; name: string; expectVersion?: string }) => {
+    { project, id: z.string().describe("From add_constant or list_constants"), expectVersion: z.string().optional() },
+    (args: { project?: string; target?: string; id: string; expectVersion?: string }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project, args.target);
       space.expect(args.expectVersion);
-      return space.removeConstant(caller, args.name);
+      return space.removeConstant(caller, args.id);
     }
   );
 
@@ -1382,7 +1655,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     {
       project,
       bindings: z
-        .array(z.strictObject({ address, name: z.string().min(1) }))
+        .array(z.strictObject({ address, constant: z.string().describe("A constant id") }))
         .min(1)
         .max(500),
       expectVersion: z.string().optional(),
@@ -1390,7 +1663,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     (args: {
       project?: string;
       target?: string;
-      bindings: { address: number; name: string }[];
+      bindings: { address: number; constant: string }[];
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
@@ -1429,12 +1702,12 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "Takes a name or an id; where a name reaches two constants the operand's " +
       "own value picks between them, since two constants sharing a name must " +
       "differ in value to be worth telling apart.",
-    { project, address, name: z.string().min(1).describe("A name, or an id"), expectVersion: z.string().optional() },
-    (args: { project?: string; target?: string; address: number; name: string; expectVersion?: string }) => {
+    { project, address, constant: z.string().describe("A constant id from add_constant or list_constants"), expectVersion: z.string().optional() },
+    (args: { project?: string; target?: string; address: number; constant: string; expectVersion?: string }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project, args.target);
       space.expect(args.expectVersion);
-      return space.bindConstant(caller, args.address, args.name);
+      return space.bindConstant(caller, args.address, args.constant);
     }
   );
 
@@ -1529,43 +1802,23 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
-    "set_target",
-    "Declare a named view: which layers are linked in, in what order, where " +
-      "each one lands, and where disassembly starts beyond what they " +
-      "contribute. A project holding a packed file and the image it unpacks to " +
-      "can be read as the bytes load or as the program runs — one target each — " +
-      "because the second must shadow the first. Annotations belong to layers, " +
-      "so they follow linking. " +
-      "**The order is the z-order**, bottom-up: the last layer shadows the ones " +
-      "before it. So reordering the stack is this call with a reordered list. " +
-      "A bare layer id links it at its own address — a PRG's is in its own " +
-      "header — and `{layer, at}` puts it somewhere else, which is what a " +
-      "program relocating its own code needs. " +
-      "The list is a history of the program's life — loader, then the image it " +
-      "expands into, then whatever it loads later — so `order` says where this " +
-      "sits and `description` says what the phase is. " +
-      "Every field but the name is optional and an omitted one is left alone, " +
-      "so describing a target does not restate its layers and two people " +
-      "revising one do not revert each other.",
+    "add_target",
+    "Declare a view over the layer stack. **Always adds**, and returns the id " +
+      "— `edit_target` revises by that id. A target is a phase of the " +
+      "program's life: the loader, the image it expands into, a level it pulls " +
+      "in later.",
     {
       project,
       name: z.string().min(1),
       layers: z
         .array(
-          z.union([
-            z.string(),
-            z.strictObject({
-              layer: z.string(),
-              at: address.describe("Where this layer lands in this target"),
-            }),
-          ])
+          z.strictObject({
+            layer: z.string().describe("A layer id from list_targets"),
+            at: address.optional().describe("Where this layer lands in this target"),
+          })
         )
         .min(1)
-        .optional()
-        .describe(
-          "Bottom-up, so the last shadows the rest. Layer ids from list_targets; " +
-            "omit to leave the links as they are"
-        ),
+        .describe("Bottom-up, so the last shadows the rest"),
       entryPoints: z.array(address).optional(),
       order: z
         .number()
@@ -1582,7 +1835,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       project?: string;
       target?: string;
       name: string;
-      layers?: string[];
+      layers: { layer: string; at?: number }[];
       entryPoints?: number[];
       order?: number;
       description?: string;
@@ -1591,7 +1844,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       const { workspace, caller } = context();
       const space = workspace(args.project, args.target);
       space.expect(args.expectVersion);
-      return space.setTarget(
+      return space.addTarget(
         caller,
         args.name,
         args.layers,
@@ -1602,16 +1855,354 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     }
   );
 
-
   tool(
-    "remove_target",
-    "Forget a view. The layers and everything in them are untouched.",
-    { project, name: z.string().min(1), expectVersion: z.string().optional() },
-    (args: { project?: string; target?: string; name: string; expectVersion?: string }) => {
+    "edit_target",
+    "Revise a view by id. Omitted fields are left alone, so describing a " +
+      "target does not restate its layers and two people revising one do not " +
+      "revert each other. An id nothing holds is an error — this never creates.",
+    {
+      project,
+      id: z.string().describe("From add_target or list_targets"),
+      name: z.string().min(1).optional(),
+      layers: z
+        .array(
+          z.strictObject({
+            layer: z.string().describe("A layer id from list_targets"),
+            at: address.optional().describe("Where this layer lands in this target"),
+          })
+        )
+        .min(1)
+        .optional()
+        .describe("Bottom-up, so the last shadows the rest; omit to leave the links alone"),
+      entryPoints: z.array(address).optional(),
+      order: z.number().int().optional(),
+      description: z.string().optional(),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      target?: string;
+      id: string;
+      name?: string;
+      layers?: { layer: string; at?: number }[];
+      entryPoints?: number[];
+      order?: number;
+      description?: string;
+      expectVersion?: string;
+    }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project, args.target);
       space.expect(args.expectVersion);
-      return space.removeTarget(caller, args.name);
+      return space.editTarget(caller, args.id, {
+        ...(args.name === undefined ? {} : { name: args.name }),
+        ...(args.layers === undefined ? {} : { layers: args.layers }),
+        ...(args.entryPoints === undefined ? {} : { entryPoints: args.entryPoints }),
+        ...(args.order === undefined ? {} : { order: args.order }),
+        ...(args.description === undefined ? {} : { description: args.description }),
+      });
+    }
+  );
+
+  tool(
+    "remove_target",
+    "Forget a view, by id. The layers and everything in them are untouched.",
+    { project, id: z.string().describe("From list_targets"), expectVersion: z.string().optional() },
+    (args: { project?: string; target?: string; id: string; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project, args.target);
+      space.expect(args.expectVersion);
+      return space.removeTarget(caller, args.id);
+    }
+  );
+
+  const stepSchema = z.discriminatedUnion("kind", [
+    z.strictObject({
+      kind: z.literal("start"),
+      at: address.describe("Where to begin, or the vector to read it from"),
+      vector: z.boolean().optional().describe("Read a two-byte address at `at` and start there"),
+    }),
+    z.strictObject({
+      kind: z.literal("set"),
+      registers: z.record(z.string(), z.number().int()).optional(),
+      memory: z.record(z.string(), z.number().int().min(0).max(255)).optional(),
+    }),
+    z.strictObject({
+      kind: z.literal("input"),
+      port: z.union([z.literal(1), z.literal(2)]),
+      up: z.boolean().optional(),
+      down: z.boolean().optional(),
+      left: z.boolean().optional(),
+      right: z.boolean().optional(),
+      fire: z.boolean().optional(),
+    }),
+    z.strictObject({
+      kind: z.literal("key"),
+      keys: z
+        .array(z.union([z.string(), z.number().int().min(0).max(63)]))
+        .describe(
+          "Keys to hold, by name — letters, digits, f1/f3/f5/f7, return, space, " +
+            "run-stop, ctrl, commodore, shift-left, shift-right, home, delete, " +
+            "cursor-down, cursor-right, and the punctuation the machine has. " +
+            "Held until another key step changes them, so [] releases; a keystroke " +
+            "is press, run, release, because a program's own debounce ignores a key " +
+            "that is still down. An unknown name is refused rather than pressing nothing."
+        ),
+    }),
+    z.strictObject({
+      kind: z.literal("run"),
+      frames: z.number().int().min(1).optional().describe("PAL frames, 50 to the second"),
+      cycles: z.number().int().min(1).optional(),
+      breakpoints: z.array(address).optional(),
+      watchpoints: z
+        .array(
+          z.strictObject({
+            from: address,
+            to: address,
+            on: z.enum(["read", "write", "any"]).optional(),
+          })
+        )
+        .optional(),
+      leaves: z
+        .boolean()
+        .optional()
+        .describe(
+          "Stop where control leaves the program — an address no layer supplies " +
+            "and this run never wrote. What a loader finishes by doing, so nothing " +
+            "has to guess a limit. Code the program wrote is still the program."
+        ),
+      maxInstructions: z.number().int().min(1).optional(),
+    }),
+    z.strictObject({
+      kind: z.literal("assert"),
+      memory: z.record(z.string(), z.number().int().min(0).max(255)).optional(),
+      registers: z.record(z.string(), z.number().int()).optional(),
+      note: z.string().optional().describe("What this is checking, for the report"),
+    }),
+    z.strictObject({
+      kind: z.literal("capture"),
+      what: z.enum(["ram", "screen", "frames", "trace", "sid"]),
+      from: address.optional().describe("For `ram`"),
+      to: address.optional().describe("For `ram`"),
+      count: z.number().int().min(1).optional().describe("For `frames`"),
+      every: z.number().int().min(1).optional().describe("For `frames`: frames between shots"),
+      name: z.string().min(1).describe("What to call the file this produces"),
+    }),
+  ]);
+
+  tool(
+    "list_evidence",
+    "What has been said about a claim: evidence for it, against it, or " +
+      "replacing it. Give a claim id to see just that one. This is where a " +
+      "refutation lives that shares no bytes with what it refutes — `$8DF9` " +
+      "holding `$3B` refutes a claim about the *glyph* `$3B`, somewhere else " +
+      "entirely, which `disagreements` could never find by sweeping addresses.",
+    { project, claim: z.string().optional().describe("Only evidence about this claim") },
+    (args: { project?: string; target?: string; claim?: string }) =>
+      context().workspace(args.project, args.target).evidenceFor(args.claim)
+  );
+
+  tool(
+    "add_evidence",
+    "Say something about a **claim** rather than about an address. " +
+      "`supports` backs it up; `refutes` says it is wrong; `supersedes` replaces " +
+      "it, which is how an earlier reading that led somewhere is kept rather " +
+      "than deleted — the wrong model that led to the right place is worth " +
+      "keeping. Point at a `scenario` and the evidence re-verifies: running it " +
+      "says pass or fail rather than leaving a sentence nobody can check.",
+    {
+      project,
+      claim: z.string().describe("The claim this is about, from claims_at"),
+      kind: z.enum(["supports", "refutes", "supersedes"]),
+      scenario: z
+        .string()
+        .optional()
+        .describe("A scenario that checks it — the strongest form, because it re-runs"),
+      capture: z.string().optional().describe("Something a run produced, from list_scenarios"),
+      other: z.string().optional().describe("Another claim, for refutes and supersedes"),
+      note: z.string().optional().describe("Why, for the part no reference carries"),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      target?: string;
+      claim: string;
+      kind: "supports" | "refutes" | "supersedes";
+      scenario?: string;
+      capture?: string;
+      other?: string;
+      note?: string;
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project, args.target);
+      space.expect(args.expectVersion);
+      return space.addEvidence(caller, args.claim, args.kind, {
+        ...(args.scenario === undefined ? {} : { scenario: args.scenario }),
+        ...(args.capture === undefined ? {} : { capture: args.capture }),
+        ...(args.other === undefined ? {} : { other: args.other }),
+        ...(args.note === undefined ? {} : { note: args.note }),
+      });
+    }
+  );
+
+  tool(
+    "edit_evidence",
+    "Revise a piece of evidence by id. Omitted fields are left alone; `null` " +
+      "clears one. An id nothing holds is an error.",
+    {
+      project,
+      id: z.string(),
+      kind: z.enum(["supports", "refutes", "supersedes"]).optional(),
+      scenario: z.string().nullable().optional(),
+      capture: z.string().nullable().optional(),
+      other: z.string().nullable().optional(),
+      note: z.string().nullable().optional(),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      target?: string;
+      id: string;
+      kind?: "supports" | "refutes" | "supersedes";
+      scenario?: string | null;
+      capture?: string | null;
+      other?: string | null;
+      note?: string | null;
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project, args.target);
+      space.expect(args.expectVersion);
+      return space.editEvidence(caller, args.id, {
+        ...(args.kind === undefined ? {} : { kind: args.kind }),
+        ...(args.scenario === undefined ? {} : { scenario: args.scenario }),
+        ...(args.capture === undefined ? {} : { capture: args.capture }),
+        ...(args.other === undefined ? {} : { other: args.other }),
+        ...(args.note === undefined ? {} : { note: args.note }),
+      });
+    }
+  );
+
+  tool(
+    "remove_evidence",
+    "Withdraw a piece of evidence, by id. The claim it was about is untouched.",
+    { project, id: z.string(), expectVersion: z.string().optional() },
+    (args: { project?: string; target?: string; id: string; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project, args.target);
+      space.expect(args.expectVersion);
+      return space.removeEvidence(caller, args.id);
+    }
+  );
+
+  tool(
+    "list_scenarios",
+    "Every workflow this project carries, with the captures each has produced " +
+      "and a `url` to fetch each capture's bytes. " +
+      "A scenario is what the machine is asked to do; the machine itself is " +
+      "never stored, because it is derived from these steps and the project's " +
+      "bytes.",
+    { project },
+    ({ project: id, target }: { project?: string; target?: string }) =>
+      context().workspace(id, target).scenarios()
+  );
+
+  tool(
+    "add_scenario",
+    "Declare a workflow for the machine. **Always adds**, and returns the id. " +
+      "Steps run in order: `start` where to begin, `set` to pin registers or " +
+      "memory, `input` to point a joystick, `key` to hold keys on the " +
+      "keyboard, `run` until frames/cycles/a breakpoint/a watchpoint, and " +
+      "`capture` to keep something. A joystick and a set of keys both stay as " +
+      "they were put until another step changes them, so a keystroke is press, " +
+      "run, release — which is what a program's own debounce is written " +
+      "against. Running is deterministic: the same steps over the same bytes " +
+      "give the same result, which is what lets a re-run resume rather than " +
+      "start again.",
+    {
+      project,
+      name: z.string().min(1),
+      description: z.string().optional(),
+      steps: z.array(stepSchema).min(1),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      target?: string;
+      name: string;
+      description?: string;
+      steps: ProjectStep[];
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project, args.target);
+      space.expect(args.expectVersion);
+      return space.addScenario(caller, args.name, args.steps, args.description);
+    }
+  );
+
+  tool(
+    "edit_scenario",
+    "Revise a workflow by id. Omitted fields are left alone; `steps` is written " +
+      "whole, because a scenario is one author's sequence and the order is the " +
+      "meaning. An id nothing holds is an error — this never creates.",
+    {
+      project,
+      id: z.string().describe("From add_scenario or list_scenarios"),
+      name: z.string().min(1).optional(),
+      description: z.string().nullable().optional(),
+      steps: z.array(stepSchema).min(1).optional(),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      target?: string;
+      id: string;
+      name?: string;
+      description?: string | null;
+      steps?: ProjectStep[];
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project, args.target);
+      space.expect(args.expectVersion);
+      return space.editScenario(caller, args.id, {
+        ...(args.name === undefined ? {} : { name: args.name }),
+        ...(args.description === undefined ? {} : { description: args.description }),
+        ...(args.steps === undefined ? {} : { steps: args.steps }),
+      });
+    }
+  );
+
+  tool(
+    "remove_scenario",
+    "Forget a workflow, by id. Anything it captured stays, because a capture is " +
+      "evidence rather than a by-product.",
+    { project, id: z.string(), expectVersion: z.string().optional() },
+    (args: { project?: string; target?: string; id: string; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project, args.target);
+      space.expect(args.expectVersion);
+      return space.removeScenario(caller, args.id);
+    }
+  );
+
+  tool(
+    "run_scenario",
+    "Run a workflow and keep what it captured. Says what each step did, where " +
+      "the machine stopped, and — if the scenario asserts anything — whether the " +
+      "checks passed. Each capture comes back with a **`url`**: GET it to fetch " +
+      "the bytes, which for a screen or frames is JSON holding palette indices " +
+      "you can render however you like. Bytes go over HTTP rather than through " +
+      "this result because a captured screen is a few hundred kilobytes. " +
+      "Re-running a scenario whose later steps changed resumes from where the " +
+      "earlier ones left off rather than starting over.",
+    { project, id: z.string(), expectVersion: z.string().optional() },
+    (args: { project?: string; target?: string; id: string; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project, args.target);
+      space.expect(args.expectVersion);
+      return space.runScenario(caller, args.id);
     }
   );
 

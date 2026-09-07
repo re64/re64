@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer, RunningServer } from "../server/index.js";
@@ -68,6 +68,108 @@ describe("joining a project", () => {
   });
 });
 
+describe("choosing which target to read", () => {
+  /**
+   * The last surface to learn targets exist. On a project built by running a
+   * loader — which is every packed game — the disassembly worth reading is in
+   * the runtime target, so without this a person watching agents work could not
+   * see what they were working on.
+   *
+   * Its own server on its own fixture, because the shared one is Gridrunner:
+   * one file, no targets, which is the case the control hides itself for and is
+   * asserted as such below.
+   */
+  let two: RunningServer;
+  let twoOrigin: string;
+  let twoProject: string;
+  let twoDir: string;
+
+  beforeEach(async () => {
+    twoDir = mkdtempSync(join(tmpdir(), "re64-targets-"));
+    const path = join(twoDir, "two.re64");
+    copyFileSync("assets/gridrunner/gridrunner.prg", join(twoDir, "gridrunner.prg"));
+
+    const project = JSON.parse(readFileSync("assets/gridrunner/gridrunner.re64", "utf8"));
+    // Linked by layer **id**, which is the only handle a target has — a path or
+    // a name reaches nothing, and a target that links nothing supplies nothing.
+    const prg = project.layers.find((l: { type: string }) => l.type === "prg");
+    project.targets = [
+      { name: "program", order: 1, description: "The game", layers: [prg.id] },
+      { name: "empty", order: 2, description: "Nothing at all", layers: [] },
+    ];
+    project.defaultTarget = "program";
+    writeFileSync(path, JSON.stringify(project, null, 2));
+
+    const { databasePath, projectId } = importProject(path);
+    two = startServer({ projectPath: databasePath, port: 0, host: "127.0.0.1", quiet: true });
+    await two.ready;
+    twoOrigin = `http://127.0.0.1:${two.port}`;
+    twoProject = projectId;
+  });
+
+  afterEach(async () => {
+    await two.close();
+    rmSync(twoDir, { recursive: true, force: true });
+  });
+
+  const openTwo = () =>
+    ProjectSession.open({ origin: twoOrigin, project: twoProject, author: "tester" });
+
+  it("offers no choice on a project that declares none", async () => {
+    // Gridrunner itself is one file and declares no targets — the ordinary
+    // small project, and the case the control hides itself for.
+    const session = await open();
+    expect(session.targets()).toEqual([]);
+    session.close();
+  });
+
+  it("opens on the project's declared default", async () => {
+    const session = await openTwo();
+    expect(session.targets().map((t) => t.name)).toEqual(["program", "empty"]);
+    expect(session.target).toBe("program");
+    expect(session.targets().find((t) => t.isDefault)?.name).toBe("program");
+    session.close();
+  });
+
+  it("narrows the model to the chosen target, and back", async () => {
+    // Asserted on the bytes rather than on the layer list, because that is what
+    // a target is *for*: which bytes you are reading. A target linking nothing
+    // supplies nothing, and the cartridge at $8000 disappears.
+    const session = await openTwo();
+    expect(session.loaded.map.readByte(0x8000)).toBeDefined();
+
+    session.selectTarget("empty");
+    expect(session.target).toBe("empty");
+    expect(session.loaded.map.readByte(0x8000)).toBeUndefined();
+
+    session.selectTarget(undefined);
+    expect(session.target).toBe("program");
+    expect(session.loaded.map.readByte(0x8000)).toBeDefined();
+    session.close();
+  });
+
+  it("writes nothing, because which view I am reading is a cursor", async () => {
+    // The property that makes a split view possible and a shared selection
+    // wrong: two panes over one document, neither moving the other. It is also
+    // why `defaultTarget` in the export still says what the *project* opens
+    // with, not what anybody happens to be looking at.
+    const session = await openTwo();
+    const before = session.exportedText();
+
+    session.selectTarget("empty");
+    expect(session.exportedText()).toBe(before);
+    expect(JSON.parse(before).defaultTarget).toBe("program");
+    session.close();
+  });
+
+  it("refuses a target that does not exist rather than falling back", async () => {
+    const session = await openTwo();
+    expect(() => session.selectTarget("nonesuch")).toThrow(/no target/);
+    expect(session.target).toBe("program");
+    session.close();
+  });
+});
+
 describe("editing", () => {
   it("shows a rename without waiting for anything", async () => {
     const session = await open();
@@ -77,9 +179,12 @@ describe("editing", () => {
     session.close();
   });
 
-  it("removes a label", async () => {
+  it("removes a claim by id, which is the only thing that names one", async () => {
     const session = await open();
-    session.removeLabel(0x8100);
+    const claim = session.claimsAt(0x8100).find((c) => c.by.source === "user")!;
+    expect(claim).toBeDefined();
+
+    session.removeClaim(claim.id);
     await session.refresh();
     expect(labelAt(session, 0x8100)).not.toBe("InitializeGame");
     session.close();
@@ -172,7 +277,7 @@ describe("two sessions, as two tabs would be", () => {
 
 describe("what the record says afterwards", () => {
   it("attributes an edit made over the socket, which used to leave no trace", async () => {
-    // Only CLI edits were ever recorded. A browser could rename a hundred
+    // Only server-side edits were ever recorded. A browser could name a hundred
     // labels and the history would know a session happened and nothing else.
     const session = await open();
     session.addLabel(0x8100, "ByAParticipant", undefined);
@@ -188,7 +293,7 @@ describe("what the record says afterwards", () => {
     session.close();
   });
 
-  it("records an inverse, so the CLI can take it back", async () => {
+  it("records an inverse, so the edit can be taken back", async () => {
     const session = await open();
     session.addLabel(0x8100, "Reversible", undefined);
     await settle();
@@ -197,7 +302,12 @@ describe("what the record says afterwards", () => {
     const recorded = storage.readOps().at(-1)!;
     storage.close();
 
-    expect(recorded.inverse).toMatchObject({ op: "claim.set" });
+    // `claim.remove`, and the kind is worth asserting rather than merely
+    // checking an inverse exists: it was `claim.set` while the browser named an
+    // address by upsert, which meant naming $8100 — where a label already sits —
+    // silently *renamed* somebody's claim. Naming adds now, so taking it back is
+    // a removal. If this ever reads `claim.set` again the upsert is back.
+    expect(recorded.inverse).toMatchObject({ op: "claim.remove" });
     session.close();
   });
 

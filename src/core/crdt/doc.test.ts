@@ -171,8 +171,8 @@ describe("merge", () => {
     // The property the primary-label index depends on: promoting is one map
     // entry, so concurrent promotions pick a winner instead of leaving two.
     const [a, b] = twoClients();
-    applyOpToDoc(a, { op: "primary.set", address: 0x8000, labelId: "lbl_x" });
-    applyOpToDoc(b, { op: "primary.set", address: 0x8000, labelId: "lbl_y" });
+    applyOpToDoc(a, { op: "primary.bind", address: 0x8000, labelId: "lbl_x" });
+    applyOpToDoc(b, { op: "primary.bind", address: 0x8000, labelId: "lbl_y" });
     sync(a, b);
 
     expect(projectFromDoc(a).primaryLabels).toEqual(projectFromDoc(b).primaryLabels);
@@ -231,7 +231,7 @@ describe("one action, one undo step", () => {
       doc,
       [
         { op: "claim.add", claim: { id: "lbl_c", at: 0x8100, name: "sub_8100", root: "routine", by: { author: "test", source: "user" } } },
-        { op: "primary.set", address: 0x8100, labelId: "lbl_c" },
+        { op: "primary.bind", address: 0x8100, labelId: "lbl_c" },
       ],
       "me"
     );
@@ -281,7 +281,7 @@ describe("session squashing", () => {
     const ops: Op[] = [
       { op: "claim.add", claim: { id: "lbl_b", at: 0x8000, name: "One", by: { author: "test", source: "user" } } },
       { op: "claim.add", claim: { id: "lbl_c", at: 0x8100, name: "Two", by: { author: "test", source: "user" } } },
-      { op: "primary.clear", address: 0x8000 },
+      { op: "primary.unbind", address: 0x8000 },
     ];
     for (const op of ops) applyOpToDoc(session, op);
 

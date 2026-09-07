@@ -26,7 +26,6 @@ describe("the browser bundle", () => {
       (path) =>
         path.startsWith("src/server/") ||
         path.startsWith("src/store/") ||
-        path.startsWith("src/cli/") ||
         /node_modules\/(@modelcontextprotocol|express|ws)\//.test(path)
     );
 

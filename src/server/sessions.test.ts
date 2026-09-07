@@ -124,3 +124,49 @@ describe("finding which lease a request wants", () => {
     expect(sessionKeyOf({ "mcp-session-id": ["a", "b"] }, "usr_a").key).toBe("a");
   });
 });
+
+describe("codenames a restart must not hand out again", () => {
+  /**
+   * Experiment 9, and the reason this is asserted rather than reasoned about.
+   *
+   * The server was rebuilt and restarted under three working agents. Everything
+   * that lives in the document came back; the lease map did not, because it is
+   * memory — so the pool began again at the top and the editor was issued
+   * `basalt` while the reader holding `basalt` was still online. Three of its
+   * messages are recorded in that project's chat as spoken by somebody else,
+   * permanently, because chat records how an author was named at the time.
+   */
+  const who = { userId: "usr_a", label: "a" };
+
+  it("skips a name the database remembers, even with nothing live", () => {
+    const leases = new SessionLeases({ spentCodenames: () => ["agate", "amber"] });
+    expect(leases.claim("one", who).codename).toBe("basalt");
+  });
+
+  it("still avoids names held right now", () => {
+    const leases = new SessionLeases({ spentCodenames: () => ["agate"] });
+    const first = leases.claim("one", who).codename;
+    const second = leases.claim("two", who).codename;
+    expect(first).toBe("amber");
+    expect(second).toBe("basalt");
+  });
+
+  it("numbers past a pool that is entirely spent, without repeating", () => {
+    // The suffix used to come from a counter that is also memory, so it
+    // repeated after a restart exactly as the pool did.
+    const spent = new Set<string>();
+    const leases = new SessionLeases({
+      spentCodenames: () => spent,
+      onIssued: (lease) => spent.add(lease.codename),
+    });
+
+    const seen = new Set<string>();
+    for (let i = 0; i < 70; i++) {
+      const codename = leases.claim(`s${i}`, who).codename;
+      expect(seen.has(codename)).toBe(false);
+      seen.add(codename);
+    }
+    expect(seen.size).toBe(70);
+    expect([...seen].some((name) => name.endsWith("-2"))).toBe(true);
+  });
+});

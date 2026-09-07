@@ -33,6 +33,9 @@ import {
   ProjectDecoder,
   ProjectFile,
   ProjectTarget,
+  ProjectScenario,
+  ProjectCapture,
+  ProjectEvidence,
   ProjectConstantUse,
   ProjectLabel,
   ProjectLabelUse,
@@ -80,6 +83,9 @@ const ROOT_PRIMARY = "primaryLabels";
 const ROOT_CONSTANTS = "constants";
 const ROOT_DECODERS = "decoders";
 const ROOT_TYPES = "types";
+const ROOT_SCENARIOS = "scenarios";
+const ROOT_CAPTURES = "captures";
+const ROOT_EVIDENCE = "evidence";
 const ROOT_FILES = "files";
 const ROOT_TARGETS = "targets";
 const ROOT_CLAIMS = "claims";
@@ -174,8 +180,10 @@ export function docFromProject(declared: Project): Y.Doc {
     // Project level for the same reason: a way of *reading* bytes describes
     // none of its own, so there is no layer for it to move with.
     const targets = doc.getMap<Y.Map<unknown>>(ROOT_TARGETS);
+    // Keyed by id, like every other collection here. It was keyed by name,
+    // which made a target the one entity whose identity could be edited.
     for (const target of [...(project.targets ?? [])].sort((a, b) => a.name.localeCompare(b.name))) {
-      targets.set(target.name, mapFrom(target as unknown as Record<string, unknown>));
+      targets.set(target.id!, mapFrom(target as unknown as Record<string, unknown>));
     }
 
     const files = doc.getMap<Y.Map<unknown>>(ROOT_FILES);
@@ -198,6 +206,29 @@ export function docFromProject(declared: Project): Y.Doc {
     const types = doc.getMap<Y.Map<unknown>>(ROOT_TYPES);
     for (const type of [...(project.types ?? [])].sort(byId)) {
       types.set(type.id!, typeMapFrom(type));
+    }
+
+    // Steps as one JSON value, matching the operation: a scenario is one
+    // author's sequence, so there is no key for two writers to merge on.
+    const scenarios = doc.getMap<Y.Map<unknown>>(ROOT_SCENARIOS);
+    for (const scenario of [...(project.scenarios ?? [])].sort(byId)) {
+      scenarios.set(
+        scenario.id!,
+        mapFrom({
+          ...(scenario as unknown as Record<string, unknown>),
+          steps: JSON.stringify(scenario.steps),
+        })
+      );
+    }
+
+    const captures = doc.getMap<Y.Map<unknown>>(ROOT_CAPTURES);
+    for (const capture of [...(project.captures ?? [])].sort(byId)) {
+      captures.set(capture.id!, mapFrom(capture as unknown as Record<string, unknown>));
+    }
+
+    const evidence = doc.getMap<Y.Map<unknown>>(ROOT_EVIDENCE);
+    for (const item of [...(project.evidence ?? [])].sort(byId)) {
+      evidence.set(item.id!, mapFrom(item as unknown as Record<string, unknown>));
     }
   }, "load");
 
@@ -340,6 +371,31 @@ export function projectFromDoc(doc: Y.Doc): Project {
   );
   if (targetList.length) project.targets = targetList;
 
+  // Steps come back out of the one JSON value they went in as.
+  const scenarioList = sortedValues<Record<string, unknown>>(
+    doc.getMap<Y.Map<unknown>>(ROOT_SCENARIOS),
+    "name"
+  ).map((entry) => {
+    const ordered = inOrder<Record<string, unknown>>(entry, SCENARIO_FIELDS);
+    return {
+      ...ordered,
+      steps: JSON.parse(String(ordered.steps ?? "[]")),
+    } as unknown as ProjectScenario;
+  });
+  if (scenarioList.length) project.scenarios = scenarioList;
+
+  const captureList = sortedValues<ProjectCapture>(
+    doc.getMap<Y.Map<unknown>>(ROOT_CAPTURES),
+    "file"
+  ).map((c) => inOrder<ProjectCapture>(c as unknown as Record<string, unknown>, CAPTURE_FIELDS));
+  if (captureList.length) project.captures = captureList;
+
+  const evidenceList = sortedValues<ProjectEvidence>(
+    doc.getMap<Y.Map<unknown>>(ROOT_EVIDENCE),
+    "claim"
+  ).map((e) => inOrder<ProjectEvidence>(e as unknown as Record<string, unknown>, EVIDENCE_FIELDS));
+  if (evidenceList.length) project.evidence = evidenceList;
+
   return project;
 }
 
@@ -378,7 +434,7 @@ const TYPE_FIELDS = ["id", "name", "size", "fields"] as const;
  * qualifies. A missing entry here is silent: `inOrder` keeps unknown keys, so it
  * produces a subtly reordered file rather than a failure.
  */
-const CLAIM_FIELDS = [
+export const CLAIM_FIELDS = [
   "id",
   "at",
   "extent",
@@ -394,10 +450,13 @@ const CLAIM_FIELDS = [
   "author",
   "source",
   "when",
-  "confidence",
+  "method",
 ] as const;
 const FILE_FIELDS = ["name", "hash", "size"] as const;
-const TARGET_FIELDS = ["name", "layers", "entryPoints"] as const;
+export const TARGET_FIELDS = ["id", "name", "layers", "entryPoints", "order", "description"] as const;
+const SCENARIO_FIELDS = ["id", "name", "description", "steps"] as const;
+const CAPTURE_FIELDS = ["id", "scenario", "step", "kind", "file", "when"] as const;
+const EVIDENCE_FIELDS = ["id", "claim", "kind", "scenario", "capture", "other", "note"] as const;
 const LAYER_FIELDS = [
   "id",
   "type",

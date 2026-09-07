@@ -128,8 +128,8 @@ describe("building a project from a disk image", () => {
     camels.addByteLayer(builder, { type: "prg", path: "unpacked.prg", name: "unpacked" });
 
     const ids = Object.fromEntries(camels.targets().layers.map((l) => [l.name, l.id]));
-    camels.setTarget(builder, "loader", [ids.packed]);
-    camels.setTarget(builder, "runtime", [ids.unpacked]);
+    camels.addTarget(builder, "loader", [{ layer: ids.packed }]);
+    camels.addTarget(builder, "runtime", [{ layer: ids.unpacked }]);
 
     // Everything, as before: the unpacked layer is on top and shadows the other.
     expect(camels.targets().total).toBe(2);
@@ -184,7 +184,7 @@ describe("building a project from a disk image", () => {
 
     // A target holding only the *other* layer, so $0801 is supplied by nothing.
     const other = camels.targets().layers.find((l) => l.name === "other")!.id;
-    camels.setTarget(builder, "elsewhere", [other]);
+    camels.addTarget(builder, "elsewhere", [{ layer: other }]);
 
     // Read through that view, without it becoming everybody's view: a workspace
     // *is* a view, so asking for another hands you another object rather than
@@ -234,7 +234,7 @@ describe("building a project from a disk image", () => {
     camels.addLabel(builder, 0x0801, "waveTable");
     const over = camels.addLabel(builder, 0x0801, "zoneTable") as { warnings?: string[] };
     expect(over.warnings?.join(" ")).toMatch(/already had "waveTable"/);
-    expect(over.warnings?.join(" ")).toMatch(/set_claim/);
+    expect(over.warnings?.join(" ")).toMatch(/edit_claim/);
 
     // Both survive, and the one that was there still renders.
     const here = camels.labels({ range: { start: 0x0801, end: 0x0802 } }).labels.map((l) => l.name);
@@ -274,13 +274,20 @@ describe("building a project from a disk image", () => {
     camels.addByteLayer(builder, { type: "prg", path: "packed.prg", name: "packed" });
     const packed = camels.targets().layers.find((l) => l.name === "packed")!.id;
 
-    camels.setTarget(builder, "loader", [packed]);
-    camels.setTarget(builder, "loader", undefined, undefined, 1, "The file as the disk loads it");
+    const { target } = camels.addTarget(builder, "loader", [{ layer: packed }]);
+    // Revised by id and without restating the layers, which is the point of a
+    // partial write: describing a target must not revert somebody's stack.
+    camels.editTarget(builder, target, {
+      order: 1,
+      description: "The file as the disk loads it",
+    });
 
     const [loader] = camels.targets().targets;
     // Links now, in z-order, rather than a bare list of ids: what a target
     // holds is a memory map, and the last entry shadows the ones before it.
-    expect(loader.layers).toEqual([{ layer: packed, name: "packed" }]);
+    expect(loader.layers).toEqual([
+      { id: expect.any(String), layer: packed, name: "packed" },
+    ]);
     expect(loader.order).toBe(1);
     expect(loader.description).toBe("The file as the disk loads it");
   });
@@ -291,19 +298,22 @@ describe("building a project from a disk image", () => {
     camels.addByteLayer(builder, { type: "prg", path: "packed.prg", name: "packed" });
     const packed = camels.targets().layers.find((l) => l.name === "packed")!.id;
 
-    camels.setTarget(builder, "runtime", [packed], undefined, 2);
-    camels.setTarget(builder, "loader", [packed], undefined, 1);
+    camels.addTarget(builder, "runtime", [{ layer: packed }], undefined, 2);
+    camels.addTarget(builder, "loader", [{ layer: packed }], undefined, 1);
 
     expect(camels.targets().targets.map((t) => t.name)).toEqual(["loader", "runtime"]);
   });
 
-  it("needs layers only when the target is new", () => {
+  it("revises nothing it cannot find, rather than creating it", () => {
+    // `add` and `set` used to be one call keyed by name, so revising a target
+    // nobody had declared quietly made one — the upsert this vocabulary exists
+    // to remove. An id nothing holds is not found.
     ws.createProject("camels");
     const camels = upload("camels", "packed.prg", new Uint8Array([0x00, 0x08, 0x60]));
     camels.addByteLayer(builder, { type: "prg", path: "packed.prg" });
 
-    expect(() => camels.setTarget(builder, "nothing", undefined, undefined, 1)).toThrow(
-      /needs its layers/
+    expect(() => camels.editTarget(builder, "tgt_nope", { order: 1 })).toThrow(
+      /No target tgt_nope/
     );
   });
 
@@ -335,7 +345,7 @@ describe("building a project from a disk image", () => {
     const camels = upload("camels", "p.prg", new Uint8Array([0x00, 0x80, 0xa9, 0x01, 0x60]));
     camels.addByteLayer(builder, { type: "prg", path: "p.prg", name: "p" });
     const id = camels.targets().layers.find((l) => l.name === "p")!.id;
-    camels.setTarget(builder, "runtime", [id], [0x8002]);
+    camels.addTarget(builder, "runtime", [{ layer: id }], [0x8002]);
     
     const runtimeView = camels.view("runtime");
 
@@ -355,8 +365,8 @@ describe("building a project from a disk image", () => {
     camels.addByteLayer(builder, { type: "prg", path: "runtime.prg", name: "runtime" });
 
     const ids = Object.fromEntries(camels.targets().layers.map((l) => [l.name, l.id]));
-    camels.setTarget(builder, "loader", [ids.packed]);
-    camels.setTarget(builder, "runtime", [ids.runtime]);
+    camels.addTarget(builder, "loader", [{ layer: ids.packed }]);
+    camels.addTarget(builder, "runtime", [{ layer: ids.runtime }]);
     expect(camels.view("runtime").bytes(0x8000, 1).hex.toLowerCase()).toBe("bb");
     expect(camels.view("loader").bytes(0x8000, 1).hex.toLowerCase()).toBe("aa");
     // Two views of one project are two objects, so neither can move the other
@@ -375,7 +385,7 @@ describe("building a project from a disk image", () => {
     camels.addByteLayer(builder, { type: "prg", path: "packed.prg", name: "packed" });
 
     const packed = camels.targets().layers.find((l) => l.name === "packed")!.id;
-    camels.setTarget(builder, "runtime", [packed]);
+    camels.addTarget(builder, "runtime", [{ layer: packed }]);
     
     const runtimeView = camels.view("runtime");
 
@@ -406,8 +416,8 @@ describe("building a project from a disk image", () => {
     camels.addByteLayer(builder, { type: "prg", path: "b.prg", name: "second" });
 
     const ids = Object.fromEntries(camels.targets().layers.map((l) => [l.name, l.id]));
-    camels.setTarget(builder, "loader", [ids.first]);
-    camels.setTarget(builder, "runtime", [ids.second]);
+    camels.addTarget(builder, "loader", [{ layer: ids.first }]);
+    camels.addTarget(builder, "runtime", [{ layer: ids.second }]);
 
     expect(camels.view("runtime").labels({ namePattern: "inTheLoader" }).total).toBe(0);
     expect(camels.view("loader").labels({ namePattern: "inTheLoader" }).total).toBe(1);
@@ -417,8 +427,8 @@ describe("building a project from a disk image", () => {
     ws.createProject("camels");
     const camels = upload("camels", "a.prg", new Uint8Array([0x00, 0x08, 0x60]));
     camels.addByteLayer(builder, { type: "prg", path: "a.prg" });
-    expect(() => camels.setTarget(builder, "bad", ["lay_nope"])).toThrow(/No layer/);
-    expect(() => camels.setTarget(builder, "empty", [])).toThrow(/shows nothing/);
+    expect(() => camels.addTarget(builder, "bad", [{ layer: "lay_nope" }])).toThrow(/No layer/);
+    expect(() => camels.addTarget(builder, "empty", [])).toThrow(/shows nothing/);
     // A view nothing declares is refused rather than silently answered for.
     expect(() => camels.view("missing").describe()).toThrow(/No target|missing/);
   });
@@ -432,10 +442,12 @@ describe("building a project from a disk image", () => {
     const camels = upload("camels", "a.prg", new Uint8Array([0x00, 0x08, 0x60]));
     camels.addByteLayer(builder, { type: "prg", path: "a.prg" });
     const id = camels.targets().layers[0].id;
-    camels.setTarget(builder, "only", [id]);
+    const { target } = camels.addTarget(builder, "only", [{ layer: id }]);
     expect(camels.view("only").describe().layers).toHaveLength(1);
 
-    camels.removeTarget(builder, "only");
+    // Removed by id. A view is *selected* by name — that is a read and may
+    // resolve one — but a write names the thing it changes.
+    camels.removeTarget(builder, target);
     expect(() => camels.view("only").describe()).toThrow(/No target/);
   });
 
@@ -458,7 +470,17 @@ describe("building a project from a disk image", () => {
       captured: { file: string; bytes: number };
     };
 
-    expect(run.instructions).toBeGreaterThan(1_700_000);
+    // **Exact, not a lower bound.** This is the tripwire for the device bus: a
+    // machine with no device installed must be flat 64K and must execute this
+    // decruncher instruction for instruction as it always did. A range would
+    // let a bus that quietly changed a read slip through.
+    //
+    // 1,768,854 — one more than `docs/decisions/machine.md` records. The prose
+    // number was off by one and nothing pinned it, which is why it survived:
+    // checked here by running the pre-change interpreter against the same
+    // fixture and getting the same figure, so the bus is a genuine no-op and
+    // the discrepancy is older than it.
+    expect(run.instructions).toBe(1_768_854);
     expect(run.reason).toBe("left the program");
     // A KERNAL call, which is how this loader signals it has finished.
     expect(run.stoppedAt).toBe("$FFBA");

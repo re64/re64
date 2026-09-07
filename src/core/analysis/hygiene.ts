@@ -47,6 +47,8 @@ export type HygieneKind =
   | "annotation.insideInstruction"
   /** A claim asks for a decoder the project does not have. */
   | "claim.missingDecoder"
+  /** An interpretation over bytes nothing supplies, which renders nowhere. */
+  | "claim.noBytes"
   /** Two inline comments on one row, the second indented under the first. */
   | "comment.inlineDuplicated"
   /** A claim is an array of a layout the project does not declare. */
@@ -102,12 +104,26 @@ export function checkHygiene(
   // Only reachable since naming became additive: the write that would have made
   // one used to refuse, and a retry is now the ordinary way to get one.
   for (const { address, name, labels: twins } of labels.duplicates()) {
+    // **Whether the methods differ**, which is the difference between two
+    // people confirming each other and one account written down twice. Both
+    // experiment-0 agents concluded glyphs $03/$04 were never drawn, both were
+    // wrong, and they agreed because they used the *same* static reasoning and
+    // shared its blind spot — so "two accounts agree" was read as corroboration
+    // when it was one account arriving twice. See invariant E10.
+    const methods = new Set(twins.map((label) => label.by.method ?? "unstated"));
+    const corroborated =
+      methods.size > 1
+        ? ` They were reached ${methods.size} different ways (${[...methods].join(", ")}), so ` +
+          `they do corroborate each other.`
+        : ` All ${twins.length} were reached the same way (${[...methods][0]}), so this is one ` +
+          `account written down twice rather than two that agree.`;
     found.push({
       kind: "label.duplicated",
       message:
         `${hex4(address)} is called "${name}" ${twins.length} times over. Only one of ` +
         `them renders, so the rest are invisible — remove_claim takes one by id, ` +
-        `or set_claim makes it say something different.`,
+        `or edit_claim makes it say something different.` +
+        corroborated,
       subjects: twins.map((label) => ({ address: hex4(label.at), id: label.id })),
     });
   }
@@ -170,6 +186,41 @@ export function checkHygiene(
         `The label "${label.name}" is at ${hex4(label.at)}, inside the ` +
         `instruction at ${hex4(inside)}. It resolves in operands but has no row.`,
       subjects: [{ id: label.id, address: hex4(label.at) }],
+    });
+  }
+
+  // Saying how to *read* bytes that are not there says nothing: there is no
+  // row to render `is: "data"` on, so the claim is inert and invisible.
+  //
+  // **Reported rather than refused, and the refusal is the interesting part.**
+  // The legacy region write refused this outright — "a region needs bytes; a
+  // label does not" — and that guard fails this project's own offline/online
+  // rule: whether a layer supplies an address is a property of what you have
+  // *synced*, so the same call would be accepted by a peer holding the layer
+  // and refused by one who had not got it yet. A write must not depend on that.
+  //
+  // It is also legitimate ahead of time — annotate now, link the layer later,
+  // and the claim starts rendering — which is exactly why this is hygiene and
+  // not an error. A *name* over byteless memory is ordinary and not reported:
+  // zero page and the I/O registers are where half of what anybody says lives.
+  for (const claim of loaded.claims) {
+    if (!claim.says) continue;
+    const span = claim.extent ?? 1;
+    let supplied = false;
+    for (let at = claim.at; at < claim.at + span; at++) {
+      if (loaded.map.readByte(at) !== undefined) {
+        supplied = true;
+        break;
+      }
+    }
+    if (supplied) continue;
+    found.push({
+      kind: "claim.noBytes",
+      message:
+        `The claim at ${hex4(claim.at)} says these bytes are ${claim.says.is}, and ` +
+        `no layer in this view supplies any of them — so it renders nowhere. ` +
+        `Link the layer that holds them, or read it in a target that has it.`,
+      subjects: [{ id: claim.id, address: hex4(claim.at) }],
     });
   }
 

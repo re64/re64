@@ -21,7 +21,7 @@ readers="${1:-3}"
 run="${2:-$here/run}"
 port="${RE64_PORT:-5165}"
 
-if [ ! -f "$repo/dist/cli/index.js" ]; then
+if [ ! -f "$repo/dist/server/index.js" ]; then
   echo "Building..." >&2
   (cd "$repo" && npm run build >/dev/null)
 fi
@@ -49,7 +49,7 @@ for i in $(seq 1 "$readers"); do
   "layers": [{ "type": "prg", "path": "gridrunner.prg" }]
 }
 JSON
-  node "$repo/dist/cli/index.js" import "$run/$name.re64" --db "$db" >/dev/null
+  node "$repo/experiments/import.mjs" "$run/$name.re64" "$db" >/dev/null
 done
 
 node "$repo/dist/server/index.js" "$db" --port "$port" &
@@ -80,7 +80,7 @@ Give each one experiments/02-convergence/brief.md with PROJECT set to its name.
 
 Read the run:
 
-  node $repo/dist/cli/index.js transcript "$run/convergence.mcp.jsonl"
+  node $repo/dist/tools/experiment-transcript.js "$run/convergence.mcp.jsonl"
 
 Ctrl-C stops the server.
 EOF

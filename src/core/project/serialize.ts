@@ -14,6 +14,9 @@
 
 import {
   ProjectType,
+  ProjectScenario,
+  ProjectCapture,
+  ProjectEvidence,
   ProjectLink,
   Project,
   ProjectComment,
@@ -163,6 +166,39 @@ export function formatProject(project: Project): string {
       })
       .join(",\n");
     body.push(`  "types": [\n${entries}\n  ]`);
+  }
+
+  if (project.scenarios?.length) {
+    const entries = project.scenarios
+      .map((x) => {
+        const steps = x.steps
+          .map((step) => `        ${compactObject(step as unknown as Record<string, unknown>)}`)
+          .join(",\n");
+        const head = [
+          `      "id": ${JSON.stringify(x.id)}`,
+          `      "name": ${JSON.stringify(x.name)}`,
+          ...(x.description === undefined
+            ? []
+            : [`      "description": ${JSON.stringify(x.description)}`]),
+        ].join(",\n");
+        return `    {\n${head},\n      "steps": [\n${steps}\n      ]\n    }`;
+      })
+      .join(",\n");
+    body.push(`  "scenarios": [\n${entries}\n  ]`);
+  }
+
+  if (project.evidence?.length) {
+    const entries = project.evidence
+      .map((x) => `    ${compactObject(x as unknown as Record<string, unknown>)}`)
+      .join(",\n");
+    body.push(`  "evidence": [\n${entries}\n  ]`);
+  }
+
+  if (project.captures?.length) {
+    const entries = project.captures
+      .map((c) => `    ${compactObject(c as unknown as Record<string, unknown>)}`)
+      .join(",\n");
+    body.push(`  "captures": [\n${entries}\n  ]`);
   }
 
   const primary = Object.entries(project.primaryLabels ?? {});
@@ -393,6 +429,22 @@ export function insertLayer(raw: string, layer: ProjectLayer, index?: number): s
   return formatProject(project);
 }
 
+/**
+ * Rename a layer.
+ *
+ * The one field of a layer somebody chose. `path`, `address` and `type` are
+ * what the layer *is* — they come from the file it carries — and z-order is a
+ * property of a target's link list rather than of the layer, which is why this
+ * is the whole of `layer.set` and not the start of it.
+ */
+export function renameLayer(raw: string, index: number, name: string): string {
+  const project = parseProject(raw);
+  const layer = project.layers[index];
+  if (!layer || layer.name === name) return raw;
+  layer.name = name;
+  return formatProject(project);
+}
+
 export function removeLayer(raw: string, id: string): string {
   const project = parseProject(raw);
   project.layers = project.layers.filter((l) => l.id !== id);
@@ -410,11 +462,12 @@ export function removeLayer(raw: string, id: string): string {
  * effect is still present, so a writer that appended a duplicate instead of
  * doing nothing would make its own operation impossible to take back.
  */
-export function upsertTarget(
+export function addTarget(
   raw: string,
   target: {
+    id: string;
     name: string;
-    layers?: (string | ProjectLink)[];
+    layers?: ProjectLink[];
     entryPoints?: number[];
     order?: number;
     description?: string;
@@ -422,51 +475,75 @@ export function upsertTarget(
 ): string {
   const project = parseProject(raw);
   const targets = (project.targets ??= []);
-  const at = targets.findIndex((t) => t.name === target.name);
-  const before = at >= 0 ? targets[at] : undefined;
-
-  // Merged, not replaced: a field the caller did not mention keeps what it had.
-  // Writing the whole object would make revising a description revert somebody
-  // else's layer list, which is the same edit working alone and failing
-  // together.
-  const entry = {
+  // Idempotent, like every other write here: undo replays an operation forward
+  // to check its effect is still present, so appending a duplicate would make
+  // the operation impossible to take back.
+  if (targets.some((t) => t.id === target.id)) return raw;
+  targets.push({
+    id: target.id,
     name: target.name,
-    layers: target.layers ?? before?.layers ?? [],
-    ...(target.entryPoints !== undefined
-      ? {
-          entryPoints: target.entryPoints.map(
-            (a) => "$" + a.toString(16).toUpperCase().padStart(4, "0")
-          ),
-        }
-      : before?.entryPoints !== undefined
-        ? { entryPoints: before.entryPoints }
-        : {}),
-    ...(target.order !== undefined
-      ? { order: target.order }
-      : before?.order !== undefined
-        ? { order: before.order }
-        : {}),
-    ...(target.description !== undefined
-      ? { description: target.description }
-      : before?.description !== undefined
-        ? { description: before.description }
-        : {}),
-  };
-  if (at >= 0) targets[at] = entry;
-  else targets.push(entry);
+    layers: target.layers ?? [],
+    ...(target.entryPoints === undefined ? {} : { entryPoints: target.entryPoints.map(hexAddr) }),
+    ...(target.order === undefined ? {} : { order: target.order }),
+    ...(target.description === undefined ? {} : { description: target.description }),
+  });
   return formatProject(project);
 }
 
-export function deleteTarget(raw: string, name: string): string {
+/**
+ * Revise a target by id. Omitted fields keep what they had.
+ *
+ * Writing the whole object would make revising a description revert somebody
+ * else's layer list — the same edit working alone and failing together.
+ */
+export function setTarget(
+  raw: string,
+  id: string,
+  fields: {
+    name?: string;
+    layers?: ProjectLink[];
+    entryPoints?: number[] | null;
+    order?: number | null;
+    description?: string | null;
+  }
+): string {
   const project = parseProject(raw);
-  if (!project.targets?.some((t) => t.name === name)) return raw;
-  project.targets = project.targets.filter((t) => t.name !== name);
+  const at = (project.targets ?? []).findIndex((t) => t.id === id);
+  if (at < 0) return raw;
+  const before = project.targets![at];
+  project.targets![at] = {
+    ...before,
+    ...(fields.name === undefined ? {} : { name: fields.name }),
+    ...(fields.layers === undefined ? {} : { layers: fields.layers }),
+  };
+  const entry = project.targets![at] as unknown as Record<string, unknown>;
+  // `null` clears, which an omitted field cannot say — so a description put on
+  // by mistake can be taken off, and undoing "describe this" removes it rather
+  // than leaving an empty string behind.
+  for (const [key, value] of [
+    ["entryPoints", fields.entryPoints === null ? null : fields.entryPoints?.map(hexAddr)],
+    ["order", fields.order],
+    ["description", fields.description],
+  ] as const) {
+    if (value === undefined) continue;
+    if (value === null) delete entry[key];
+    else entry[key] = value;
+  }
+  return formatProject(project);
+}
+
+export function deleteTarget(raw: string, id: string): string {
+  const project = parseProject(raw);
+  if (!project.targets?.some((t) => t.id === id)) return raw;
+  project.targets = project.targets.filter((t) => t.id !== id);
   if (project.targets.length === 0) delete project.targets;
   // A selection pointing at nothing is worse than none: it would read as a
   // filter that silently does nothing.
-  if (project.defaultTarget === name) delete project.defaultTarget;
+  if (project.defaultTarget === id) delete project.defaultTarget;
   return formatProject(project);
 }
+
+const hexAddr = (a: number) => "$" + a.toString(16).toUpperCase().padStart(4, "0");
 
 export function upsertFile(raw: string, file: { name: string; hash: string; size: number }): string {
   const project = parseProject(raw);
@@ -533,6 +610,76 @@ export function upsertType(raw: string, type: ProjectType): string {
   } else {
     types.push(type);
   }
+  return formatProject(project);
+}
+
+/**
+ * Scenarios and captures, written the way every other collection here is.
+ *
+ * Reserialising rather than line-editing, like the types and constants above: a
+ * structural change to an array has no small diff to preserve, and every caller
+ * that applies operations to text reads the result back to derive an inverse.
+ */
+export function upsertScenario(raw: string, scenario: ProjectScenario): string {
+  const project = parseProject(raw);
+  const scenarios = (project.scenarios ??= []);
+  const at = scenarios.findIndex((x) => x.id === scenario.id);
+  if (at >= 0) {
+    if (JSON.stringify(scenarios[at]) === JSON.stringify(scenario)) return raw;
+    scenarios[at] = scenario;
+  } else {
+    scenarios.push(scenario);
+  }
+  return formatProject(project);
+}
+
+export function deleteScenario(raw: string, id: string): string {
+  const project = parseProject(raw);
+  if (!project.scenarios?.some((x) => x.id === id)) return raw;
+  project.scenarios = project.scenarios.filter((x) => x.id !== id);
+  if (project.scenarios.length === 0) delete project.scenarios;
+  return formatProject(project);
+}
+
+export function upsertCapture(raw: string, capture: ProjectCapture): string {
+  const project = parseProject(raw);
+  const captures = (project.captures ??= []);
+  const at = captures.findIndex((x) => x.id === capture.id);
+  if (at >= 0) {
+    if (JSON.stringify(captures[at]) === JSON.stringify(capture)) return raw;
+    captures[at] = capture;
+  } else {
+    captures.push(capture);
+  }
+  return formatProject(project);
+}
+
+export function deleteCapture(raw: string, id: string): string {
+  const project = parseProject(raw);
+  if (!project.captures?.some((x) => x.id === id)) return raw;
+  project.captures = project.captures.filter((x) => x.id !== id);
+  if (project.captures.length === 0) delete project.captures;
+  return formatProject(project);
+}
+
+export function upsertEvidence(raw: string, evidence: ProjectEvidence): string {
+  const project = parseProject(raw);
+  const all = (project.evidence ??= []);
+  const at = all.findIndex((x) => x.id === evidence.id);
+  if (at >= 0) {
+    if (JSON.stringify(all[at]) === JSON.stringify(evidence)) return raw;
+    all[at] = evidence;
+  } else {
+    all.push(evidence);
+  }
+  return formatProject(project);
+}
+
+export function deleteEvidence(raw: string, id: string): string {
+  const project = parseProject(raw);
+  if (!project.evidence?.some((x) => x.id === id)) return raw;
+  project.evidence = project.evidence.filter((x) => x.id !== id);
+  if (project.evidence.length === 0) delete project.evidence;
   return formatProject(project);
 }
 

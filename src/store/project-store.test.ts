@@ -274,7 +274,7 @@ describe.each(BACKENDS)("$name", (b) => {
     it("holds for regions and the primary index too, not just labels", () => {
       const s = store();
       applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "rgn_x", at: 0x8008, extent: 0x800c - 0x8008, name: "blurb", says: { is: "text" }, root: "data", by: { author: "test", source: "user" } } });
-      applyOpToDoc(s.document(), { op: "primary.set", address: 0x8000, labelId: "lbl_1" });
+      applyOpToDoc(s.document(), { op: "primary.bind", address: 0x8000, labelId: "lbl_1" });
 
       s.writeFile();
       expect(diffProjects(parseProject(currentText()), projectFromDoc(s.document()))).toEqual([]);

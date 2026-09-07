@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { decimalModes, decimalSites, carrySites, interruptsDisabledAt } from "./flags.js";
 import { buildBlocks } from "./blocks.js";
+import { proveValues } from "./values.js";
 import { InstructionIndex, disassemble } from "../arch/mos6502/disassembler.js";
 import { MemoryMap } from "../memory/memory-map.js";
 import { BytesLayer } from "../memory/layer.js";
@@ -32,6 +33,37 @@ describe("proving the decimal flag", () => {
     // the thing those CLDs exist to establish.
     const { blocks, entries } = program([0x69, 0x01, 0x60]);
     expect(decimalModes(blocks, entries).get(0x1000)).toBe("unknown");
+  });
+
+  it("is unknown after a call it cannot see, rather than proved", () => {
+    /**
+     * **A check that cannot see something must say so, not skip it.**
+     *
+     * This is the shape that has produced two wrong results here. `canTouch`
+     * walked from a call target and did `if (!block) continue`, so a callee it
+     * could not see was assumed to touch nothing — and since Gridrunner calls
+     * five KERNAL routines while loading no ROM, all five were skipped and `D`
+     * sailed through them. It reported 19 of 19 proved binary. That was not a
+     * proof; it was an omission that looked exactly like one at the point of
+     * use, which is what makes the shape dangerous rather than merely wrong.
+     *
+     * CLD / JSR $9000 / ADC #$01 / RTS — and nothing supplies $9000, so
+     * nothing can say what it does to the flag.
+     */
+    const { blocks, entries } = program([0xd8, 0x20, 0x00, 0x90, 0x69, 0x01, 0x60]);
+    expect(decimalModes(blocks, entries).get(0x1004)).toBe("unknown");
+  });
+
+  it("is proved again once something says what the callee touches", () => {
+    // The other half, or the rule above would just be "give up on every call".
+    // `externalWrites` is the seam KERNAL_CLOBBERS is consulted through: an
+    // answer of "this routine writes nothing" restores the proof, and only an
+    // *absent* answer means assume anything.
+    const { blocks, entries } = program([0xd8, 0x20, 0x00, 0x90, 0x69, 0x01, 0x60]);
+    const saysNothing = proveValues(blocks, entries, {
+      externalWrites: () => [] as readonly number[],
+    });
+    expect(decimalModes(blocks, entries, saysNothing).get(0x1004)).toBe("binary");
   });
 
   it("is unknown after PLP, since the flag came off the stack", () => {

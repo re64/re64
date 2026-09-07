@@ -24,9 +24,8 @@ import {
   projectClaims,
   ProjectType,
   targetLinks,
-  linksAsWritten,
 } from "../project/project.js";
-import { ClaimEdit, Op } from "./types.js";
+import { ClaimEdit, Op, TypeField } from "./types.js";
 import { Claim } from "../claims/model.js";
 
 /** A stored claim as the model sees it, via the loader's own parser. */
@@ -145,8 +144,8 @@ export function diffProjects(from: Project, to: Project): Op[] {
 
   // Targets name layers, so they follow the layers rather than lead them; the
   // removals go last for the same reason removals always do here.
-  const fromTargets = new Map((from.targets ?? []).map((t) => [t.name, t]));
-  const toTargets = new Map((to.targets ?? []).map((t) => [t.name, t]));
+  const fromTargets = new Map((from.targets ?? []).filter((t) => t.id).map((t) => [t.id!, t]));
+  const toTargets = new Map((to.targets ?? []).filter((t) => t.id).map((t) => [t.id!, t]));
 
   // Files, before layers: a layer may reference one by name, so the file has to
   // be in the export before anything points at it. The same ordering rule that
@@ -196,22 +195,58 @@ export function diffProjects(from: Project, to: Project): Op[] {
     });
   }
 
-  for (const [name, target] of toTargets) {
-    const before = fromTargets.get(name);
+  // A layer's name is the one field of it somebody chose, and the only thing
+  // `layer.set` carries — the rest is what the layer *is*.
+  const renamedFrom = new Map(from.layers.filter((l) => l.id).map((l) => [l.id!, l]));
+  for (const layer of to.layers) {
+    if (!layer.id) continue;
+    const before = renamedFrom.get(layer.id);
+    if (!before || before.name === layer.name) continue;
+    ops.push({ op: "layer.set", id: layer.id, fields: { name: layer.name ?? "" } });
+  }
+
+  for (const [id, target] of toTargets) {
+    const before = fromTargets.get(id);
     if (before && JSON.stringify(before) === JSON.stringify(target)) continue;
+    const points =
+      target.entryPoints === undefined
+        ? undefined
+        : target.entryPoints.map((a) => parseProjectAddress(a));
+    if (!before) {
+      ops.push({
+        op: "target.add",
+        id,
+        name: target.name,
+        layers: targetLinks(target),
+        ...(points === undefined ? {} : { entryPoints: points }),
+        ...(target.order === undefined ? {} : { order: target.order }),
+        ...(target.description === undefined ? {} : { description: target.description }),
+      });
+      continue;
+    }
+    // Only what differs, so replaying a diff does not reassert a field the two
+    // states agree on.
+    const beforePoints = before.entryPoints?.map((a) => parseProjectAddress(a));
     ops.push({
       op: "target.set",
-      name,
-      layers: linksAsWritten(targetLinks(target)),
-      ...(target.entryPoints === undefined
-        ? {}
-        : { entryPoints: target.entryPoints.map((a) => parseProjectAddress(a)) }),
-      ...(target.order === undefined ? {} : { order: target.order }),
-      ...(target.description === undefined ? {} : { description: target.description }),
+      id,
+      fields: {
+        ...(before.name === target.name ? {} : { name: target.name }),
+        ...(JSON.stringify(targetLinks(before)) === JSON.stringify(targetLinks(target))
+          ? {}
+          : { layers: targetLinks(target) }),
+        ...(JSON.stringify(beforePoints) === JSON.stringify(points) || points === undefined
+          ? {}
+          : { entryPoints: points }),
+        ...(before.order === target.order ? {} : { order: target.order ?? 0 }),
+        ...(before.description === target.description
+          ? {}
+          : { description: target.description ?? "" }),
+      },
     });
   }
-  for (const name of fromTargets.keys()) {
-    if (!toTargets.has(name)) ops.push({ op: "target.remove", name });
+  for (const id of fromTargets.keys()) {
+    if (!toTargets.has(id)) ops.push({ op: "target.remove", id });
   }
 
   const beforeLabels = labelsById(from);
@@ -232,18 +267,18 @@ export function diffProjects(from: Project, to: Project): Op[] {
   const afterTypes = new Map((to.types ?? []).filter((t) => t.id).map((t) => [t.id!, t]));
 
   for (const [id, owned] of beforeComments) {
-    if (!afterComments.has(id)) ops.push({ op: "comment.delete", id, layerId: owned.layerId });
+    if (!afterComments.has(id)) ops.push({ op: "comment.remove", id, layerId: owned.layerId });
   }
   for (const [id, owned] of beforeUses) {
-    if (!afterUses.has(id)) ops.push({ op: "constant.unbind", id, layerId: owned.layerId });
+    if (!afterUses.has(id)) ops.push({ op: "constantUse.unbind", id, layerId: owned.layerId });
   }
   for (const [id, owned] of beforeLabelUses) {
-    if (!afterLabelUses.has(id)) ops.push({ op: "label.unbind", id, layerId: owned.layerId });
+    if (!afterLabelUses.has(id)) ops.push({ op: "labelUse.unbind", id, layerId: owned.layerId });
   }
   // Declarations go after the sites that meant them, so nothing is left
   // pointing at a constant that has already gone.
   for (const id of beforeConstants.keys()) {
-    if (!afterConstants.has(id)) ops.push({ op: "constant.delete", id });
+    if (!afterConstants.has(id)) ops.push({ op: "constant.remove", id });
   }
   for (const id of beforeClaims.keys()) {
     if (!afterClaims.has(id)) ops.push({ op: "claim.remove", id });
@@ -252,12 +287,21 @@ export function diffProjects(from: Project, to: Project): Op[] {
 
   // Removals before additions, as everywhere else here.
   for (const id of beforeDecoders.keys()) {
-    if (!afterDecoders.has(id)) ops.push({ op: "decoder.delete", id });
+    if (!afterDecoders.has(id)) ops.push({ op: "decoder.remove", id });
   }
   for (const [id, decoder] of afterDecoders) {
     const before = beforeDecoders.get(id);
-    if (before && before.name === decoder.name && before.source === decoder.source) continue;
-    ops.push({ op: "decoder.set", id, name: decoder.name, source: decoder.source });
+    if (!before) {
+      ops.push({ op: "decoder.add", id, name: decoder.name, source: decoder.source });
+      continue;
+    }
+    // Only what differs, which is what a partial `set` is for: replaying this
+    // diff must not overwrite a field the two states agree on.
+    const fields = {
+      ...(before.name === decoder.name ? {} : { name: decoder.name }),
+      ...(before.source === decoder.source ? {} : { source: decoder.source }),
+    };
+    if (Object.keys(fields).length) ops.push({ op: "decoder.set", id, fields });
   }
 
   // Removals first, again: a claim referencing a type that has gone renders its
@@ -265,30 +309,161 @@ export function diffProjects(from: Project, to: Project): Op[] {
   // but doing it the same way everywhere is what stops somebody having to
   // check which of them is which.
   for (const id of beforeTypes.keys()) {
-    if (!afterTypes.has(id)) ops.push({ op: "type.delete", id });
+    if (!afterTypes.has(id)) ops.push({ op: "type.remove", id });
   }
   for (const [id, type] of afterTypes) {
     const before = beforeTypes.get(id);
-    if (before && sameType(before, type)) continue;
+    const size = typeof type.size === "string" ? parseProjectAddress(type.size) : type.size;
+    const asFields: Record<number, TypeField> = Object.fromEntries(
+      Object.entries(type.fields).map(([offset, field]) => [
+        Number(offset),
+        { ...field, id: field.id! },
+      ])
+    );
+    if (!before) {
+      ops.push({ op: "type.add", id, name: type.name, size, fields: asFields });
+      continue;
+    }
+    if (sameType(before, type)) continue;
+    const beforeSize =
+      typeof before.size === "string" ? parseProjectAddress(before.size) : before.size;
+    // Per offset: an offset present in neither is untouched, one that went is
+    // `null`. A whole-map write here is what would lose a field a concurrent
+    // reader added.
+    const fields: Record<number, TypeField | null> = {};
+    for (const offset of new Set([
+      ...Object.keys(before.fields),
+      ...Object.keys(type.fields),
+    ])) {
+      const was = before.fields[offset];
+      const now = type.fields[offset];
+      if (JSON.stringify(was) === JSON.stringify(now)) continue;
+      fields[Number(offset)] = now ? { ...now, id: now.id! } : null;
+    }
     ops.push({
       op: "type.set",
       id,
-      name: type.name,
-      size: typeof type.size === "string" ? parseProjectAddress(type.size) : type.size,
-      fields: Object.fromEntries(
-        Object.entries(type.fields).map(([offset, field]) => [Number(offset), field])
-      ),
+      fields: {
+        ...(before.name === type.name ? {} : { name: type.name }),
+        ...(beforeSize === size ? {} : { size }),
+        ...(Object.keys(fields).length ? { fields } : {}),
+      },
+    });
+  }
+
+  const beforeEvidence = new Map((from.evidence ?? []).filter((e) => e.id).map((e) => [e.id!, e]));
+  const afterEvidence = new Map((to.evidence ?? []).filter((e) => e.id).map((e) => [e.id!, e]));
+  for (const id of beforeEvidence.keys()) {
+    if (!afterEvidence.has(id)) ops.push({ op: "evidence.remove", id });
+  }
+  for (const [id, item] of afterEvidence) {
+    const before = beforeEvidence.get(id);
+    if (!before) {
+      ops.push({
+        op: "evidence.add",
+        id,
+        claim: item.claim,
+        kind: item.kind,
+        ...(item.scenario === undefined ? {} : { scenario: item.scenario }),
+        ...(item.capture === undefined ? {} : { capture: item.capture }),
+        ...(item.other === undefined ? {} : { other: item.other }),
+        ...(item.note === undefined ? {} : { note: item.note }),
+      });
+      continue;
+    }
+    if (JSON.stringify(before) === JSON.stringify(item)) continue;
+    ops.push({
+      op: "evidence.set",
+      id,
+      fields: {
+        ...(before.kind === item.kind ? {} : { kind: item.kind }),
+        ...(before.scenario === item.scenario ? {} : { scenario: item.scenario ?? null }),
+        ...(before.capture === item.capture ? {} : { capture: item.capture ?? null }),
+        ...(before.other === item.other ? {} : { other: item.other ?? null }),
+        ...(before.note === item.note ? {} : { note: item.note ?? null }),
+      },
+    });
+  }
+
+  // Scenarios and captures, removals before additions like everything else.
+  const beforeScenarios = new Map((from.scenarios ?? []).filter((x) => x.id).map((x) => [x.id!, x]));
+  const afterScenarios = new Map((to.scenarios ?? []).filter((x) => x.id).map((x) => [x.id!, x]));
+  for (const id of beforeScenarios.keys()) {
+    if (!afterScenarios.has(id)) ops.push({ op: "scenario.remove", id });
+  }
+  for (const [id, scenario] of afterScenarios) {
+    const before = beforeScenarios.get(id);
+    if (!before) {
+      ops.push({
+        op: "scenario.add",
+        id,
+        name: scenario.name,
+        ...(scenario.description === undefined ? {} : { description: scenario.description }),
+        steps: scenario.steps,
+      });
+      continue;
+    }
+    if (JSON.stringify(before) === JSON.stringify(scenario)) continue;
+    ops.push({
+      op: "scenario.set",
+      id,
+      fields: {
+        ...(before.name === scenario.name ? {} : { name: scenario.name }),
+        ...(before.description === scenario.description
+          ? {}
+          : { description: scenario.description ?? null }),
+        ...(JSON.stringify(before.steps) === JSON.stringify(scenario.steps)
+          ? {}
+          : { steps: scenario.steps }),
+      },
+    });
+  }
+
+  const beforeCaptures = new Map((from.captures ?? []).filter((c) => c.id).map((c) => [c.id!, c]));
+  const afterCaptures = new Map((to.captures ?? []).filter((c) => c.id).map((c) => [c.id!, c]));
+  for (const id of beforeCaptures.keys()) {
+    if (!afterCaptures.has(id)) ops.push({ op: "capture.remove", id });
+  }
+  for (const [id, capture] of afterCaptures) {
+    const before = beforeCaptures.get(id);
+    if (!before) {
+      ops.push({
+        op: "capture.add",
+        id,
+        scenario: capture.scenario,
+        step: capture.step,
+        kind: capture.kind,
+        file: capture.file,
+        ...(capture.when === undefined ? {} : { when: capture.when }),
+      });
+      continue;
+    }
+    if (JSON.stringify(before) === JSON.stringify(capture)) continue;
+    ops.push({
+      op: "capture.set",
+      id,
+      fields: {
+        ...(before.file === capture.file ? {} : { file: capture.file }),
+        ...(before.when === capture.when ? {} : { when: capture.when ?? null }),
+      },
     });
   }
 
   for (const [id, constant] of afterConstants) {
     const before = beforeConstants.get(id);
-    if (before && sameConstant(before, constant)) continue;
+    const value = parseProjectAddress(constant.value);
+    if (!before) {
+      ops.push({ op: "constant.add", id, name: constant.name, value });
+      continue;
+    }
+    if (sameConstant(before, constant)) continue;
     ops.push({
       op: "constant.set",
       id,
-      name: constant.name,
-      value: parseProjectAddress(constant.value),
+      fields: {
+        ...(before.name === constant.name ? {} : { name: constant.name }),
+        ...(parseProjectAddress(before.value) === value ? {} : { value }),
+      },
     });
   }
 
@@ -324,7 +499,7 @@ export function diffProjects(from: Project, to: Project): Op[] {
       continue;
     }
     ops.push({
-      op: "label.bind",
+      op: "labelUse.bind",
       id,
       layerId: owned.layerId,
       address: parseProjectAddress(owned.entry.address),
@@ -336,7 +511,7 @@ export function diffProjects(from: Project, to: Project): Op[] {
     const before = beforeUses.get(id);
     if (before && before.layerId === owned.layerId && sameUse(before.entry, owned.entry)) continue;
     ops.push({
-      op: "constant.bind",
+      op: "constantUse.bind",
       id,
       layerId: owned.layerId,
       address: parseProjectAddress(owned.entry.address),
@@ -349,13 +524,32 @@ export function diffProjects(from: Project, to: Project): Op[] {
     if (before && before.layerId === owned.layerId && sameComment(before.entry, owned.entry)) {
       continue;
     }
+    const address = parseProjectAddress(owned.entry.address);
+    const placement = owned.entry.placement ?? "before";
+    if (!before) {
+      ops.push({
+        op: "comment.add",
+        id,
+        layerId: owned.layerId,
+        address,
+        placement,
+        text: owned.entry.text,
+        ...(owned.entry.order === undefined ? {} : { order: owned.entry.order }),
+      });
+      continue;
+    }
     ops.push({
       op: "comment.set",
       id,
       layerId: owned.layerId,
-      address: parseProjectAddress(owned.entry.address),
-      placement: owned.entry.placement ?? "before",
-      text: owned.entry.text,
+      fields: {
+        ...(parseProjectAddress(before.entry.address) === address ? {} : { address }),
+        ...((before.entry.placement ?? "before") === placement ? {} : { placement }),
+        ...(before.entry.text === owned.entry.text ? {} : { text: owned.entry.text }),
+        ...(before.entry.order === owned.entry.order
+          ? {}
+          : { order: owned.entry.order ?? null }),
+      },
     });
   }
 
@@ -364,12 +558,12 @@ export function diffProjects(from: Project, to: Project): Op[] {
   const afterPrimary = to.primaryLabels ?? {};
   for (const address of Object.keys(beforePrimary)) {
     if (!(address in afterPrimary)) {
-      ops.push({ op: "primary.clear", address: parseProjectAddress(address) });
+      ops.push({ op: "primary.unbind", address: parseProjectAddress(address) });
     }
   }
   for (const [address, labelId] of Object.entries(afterPrimary)) {
     if (beforePrimary[address] !== labelId) {
-      ops.push({ op: "primary.set", address: parseProjectAddress(address), labelId });
+      ops.push({ op: "primary.bind", address: parseProjectAddress(address), labelId });
     }
   }
 

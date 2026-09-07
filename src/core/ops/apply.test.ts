@@ -90,11 +90,11 @@ describe("claim operations", () => {
 
 describe("primary label operations", () => {
   it("adds the block on first use and removes it when emptied", () => {
-    const set = applyOp(PROJECT, { op: "primary.set", address: 0x8000, labelId: "clm_1" });
+    const set = applyOp(PROJECT, { op: "primary.bind", address: 0x8000, labelId: "clm_1" });
     expect(set).toContain('"primaryLabels"');
-    const cleared = applyOp(set, { op: "primary.clear", address: 0x8000 });
+    const cleared = applyOp(set, { op: "primary.unbind", address: 0x8000 });
     expect(cleared).not.toContain('"primaryLabels"');
-    expect(roundTrips({ op: "primary.set", address: 0x8000, labelId: "clm_1" })).toBe(true);
+    expect(roundTrips({ op: "primary.bind", address: 0x8000, labelId: "clm_1" })).toBe(true);
   });
 });
 
@@ -134,7 +134,7 @@ describe("errors", () => {
     const ops: Op[] = [
       { op: "claim.add", claim: { id: "clm_3", at: 0x9000, extent: 8, says: { is: "data" }, by } },
       { op: "claim.set", id: "clm_3", fields: { name: "table" } },
-      { op: "primary.set", address: 0x8000, labelId: "clm_1" },
+      { op: "primary.bind", address: 0x8000, labelId: "clm_1" },
     ];
     const out = applyOps(PROJECT, ops);
     expect(() => parseProject(out)).not.toThrow();

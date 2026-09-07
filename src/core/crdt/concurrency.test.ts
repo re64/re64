@@ -138,7 +138,7 @@ describe("three participants", () => {
     const [a, b, c] = [participant(1), participant(2), participant(3)];
     applyOpToDoc(a, rename("lbl_1", "A"));
     applyOpToDoc(b, rename("lbl_2", "B"));
-    applyOpToDoc(c, { op: "primary.set", address: 0x8000, labelId: "lbl_1" });
+    applyOpToDoc(c, { op: "primary.bind", address: 0x8000, labelId: "lbl_1" });
 
     // a -> b -> c, then back down.
     applyUpdate(b, encodeDoc(a));

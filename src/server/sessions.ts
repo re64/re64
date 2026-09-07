@@ -68,6 +68,14 @@ export interface LeaseOptions {
   onIssued?: (lease: Lease) => void;
   /** Called when one lapses, so presence can drop it. */
   onLapsed?: (lease: Lease) => void;
+  /**
+   * Codenames already spent, from wherever the host wrote them down.
+   *
+   * Injected rather than read here, because this class is deliberately
+   * storage-free — the same seam `onIssued` uses. A host with no memory of
+   * previous runs supplies nothing and behaves as before.
+   */
+  spentCodenames?: () => Iterable<string>;
 }
 
 const DEFAULT_IDLE_MS = 30 * 60 * 1000;
@@ -143,17 +151,36 @@ export class SessionLeases {
   }
 
   /**
-   * A codename nobody currently holds.
+   * A codename nobody holds and nobody has held.
    *
-   * Reused once a lease lapses, which is wanted — the pool should not drift
-   * towards exhaustion over a long-running server. Numbered only if every name
-   * is taken at once, which needs more concurrent sessions than the list.
+   * **Not merely one nobody holds right now**, which is what this checked
+   * before and what experiment 9 caught: the live map is memory, so restarting
+   * the server emptied it and the pool began again at the top. The editor was
+   * issued `basalt` while the reader holding `basalt` was still online, and
+   * three of its messages are recorded in that project's chat as spoken by
+   * somebody else — permanently, because chat records how an author was named
+   * at the time and is right to.
+   *
+   * That rule assumes a codename identifies one participant, so a name that has
+   * ever been spoken must never come back. Which is this project's own recurring
+   * defect once more: "not currently held in memory" standing in for "never
+   * used" — an identity keyed on something that is not one.
+   *
+   * Exhaustion is what the numbered fallback is for, and it is the right place
+   * for it: `basalt-2` is still readable in a transcript, and a pool that
+   * silently recycles is not.
    */
   private freeCodename(): string {
     const taken = new Set([...this.held.values()].map((l) => l.codename));
+    for (const spent of this.options.spentCodenames?.() ?? []) taken.add(spent);
     const free = CODENAMES.find((name) => !taken.has(name));
     if (free) return free;
-    return `${CODENAMES[this.issued % CODENAMES.length]}-${Math.floor(this.issued / CODENAMES.length) + 1}`;
+    // `issued` is memory too, so a suffix derived from it repeats after a
+    // restart exactly as the pool did. Count up until the name is genuinely new.
+    for (let suffix = 2; ; suffix++) {
+      const numbered = CODENAMES.map((name) => `${name}-${suffix}`).find((name) => !taken.has(name));
+      if (numbered) return numbered;
+    }
   }
 
   private nextId(): string {

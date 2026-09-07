@@ -25,7 +25,7 @@ repo="$(cd "$here/../.." && pwd)"
 run="${1:-$here/run}"
 port="${RE64_PORT:-5171}"
 
-if [ ! -f "$repo/dist/cli/index.js" ]; then
+if [ ! -f "$repo/dist/server/index.js" ]; then
   echo "Building..." >&2
   (cd "$repo" && npm run build >/dev/null)
 fi
@@ -44,7 +44,7 @@ cp "$repo/assets/mutant-camels/revenge-of-the-mutant-camels.d64" "$run/"
 # A database with one empty project, so the server has something to open. The
 # agents make their own beside it.
 echo '{ "name": "empty", "layers": [] }' > "$run/workspace.re64"
-node "$repo/dist/cli/index.js" import "$run/workspace.re64" >/dev/null
+node "$repo/experiments/import.mjs" "$run/workspace.re64" >/dev/null
 
 nohup node "$repo/dist/server/index.js" "$run/workspace.re64db" \
   --port "$port" > "$run/server.log" 2>&1 &

@@ -21,9 +21,11 @@ import {
   SqliteStorage,
   pathsFor,
 } from "../store/index.js";
+import { openDatabase } from "../store/db.js";
 import { diffProjects, parseProject } from "../core/index.js";
 import { needsMigration, migrateToClaims } from "../core/claims/migrate.js";
 import { SyncServer } from "./sync.js";
+import { CheckpointCache } from "../core/machine/scenario.js";
 import { Workspace } from "./workspace.js";
 import { McpEndpoint, createMcpEndpoint } from "./mcp/transport.js";
 import { Caller, resolveCaller } from "./mcp/identity.js";
@@ -205,7 +207,22 @@ export function startServer(options: ServerOptions): RunningServer {
    * Agent sessions, held here rather than per project: one caller working
    * across two projects is one session, the same way one browser tab would be.
    */
-  const leases = new SessionLeases({ onLapsed: (lease) => dropPresence(lease.id) });
+  /**
+   * Codenames this database has ever issued.
+   *
+   * Seeded from storage at startup rather than gathered from open rooms,
+   * because the case that matters is the *first* call after a restart — the
+   * room it names is not open yet, and that is precisely when the pool would
+   * otherwise hand out a name somebody is still using. Experiment 9 hit exactly
+   * that.
+   */
+  const spentCodenames = new Set<string>(loadSpentCodenames(projectPath, isDatabase));
+
+  const leases = new SessionLeases({
+    onLapsed: (lease) => dropPresence(lease.id),
+    onIssued: (lease) => spentCodenames.add(lease.codename),
+    spentCodenames: () => spentCodenames,
+  });
 
   /**
    * Which agents are showing as here, and where.
@@ -285,17 +302,33 @@ export function startServer(options: ServerOptions): RunningServer {
    * Bounded by the number of targets a project declares, which is small.
    */
   const workspaces = new Map<string, Workspace>();
+  /**
+   * Machines part-way through a scenario, one cache per project.
+   *
+   * Per project rather than per workspace, because a workspace is a *view* and
+   * two views of one project run the same bytes. Held here rather than in the
+   * document because a machine is derived from the script, and this project
+   * does not store derived things.
+   */
+  const machines = new Map<string, CheckpointCache>();
+
   function workspaceFor(projectId: string, target?: string): Workspace {
     const key = `${projectId}\u0000${target ?? ""}`;
     const existing = workspaces.get(key);
     if (existing) return existing;
 
     const { sync, storage } = room(projectId);
+    let cache = machines.get(projectId);
+    if (!cache) {
+      cache = new CheckpointCache();
+      machines.set(projectId, cache);
+    }
     const made = new Workspace({
       store: sync.store,
       storage,
       projectId,
       projectPath,
+      machines: cache,
       baseUrl: `http://${host === "0.0.0.0" ? "127.0.0.1" : host}:${port}`,
       ...(target === undefined ? {} : { target }),
     });
@@ -422,7 +455,10 @@ export function startServer(options: ServerOptions): RunningServer {
           return sendJson(res, 403, { error: "path escapes the project directory" });
         }
         res.writeHead(200, {
-          "content-type": "application/octet-stream",
+          // Typed by extension, so a rendered sprite sheet opens in a browser
+          // tab rather than downloading as an unnamed blob. Everything else
+          // stays an octet stream, which is the honest answer for a `.prg`.
+          "content-type": mimeOf(requested),
           "content-length": bytes.length,
           // Content-addressed and immutable: a name maps to bytes that never
           // change under it, so a reload need not refetch a 174KB disk image.
@@ -639,4 +675,43 @@ if (isMain) {
       void running.close().finally(() => process.exit(0));
     });
   }
+}
+
+/**
+ * Every codename the sessions table remembers.
+ *
+ * Read once, with its own handle, because it happens before any room exists.
+ * A missing or unreadable database is not an error here: the worst case is the
+ * behaviour this replaced, and refusing to start a server over it would be a
+ * judgement about the result rather than a fact about the request.
+ */
+function loadSpentCodenames(path: string, isDatabase: boolean): string[] {
+  if (!isDatabase) return [];
+  try {
+    const db = openDatabase(path);
+    try {
+      const rows = db
+        .prepare("SELECT DISTINCT codename FROM sessions WHERE codename IS NOT NULL")
+        .all() as { codename: string }[];
+      return rows.map((row) => row.codename);
+    } finally {
+      db.close();
+    }
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * What a stored file is, by its name.
+ *
+ * Deliberately short: these are the only types this server puts into the blob
+ * store itself, and guessing at anything else would be inventing an answer
+ * about bytes somebody else uploaded.
+ */
+function mimeOf(name: string): string {
+  if (name.endsWith(".png")) return "image/png";
+  if (name.endsWith(".wav")) return "audio/wav";
+  if (name.endsWith(".json")) return "application/json";
+  return "application/octet-stream";
 }

@@ -71,7 +71,7 @@ export function encodeClaim(claim: Claim): Record<string, unknown> {
   if (claim.description !== undefined) out.description = claim.description;
   if (claim.root !== undefined) out.root = claim.root;
   if (claim.by.when !== undefined) out.when = claim.by.when;
-  if (claim.by.confidence !== undefined) out.confidence = claim.by.confidence;
+  if (claim.by.method !== undefined) out.method = claim.by.method;
   if (claim.frame?.space === "layer") out.layer = claim.frame.layer;
   if (claim.frame?.space === "target") out.target = claim.frame.target;
   if (claim.says !== undefined) {
@@ -101,8 +101,8 @@ export function decodeClaim(entry: Y.Map<unknown>): Claim {
     author: get<string>("author") ?? "unknown",
     source: get<Provenance["source"]>("source") ?? "user",
     ...(get<number>("when") !== undefined ? { when: get<number>("when") } : {}),
-    ...(get<Provenance["confidence"]>("confidence")
-      ? { confidence: get<Provenance["confidence"]>("confidence") }
+    ...(get<Provenance["method"]>("method")
+      ? { method: get<Provenance["method"]>("method") }
       : {}),
   };
 
@@ -200,7 +200,7 @@ export function applyClaimOp(doc: Y.Doc, op: ClaimOp, origin: unknown = "local")
           entry.set("author", by.author);
           entry.set("source", by.source);
           if (by.when !== undefined) entry.set("when", by.when);
-          if (by.confidence !== undefined) entry.set("confidence", by.confidence);
+          if (by.method !== undefined) entry.set("method", by.method);
         }
         break;
       }

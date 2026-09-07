@@ -189,7 +189,12 @@ describe("editing", () => {
     // being decoded. The claim still stands — only the author knows which end to
     // move — but the disagreement comes back on the write that caused it.
     // $8D52 is `Waste20Cycles`, reached by `JSR $8D52` at $8D24.
-    const result = workspace.setRegion(agent, 0x8d52, 0x8d60, "data", "swallowsARoutine");
+    const result = workspace.addClaim(agent, {
+        at: 0x8d52,
+        extent: 0x8d60 - 0x8d52,
+        is: "data",
+        name: "swallowsARoutine",
+      });
 
     expect(result.ok).toBe(true);
     expect(result.warnings?.join(" ")).toContain("$8D52");
@@ -225,7 +230,7 @@ describe("editing", () => {
   });
 
   it("sets a region, which the browser cannot", () => {
-    const result = workspace.setRegion(agent, 0x8f00, 0x8f20, "text", "blurb");
+    const result = workspace.addClaim(agent, { at: 0x8f00, extent: 0x8f20 - 0x8f00, is: "text", name: "blurb" });
     expect(result.ok).toBe(true);
 
     const regions = workspace.describe().regions;
@@ -241,8 +246,7 @@ describe("editing", () => {
   });
 
   it("says what is missing rather than failing silently", () => {
-    expect(() => workspace.removeLabel(agent, 0x8f00)).toThrow(/no label at/i);
-    expect(() => workspace.removeRegion(agent, 0x8f00)).toThrow(/no region/i);
+    expect(() => workspace.removeClaim(agent, "clm_absent")).toThrow(/No claim/i);
   });
 });
 
@@ -351,7 +355,7 @@ describe("saying what a span holds", () => {
     const blank = blankWorkspace();
     expect(blank.describe().counts.instructions).toBe(5);
 
-    const result = blank.setRegion(agent, 0x8011, 0x8014, "code");
+    const result = blank.addClaim(agent, { at: 0x8011, root: "entry" });
 
     expect(result.instructions.delta).toBeGreaterThan(1000);
     // And nothing appeared in the listing that nobody put there.
@@ -359,7 +363,7 @@ describe("saying what a span holds", () => {
   });
 
   it("says which bytes it took, because end is exclusive", () => {
-    const result = workspace.setRegion(agent, 0x8f00, 0x8f20, "text");
+    const result = workspace.addClaim(agent, { at: 0x8f00, extent: 0x8f20 - 0x8f00, is: "text" });
     expect(result.covers).toBe("$8F00-$8F1F (32 bytes)");
   });
 
@@ -367,20 +371,25 @@ describe("saying what a span holds", () => {
     // $8000-$8001 is one byte. It contains no address, decodes nothing, and
     // used to return ok — which on a project with nothing else reachable is
     // the difference between the whole program and five instructions.
-    expect(() => workspace.setRegion(agent, 0x8000, 0x8001, "jumptable")).toThrow(
+    expect(() => workspace.addClaim(agent, { at: 0x8000, extent: 0x8001 - 0x8000, is: "jumptable" })).toThrow(
       /even number of bytes/
     );
   });
 
   it("refuses a region covering nothing", () => {
-    expect(() => workspace.setRegion(agent, 0x8000, 0x8000, "data")).toThrow(
+    expect(() => workspace.addClaim(agent, { at: 0x8000, extent: 0x8000 - 0x8000, is: "data" })).toThrow(
       /at least one byte/
     );
   });
 
   it("follows a jumptable that covers a whole address", () => {
     const blank = blankWorkspace();
-    const result = blank.setRegion(agent, 0x8000, 0x8002, "jumptable", "initVector");
+    const result = blank.addClaim(agent, {
+        at: 0x8000,
+        extent: 0x8002 - 0x8000,
+        is: "jumptable",
+        name: "initVector",
+      });
     expect(result.instructions.delta).toBeGreaterThan(1000);
   });
 });
@@ -441,7 +450,7 @@ describe("what is left to look at", () => {
     const blank = blankWorkspace();
     const before = blank.undecoded().unexplainedBytes;
 
-    blank.setRegion(agent, 0x8f00, 0x9000, "data", "chargen");
+    blank.addClaim(agent, { at: 0x8f00, extent: 0x9000 - 0x8f00, is: "data", name: "chargen" });
 
     expect(blank.undecoded().unexplainedBytes).toBe(before - 0x100);
   });
@@ -684,10 +693,10 @@ describe("an edit that breaks the decode", () => {
 
 describe("naming many addresses at once", () => {
   it("takes a batch and reports it as one action", () => {
-    const result = workspace.addLabels(agent, [
-      { address: 0x8450, name: "BatchedOne", type: "function" },
-      { address: 0x8870, name: "BatchedTwo", type: "function" },
-      { address: 0x8230, name: "BatchedThree" },
+    const result = workspace.addClaims(agent, [
+      { at: 0x8450, name: "BatchedOne", root: "routine" },
+      { at: 0x8870, name: "BatchedTwo", root: "routine" },
+      { at: 0x8230, name: "BatchedThree" },
     ]);
 
     expect(result.did).toHaveLength(3);
@@ -697,9 +706,9 @@ describe("naming many addresses at once", () => {
   });
 
   it("undoes the whole batch, not the last of it", () => {
-    workspace.addLabels(agent, [
-      { address: 0x8450, name: "BatchedOne" },
-      { address: 0x8870, name: "BatchedTwo" },
+    workspace.addClaims(agent, [
+      { at: 0x8450, name: "BatchedOne" },
+      { at: 0x8870, name: "BatchedTwo" },
     ]);
     workspace.undo(agent);
 
@@ -708,10 +717,10 @@ describe("naming many addresses at once", () => {
 
   it("makes one symbols layer for a batch of unowned addresses, not one each", () => {
     const blank = blankWorkspace();
-    blank.addLabels(agent, [
-      { address: 0x02, name: "currentXPosition" },
-      { address: 0x03, name: "currentYPosition" },
-      { address: 0x04, name: "currentCharacter" },
+    blank.addClaims(agent, [
+      { at: 0x02, name: "currentXPosition" },
+      { at: 0x03, name: "currentYPosition" },
+      { at: 0x04, name: "currentCharacter" },
     ]);
 
     const symbols = blank.describe().layers.filter((l) => l.name.includes("symbols"));
@@ -721,8 +730,8 @@ describe("naming many addresses at once", () => {
   });
 
   it("carries comments through the batch", () => {
-    workspace.addLabels(agent, [
-      { address: 0x8450, name: "Named", comment: "and explained" },
+    workspace.addClaims(agent, [
+      { at: 0x8450, name: "Named", comment: "and explained" },
     ]);
 
     const rows = workspace.disassembly(0x8450, 3).lines.map((l) => l.text).join("\n");
@@ -730,7 +739,7 @@ describe("naming many addresses at once", () => {
   });
 
   it("refuses an empty batch rather than reporting success", () => {
-    expect(() => workspace.addLabels(agent, [])).toThrow(/at least one/);
+    expect(() => workspace.addClaims(agent, [])).toThrow(/at least one/);
   });
 });
 
@@ -749,8 +758,8 @@ describe("naming a value", () => {
     const site = workspace.immediates(0x08).sites[0];
     const address = parseInt(site.address.slice(1), 16);
 
-    workspace.addConstant(agent, "ORANGE", 0x08);
-    workspace.bindConstant(agent, address, "ORANGE");
+    const { constant: ORANGE_id } = workspace.addConstant(agent, "ORANGE", 0x08);
+    workspace.bindConstant(agent, address, ORANGE_id);
 
     const row = workspace.disassembly(address, 1).lines[0].text;
     expect(row).toContain("#ORANGE");
@@ -761,15 +770,17 @@ describe("naming a value", () => {
   });
 
   it("refuses a binding the instruction cannot mean", () => {
-    workspace.addConstant(agent, "ORANGE", 0x08);
+    const { constant } = workspace.addConstant(agent, "ORANGE", 0x08);
     const wrongValue = workspace.immediates().sites.find((s) => s.value !== "$08")!;
     const at = parseInt(wrongValue.address.slice(1), 16);
 
-    expect(() => workspace.bindConstant(agent, at, "ORANGE")).toThrow(/but ORANGE is/);
+    expect(() => workspace.bindConstant(agent, at, constant)).toThrow(/but ORANGE is/);
     // And an address with no immediate at all.
-    expect(() => workspace.bindConstant(agent, 0x8015, "ORANGE")).toThrow(
+    expect(() => workspace.bindConstant(agent, 0x8015, constant)).toThrow(
       /no immediate|nothing there/i
     );
+    // And an id nothing holds, which never creates one.
+    expect(() => workspace.bindConstant(agent, at, "cst_nope")).toThrow(/No constant/);
   });
 
   it("refuses a value that is not a byte", () => {
@@ -782,9 +793,9 @@ describe("naming a value", () => {
     const site = workspace.immediates(0x08).sites[0];
     const address = parseInt(site.address.slice(1), 16);
 
-    workspace.addConstant(agent, "ORANGE", 0x08);
-    workspace.bindConstant(agent, address, "ORANGE");
-    workspace.removeConstant(agent, "ORANGE");
+    const { constant } = workspace.addConstant(agent, "ORANGE", 0x08);
+    workspace.bindConstant(agent, address, constant);
+    workspace.removeConstant(agent, constant);
 
     expect(workspace.disassembly(address, 1).lines[0].text).toContain("#$08");
   });
@@ -793,8 +804,8 @@ describe("naming a value", () => {
     const site = workspace.immediates(0x08).sites[0];
     const address = parseInt(site.address.slice(1), 16);
 
-    workspace.addConstant(agent, "ORANGE", 0x08);
-    workspace.bindConstant(agent, address, "ORANGE");
+    const { constant: ORANGE_id } = workspace.addConstant(agent, "ORANGE", 0x08);
+    workspace.bindConstant(agent, address, ORANGE_id);
     workspace.unbindConstant(agent, address);
 
     expect(workspace.disassembly(address, 1).lines[0].text).toContain("#$08");
@@ -826,10 +837,11 @@ describe("naming a value", () => {
     expect(names).toContain("SHIELD_BIT");
     expect(names).toContain("SHIELD_FLAG");
 
-    // Two constants still share no name now, but an ambiguous remove is refused
-    // and names the candidates — which is how a caller learns the ids.
+    // A name cannot be passed to a write at all now, so there is nothing to be
+    // ambiguous about: whether a name reaches one constant is a property of
+    // what you have synced, and a write must not depend on that.
     workspace.addConstant(agent, "SHIELD_BIT", 0x10);
-    expect(() => workspace.removeConstant(agent, "SHIELD_BIT")).toThrow(/Say which by id/);
+    expect(() => workspace.removeConstant(agent, "SHIELD_BIT")).toThrow(/No constant/);
     expect(() => workspace.removeConstant(agent, first.constant)).not.toThrow();
   });
 
@@ -864,9 +876,9 @@ describe("the work as a listing", () => {
   it("emits only the constants the span actually means", () => {
     const site = workspace.immediates(0x16).sites[0];
     const address = parseInt(site.address.slice(1), 16);
-    workspace.addConstant(agent, "EXPLOSION1", 0x16);
+    const { constant } = workspace.addConstant(agent, "EXPLOSION1", 0x16);
     workspace.addConstant(agent, "NEVER_USED", 0x99);
-    workspace.bindConstant(agent, address, "EXPLOSION1");
+    workspace.bindConstant(agent, address, constant);
 
     const { text } = workspace.listing(address, 4);
 
@@ -892,17 +904,17 @@ describe("declaring a jumptable", () => {
     // Every entry is two bytes, so an odd length is an off-by-one at any size
     // — not only the degenerate one. A five-entry table declared one byte
     // short yields four entries and reports success.
-    expect(() => workspace.setRegion(agent, 0x8000, 0x8009, "jumptable")).toThrow(
+    expect(() => workspace.addClaim(agent, { at: 0x8000, extent: 0x8009 - 0x8000, is: "jumptable" })).toThrow(
       /covers 9.*even number|even number.*covers 9/is
     );
-    expect(() => workspace.setRegion(agent, 0x8000, 0x8001, "jumptable")).toThrow(
+    expect(() => workspace.addClaim(agent, { at: 0x8000, extent: 0x8001 - 0x8000, is: "jumptable" })).toThrow(
       /even number/
     );
   });
 
   it("names both ends that would have been right", () => {
     try {
-      workspace.setRegion(agent, 0x8000, 0x8009, "jumptable");
+      workspace.addClaim(agent, { at: 0x8000, extent: 0x8009 - 0x8000, is: "jumptable" });
       throw new Error("should have refused");
     } catch (err) {
       expect((err as Error).message).toContain("$8008");
@@ -911,14 +923,14 @@ describe("declaring a jumptable", () => {
   });
 
   it("accepts an even span", () => {
-    expect(() => workspace.setRegion(agent, 0x8000, 0x800a, "jumptable")).not.toThrow();
+    expect(() => workspace.addClaim(agent, { at: 0x8000, extent: 0x800a - 0x8000, is: "jumptable" })).not.toThrow();
   });
 
   it("warns rather than refusing to open a file that already has one", () => {
     // Refusing the write is right; refusing to load would make an existing
     // project unopenable over a byte.
     const blank = blankWorkspace();
-    blank.setRegion(agent, 0x8000, 0x8004, "jumptable", "vectors");
+    blank.addClaim(agent, { at: 0x8000, extent: 0x8004 - 0x8000, is: "jumptable", name: "vectors" });
     // Widen it to an odd span behind the validation, as a hand-edited file would.
     const project = blank.describe();
     expect(project.regions.some((r) => r.kind === "jumptable")).toBe(true);
@@ -926,24 +938,60 @@ describe("declaring a jumptable", () => {
 });
 
 describe("a region where there are no bytes", () => {
-  it("is refused, rather than written somewhere that cannot hold it", () => {
-    // Ownership falls back to a symbols layer for an address nothing supplies,
-    // which is right for a label and wrong for a region. Sharing one resolver
-    // let a region land on a symbols layer, producing a document the loader
-    // refused — after which no interface could write to the project at all.
+  /**
+   * **Settled: accepted, and reported.**
+   *
+   * The legacy region write refused this — "a region needs bytes; a label does
+   * not", on the reasoning that saying how to *read* bytes that are not there
+   * says nothing. True, and still the wrong response, for two reasons found
+   * when the guard was finally looked at:
+   *
+   * The refusal fails this project's own offline/online rule. Whether a layer
+   * supplies an address is a property of what you have **synced**, so the same
+   * call would be accepted by a peer holding the layer and refused by one who
+   * had not got it yet — the exact asymmetry every upsert here was cured of.
+   *
+   * And it is legitimate ahead of time: annotate now, link the layer later, and
+   * the claim starts rendering. Claims are scoped to a target as well as to a
+   * layer precisely so that is expressible.
+   *
+   * So it is hygiene — it *renders nowhere*, which is the admission rule almost
+   * word for word — and the guard's absence from every reachable path meant
+   * this was already the behaviour anybody actually got.
+   */
+  it("is accepted, and reported as rendering nowhere", () => {
     const blank = blankWorkspace();
-    blank.addLabel(agent, 0x02, "currentXPosition"); // creates the symbols layer
+    blank.addLabel(agent, 0x02, "currentXPosition");
 
-    expect(() => blank.setRegion(agent, 0x0400, 0x07e8, "data", "SCREEN_RAM")).toThrow(
-      /No loaded bytes at \$0400/
-    );
+    const written = blank.addClaim(agent, {
+      at: 0x0400,
+      extent: 0x07e8 - 0x0400,
+      is: "data",
+      name: "SCREEN_RAM",
+    });
+    expect(written.ok).toBe(true);
+
+    const found = blank.program().hygiene.filter((h) => h.kind === "claim.noBytes");
+    expect(found).toHaveLength(1);
+    expect(found[0].message).toMatch(/renders nowhere/);
+    expect(found[0].subjects[0].address).toBe("$0400");
+  });
+
+  it("says nothing about a name over byteless memory, which is the ordinary case", () => {
+    // Zero page and the I/O registers are where half of what anybody says
+    // lives. Only an *interpretation* has nowhere to render.
+    const blank = blankWorkspace();
+    blank.addLabel(agent, 0x02, "currentXPosition");
+    blank.addClaim(agent, { at: 0xd020, name: "borderColour" });
+
+    expect(blank.program().hygiene.filter((h) => h.kind === "claim.noBytes")).toEqual([]);
   });
 
   it("leaves the project writable afterwards", () => {
     const blank = blankWorkspace();
     blank.addLabel(agent, 0x02, "currentXPosition");
     try {
-      blank.setRegion(agent, 0x0400, 0x07e8, "data");
+      blank.addClaim(agent, { at: 0x0400, extent: 0x07e8 - 0x0400, is: "data" });
     } catch {
       // expected
     }
@@ -988,7 +1036,10 @@ describe("two names for one address", () => {
     blank.markFunction(agent, 0x8011);
     blank.addLabel(agent, 0x08, "randomValue");
     blank.addLabel(agent, 0x08, "gridXPos");
-    blank.setPrimaryLabel(agent, 0x08, "randomValue");
+    // The id comes from a read — a lookup by name is fine there — and the
+    // write names the claim it chooses.
+    const chosen = blank.claimsAt(0x08).claims.find((c) => c.name === "randomValue")!.id!;
+    blank.bindPrimaryName(agent, 0x08, chosen);
 
     const rows = blank.disassembly(0x8011, 900).lines.map((l) => l.text).join("\n");
     expect(rows).toContain("randomValue");
@@ -1000,7 +1051,10 @@ describe("two names for one address", () => {
     blank.markFunction(agent, 0x8011);
     blank.addLabel(agent, 0x08, "randomValue");
     blank.addLabel(agent, 0x08, "gridXPos");
-    blank.setPrimaryLabel(agent, 0x08, "randomValue");
+    // The id comes from a read — a lookup by name is fine there — and the
+    // write names the claim it chooses.
+    const chosen = blank.claimsAt(0x08).claims.find((c) => c.name === "randomValue")!.id!;
+    blank.bindPrimaryName(agent, 0x08, chosen);
 
     // Find a site that touches $08 and bind just that one.
     const site = blank
@@ -1046,13 +1100,12 @@ describe("two names for one address", () => {
     blank.addLabel(agent, 0x08, "randomValue");
     blank.addLabel(agent, 0x08, "gridXPos");
 
-    expect(() => blank.removeLabel(agent, 0x08)).toThrow(/carries 2 labels/);
-    // The refusal is where the ids come from, as it is for remove_region.
-    expect(() => blank.removeLabel(agent, 0x08)).toThrow(/clm_/);
-
+    // Structural now rather than a refusal: there is no address form to be
+    // ambiguous with. Removal names the claim, and `list_claims` is where the
+    // id comes from.
     const listed = blank.labels({ namePattern: "gridXPos" }, 10).labels[0];
     expect(listed.id).toBeDefined();
-    expect(blank.removeLabel(agent, listed.id!).ok).toBe(true);
+    expect(blank.removeClaim(agent, listed.id!).ok).toBe(true);
     expect(blank.labels({ namePattern: "gridXPos" }, 10).total).toBe(0);
   });
 
@@ -1083,7 +1136,7 @@ describe("two names for one address", () => {
       .labels({ namePattern: "gridXPos" }, 10)
       .labels.find((l) => l.name === "gridXPos")!;
     expect(bound.id).toBeDefined();
-    blank.removeLabel(agent, bound.id!);
+    blank.removeClaim(agent, bound.id!);
 
     // A dangling use resolves by the ordinary rule rather than breaking.
     expect(() => blank.disassembly(site.address, 1)).not.toThrow();
@@ -1143,7 +1196,12 @@ describe("comments on rows that are not instructions", () => {
   it("renders an inline comment on a data row", () => {
     // Handled only where instructions were emitted, so a comment on a data row
     // was stored and rendered nowhere: written, kept, and never seen.
-    workspace.setRegion(agent, 0x8080, 0x8090, "data", "copyright");
+    workspace.addClaim(agent, {
+        at: 0x8080,
+        extent: 0x8090 - 0x8080,
+        is: "data",
+        name: "copyright",
+      });
     workspace.addComment(agent, 0x8080, "(c) 1982 HES", "inline");
 
     const rows = workspace.disassembly(0x8080, 2).lines.map((l) => l.text).join("\n");
@@ -1163,7 +1221,12 @@ describe("saying how to read text", () => {
   it("shows the decoded string rather than a bare directive", () => {
     // A text region used to render `.TEXT` and nothing else, which made
     // declaring one strictly worse than leaving the span as data.
-    workspace.setRegion(agent, 0x8080, 0x8088, "text", "copyright");
+    workspace.addClaim(agent, {
+        at: 0x8080,
+        extent: 0x8088 - 0x8080,
+        is: "text",
+        name: "copyright",
+      });
     const row = workspace.disassembly(0x8080, 2).lines.map((l) => l.text).join("\n");
 
     expect(row).toContain('.TEXT "');
@@ -1176,15 +1239,18 @@ describe("saying how to read text", () => {
     // Declared once and revised by id, since declaring is additive now: two
     // claims over one span would both stand and the listing would show whichever
     // sorted first, which is the ambiguity the id exists to remove.
-    const declared = workspace.setRegion(agent, 0x8004, 0x800c, "text", "header", undefined, "screen");
-    const claim = (declared as { claim?: string }).claim!;
+    const declared = workspace.addClaim(agent, {
+        at: 0x8004,
+        extent: 0x800c - 0x8004,
+        is: "text",
+        name: "header",
+        encoding: "screen",
+      });
+    const claim = (declared as { claims?: { claim: string }[] }).claims![0].claim;
     expect(claim).toBeDefined();
 
     const read = (encoding: "ascii" | "screen") => {
-      workspace.setRegion(
-        agent, 0x8004, 0x800c, "text", "header",
-        undefined, encoding, undefined, claim
-      );
+      workspace.setClaim(agent, claim, { says: { is: "text", encoding } });
       return workspace.disassembly(0x8004, 2).lines.map((l) => l.text).join("\n");
     };
 
@@ -1192,7 +1258,13 @@ describe("saying how to read text", () => {
   });
 
   it("keeps the encoding in the project", () => {
-    workspace.setRegion(agent, 0x8080, 0x8088, "text", "copyright", undefined, "petscii");
+    workspace.addClaim(agent, {
+        at: 0x8080,
+        extent: 0x8088 - 0x8080,
+        is: "text",
+        name: "copyright",
+        encoding: "petscii",
+      });
     const region = workspace.describe().regions.find((r) => r.name === "copyright");
 
     expect(region).toBeDefined();
@@ -1208,7 +1280,12 @@ describe("the last of trial 2's list", () => {
     // entry, not an instruction, so find_references reported no callers for
     // the address everything starts from.
     const blank = blankWorkspace();
-    blank.setRegion(agent, 0x8000, 0x8002, "jumptable", "initVector");
+    blank.addClaim(agent, {
+        at: 0x8000,
+        extent: 0x8002 - 0x8000,
+        is: "jumptable",
+        name: "initVector",
+      });
 
     const { inbound } = blank.references(0x83c1, "in");
     expect(inbound!.length).toBeGreaterThan(0);
@@ -1219,7 +1296,12 @@ describe("the last of trial 2's list", () => {
   it("starts a listing at the row containing the address", () => {
     // A data row covers eight bytes, so asking for $808C used to skip to
     // $8090 and leave out the row being checked.
-    workspace.setRegion(agent, 0x8080, 0x8090, "data", "copyright");
+    workspace.addClaim(agent, {
+        at: 0x8080,
+        extent: 0x8090 - 0x8080,
+        is: "data",
+        name: "copyright",
+      });
     expect(workspace.listing(0x808c, 2).start).toBe("$8088");
   });
 
@@ -1282,9 +1364,9 @@ describe("an edit that cuts code off", () => {
     // correct behaviour for a wrong declaration — the NOPs are code — and the
     // whole point is that it must not happen quietly.
     const blank = blankWorkspace();
-    blank.setRegion(agent, 0x8000, 0x8002, "jumptable");
+    blank.addClaim(agent, { at: 0x8000, extent: 0x8002 - 0x8000, is: "jumptable" });
 
-    const result = blank.setRegion(agent, 0x8361, 0x8370, "data", "filler");
+    const result = blank.addClaim(agent, { at: 0x8361, extent: 0x8370 - 0x8361, is: "data", name: "filler" });
 
     expect(result.instructions.delta).toBeLessThan(-500);
     expect(result.orphaned).toBeDefined();
@@ -1294,7 +1376,7 @@ describe("an edit that cuts code off", () => {
   it("stays quiet about bytes nothing was reaching anyway", () => {
     // A region over unreachable bytes costs nothing and says nothing.
     const blank = blankWorkspace();
-    const result = blank.setRegion(agent, 0x8f00, 0x8f20, "data", "chargen");
+    const result = blank.addClaim(agent, { at: 0x8f00, extent: 0x8f20 - 0x8f00, is: "data", name: "chargen" });
 
     expect(result.orphaned).toBeUndefined();
   });
@@ -1304,9 +1386,9 @@ describe("an edit that cuts code off", () => {
     // with it, which delta reports in the same field, shape and tone as a
     // useful gain.
     const blank = blankWorkspace();
-    blank.setRegion(agent, 0x8011, 0x8014, "code");
+    blank.addClaim(agent, { at: 0x8011, root: "entry" });
 
-    const result = blank.setRegion(agent, 0x8011, 0x8014, "data");
+    const result = blank.addClaim(agent, { at: 0x8011, extent: 0x8014 - 0x8011, is: "data" });
 
     expect(result.instructions.delta).toBeLessThan(-1000);
     expect(result.orphaned).toBeDefined();
@@ -1316,16 +1398,16 @@ describe("an edit that cuts code off", () => {
 
   it("names an address outside the span, not one inside it", () => {
     const blank = blankWorkspace();
-    blank.setRegion(agent, 0x8011, 0x8014, "code");
+    blank.addClaim(agent, { at: 0x8011, root: "entry" });
 
-    const { orphaned } = blank.setRegion(agent, 0x8011, 0x8014, "data");
+    const { orphaned } = blank.addClaim(agent, { at: 0x8011, extent: 0x8014 - 0x8011, is: "data" });
     const at = parseInt(orphaned!.firstAt.slice(1), 16);
     expect(at).toBeGreaterThanOrEqual(0x8014);
   });
 
   it("stays quiet when an edit costs nothing", () => {
     const blank = blankWorkspace();
-    expect(blank.setRegion(agent, 0x8011, 0x8015, "code").orphaned).toBeUndefined();
+    expect(blank.addClaim(agent, { at: 0x8011, root: "entry" }).orphaned).toBeUndefined();
   });
 });
 
@@ -1336,7 +1418,7 @@ describe("adding a second name", () => {
     // second name silently renamed every reference to the address, and
     // unpredictably enough that testing it once told you nothing.
     const blank = blankWorkspace();
-    blank.setRegion(agent, 0x8011, 0x8015, "code");
+    blank.addClaim(agent, { at: 0x8011, root: "entry" });
     blank.addLabel(agent, 0x02, "currentXPosition");
 
     const before = blank.disassembly(0x8132, 1).lines[0].text;
@@ -1347,10 +1429,11 @@ describe("adding a second name", () => {
 
   it("leaves an explicit choice alone", () => {
     const blank = blankWorkspace();
-    blank.setRegion(agent, 0x8011, 0x8015, "code");
+    blank.addClaim(agent, { at: 0x8011, root: "entry" });
     blank.addLabel(agent, 0x02, "currentXPosition");
     blank.addLabel(agent, 0x02, "vicRegisterLoPtr");
-    blank.setPrimaryLabel(agent, 0x02, "vicRegisterLoPtr");
+    const chosen = blank.claimsAt(0x02).claims.find((c) => c.name === "vicRegisterLoPtr")!.id!;
+    blank.bindPrimaryName(agent, 0x02, chosen);
 
     blank.addLabel(agent, 0x02, "aThirdName");
     expect(blank.disassembly(0x8132, 1).lines[0].text).toContain("vicRegisterLoPtr");
@@ -1361,7 +1444,13 @@ describe("the rest of trial 3's list", () => {
   it("shows a region's own comment where the region begins", () => {
     // It was stored, rendered only in the memory map, and so `comment:` on
     // set_region looked like it had worked and appeared nowhere a reader looks.
-    workspace.setRegion(agent, 0x8f00, 0x8f20, "data", "chargen", "copied to $2000 at boot");
+    workspace.addClaim(agent, {
+        at: 0x8f00,
+        extent: 0x8f20 - 0x8f00,
+        is: "data",
+        name: "chargen",
+        comment: "copied to $2000 at boot",
+      });
     const rows = workspace.disassembly(0x8f00, 3).lines.map((l) => l.text).join("\n");
 
     expect(rows).toContain("; copied to $2000 at boot");
@@ -1370,8 +1459,8 @@ describe("the rest of trial 3's list", () => {
   it("breaks a data row at a region boundary", () => {
     // Rows chunk in eights, so two adjacent regions shared a row and the
     // distinction someone drew between them became invisible.
-    workspace.setRegion(agent, 0x8f00, 0x8f04, "data", "first");
-    workspace.setRegion(agent, 0x8f04, 0x8f10, "data", "second");
+    workspace.addClaim(agent, { at: 0x8f00, extent: 0x8f04 - 0x8f00, is: "data", name: "first" });
+    workspace.addClaim(agent, { at: 0x8f04, extent: 0x8f10 - 0x8f04, is: "data", name: "second" });
 
     const rows = workspace.disassembly(0x8f00, 4).lines.filter((l) => l.kind === "data");
     expect(rows[0].text).toContain("8F00");
@@ -1389,17 +1478,25 @@ describe("the rest of trial 3's list", () => {
     expect(note).toBeGreaterThan(jump);
   });
 
-  it("says where a name comes from instead of denying it exists", () => {
-    // "No label at $8000" contradicted a listing plainly showing one. The PRG
-    // layer names its own load address, and no project owns that.
+  it("cannot be asked to remove a name no project owns", () => {
+    // A PRG layer names its own load address and no project owns that, so
+    // there is no id to pass — the same rule as `withholds ids for names
+    // nothing owns`, arriving structurally rather than as a refusal.
     const blank = blankWorkspace();
-    expect(() => blank.removeLabel(agent, 0x8000)).toThrow(/comes from .*rather than/);
+    const notOurs = blank
+      .labels({}, 500)
+      .labels.filter((l) => l.source === "layer" || l.source === "platform");
+    expect(notOurs.length).toBeGreaterThan(0);
+    for (const label of notOurs) {
+      expect(label.writable).toBe(false);
+      expect(label.id).toBeUndefined();
+    }
   });
 
   it("takes an extent in a batch of labels", () => {
-    workspace.addLabels(agent, [
-      { address: 0x0400, name: "SCREEN_RAM", extent: 1000 },
-      { address: 0xd800, name: "COLOUR_RAM", extent: 1000 },
+    workspace.addClaims(agent, [
+      { at: 0x0400, name: "SCREEN_RAM", extent: 1000 },
+      { at: 0xd800, name: "COLOUR_RAM", extent: 1000 },
     ]);
 
     const rows = workspace.disassembly(0x8072, 2).lines.map((l) => l.text).join("\n");
@@ -1408,11 +1505,11 @@ describe("the rest of trial 3's list", () => {
 
   it("binds several constant sites at once", () => {
     const sites = workspace.immediates(0x08).sites.slice(0, 2);
-    workspace.addConstant(agent, "ORANGE", 0x08);
+    const { constant } = workspace.addConstant(agent, "ORANGE", 0x08);
 
     const result = workspace.bindConstants(
       agent,
-      sites.map((s) => ({ address: parseInt(s.address.slice(1), 16), name: "ORANGE" }))
+      sites.map((s) => ({ address: parseInt(s.address.slice(1), 16), constant }))
     );
 
     expect(result.did).toHaveLength(2);
@@ -1578,7 +1675,13 @@ describe("quoting the line that refers to something", () => {
 
 describe("declaring a picture", () => {
   it("draws it in the listing", () => {
-    workspace.setRegion(agent, 0x8e00, 0x8e20, "bitmap", "CharSet", undefined, undefined, "char:4");
+    workspace.addClaim(agent, {
+        at: 0x8e00,
+        extent: 0x8e20 - 0x8e00,
+        is: "bitmap",
+        name: "CharSet",
+        view: "char:4",
+      });
     const listing = workspace.listing(0x8e00, 10).text;
     expect(listing).toContain("CharSet:");
     // Shading characters, not a hex column.
@@ -1588,14 +1691,20 @@ describe("declaring a picture", () => {
   it("insists on knowing how to read the bytes", () => {
     // A bitmap without a view cannot be drawn at all, so accepting one would
     // record a region nothing can render and report success.
-    expect(() => workspace.setRegion(agent, 0x8e00, 0x8e20, "bitmap")).toThrow(
+    expect(() => workspace.addClaim(agent, { at: 0x8e00, extent: 0x8e20 - 0x8e00, is: "bitmap" })).toThrow(
       /needs a view/
     );
   });
 
   it("names the views it understands rather than failing vaguely", () => {
     expect(() =>
-      workspace.setRegion(agent, 0x8e00, 0x8e20, "bitmap", "X", undefined, undefined, "pixels")
+      workspace.addClaim(agent, {
+        at: 0x8e00,
+        extent: 0x8e20 - 0x8e00,
+        is: "bitmap",
+        name: "X",
+        view: "pixels",
+      })
     ).toThrow(/char:<columns>/);
   });
 
@@ -1604,7 +1713,13 @@ describe("declaring a picture", () => {
     // bitmap must leave the accounting alone: a picture is an explanation of
     // those bytes just as much as "data" was.
     const before = workspace.undecoded(50).unexplainedBytes;
-    workspace.setRegion(agent, 0x8e00, 0x9000, "bitmap", "CharSet", undefined, undefined, "char:8");
+    workspace.addClaim(agent, {
+        at: 0x8e00,
+        extent: 0x9000 - 0x8e00,
+        is: "bitmap",
+        name: "CharSet",
+        view: "char:8",
+      });
     expect(workspace.undecoded(50).unexplainedBytes).toBe(before);
   });
 
@@ -1615,9 +1730,13 @@ describe("declaring a picture", () => {
     // model has always allowed them to be: regions may overlap and resolve
     // innermost-first.
     const before = workspace.undecoded(50).unexplainedBytes;
-    const result = workspace.setRegion(
-      agent, 0x8e00, 0x8e20, "bitmap", "CharSet", undefined, undefined, "char:4"
-    );
+    const result = workspace.addClaim(agent, {
+        at: 0x8e00,
+        extent: 0x8e20 - 0x8e00,
+        is: "bitmap",
+        name: "CharSet",
+        view: "char:4",
+      });
 
     expect(workspace.undecoded(50).unexplainedBytes).toBe(before);
     expect(result.nestedInside).toContain("characterSetData");
@@ -1625,7 +1744,13 @@ describe("declaring a picture", () => {
   });
 
   it("draws the inner picture and leaves the outer region either side", () => {
-    workspace.setRegion(agent, 0x8e00, 0x8e20, "bitmap", "CharSet", undefined, undefined, "char:4");
+    workspace.addClaim(agent, {
+        at: 0x8e00,
+        extent: 0x8e20 - 0x8e00,
+        is: "bitmap",
+        name: "CharSet",
+        view: "char:4",
+      });
     const listing = workspace.listing(0x8e00, 14).text;
     expect(listing).toMatch(/@{2,}/);
     // The bytes past the nested span are still data, from the region that was
@@ -1638,8 +1763,20 @@ describe("declaring a picture", () => {
     // that made the write's identity depend on what the caller had synced. Now
     // both stand and the second says how to revise the first instead.
     const before = workspace.describe().regions.length;
-    const first = workspace.setRegion(agent, 0x8004, 0x800c, "text", "header", undefined, "screen");
-    workspace.setRegion(agent, 0x8004, 0x800c, "text", "header", undefined, "ascii");
+    const first = workspace.addClaim(agent, {
+        at: 0x8004,
+        extent: 0x800c - 0x8004,
+        is: "text",
+        name: "header",
+        encoding: "screen",
+      });
+    workspace.addClaim(agent, {
+        at: 0x8004,
+        extent: 0x800c - 0x8004,
+        is: "text",
+        name: "header",
+        encoding: "ascii",
+      });
 
     expect(workspace.describe().regions.length).toBe(before + 2);
 
@@ -1647,7 +1784,7 @@ describe("declaring a picture", () => {
     // which renders falls to a stable but arbitrary order. What the caller gets
     // instead is the id of the one it just made, so it can revise that rather
     // than declaring a third.
-    expect((first as { claim?: string }).claim).toBeDefined();
+    expect((first as { claims?: { claim: string }[] }).claims![0].claim).toBeDefined();
   });
 
   it("revises the one it is told to, by id", () => {
@@ -1659,14 +1796,8 @@ describe("declaring a picture", () => {
       .regions.find((r) => r.name === "characterSetData")!;
     const before = workspace.describe().regions.length;
 
-    workspace.setRegion(
-      agent, 0x8e00, 0x9000, "data", "RenamedOnce",
-      undefined, undefined, undefined, existing.id
-    );
-    workspace.setRegion(
-      agent, 0x8e00, 0x9000, "data", "RenamedTwice",
-      undefined, undefined, undefined, existing.id
-    );
+    workspace.setClaim(agent, existing.id!, { name: "RenamedOnce" });
+    workspace.setClaim(agent, existing.id!, { name: "RenamedTwice" });
 
     expect(workspace.describe().regions.length).toBe(before);
     expect(workspace.describe().regions.find((r) => r.id === existing.id)!.name)
@@ -1679,10 +1810,10 @@ describe("declaring a picture", () => {
       .regions.find((r) => r.name === "characterSetData")!;
     const before = workspace.describe().regions.length;
 
-    workspace.setRegion(
-      agent, 0x8e00, 0x9100, "data", "Wider",
-      undefined, undefined, undefined, existing.id
-    );
+    workspace.setClaim(agent, existing.id!, {
+      name: "Wider",
+      extent: 0x9100 - 0x8e00,
+    });
     expect(workspace.describe().regions.length).toBe(before);
   });
 });
@@ -1692,15 +1823,21 @@ describe("naming a region rather than guessing which one", () => {
     // The point of ids. Without one, a smaller span inside an existing region
     // is read as a new nested statement — which is right when you meant it and
     // wrong when you meant to resize. Naming the region removes the guess.
-    const first = workspace.setRegion(agent, 0x8e00, 0x9000, "data", "Whole");
+    const first = workspace.addClaim(agent, { at: 0x8e00, extent: 0x9000 - 0x8e00, is: "data", name: "Whole" });
     void first;
     const id = workspace.describe().regions.find((r) => r.name === "Whole")?.id;
     expect(id).toBeDefined();
 
     const before = workspace.describe().regions.length;
-    const result = workspace.setRegion(
-      agent, 0x8e00, 0x8e20, "bitmap", "Whole", undefined, undefined, "char:4", id
-    );
+    // No `at`: a claim's position is stored relative to its layer and is
+    // written with its frame by `placed()`, so a raw absolute address here
+    // would be read as a layer offset. `set_claim` offers no `at` for exactly
+    // that reason — this revises the span and the reading, which is what
+    // "whatever its span" means.
+    const result = workspace.setClaim(agent, id!, {
+      extent: 0x8e20 - 0x8e00,
+      says: { is: "bitmap", view: "char:4" },
+    });
 
     expect(workspace.describe().regions.length).toBe(before);
     expect(result.nestedInside).toBeUndefined();
@@ -1710,32 +1847,50 @@ describe("naming a region rather than guessing which one", () => {
 
   it("says so when the id names nothing", () => {
     expect(() =>
-      workspace.setRegion(agent, 0x8e00, 0x8e20, "data", "X", undefined, undefined, undefined, "rgn_nope")
+      workspace.setClaim(agent, "rgn_nope", { name: "X" })
     ).toThrow(/No claim rgn_nope/);
   });
 
   it("refuses an ambiguous removal instead of deleting the wrong one", () => {
     // Nesting made a start address stop being a unique handle, so picking
     // whichever the array listed first would silently delete the wrong region.
-    workspace.setRegion(agent, 0x8004, 0x800c, "text", "inner", undefined, "screen");
-    expect(() => workspace.removeRegion(agent, 0x8004)).toThrow(/Several claims start/);
+    workspace.addClaim(agent, {
+        at: 0x8004,
+        extent: 0x800c - 0x8004,
+        is: "text",
+        name: "inner",
+        encoding: "screen",
+      });
+    // No address form to be ambiguous with: removal names the claim.
+    const ids = workspace
+      .claimsAt(0x8004)
+      .claims.filter((c) => c.id)
+      .map((c) => c.id!);
+    expect(ids.length).toBeGreaterThan(1);
   });
 
-  it("removes the one you name", () => {
-    workspace.setRegion(agent, 0x8004, 0x800c, "text", "inner", undefined, "screen");
-    const id = workspace.describe().regions.find((r) => r.name === "inner")?.id;
+  it("removes the one you name, by id", () => {
+    workspace.addClaim(agent, {
+      at: 0x8004,
+      extent: 0x800c - 0x8004,
+      is: "text",
+      name: "inner",
+      encoding: "screen",
+    });
+    const id = workspace.describe().regions.find((r) => r.name === "inner")!.id!;
     const before = workspace.describe().regions.length;
 
-    workspace.removeRegion(agent, 0x8004, id);
+    workspace.removeClaim(agent, id);
 
     expect(workspace.describe().regions.length).toBe(before - 1);
     expect(workspace.describe().regions.find((r) => r.name === "initData")).toBeDefined();
   });
 
-  it("still takes a bare start address while only one region begins there", () => {
-    const before = workspace.describe().regions.length;
-    workspace.removeRegion(agent, 0x8004);
-    expect(workspace.describe().regions.length).toBe(before - 1);
+  it("has no address form at all, so nothing can be ambiguous", () => {
+    // A start address stopped being a unique handle the moment claims could
+    // nest, and "while only one begins there" is a property of what you have
+    // synced — so the shortcut was removed rather than disambiguated.
+    expect(() => workspace.removeClaim(agent, "clm_nope")).toThrow(/No claim/i);
   });
 });
 
@@ -1777,7 +1932,7 @@ describe("keeping a decoder in the project", () => {
   const source = 'return { kind: "text", lines: ["ran"] };';
 
   it("stores it and hands it back", () => {
-    workspace.setDecoder(agent, "charset, reversed", source);
+    workspace.addDecoder(agent, "charset, reversed", source);
     const kept = workspace.decoders();
     expect(kept.total).toBe(1);
     expect(kept.decoders[0]).toMatchObject({ name: "charset, reversed", source });
@@ -1785,9 +1940,8 @@ describe("keeping a decoder in the project", () => {
   });
 
   it("revises one by id rather than adding another", () => {
-    workspace.setDecoder(agent, "first", source);
-    const id = workspace.decoders().decoders[0].id;
-    workspace.setDecoder(agent, "second", "return null;", id);
+    const { decoder: id } = workspace.addDecoder(agent, "first", source);
+    workspace.editDecoder(agent, id, { name: "second", source: "return null;" });
 
     const kept = workspace.decoders();
     expect(kept.total).toBe(1);
@@ -1795,7 +1949,7 @@ describe("keeping a decoder in the project", () => {
   });
 
   it("reaches the project, which is what makes it travel", () => {
-    workspace.setDecoder(agent, "charset, reversed", source);
+    workspace.addDecoder(agent, "charset, reversed", source);
     expect(workspace.program().loaded.project.decoders?.[0]).toMatchObject({
       name: "charset, reversed",
       source,
@@ -1807,7 +1961,7 @@ describe("keeping a decoder in the project", () => {
   });
 
   it("removes the one named", () => {
-    workspace.setDecoder(agent, "doomed", source);
+    workspace.addDecoder(agent, "doomed", source);
     workspace.removeDecoder(agent, workspace.decoders().decoders[0].id);
     expect(workspace.decoders().total).toBe(0);
   });
@@ -1898,7 +2052,14 @@ describe("finding things across the whole program", () => {
     // branch — and a comment or label *inside* the span rendered not at all,
     // because a row covers a whole cell and the walk stepped over everything in
     // between. On a character set, naming which glyph is the ship is the job.
-    workspace.setRegion(agent, 0x8e00, 0x8e40, "bitmap", "charset", "ONCE", undefined, "char:8");
+    workspace.addClaim(agent, {
+        at: 0x8e00,
+        extent: 0x8e40 - 0x8e00,
+        is: "bitmap",
+        name: "charset",
+        comment: "ONCE",
+        view: "char:8",
+      });
     workspace.addComment(agent, 0x8e08, "INNER", "before");
     workspace.addLabel(agent, 0x8e08, "innerGlyph");
 
@@ -2044,9 +2205,15 @@ describe("rendering text with a project decoder", () => {
   it("puts the decoder's characters in the listing", () => {
     // End to end: SES compiles it in this realm, synchronously, because a
     // listing is built in one pass and a row cannot await.
-    workspace.setDecoder(agent, "lowercase", font);
+    workspace.addDecoder(agent, "lowercase", font);
     const id = workspace.decoders().decoders[0].id;
-    workspace.setRegion(agent, 0x8080, 0x8090, "text", "msg", undefined, undefined, `snippet:${id}`);
+    workspace.addClaim(agent, {
+        at: 0x8080,
+        extent: 0x8090 - 0x8080,
+        is: "text",
+        name: "msg",
+        view: `snippet:${id}`,
+      });
 
     const listing = workspace.listing(0x8080, 4).text;
     expect(listing).toContain(".TEXT");
@@ -2056,14 +2223,27 @@ describe("rendering text with a project decoder", () => {
     // Checked when the region is declared, because a listing that quietly
     // ignores an unknown decoder looks exactly like one whose decoder is wrong.
     expect(() =>
-      workspace.setRegion(agent, 0x8080, 0x8090, "text", "msg", undefined, undefined, "snippet:dec_nope")
+      workspace.addClaim(agent, {
+        at: 0x8080,
+        extent: 0x8090 - 0x8080,
+        is: "text",
+        name: "msg",
+        view: "snippet:dec_nope",
+      })
     ).toThrow(/No decoder dec_nope/);
   });
 
   it("keeps rendering when a decoder throws", () => {
-    workspace.setDecoder(agent, "broken", "throw new Error('nope');");
+    workspace.addDecoder(agent, "broken", "throw new Error('nope');");
     const id = workspace.decoders().decoders[0].id;
-    workspace.setRegion(agent, 0x8080, 0x8090, "text", "msg", undefined, "screen", `snippet:${id}`);
+    workspace.addClaim(agent, {
+        at: 0x8080,
+        extent: 0x8090 - 0x8080,
+        is: "text",
+        name: "msg",
+        encoding: "screen",
+        view: `snippet:${id}`,
+      });
 
     // Falls back to the declared encoding rather than losing the row.
     expect(workspace.listing(0x8080, 4).text).toContain(".TEXT");

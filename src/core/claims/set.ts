@@ -173,6 +173,22 @@ export type Disagreement =
       readonly kind: "nameShared";
       readonly name: string;
       readonly claims: readonly PlacedClaim[];
+    }
+  /**
+   * A contradiction somebody *declared*, rather than one the bytes imply.
+   *
+   * Everything above is geometric — claims covering the same address, a root
+   * inside somebody's data. That finds a whole class and misses another, and
+   * experiment-0's two real disagreements were both in the class it misses:
+   * `$8DF9` holding `$3B` refutes a claim about the *glyph* `$3B`, which lives
+   * somewhere else entirely and overlaps nothing.
+   */
+  | {
+      readonly kind: "declared";
+      readonly evidence: string;
+      readonly claim: PlacedClaim;
+      readonly other?: PlacedClaim;
+      readonly note?: string;
     };
 
 /**
@@ -224,8 +240,41 @@ function refines(a: PlacedClaim, b: PlacedClaim): boolean {
  * project experiment 7 produced — the same mistake as reporting thirty swallowed
  * instructions as thirty problems, which is a list nobody reads.
  */
-export function disagreements(set: ClaimSet): Disagreement[] {
+export function disagreements(
+  set: ClaimSet,
+  /**
+   * Refutations somebody wrote down.
+   *
+   * Passed in rather than held by the set, because a `ClaimSet` is claims and
+   * evidence is a different root — and because the sweep below is on the read
+   * path and must not grow a second index it does not need.
+   */
+  declared: readonly {
+    id?: string;
+    claim: string;
+    kind: string;
+    other?: string;
+    note?: string;
+  }[] = []
+): Disagreement[] {
   const found: Disagreement[] = [];
+
+  // Declared first: somebody saying "this is wrong, and here is why" outranks
+  // anything inferred from where the bytes happen to sit.
+  const byId = new Map(set.all().map((c) => [c.id, c]));
+  for (const item of declared) {
+    if (item.kind !== "refutes") continue;
+    const claim = byId.get(item.claim);
+    if (!claim) continue;
+    const other = item.other === undefined ? undefined : byId.get(item.other);
+    found.push({
+      kind: "declared",
+      evidence: item.id ?? "",
+      claim,
+      ...(other ? { other } : {}),
+      ...(item.note === undefined ? {} : { note: item.note }),
+    });
+  }
 
   for (const [name, claims] of set.sharedNames()) {
     const addresses = new Set(claims.map((c) => c.at));
@@ -282,6 +331,12 @@ export function describeDisagreement(d: Disagreement): string {
       return (
         `$${d.address.toString(16).toUpperCase()} is a ${d.root.root} root (${d.root.by.author}) ` +
         `inside ${d.data.name ?? "a claim"} declared ${d.data.says!.is} (${d.data.by.author})`
+      );
+    case "declared":
+      return (
+        `${d.claim.by.author} says ${d.other ? `${d.other.id} is wrong` : "this is contradicted"}` +
+        `${d.other ? ` — ${d.other.name ?? `the claim at $${d.other.at.toString(16).toUpperCase()}`}` : ""}` +
+        `${d.note ? `: ${d.note}` : ""}`
       );
   }
 }

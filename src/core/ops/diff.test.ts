@@ -73,7 +73,7 @@ describe("diffProjects", () => {
     expect(
       ops.some((o) => o.op === "claim.set" && o.fields.says?.is === "data")
     ).toBe(true);
-    expect(ops.some((o) => o.op === "primary.set" && o.labelId === "clm_1")).toBe(true);
+    expect(ops.some((o) => o.op === "primary.bind" && o.labelId === "clm_1")).toBe(true);
   });
 
   it("round-trips: applying the diff reaches the target content", () => {
