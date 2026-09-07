@@ -115,6 +115,19 @@ export class C64 {
     }
   }
 
+  /**
+   * Whether any layer supplied this address, or the run has written it.
+   *
+   * The same test `leaves` uses to decide that control has left the program,
+   * asked before starting rather than during — because starting somewhere
+   * nothing supplies is the same condition, and it is worth refusing at the
+   * point a caller can still do something about it.
+   */
+  supplies(address: number): boolean {
+    const at = address & 0xffff;
+    return this.supplied[at] === 1 || this.written[at] === 1;
+  }
+
   /** Start here. Reads a vector rather than an address when told to. */
   start(at: number): void {
     this.cpu.pc = at;

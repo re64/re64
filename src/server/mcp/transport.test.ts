@@ -302,6 +302,51 @@ describe("drawing a span", () => {
   });
 });
 
+describe("a layer nobody links supplies nothing", () => {
+  /**
+   * Two consecutive experiments lost real work to this. Run 9's editor called
+   * `add_rom_layer` twice, got `ok` twice, saw no change, decided the problem
+   * was `reference: true`, and uploaded the ROMs again as raw bytes *while*
+   * creating a target that linked them — two variables at once, and it credited
+   * the wrong one in notes that run 10's editor then inherited. Run 10 declared
+   * three ROM layers, linked none, and hand-wrote a KERNAL shim instead of
+   * using the ROMs on the disk.
+   *
+   * `ok: true` on a write nothing can see is the confident wrong answer in
+   * miniature, so both halves of the mistake are now reported.
+   */
+  it("says a new layer is linked into nothing, and how to link it", async () => {
+    const made = await callTool("add_rom_layer", { rom: "characters" });
+    // The ROM may be absent on this machine; the advice must not depend on it.
+    if (made.isError) return;
+    const value = made.value as { note?: string; linkedInto?: string[] };
+    expect(value.linkedInto).toEqual([]);
+    expect(value.note).toContain("set_target");
+  });
+
+  it("names the ROMs a new view leaves out, since it will boot into zeros", async () => {
+    // `list_targets` reports every layer, including ones no view links — which
+    // is how a caller finds the id to link in the first place.
+    const seen = (await callTool("list_targets", {})).value as {
+      layers: { id: string; type: string }[];
+    };
+    const someLayer = seen.layers.find((l) => l.type !== "symbols")?.id;
+    expect(someLayer).toBeDefined();
+
+    const rom = await callTool("add_rom_layer", { rom: "kernal" });
+    if (rom.isError) return; // no ROM on this machine; the advice is not the point
+
+    const made = await callTool("add_target", {
+      name: "reading-only",
+      layers: [{ layer: someLayer }],
+    });
+    expect(made.isError, made.text).toBe(false);
+    const value = made.value as { romsNotLinked?: string[]; romNote?: string };
+    expect(value.romsNotLinked?.length).toBeGreaterThan(0);
+    expect(value.romNote).toContain("boots into $0000");
+  });
+});
+
 describe("naming a value has an on-ramp", () => {
   /**
    * `find_immediates` exists to be the way in to constants — "the query behind

@@ -449,3 +449,43 @@ with three it is necessary, and the habit formed instantly.
 - Keep the prior memo. It did not spoil the run; it raised the floor and forced the
   interesting question, which was *what can you show me that this does not already
   say*. Three of the article's best findings are corrections to it.
+
+---
+
+## Correction, appended after the fact — the ROM diagnosis in §8 is wrong
+
+*Not by the editor who wrote this. Added when experiment 10 reproduced the same
+failure and the code was read.*
+
+Section 8 says `add_rom_layer` "was **not** sufficient: a `reference: true` ROM
+layer is invisible to the machine". That is not what happened, and the wrong
+explanation propagated: experiment 10's editor inherited it, declared three ROM
+layers, linked none, concluded the host had no ROM files — on a host with all
+three on disk — and hand-wrote a seventeen-byte KERNAL shim instead.
+
+`reference` is consulted in exactly one place in the codebase, `view/rows.ts`,
+where it keeps eight kilobytes of BASIC out of the rendered listing. `readByte`
+does not filter on it, so a linked ROM layer is perfectly visible to the machine.
+
+This run's own transcript says what really happened:
+
+    add_rom_layer   rom=kernal      ok      ← declared, linked into nothing
+    add_rom_layer   rom=basic       ok      ← declared, linked into nothing
+    add_byte_layer  raw kernal.rom  ok      ← gave up, uploaded the bytes again
+    add_byte_layer  raw basic.rom   ok
+    add_target      machine [runtime, basic @ $A000, kernal @ $E000]   ← the fix
+
+**A layer nobody links supplies nothing**, because a target's layer list is an
+allowlist. Creating the `machine` target is what made the ROMs readable; the
+switch from `rom` layers to raw byte layers was incidental. Two variables moved
+at once and the note credited the wrong one.
+
+Kept rather than rewritten, because it is a clean instance of the rule this
+project already states: *take the reports and the request log together, and
+where they disagree the log wins*. The report offered a mechanism it had not
+checked; the log showed two calls that succeeded and did nothing.
+
+Since fixed: `add_rom_layer` and `add_byte_layer` now report that no target
+links the new layer and name `set_target`; `add_target` names the declared ROMs
+a new view leaves out; and a scenario that starts where no layer supplies the
+bytes is refused rather than run.

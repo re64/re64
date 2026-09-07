@@ -1040,7 +1040,45 @@ export class Workspace {
         ...(description === undefined ? {} : { description }),
       },
     ]);
-    return { ...result, target: id };
+
+    // What this view can and cannot see, said at the moment it is made.
+    //
+    // A target that links no ROM boots into zeros, because its vectors read as
+    // zero. Two editors in a row hit that from the other side — declaring ROM
+    // layers and never linking them — so the write that makes a view says which
+    // declared layers it left out. (A view linking *nothing* is refused by the
+    // schema, so there is no branch for it here.)
+    //
+    // Deliberately *not* linking anything automatically. A project asks for its
+    // ROMs and the request is committed even though the bytes never are;
+    // loading them whenever the files happen to be present would make the
+    // analysis depend on a gitignored file, which is a suite that means
+    // different things on different machines. And a loader target legitimately
+    // wants no ROM at all.
+    // The *declared* project, not `loaded.project` — which is narrowed to the
+    // current view, so the very layers this is about would be filtered out of
+    // it. The same reason `list_targets` reads from the document directly.
+    const project = projectFromDoc(this.room.store.document());
+    const linked = new Set(links.map((l) => (typeof l === "string" ? l : l.layer)));
+    const unlinked = (project.layers ?? []).filter(
+      (l) => l.id !== undefined && !linked.has(l.id) && l.type !== "symbols"
+    );
+    const roms = unlinked.filter((l) => l.type === "rom");
+
+    return {
+      ...result,
+      target: id,
+      ...(roms.length === 0
+        ? {}
+        : {
+            romsNotLinked: roms.map((l) => l.name ?? l.rom ?? l.id!),
+            romNote:
+              "This project declares ROM layers that this view does not link. A " +
+              "machine started here reads its reset and interrupt vectors as zero " +
+              "and boots into $0000. Link them with set_target if this view is for " +
+              "running rather than for reading.",
+          }),
+    };
   }
 
   /** Revise a view by id. An id nothing holds is not found; it never creates. */
@@ -4158,13 +4196,42 @@ export class Workspace {
    * `add_byte_layer` takes is one this must refuse. Folding them together would
    * be a call with three arguments that are meaningless half the time.
    */
+  /**
+   * What a newly declared layer is not yet part of.
+   *
+   * **A layer nobody links supplies nothing**, because a target's layer list is
+   * an allowlist rather than a filter — and `ok: true` on a write that changed
+   * nothing anybody can see is the confident wrong answer in miniature.
+   *
+   * Two consecutive experiments were cost real work by this. Run 9's editor
+   * called `add_rom_layer` twice, got `ok` twice, saw no change, concluded the
+   * problem was `reference: true`, uploaded the ROMs again as raw bytes *and*
+   * made a target linking them — two variables at once, and it credited the
+   * wrong one in its notes. Run 10's editor inherited that explanation, declared
+   * three ROM layers, linked none, and hand-wrote a seventeen-byte KERNAL shim
+   * instead of using the ROMs sitting on the disk.
+   */
+  private linkAdvice(): { linkedInto?: string[]; note?: string } {
+    const project = this.program().loaded.project;
+    const targets = project.targets ?? [];
+    if (targets.length === 0) return {};
+    return {
+      linkedInto: [],
+      note:
+        `Declared, and linked into no target — so nothing reads it yet. A target's ` +
+        `layer list is an allowlist: add it with set_target on one of ` +
+        `${targets.map((t) => `"${t.name}"`).join(", ")}, or add_target for a new view.`,
+    };
+  }
+
   addRomLayer(caller: Caller, rom: "basic" | "kernal" | "characters"): EditResult {
     const held = this.program().loaded.project.layers;
     const already = held.find((l) => l.type === "rom" && l.rom === rom);
     if (already) {
       throw new Error(`This project already links the ${rom} ROM as "${already.name}".`);
     }
-    return this.edit(caller, () => [
+    const advice = this.linkAdvice();
+    const result = this.edit(caller, () => [
       {
         op: "layer.add",
         id: newId("lay"),
@@ -4176,6 +4243,7 @@ export class Workspace {
         index: 0,
       } as Op,
     ]);
+    return { ...result, ...advice };
   }
 
   addByteLayer(
@@ -4202,7 +4270,8 @@ export class Workspace {
     // The stack is declared bottom-up and a byte layer is the foundation, so a
     // new one goes on top of what is already there rather than under it.
     const index = this.program().loaded.project.layers.length;
-    return this.edit(caller, () => [
+    const advice = this.linkAdvice();
+    const result = this.edit(caller, () => [
       {
         op: "layer.add",
         id: newId("lay"),
@@ -4213,6 +4282,7 @@ export class Workspace {
         index,
       } as Op,
     ]);
+    return { ...result, ...advice };
   }
 
   /**

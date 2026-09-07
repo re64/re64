@@ -247,6 +247,26 @@ function perform(
     case "start": {
       const at = parseProjectAddress(step.at);
       const from = step.vector ? machine.vector(at) : at;
+
+      // **Refused rather than run**, which is the one thing this step must not
+      // do quietly. A view that links no ROM reads its vectors as zero, so a
+      // scenario starting through one boots to $0000 and executes whatever
+      // happens to be there — which comes back as a black screen and five
+      // hundred frames of nothing, with `ok` on it. Both editors who tried to
+      // run this program hit exactly that and neither was told why; one
+      // concluded the host had no ROM files, on a host that had all three.
+      //
+      // A fact about the request, not a judgement about the result: nothing
+      // supplies these bytes, so there is no program to start.
+      if (!machine.supplies(from)) {
+        const through = step.vector ? ` through the vector at ${hex(at)}` : "";
+        throw new Error(
+          `Nothing supplies ${hex(from)}${through}, so there is nothing to run. ` +
+            `No layer in this view covers it — list_targets shows which layers each ` +
+            `view links, and a machine needs its ROMs linked to boot through a vector.`
+        );
+      }
+
       machine.start(from);
       return step.vector ? `start at ${hex(from)}, from the vector at ${hex(at)}` : `start at ${hex(from)}`;
     }

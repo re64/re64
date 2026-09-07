@@ -57,6 +57,26 @@ describe("running a scenario", () => {
     expect(run.did[0].said).toContain("$1000");
   });
 
+  it("refuses to start where no layer supplies the bytes", () => {
+    // Both editors who tried to run this program booted into $0000 and were
+    // told nothing: a view that links no ROM reads its vectors as zero, so the
+    // machine executed whatever was there and came back with a black screen,
+    // five hundred frames, and `ok`. One concluded the host had no ROM files,
+    // on a host that had all three.
+    const run = runScenario(
+      program(),
+      scenario([
+        { id: "stp_1", kind: "start", at: "$F000" },
+        { id: "stp_2", kind: "run", cycles: 50 },
+      ]),
+      { fingerprint: "f1" }
+    );
+    expect(run.warnings.join(" ")).toContain("Nothing supplies $F000");
+    expect(run.did[0].said).toContain("refused");
+    // And nothing after it ran, rather than running against zeros.
+    expect(run.did).toHaveLength(1);
+  });
+
   it("holds keys until another step changes them", () => {
     const run = runScenario(
       program(),
