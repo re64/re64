@@ -2661,10 +2661,17 @@ export class Workspace {
                 petscii: decodeText(bytes, "petscii"),
                 screen: decodeText(bytes, "screen"),
                 ascii: decodeText(bytes, "ascii"),
+                // A table of key positions is not text and reads as noise under
+                // the other three — which is exactly why it belongs beside
+                // them: the one column that comes out as words is the answer.
+                keycode: decodeText(bytes, "keycode"),
               },
               note:
-                "No encoding named, so all three are shown. A program with its own " +
-                "character set is unreadable by any of them — that is what a decoder is for.",
+                "No encoding named, so all four are shown. Digits and space are " +
+                "identical in petscii and screen, so only the letters tell those two " +
+                "apart. `keycode` reads bytes as keyboard matrix positions, which is " +
+                "what a key table holds. A program with its own character set is " +
+                "unreadable by any of them — that is what a decoder is for.",
             }
           : {}),
       };

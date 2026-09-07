@@ -385,7 +385,7 @@ describe("reading a span without saying what it is", () => {
    * for pictures; text and code had no equivalent, so the only way to find out
    * was to write a claim in a document somebody else is reading.
    */
-  it("shows all three encodings when none is named", async () => {
+  it("shows every encoding when none is named", async () => {
     const { value, isError } = await callTool("preview", {
       start: "$8E00",
       length: 16,
@@ -393,7 +393,14 @@ describe("reading a span without saying what it is", () => {
     });
     expect(isError, "preview text").toBe(false);
     const seen = value as { alternatives?: Record<string, string>; text: string };
-    expect(Object.keys(seen.alternatives ?? {}).sort()).toEqual(["ascii", "petscii", "screen"]);
+    // Four now: `keycode` reads bytes as keyboard matrix positions, which is
+    // what a key table holds and what reads as noise under the other three.
+    expect(Object.keys(seen.alternatives ?? {}).sort()).toEqual([
+      "ascii",
+      "keycode",
+      "petscii",
+      "screen",
+    ]);
   });
 
   it("takes one encoding when named, and offers no alternatives", async () => {

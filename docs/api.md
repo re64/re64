@@ -355,7 +355,7 @@ Say something about an address. **This adds; it never replaces.** A claim carrie
 | `typeId` | `string` | optional | With is:"record": which layout, from list_types |
 | `extent` | `integer` | optional | Bytes covered. On a name it makes an operand inside render as NAME + $000F; on an interpretation it is the span. |
 | `root` | `entry` \| `routine` \| `location` \| `data` | optional | Surface this regardless of what reaches it. `routine` is a subroutine, `entry` is where execution starts, `data` means show these bytes even though nothing names them — an unreferenced sprite sheet needs it. |
-| `encoding` | `petscii` \| `screen` \| `ascii` | optional |  |
+| `encoding` | `petscii` \| `screen` \| `ascii` \| `keycode` | optional |  |
 | `view` | `string` | optional | For a bitmap: char:8, bits:3, sprite, snippet:<id> |
 | `comment` | `string` | optional |  |
 | `method` | `guessed` \| `transcribed` \| `read` \| `derived` \| `ran` | optional | **How you know**, not how sure you are. guessed = a hypothesis; transcribed = copied by hand from a listing or another project; read = reasoned from the code; derived = an analysis here computed it; ran = watched happening in the machine. Two accounts that agree are one account unless the methods differ — which is why this is the axis rather than a confidence score. |

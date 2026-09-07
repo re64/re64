@@ -74,3 +74,34 @@ describe("choosing wrongly is visible", () => {
     expect(decodeText(same, "petscii")).not.toBe("HELLO");
   });
 });
+
+describe("keycodes, which are positions rather than characters", () => {
+  /**
+   * The fourth table, and the odd one: a matrix code is `row * 8 + column`,
+   * where a key sits on the grid CIA 1 scans, so nothing ever draws one. It is
+   * here because programs *store* them, and because a reader in experiment 10
+   * worked out by hand that Revenge of the Mutant Camels holds five of them at
+   * `$96F7` and wrote the answer in a comment — which is the last place a
+   * finding should have to live.
+   */
+  it("reads the cheat table out of the bytes", () => {
+    // `1A 26 0A 16 0D`, which the game compares `$C5` against.
+    expect(decodeText([0x1a, 0x26, 0x0a, 0x16, 0x0d], "keycode")).toBe("GOATS");
+  });
+
+  it("is noise under every other table, which is the point of showing four", () => {
+    const bytes = [0x1a, 0x26, 0x0a, 0x16, 0x0d];
+    expect(decodeText(bytes, "screen")).not.toBe("GOATS");
+    expect(decodeText(bytes, "petscii")).not.toBe("GOATS");
+    expect(decodeText(bytes, "ascii")).not.toBe("GOATS");
+  });
+
+  it("gives a gap for a key with no single character", () => {
+    // f1, run-stop and either shift are keys, not letters. A name spliced into
+    // a string would make the run unreadable exactly where it is interesting,
+    // so this follows the graphics-glyph rule: a visible gap, never a guess.
+    expect(decodeText([0x04], "keycode")).toBe("·"); // f1
+    expect(decodeText([0x3f], "keycode")).toBe("·"); // run-stop
+    expect(decodeText([0x3c], "keycode")).toBe(" "); // space really is a space
+  });
+});

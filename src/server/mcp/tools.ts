@@ -1151,7 +1151,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
             "`entry` is where execution starts, `data` means show these bytes even " +
             "though nothing names them — an unreferenced sprite sheet needs it."
         ),
-      encoding: z.enum(["petscii", "screen", "ascii"]).optional(),
+      encoding: z.enum(["petscii", "screen", "ascii", "keycode"]).optional(),
       view: z.string().optional().describe("For a bitmap: char:8, bits:3, sprite, snippet:<id>"),
       comment: z.string().optional(),
       method: z
@@ -1178,7 +1178,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       is?: "data" | "text" | "bitmap" | "jumptable";
       extent?: number;
       root?: "entry" | "routine" | "location" | "data";
-      encoding?: "petscii" | "screen" | "ascii";
+      encoding?: TextEncoding;
       view?: string;
       comment?: string;
       method?: "guessed" | "transcribed" | "read" | "derived" | "ran";
@@ -1419,7 +1419,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
               .describe("How you know — the same axis the single write takes"),
             extent: z.number().int().min(1).max(0x10000).optional(),
             root: z.enum(["entry", "routine", "location", "data"]).optional(),
-            encoding: z.enum(["petscii", "screen", "ascii"]).optional(),
+            encoding: z.enum(["petscii", "screen", "ascii", "keycode"]).optional(),
             view: z.string().optional(),
             comment: z.string().optional(),
           })
@@ -1464,7 +1464,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       typeId: z.string().nullable().optional().describe("With is:\"record\", the layout"),
       extent: z.number().int().min(1).max(0x10000).nullable().optional(),
       root: z.enum(["entry", "routine", "location", "data"]).nullable().optional(),
-      encoding: z.enum(["petscii", "screen", "ascii"]).nullable().optional(),
+      encoding: z.enum(["petscii", "screen", "ascii", "keycode"]).nullable().optional(),
       view: z.string().nullable().optional(),
       // Settable at creation and nowhere else, so a reader who learned more
       // could not say so — "I guessed, then I ran it" is exactly the movement

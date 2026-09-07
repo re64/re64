@@ -24,7 +24,9 @@
  * text is what a disassembly reader is looking for.
  */
 
-export type TextEncoding = "ascii" | "petscii" | "screen";
+import { KEY_MATRIX } from "./devices/keyboard.js";
+
+export type TextEncoding = "ascii" | "petscii" | "screen" | "keycode";
 
 /** Shown where a byte has no glyph in this encoding, or none worth claiming. */
 const UNKNOWN = "·";
@@ -131,6 +133,39 @@ export function fromAscii(byte: number): string {
   return byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : ".";
 }
 
+/**
+ * A keyboard matrix code, as the key it names.
+ *
+ * **A coordinate rather than a character set**, and the odd one out here: a
+ * matrix code is `row * 8 + column`, where a key physically sits on the grid
+ * CIA 1 scans, so nothing ever *draws* one. It is in this union because it is
+ * the same kind of thing every other member is — a fixed table of this machine,
+ * true of the bytes wherever they sit and belonging to no program.
+ *
+ * It earns its place because programs store them. Revenge of the Mutant Camels
+ * holds `1A 26 0A 16 0D` at `$96F7` and compares `$C5` against it; a reader
+ * worked out by hand that those are G, O, A, T and S and wrote it in a comment,
+ * which is the last place a finding should have to live. Under this encoding
+ * the bytes say `GOATS`.
+ *
+ * One character per byte, so a key with no single character — `f1`, `run-stop`,
+ * either shift — reads as `·` rather than as its name. That is the same rule
+ * the graphics glyphs follow: a visible gap beats a wrong answer, and a name
+ * spliced into a string would make the run unreadable exactly where it is
+ * interesting.
+ */
+export function fromKeycode(byte: number): string {
+  const name = KEY_NAME[byte & 0x3f];
+  if (name === undefined) return UNKNOWN;
+  if (name === "space") return " ";
+  return name.length === 1 ? name.toUpperCase() : UNKNOWN;
+}
+
+/** Matrix code to key name, inverted from the table the scan uses. */
+const KEY_NAME: Readonly<Record<number, string>> = Object.fromEntries(
+  Object.entries(KEY_MATRIX).map(([name, code]) => [code, name])
+);
+
 /** Decode a run of bytes in the given encoding. */
 export function decodeText(bytes: readonly number[], encoding: TextEncoding): string {
   return bytes.map(decoderFor(encoding)).join("");
@@ -147,6 +182,8 @@ export function decodeText(bytes: readonly number[], encoding: TextEncoding): st
  */
 function decoderFor(encoding: TextEncoding): (byte: number) => string {
   switch (encoding) {
+    case "keycode":
+      return fromKeycode;
     case "petscii":
       return fromPetscii;
     case "screen":
