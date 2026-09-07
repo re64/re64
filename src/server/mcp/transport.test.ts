@@ -302,6 +302,33 @@ describe("drawing a span", () => {
   });
 });
 
+describe("reading a named view", () => {
+  /**
+   * The behavioural half of `target.test.ts`. Two tools shipped answering for
+   * the project's default view whatever was asked — and the failure was
+   * invisible, because both returned a perfectly good answer about the wrong
+   * thing.
+   */
+  it("narrows what it lists to the target it was given", async () => {
+    // Gridrunner declares no targets, so an unknown one must be refused rather
+    // than quietly answered for the default — which is the behaviour that makes
+    // a wrong answer impossible rather than merely unlikely.
+    const { isError, text } = await callTool("list_claims", { target: "nonesuch" });
+    expect(isError).toBe(true);
+    expect(text).toMatch(/target/i);
+  });
+
+  it("says which view every answer was computed for", async () => {
+    // Being told is what turns "always name your target" into a habit the API
+    // teaches rather than a rule it enforces.
+    for (const tool of ["list_claims", "export_listing", "describe_project"]) {
+      const { value, isError } = await callTool(tool, {});
+      expect(isError, tool).toBe(false);
+      expect(value, tool).toHaveProperty("target");
+    }
+  });
+});
+
 describe("saying where something is", () => {
   /**
    * The arithmetic experiment 8's readers did by hand over and over, and asked

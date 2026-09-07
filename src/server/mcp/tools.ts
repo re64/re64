@@ -962,7 +962,13 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       to?: number;
     }) =>
       context()
-        .workspace(id)
+        // `target`, which this dropped — so it always answered for the project's
+        // default view. On a project built by running a loader that is the
+        // packed file, where claims framed on the runtime layer resolve to
+        // nothing: it reported 399 labels on a project holding 1035, and one
+        // hand-made claim out of thirty-four. Second tool with this defect,
+        // hence the structural test beside this file.
+        .workspace(id, target)
         .labels(
           {
             ...criteria,

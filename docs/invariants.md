@@ -228,6 +228,21 @@ it grows a transport test.**
 *Pinned:* `server/mcp/transport.test.ts` — 78 assertions, the only layer where this
 class of bug exists.
 
+**D1a · A handler that builds a `Workspace` passes the target.** A `Workspace`
+*is* a view — constructed for a project **and** a target, which is why the target
+reaches seventy methods without appearing in any of their signatures. So dropping
+it does not fail; it answers correctly about the wrong program.
+*Origin:* two tools shipped with it. `export_listing` returned the loader's bytes
+whatever you asked for. `list_claims` reported **399** labels on a project holding
+1,035 and one hand-made claim out of thirty-four — so the tool an agent uses to
+ask "what has been named here" would have told the next run that a heavily
+annotated project was nearly empty. Neither was reachable by testing what the
+tools do: `Workspace` answers correctly for whatever view it is given, and the
+defect is in the wiring.
+*Pinned:* `server/mcp/target.test.ts` — reads the source and requires every
+single-argument `workspace()` call to name a tool on an explicit list, each with
+a written reason; plus `transport.test.ts` for the behaviour.
+
 **D2 · No deprecation aliases, and retired names are asserted absent.** An MCP
 surface is rediscovered from the schema each session and has no persisted callers.
 *Pinned:* `server/mcp/transport.test.ts` — "refuses an argument it never declared".
