@@ -109,3 +109,41 @@ describe("as text, for a terminal", () => {
     expect(bitmapToText(decodeBitmap([0xff, 0xff, 0xff])).split("\n")).toHaveLength(3);
   });
 });
+
+describe("a bank of sprites", () => {
+  /**
+   * The VIC addresses sprite data in 64-byte blocks, not 63, so a contact sheet
+   * of consecutive sprites has to step by the pitch. Stepping by the 63 bytes a
+   * sprite *uses* slips one byte per cell and the sheet is unreadable by the
+   * third picture — which is the bug that would have made re64's own renderer
+   * useless for the job experiment 9's editor did by hand.
+   */
+  const bank = (count: number): number[] => {
+    const bytes = new Array(count * 64).fill(0);
+    // Each sprite is solid with its own index in the padding byte, so a
+    // misaligned read shows up as the padding leaking into the picture.
+    for (let sprite = 0; sprite < count; sprite++) {
+      for (let i = 0; i < 63; i++) bytes[sprite * 64 + i] = 0xff;
+      bytes[sprite * 64 + 63] = 0x00;
+    }
+    return bytes;
+  };
+
+  it("counts one sprite per 64 bytes, and one for a bare 63", () => {
+    expect(cellCount("sprite", 63)).toBe(1);
+    expect(cellCount("sprite", 64)).toBe(1);
+    expect(cellCount("sprite", 127)).toBe(2);
+    expect(cellCount("sprite", 128)).toBe(2);
+    expect(cellCount("sprite", 62)).toBe(0);
+  });
+
+  it("draws every sprite in a bank solid, rather than drifting", () => {
+    const sheet = decodeBitmap(bank(4), { format: "sprite", columns: 4 });
+    expect(sheet.width).toBe(4 * 24);
+    expect(sheet.height).toBe(21);
+    // Every pixel is set. Stepping by 63 would put the padding byte inside the
+    // later sprites and leave gaps.
+    const lit = [...sheet.pixels].filter((p) => p === 1).length;
+    expect(lit).toBe(4 * 24 * 21);
+  });
+});

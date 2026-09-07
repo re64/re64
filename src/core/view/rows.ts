@@ -42,6 +42,20 @@ export interface RowToken {
   name?: string;
   /** Label type, for the type tag and for cycling it. */
   labelType?: LabelType;
+  /**
+   * The claim this name belongs to, when a consumer may edit it.
+   *
+   * Absent for an invented `dat_XXXX` and for a built-in platform name: the
+   * first has an id derived from the fact that nothing named it, and the second
+   * belongs to a symbol layer no project owns. Handing either out invites a
+   * write claiming an identity that means nothing — the same rule
+   * `Workspace.summarise` applies to `writable`.
+   *
+   * Its presence is what tells an editor whether it is *renaming* or *naming*:
+   * an address cannot identify a claim, so a rename must go by id, and a name
+   * with no id behind it can only be added.
+   */
+  claimId?: string;
 }
 
 /**
@@ -476,6 +490,10 @@ export function analyze(
           target: addr,
           name: shownName,
           labelType: labelTypeOf(label),
+          // Only a stored claim has an id worth handing to an editor.
+          ...(label.by.source === "auto" || label.by.source === "platform"
+            ? {}
+            : { claimId: label.id }),
         },
       ];
 

@@ -24,3 +24,5 @@ export {
   cellCount,
   decodeBitmap,
 } from "./bitmap-view.js";
+export { encodePng, encodeApng } from "./png.js";
+export { encodeWav } from "./wav.js";

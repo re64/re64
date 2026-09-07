@@ -93,24 +93,48 @@ export interface BitmapOptions {
  */
 const DEFAULT_COLOURS = [0, 1, 12, 11];
 
-const cellSize = (format: BitmapFormat): { width: number; height: number; bytes: number } => {
+/**
+ * How big a cell is, how many bytes it *uses*, and how far to the next one.
+ *
+ * `pitch` is not `bytes` for a sprite, and the difference is the whole reason
+ * this distinction exists. A sprite is 24 by 21 one-bit pixels — three bytes a
+ * row, sixty-three bytes — but the VIC addresses sprite data in **64-byte
+ * units**, because a sprite pointer is one byte indexing 64-byte blocks within
+ * a bank. So the sixty-fourth byte is padding, and stepping by 63 through a
+ * bank of them slips one byte further out of alignment with every sprite.
+ *
+ * Found by building the thing experiment 9's editor built by hand: a contact
+ * sheet of consecutive 64-byte blocks is how every joke in that game was found,
+ * and the version of it that steps by 63 is unreadable after the third sprite.
+ */
+const cellSize = (
+  format: BitmapFormat
+): { width: number; height: number; bytes: number; pitch: number } => {
   switch (format) {
     case "char":
-      return { width: 8, height: 8, bytes: 8 };
+      return { width: 8, height: 8, bytes: 8, pitch: 8 };
     case "sprite":
-      return { width: 24, height: 21, bytes: 63 };
+      return { width: 24, height: 21, bytes: 63, pitch: 64 };
     case "sprite-multi":
       // Half the horizontal resolution, because each pixel is two bits and two
       // pixels wide on screen. The bytes are the same 63.
-      return { width: 12, height: 21, bytes: 63 };
+      return { width: 12, height: 21, bytes: 63, pitch: 64 };
     case "bits":
-      return { width: 8, height: 1, bytes: 1 };
+      return { width: 8, height: 1, bytes: 1, pitch: 1 };
   }
 };
 
-/** Number of cells a run of bytes contains, in the given format. */
+/**
+ * Number of cells a run of bytes contains, in the given format.
+ *
+ * The last cell needs only its own `bytes`, not a whole `pitch`: exactly
+ * sixty-three bytes is one sprite, and refusing to draw it because the padding
+ * byte is missing would make a claim of precisely one sprite render nothing.
+ */
 export function cellCount(format: BitmapFormat, byteCount: number): number {
-  return Math.floor(byteCount / cellSize(format).bytes);
+  const { bytes, pitch } = cellSize(format);
+  if (byteCount < bytes) return 0;
+  return Math.floor((byteCount - bytes) / pitch) + 1;
 }
 
 /**
@@ -159,7 +183,7 @@ export function decodeBitmap(
   for (let index = 0; index < total; index++) {
     const originX = (index % columns) * cell.width;
     const originY = Math.floor(index / columns) * cell.height;
-    const base = index * cell.bytes;
+    const base = index * cell.pitch;
     const bytesPerRow = format === "char" ? 1 : 3;
 
     for (let y = 0; y < cell.height; y++) {
@@ -263,14 +287,21 @@ export function parseBitmapView(view: string | undefined): BitmapOptions | undef
 export const isBitmapView = (view: string | undefined): boolean =>
   parseBitmapView(view) !== undefined;
 
-/** How many bytes one cell of this view consumes. */
+/**
+ * How many bytes of *address space* one cell of this view consumes.
+ *
+ * Sixty-four for a sprite, not the sixty-three it draws with: this is what the
+ * listing advances by per row and what the explorer steps by, so it has to be
+ * the same pitch `decodeBitmap` reads at or the two disagree and every cell
+ * after the first in a row is drawn from the wrong bytes.
+ */
 export function bytesPerCell(options: BitmapOptions): number {
   switch (options.format ?? "bits") {
     case "char":
       return 8;
     case "sprite":
     case "sprite-multi":
-      return 63;
+      return 64;
     case "bits":
       return Math.max(1, options.stride ?? 1);
   }
