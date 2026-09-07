@@ -368,10 +368,12 @@ Correct a claim, by its id. The way to change what you said rather than say some
 | `at` | `string,number` | optional | Move it. Absolute, like every address here — a claim is stored relative to the layer holding its bytes, and this is converted |
 | `name` | `any` | optional |  |
 | `is` | `any` | optional |  |
+| `typeId` | `string,null` | optional | With is:"record", the layout |
 | `extent` | `any` | optional |  |
 | `root` | `any` | optional |  |
 | `encoding` | `any` | optional |  |
 | `view` | `string,null` | optional |  |
+| `method` | `any` | optional | How you know, revised: a guess you have since run is no longer a guess |
 | `expectVersion` | `string` | optional |  |
 
 #### `remove_claim`

@@ -1353,12 +1353,23 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
             at: address,
             name: z.string().min(1).optional(),
             is: z
-              .enum(["data", "text", "bitmap", "jumptable"])
+              .enum(["data", "text", "bitmap", "jumptable", "record"])
               .optional()
               .describe(
                 "What the bytes are. There is no `code`: code is what bytes are when " +
                         "nobody has said otherwise, so to have an address decoded set a root."
               ),
+            // `method` and `typeId` were on the single write and not on this
+            // one, so a reader who wanted provenance on every claim could not
+            // use the batch at all. Reader two of experiment 10 made every
+            // claim singly for exactly that reason and said so: "This cost
+            // turns but kept provenance honest." A batch that costs you a field
+            // is not a batch.
+            typeId: z.string().optional().describe("With is:\"record\", the layout"),
+            method: z
+              .enum(["guessed", "transcribed", "read", "derived", "ran"])
+              .optional()
+              .describe("How you know — the same axis the single write takes"),
             extent: z.number().int().min(1).max(0x10000).optional(),
             root: z.enum(["entry", "routine", "location", "data"]).optional(),
             encoding: z.enum(["petscii", "screen", "ascii"]).optional(),
@@ -1400,11 +1411,22 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
             "relative to the layer holding its bytes, and this is converted"
         ),
       name: z.string().min(1).nullable().optional(),
-      is: z.enum(["data", "text", "bitmap", "jumptable"]).nullable().optional(),
+      // `record` was missing here while `add_claim` accepted it, so a record
+      // claim could be made and never corrected — reported in two runs.
+      is: z.enum(["data", "text", "bitmap", "jumptable", "record"]).nullable().optional(),
+      typeId: z.string().nullable().optional().describe("With is:\"record\", the layout"),
       extent: z.number().int().min(1).max(0x10000).nullable().optional(),
       root: z.enum(["entry", "routine", "location", "data"]).nullable().optional(),
       encoding: z.enum(["petscii", "screen", "ascii"]).nullable().optional(),
       view: z.string().nullable().optional(),
+      // Settable at creation and nowhere else, so a reader who learned more
+      // could not say so — "I guessed, then I ran it" is exactly the movement
+      // this axis exists to record.
+      method: z
+        .enum(["guessed", "transcribed", "read", "derived", "ran"])
+        .nullable()
+        .optional()
+        .describe("How you know, revised: a guess you have since run is no longer a guess"),
       expectVersion: z.string().optional(),
     },
     (args: {
@@ -1418,6 +1440,8 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       root?: RootKind | null;
       encoding?: TextEncoding | null;
       view?: string | null;
+      typeId?: string | null;
+      method?: "guessed" | "transcribed" | "read" | "derived" | "ran" | null;
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
@@ -1447,6 +1471,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         ["is", args.is],
         ["encoding", args.encoding],
         ["view", args.view],
+        ["typeId", args.typeId],
       ] as const) {
         if (value === undefined) continue;
         saysTouched = true;
@@ -1454,6 +1479,13 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         else if (value !== null) says[key] = value;
       }
       if (saysTouched) fields.says = saysCleared ? null : (says as Claim["says"]);
+
+      // `method` lives on `by`, which also carries the author and the source —
+      // so this merges rather than replacing, or revising how you know would
+      // quietly forget who said it.
+      if (args.method !== undefined) {
+        fields.method = args.method;
+      }
 
       return space.setClaim(caller, args.id, fields as ClaimEdit);
     }

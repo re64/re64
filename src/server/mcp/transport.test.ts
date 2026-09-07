@@ -376,6 +376,64 @@ describe("a layer nobody links supplies nothing", () => {
   });
 });
 
+describe("the three claim writers carry the same fields", () => {
+  /**
+   * They did not. `add_claim` took `typeId` and `method`; the batch took
+   * neither, so reader two of experiment 10 made every claim singly to keep
+   * provenance — "This cost turns but kept provenance honest." And
+   * `edit_claim`'s `is` had no `record`, so a record claim could be created and
+   * never corrected, reported in two consecutive runs.
+   *
+   * The workspace supported all of it. Only the schemas refused.
+   */
+  it("takes method and a record layout in the batch", async () => {
+    const type = await callTool("add_type", {
+      name: "BatchProbe",
+      size: 4,
+      fields: { 0: { name: "whole", type: "bytes(4)" } },
+    });
+    expect(type.isError, type.text).toBe(false);
+    const typeId = (type.value as { type: string }).type;
+
+    const made = await callTool("add_claims", {
+      claims: [
+        { at: "$8100", name: "batchOne", method: "derived" },
+        { at: "$8110", name: "batchTwo", is: "record", typeId, extent: 4, method: "ran" },
+      ],
+    });
+    expect(made.isError, made.text).toBe(false);
+
+    const at = (await callTool("claims_at", { at: "$8110" })).value as {
+      claims: { name?: string; is?: string; typeId?: string; method?: string }[];
+    };
+    const mine = at.claims.find((c) => c.name === "batchTwo")!;
+    expect(mine.is).toBe("record");
+    expect(mine.typeId).toBe(typeId);
+    expect(mine.method).toBe("ran");
+  });
+
+  it("revises how you know, without forgetting who said it", async () => {
+    const made = await callTool("add_claim", {
+      at: "$8120",
+      name: "guessedFirst",
+      method: "guessed",
+    });
+    expect(made.isError, made.text).toBe(false);
+    const id = (made.value as { claims: { claim: string }[] }).claims[0].claim;
+
+    // "I guessed, then I ran it" is the movement this axis exists to record,
+    // and it was unsayable: method could be set at creation and nowhere else.
+    const edited = await callTool("edit_claim", { id, method: "ran" });
+    expect(edited.isError, edited.text).toBe(false);
+
+    const at = (await callTool("claims_at", { at: "$8120" })).value as {
+      claims: { id: string; method?: string; by?: string }[];
+    };
+    const mine = at.claims.find((c) => c.id === id)!;
+    expect(mine.method).toBe("ran");
+  });
+});
+
 describe("naming a value has an on-ramp", () => {
   /**
    * `find_immediates` exists to be the way in to constants — "the query behind

@@ -90,6 +90,7 @@ import {
   claimSpan,
   compareClaims,
   describeScope,
+  ClaimMethod,
 } from "../core/claims/model.js";
 import { NamedClaim, labelTypeOf } from "../core/claims/names.js";
 import { fieldSize, formatFieldType, parseFieldType } from "../core/memory/type.js";
@@ -1633,6 +1634,9 @@ export class Workspace {
   }): {
     total: number;
     truncated: boolean;
+    /** Indexed instructions based below the range, which an index may carry into it. */
+    indexedNearby?: { address: string; text: string; base: string; inRoutine?: string }[];
+    indexedNote?: string;
     sites: {
       address: string;
       text: string;
@@ -1674,9 +1678,60 @@ export class Workspace {
       );
     });
 
+    // **Indexed instructions whose base sits below the range.**
+    //
+    // `find_instructions $07F8-$07FF` came back empty on a program that writes
+    // all eight sprite pointers, because the instruction is `STA $07F7,X` with X
+    // running 1 to 8: the operand is one byte below the range and the addresses
+    // written are inside it. A reader's comment recorded the dead end and the
+    // editor found the instruction by accident, reading that listing for another
+    // reason.
+    //
+    // The renderer already knows this idiom — `table-1,X` is why the ±1 window
+    // in operand resolution exists — and the search did not. An index is one
+    // byte, so "could reach" is exact rather than a guessed window: base plus
+    // 0..255. Reported separately from the matches, because *may* and *does* are
+    // different answers and collapsing them is how a search starts lying.
+    const nearby: { address: string; text: string; base: string; inRoutine?: string }[] = [];
+    if (criteria.from !== undefined || criteria.to !== undefined) {
+      const from = criteria.from ?? 0;
+      const to = criteria.to ?? 0xffff;
+      for (const instruction of program.instructions.all()) {
+        if (wanted && instruction.mnemonic.toUpperCase() !== wanted) continue;
+        const operand = instruction.operand;
+        if (operand.type !== "absoluteX" && operand.type !== "absoluteY") continue;
+        const base = operand.address;
+        if (base >= from) continue; // already matched, or above the range
+        if (base + 0xff < from) continue; // no index can reach
+        nearby.push({
+          address: hex4(instruction.address),
+          text: contentRowAt(rows, lineForAddress, instruction.address)?.text ?? "",
+          base: hex4(base),
+          ...(this.routineNameAt(instruction.address)
+            ? { inRoutine: this.routineNameAt(instruction.address)! }
+            : {}),
+        });
+      }
+    }
+
+    // Closest base first: an instruction one byte below the range is far more
+    // likely to be the one you are looking for than one two hundred below.
+    nearby.sort(
+      (a, b) => parseInt(b.base.slice(1), 16) - parseInt(a.base.slice(1), 16)
+    );
+
     return {
       total: matches.length,
       truncated: matches.length > limit,
+      ...(nearby.length === 0
+        ? {}
+        : {
+            indexedNearby: nearby.slice(0, 20),
+            indexedNote:
+              `${nearby.length} indexed instruction(s) have a base below this range and ` +
+              `could reach into it — an index is one byte, so anything within 255 below ` +
+              `may write here. These are not matches; check whether the index reaches.`,
+          }),
       sites: matches.slice(0, limit).map((instruction) => {
         const target = targetsOf(instruction, program.blocks);
         return {
@@ -2389,7 +2444,34 @@ export class Workspace {
     const vicBank = bank ?? 0;
     const cell = screenCell(address, base);
     const sprite = spriteAt(address, vicBank);
-    const byte = this.program().loaded.map.readByte(address);
+    const map = this.program().loaded.map;
+    const byte = map.readByte(address);
+
+    // **The two bytes here, read as an address.**
+    //
+    // The most repeated hand-arithmetic of experiment 10 after the places
+    // themselves: reader two did it three times — a jump table's entries, two
+    // music pointer pairs, a screen row to its colour-RAM twin — and said "there
+    // is no tool here that resolves 'the word at this address, read as an
+    // address' for me". The editor did it four more times from pairs of
+    // immediates in code, which is the harder half and still is.
+    //
+    // Little-endian first because that is what the machine is; the other order
+    // is offered because a hand-written table need not be, which is the same
+    // reason `ptr` and `ptrbe` are two field types rather than a type and a
+    // flag.
+    const lo = map.readByte(address);
+    const hi = map.readByte((address + 1) & 0xffff);
+    const word =
+      lo === undefined || hi === undefined
+        ? undefined
+        : {
+            little: hex4(lo | (hi << 8)),
+            big: hex4((lo << 8) | hi),
+            // What that address is called, if anything — which is the point:
+            // a pointer resolves, and a listing can only show it if it does.
+            namedLittle: this.program().labels.resolve(lo | (hi << 8))?.label.name,
+          };
 
     return {
       address: hex4(address),
@@ -2416,6 +2498,9 @@ export class Workspace {
               // a caller to notice the number is not zero.
               startsHere: sprite.offset === 0,
             },
+      // Only where both bytes are there; a word running off the end of the map
+      // is not a word.
+      ...(word === undefined ? {} : { word }),
       assumed: {
         screenBase: hex4(base),
         vicBank: hex4(vicBank),
@@ -3259,6 +3344,24 @@ export class Workspace {
           ? { ...fields, says: { ...held.says, ...fields.says } as Claim["says"] }
           : fields;
 
+      // `method` is offered as its own argument because that is how a caller
+      // thinks about it, and it lives inside `by` beside the author and the
+      // source — so it merges, or revising how you know would forget who said
+      // it. Settable only at creation until now, which made "I guessed, then I
+      // ran it" unsayable: exactly the movement this axis exists to record.
+      const withMethod = (raw: ClaimEdit & { method?: ClaimMethod | null }): ClaimEdit => {
+        if (raw.method === undefined) return raw;
+        const { method, ...rest } = raw;
+        return {
+          ...rest,
+          by: {
+            ...held.by,
+            ...(method === null ? {} : { method }),
+            ...(method === null && held.by.method !== undefined ? { method: undefined } : {}),
+          } as Claim["by"],
+        };
+      };
+
       // **`at` is absolute here, as it is in every tool, and is converted.**
       // A claim is stored relative to the layer that supplies its bytes, so a
       // raw absolute address written straight into the field would be read back
@@ -3273,8 +3376,8 @@ export class Workspace {
       // layers, and the answer reports the scope it ended up in.
       const edit: ClaimEdit =
         merged.at === undefined || merged.at === null
-          ? merged
-          : { ...merged, ...placed(loaded, merged.at) };
+          ? withMethod(merged)
+          : { ...withMethod(merged), ...placed(loaded, merged.at) };
 
       return [{ op: "claim.set", id, fields: edit }];
     });
