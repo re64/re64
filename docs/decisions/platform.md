@@ -126,7 +126,8 @@ The real work is three things:
 ## The seam, and what it is not
 
 `src/core/platform.ts` exists as of this entry, and it currently does one thing:
-routes the address schema's `screen(...)`/`sprite(...)` forms so that the shared
+routes the address schema's `screen(...)`/`sprite(...)` forms (see the note at
+the foot of this file: they are spelled with brackets now) so that the shared
 parser never imports a platform directly. It was added because that coupling was
 *new* — introduced the same day — and the cheapest moment to give something a
 home is before it sets.
@@ -138,3 +139,29 @@ designed against one platform describes that platform rather than the category �
 which is the mistake this project has already recorded under a different name:
 building coordination machinery in advance decides what coordination looks like
 before anyone has seen any.
+
+---
+
+## Note, appended: the places are spelled with brackets
+
+The entry above writes them `screen(row,column)` and `sprite(pointer)`, which is
+what the parser accepted when it was written. They are now `screen[row,column]`
+and `sprite[pointer]`, and the base — the thing that is not an index — moved out
+of the argument list onto the array: `screen($8400)[10,2]`.
+
+The reason is an observation rather than taste. **A place is an array reference
+into an array whose base is implicit**: the character cells from the screen base,
+the 64-byte blocks from the VIC bank. Parentheses said *call*, and on a machine
+whose own indirection syntax is `($FB),Y` they said something actively
+misleading. Brackets say what these are, and they make a place the same shape as
+a program's own tables — which matters because that notation is what the field
+types are being built around, and one notation covering both the machine's arrays
+and the program's is worth more than either alone.
+
+The old spelling is still read. A place resolves to an address and is **never
+stored**, so there was nothing to migrate — and three runs' worth of notes, every
+previous tool description and the article all use parentheses. Nothing is gained
+by refusing what everybody already typed.
+
+`where` now answers with the place written out, so the two directions round-trip:
+what it says goes straight back into any address argument.

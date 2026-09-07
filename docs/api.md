@@ -128,7 +128,7 @@ Disassembly from an address. Each line carries both the rendered text and the fi
 
 | argument | type | | |
 |---|---|---|---|
-| `start` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `start` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `lines` | `integer` | optional | Default 80 |
 
 #### `read_bytes`
@@ -137,7 +137,7 @@ The raw bytes at an address, as hex and as base64. For when you want to work on 
 
 | argument | type | | |
 |---|---|---|---|
-| `start` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `start` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `length` | `integer` | **required** | How many bytes; 8192 at a time |
 
 #### `render`
@@ -147,7 +147,7 @@ Draw a span and get a picture back, without touching the project. This is how yo
 | argument | type | | |
 |---|---|---|---|
 | `claim` | `string` | optional | A claim id from claims_at or list_claims. Draws exactly what that claim covers, using its own view — so naming a sprite once makes it drawable by name afterwards. Give this or start/length/view, not both. |
-| `start` | `string,number` | optional | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `start` | `string,number` | optional | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `length` | `integer` | optional | How many bytes to draw |
 | `view` | `string` | optional | bits:<n> \| char:<n> \| sprite:<n> \| sprite-multi:<n> — n is per row. With a claim, overrides the claim's own view without editing it. |
 | `as` | `grid` \| `frames` | optional | grid: one sheet (default). frames: an animated PNG, one cell per frame |
@@ -159,7 +159,7 @@ Read a span **as** something, without saying it is that. Writes nothing. `as: "t
 
 | argument | type | | |
 |---|---|---|---|
-| `start` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `start` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `length` | `integer` | **required** | How many bytes |
 | `as` | `text` \| `code` \| `record` | **required** |  |
 | `encoding` | `petscii` \| `screen` \| `ascii` | optional | For as:"text"; omit to see all three |
@@ -167,11 +167,11 @@ Read a span **as** something, without saying it is that. Writes nothing. `as: "t
 
 #### `where`
 
-What an address is, in the units the machine uses: which screen cell, which sprite pointer, and where its colour byte is. The inverse of the `screen(...)` and `sprite(...)` forms every address argument accepts — you can write `screen(10,2)` to get to `$0592`, and this is how you go the other way while reading a listing. Both conversions depend on runtime state rather than on the project — the screen base in `$D018`, the VIC bank in `$DD00` — so the answer names the bases it assumed, and you can override them.
+What an address is, in the units the machine uses: which screen cell, which sprite pointer, and where its colour byte is. The inverse of the `screen[...]` and `sprite[...]` forms every address argument accepts — you can write `screen[10,2]` to get to `$0592`, and this is how you go the other way while reading a listing. It answers with the place written out, so it goes straight back into an argument. Both conversions depend on runtime state rather than on the project — the screen base in `$D018`, the VIC bank in `$DD00` — so the answer names the bases it assumed, and you can override them.
 
 | argument | type | | |
 |---|---|---|---|
-| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `screenBase` | `string,number` | optional | Where this program keeps its screen; $0400 at power-on |
 | `bank` | `string,number` | optional | The VIC's 16K bank; $0000 at power-on |
 
@@ -194,7 +194,7 @@ Every claim covering an address, with nothing resolved. The read that makes an a
 
 | argument | type | | |
 |---|---|---|---|
-| `at` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `at` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 
 #### `list_roots`
 
@@ -243,7 +243,7 @@ What refers to an address, and what it refers to. Inbound entries carry the call
 
 | argument | type | | |
 |---|---|---|---|
-| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `direction` | `in` \| `out` \| `both` | optional | Default both |
 
 #### `find_instructions`
@@ -305,7 +305,7 @@ What the code at an address touches — registers, flags and memory — over a s
 
 | argument | type | | |
 |---|---|---|---|
-| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `follow` | `block` \| `routine` \| `calls` \| `returning` | optional | How far to look. Default `calls`. |
 
 #### `call_graph`
@@ -314,7 +314,7 @@ Who calls a routine, and what it calls, to a depth. The shape of a program rathe
 
 | argument | type | | |
 |---|---|---|---|
-| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `depth` | `integer` | optional | How far down to follow. Default 2 |
 
 #### `run_decoder`
@@ -323,7 +323,7 @@ Run a decoder you write over a span of bytes, and see what it produces. For data
 
 | argument | type | | |
 |---|---|---|---|
-| `start` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `start` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `length` | `integer` | **required** | How many bytes to hand it |
 | `source` | `string` | optional | The body of the function. Use `return` to produce the result. |
 | `decoder` | `string` | optional | Id of a decoder kept in the project, instead of source. See list_decoders. |
@@ -349,7 +349,7 @@ Say something about an address. **This adds; it never replaces.** A claim carrie
 
 | argument | type | | |
 |---|---|---|---|
-| `at` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `at` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `name` | `string` | optional |  |
 | `is` | `data` \| `text` \| `bitmap` \| `jumptable` \| `record` | optional | What the bytes are. There is no `code`: code is what bytes are when nobody has said otherwise, so to have an address decoded set a root. `record` is an array of a layout from list_types, and needs typeId. |
 | `typeId` | `string` | optional | With is:"record": which layout, from list_types |
@@ -403,7 +403,7 @@ Declare an address a subroutine, creating a label if there is none. This makes i
 
 | argument | type | | |
 |---|---|---|---|
-| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `name` | `string` | optional |  |
 | `expectVersion` | `string` | optional |  |
 
@@ -413,7 +413,7 @@ Take back a function declaration. An auto-shaped name is removed outright rather
 
 | argument | type | | |
 |---|---|---|---|
-| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `expectVersion` | `string` | optional |  |
 
 ---
@@ -428,7 +428,7 @@ Choose which of several claims at an address gives the name that renders where n
 
 | argument | type | | |
 |---|---|---|---|
-| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `claim` | `string` | **required** | From claims_at or list_claims |
 | `expectVersion` | `string` | optional |  |
 
@@ -438,7 +438,7 @@ Stop choosing, so the name at this address falls back to rank. There was no way 
 
 | argument | type | | |
 |---|---|---|---|
-| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `expectVersion` | `string` | optional |  |
 
 #### `bind_name`
@@ -459,7 +459,7 @@ Let the operand at an address resolve by the usual rule again.
 
 | argument | type | | |
 |---|---|---|---|
-| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `expectVersion` | `string` | optional |  |
 
 ---
@@ -474,7 +474,7 @@ Add a comment about an address, and return its id. "before" gets its own rows ab
 
 | argument | type | | |
 |---|---|---|---|
-| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `text` | `string` | **required** |  |
 | `placement` | `before` \| `inline` \| `after` | optional | before (own rows above the label), inline (shares the instruction's row), or after (own rows below it, for an observation about what happens next). Default before. |
 | `expectVersion` | `string` | optional |  |
@@ -505,7 +505,7 @@ Put the comments at an address in the order given, by id. Ordering is otherwise 
 
 | argument | type | | |
 |---|---|---|---|
-| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `ids` | `array` | **required** | In the order you want them |
 | `expectVersion` | `string` | optional |  |
 
@@ -569,7 +569,7 @@ Say that the immediate operand at an address means a named constant, so it rende
 
 | argument | type | | |
 |---|---|---|---|
-| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `constant` | `string` | **required** | A constant id from add_constant or list_constants |
 | `expectVersion` | `string` | optional |  |
 
@@ -588,7 +588,7 @@ Read the operand at an address as its literal value again.
 
 | argument | type | | |
 |---|---|---|---|
-| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `expectVersion` | `string` | optional |  |
 
 #### `add_type`
@@ -719,7 +719,7 @@ Run the program from an address until it leaves the bytes this project holds —
 
 | argument | type | | |
 |---|---|---|---|
-| `from` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `from` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `stopAt` | `string,number` | optional | Stop here instead of running on |
 | `maxInstructions` | `integer` | optional | Default 20 million, about ten seconds |
 | `capture` | `object` | optional |  |
@@ -731,7 +731,7 @@ Execute the block at an address with values you choose, and see what comes out. 
 
 | argument | type | | |
 |---|---|---|---|
-| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen(row,column), screen(cell) and sprite(pointer), each taking an optional base or VIC bank as a last argument since both depend on where the program put them |
+| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `registers` | `object` | optional | Starting registers and flags; anything omitted starts at zero |
 | `memory` | `object` | optional | Starting bytes, keyed by address as $D012 or decimal |
 

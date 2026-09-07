@@ -89,26 +89,71 @@ export function spriteAt(
 }
 
 /**
- * `screen(...)` and `sprite(...)` written out, as an address.
+ * A place written out, as an address.
  *
- * **Sugar at the parser, and deliberately not a language.** It reaches every
- * tool at once because they share one address schema, and it stops there: a
- * call with integer arguments is a lookup with parentheses, where `sprite($9D)
- * + 3` would be a grammar — with precedence to define, four consumers to
- * implement it identically, and a version to carry in the file format. The
- * moment somebody wants arithmetic, they want an expression language, and that
- * is a different decision taken deliberately rather than arrived at.
+ * **Brackets, because that is what these are.** `sprite[13]` and `screen[10,2]`
+ * are array references into an array whose base is implicit — the sprite blocks
+ * from the VIC bank, the character cells from the screen base — and writing them
+ * with parentheses said "call" or, on a machine where `($FB),Y` is the
+ * indirection syntax, said something worse. The observation is not cosmetic: it
+ * makes a place the same shape as `zones[2]`, so one notation covers a program's
+ * own tables and the machine's.
+ *
+ * The base is not an index, so it does not go inside the brackets. It goes where
+ * it belongs — on the array: `screen($8400)[10,2]` is the cell in a screen
+ * somebody moved, and `sprite($4000)[13]` the block in a different VIC bank.
+ *
+ * The parenthesised forms are still read, because three runs' worth of notes and
+ * every previous tool description use them, and a place resolves to an address
+ * and is never stored — so there is nothing to migrate and no reason to break
+ * anybody's fingers.
+ *
+ * **Sugar at the parser, and deliberately not a language.** An index list is a
+ * lookup; `sprite[$9D] + 3` would be a grammar — with precedence to define, four
+ * consumers to implement it identically, and a version to carry in the file
+ * format. The moment somebody wants arithmetic, they want an expression
+ * language, and that is a different decision taken deliberately rather than
+ * arrived at.
  *
  * Resolved here and never stored: what a claim records is the address this
  * returns, because the bases are runtime state and a stored expression would
  * mean different bytes at different moments of the program.
  */
 export function parseGeometry(text: string): number | undefined {
-  const match = /^(screen|sprite)\s*\(([^)]*)\)$/i.exec(text.trim());
+  const match = /^(screen|sprite)\s*(?:\(([^)]*)\))?\s*(?:\[([^\]]*)\])?$/i.exec(text.trim());
   if (!match) return undefined;
 
-  const [, name, inside] = match;
-  const args = inside
+  const [, word, parens, brackets] = match;
+  // Neither is a place: bare `screen` says a thing, not a thing's address.
+  if (parens === undefined && brackets === undefined) return undefined;
+  const name = word.toLowerCase() as "screen" | "sprite";
+
+  if (brackets !== undefined) {
+    const where = numbers(parens ?? "");
+    if (where.length > 1) {
+      throw new Error(
+        `${name}(...) locates the array and takes one address; the indices go in ` +
+          "the brackets."
+      );
+    }
+    return at(name, numbers(brackets), where[0]);
+  }
+
+  // The parenthesised form, where the base rides along as a last argument —
+  // which is exactly the ambiguity the brackets remove.
+  const args = numbers(parens!);
+  if (name === "screen") {
+    if (args.length === 1) return at("screen", args, undefined);
+    if (args.length === 2 || args.length === 3) return at("screen", args.slice(0, 2), args[2]);
+    throw new Error("screen[] takes a cell, or a row and a column");
+  }
+  if (args.length === 1 || args.length === 2) return at("sprite", args.slice(0, 1), args[1]);
+  throw new Error("sprite[] takes a pointer");
+}
+
+/** An index list, in the spellings addresses are written in. */
+function numbers(inside: string): number[] {
+  return inside
     .split(",")
     .map((part) => part.trim())
     .filter((part) => part.length > 0)
@@ -121,22 +166,42 @@ export function parseGeometry(text: string): number | undefined {
       if (!Number.isFinite(value)) throw new Error(`${part} is not a number`);
       return value;
     });
-
-  if (name.toLowerCase() === "screen") {
-    // `screen(cell)` as well as `screen(row, column)`, because a program's own
-    // arithmetic is usually a single offset and translating it to a row and a
-    // column first would be the work this exists to remove.
-    if (args.length === 1) {
-      const [cell] = args;
-      if (cell < 0 || cell >= CELLS) throw new Error(`Cell ${cell} is not on the screen`);
-      return (DEFAULT_SCREEN_BASE + cell) & 0xffff;
-    }
-    if (args.length === 2 || args.length === 3) {
-      return screenAddress(args[0], args[1], args[2] ?? DEFAULT_SCREEN_BASE);
-    }
-    throw new Error("screen() takes a cell, a row and a column, or those and a base");
-  }
-
-  if (args.length === 1 || args.length === 2) return spriteAddress(args[0], args[1] ?? 0);
-  throw new Error("sprite() takes a pointer, and optionally the VIC bank");
 }
+
+/** One place, from its indices and the base of the array they index. */
+function at(name: "screen" | "sprite", index: number[], base: number | undefined): number {
+  if (name === "sprite") {
+    if (index.length !== 1) throw new Error("sprite[] takes a pointer, and nothing else");
+    return spriteAddress(index[0], base ?? 0);
+  }
+  // `screen[cell]` as well as `screen[row,column]`, because a program's own
+  // arithmetic is usually a single offset and translating it to a row and a
+  // column first would be the work this exists to remove.
+  if (index.length === 1) {
+    const [cell] = index;
+    if (!Number.isInteger(cell) || cell < 0 || cell >= CELLS) {
+      throw new Error(`Cell ${cell} is not on the screen; there are ${CELLS}, numbered from 0.`);
+    }
+    return ((base ?? DEFAULT_SCREEN_BASE) + cell) & 0xffff;
+  }
+  if (index.length === 2) return screenAddress(index[0], index[1], base ?? DEFAULT_SCREEN_BASE);
+  throw new Error("screen[] takes a cell, or a row and a column");
+}
+
+/**
+ * An address written back as the place it is — the direction `where` answers.
+ *
+ * Names the base only when it is not the one at power-on, so the common case
+ * stays short and the uncommon one cannot be mistaken for it.
+ */
+export function placeText(
+  name: "screen" | "sprite",
+  index: readonly number[],
+  base: number,
+  fallback: number
+): string {
+  const located = base === fallback ? name : `${name}($${hex(base)})`;
+  return `${located}[${index.join(",")}]`;
+}
+
+const hex = (n: number) => n.toString(16).toUpperCase().padStart(4, "0");

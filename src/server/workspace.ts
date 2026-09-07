@@ -146,7 +146,12 @@ import { decodeText } from "../core/c64/text.js";
 import { decode as decodeInstruction } from "../core/arch/mos6502/decoder.js";
 import { formatInstruction } from "../core/arch/mos6502/instruction.js";
 import type { ByteReading } from "../core/memory/region.js";
-import { DEFAULT_SCREEN_BASE, screenCell, spriteAt } from "../core/c64/geometry.js";
+import {
+  DEFAULT_SCREEN_BASE,
+  placeText,
+  screenCell,
+  spriteAt,
+} from "../core/c64/geometry.js";
 import type { SidWrite } from "../core/c64/devices/sid.js";
 
 /**
@@ -2490,6 +2495,11 @@ export class Workspace {
               column: cell.column,
               cell: cell.cell,
               colourRam: hex4(cell.colourRam),
+              // The answer written so it can be pasted straight back into any
+              // address argument. Without it this direction stops at a pair of
+              // numbers the caller has to reassemble by hand — which is the
+              // arithmetic the places exist to remove, in the other direction.
+              place: placeText("screen", [cell.row, cell.column], base, DEFAULT_SCREEN_BASE),
             },
       sprite:
         sprite === undefined
@@ -2497,6 +2507,7 @@ export class Workspace {
           : {
               pointer: hex2(sprite.pointer),
               offset: sprite.offset,
+              place: placeText("sprite", [sprite.pointer], vicBank, 0),
               // Only offset zero is a sprite's start. Anything else is the
               // middle of a picture, which is worth saying rather than leaving
               // a caller to notice the number is not zero.

@@ -38,9 +38,10 @@ const address = z
   .union([z.string(), z.number()])
   .describe(
     "An address, as $8100, 0x8100, decimal text, or a number — or a place: " +
-      "screen(row,column), screen(cell) and sprite(pointer), each taking an " +
-      "optional base or VIC bank as a last argument since both depend on " +
-      "where the program put them"
+      "screen[row,column], screen[cell] and sprite[pointer]. They are array " +
+      "references, so they index with brackets; the array's own base goes in " +
+      "parentheses before them — screen($8400)[10,2], sprite($4000)[13] — " +
+      "since where the screen and the sprite blocks sit is runtime state"
   )
   .transform((value, ctx) => {
     if (typeof value === "number") {
@@ -52,7 +53,7 @@ const address = z
     }
     const text = value.trim();
 
-    // `screen(10,2)` and `sprite($9D)` before anything else, because they are
+    // `screen[10,2]` and `sprite[$9D]` before anything else, because they are
     // the arithmetic three runs of readers did by hand — and putting them here
     // rather than in a tool of their own gives every tool the capability at
     // once, since they all share this schema. Sugar, resolved to a number and
@@ -481,9 +482,10 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     "where",
     "What an address is, in the units the machine uses: which screen cell, " +
       "which sprite pointer, and where its colour byte is. " +
-      "The inverse of the `screen(...)` and `sprite(...)` forms every address " +
-      "argument accepts — you can write `screen(10,2)` to get to `$0592`, and " +
-      "this is how you go the other way while reading a listing. " +
+      "The inverse of the `screen[...]` and `sprite[...]` forms every address " +
+      "argument accepts — you can write `screen[10,2]` to get to `$0592`, and " +
+      "this is how you go the other way while reading a listing. It answers " +
+      "with the place written out, so it goes straight back into an argument. " +
       "Both conversions depend on runtime state rather than on the project — " +
       "the screen base in `$D018`, the VIC bank in `$DD00` — so the answer " +
       "names the bases it assumed, and you can override them.",

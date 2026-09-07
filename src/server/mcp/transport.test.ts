@@ -98,8 +98,8 @@ describe("speaking the protocol", () => {
       expect(said, mechanism).toContain(mechanism);
     }
     // The place forms, which nothing found on its own in three runs.
-    expect(said).toContain("sprite(pointer)");
-    expect(said).toContain("screen(row,column)");
+    expect(said).toContain("sprite[pointer]");
+    expect(said).toContain("screen[row,column]");
     // And the one that says nesting is the wrong tool for structure.
     expect(said.toLowerCase()).toContain("field instead");
   });

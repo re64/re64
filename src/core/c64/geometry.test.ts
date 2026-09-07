@@ -5,7 +5,9 @@ import {
   spriteAddress,
   spriteAt,
   parseGeometry,
+  placeText,
   COLOUR_RAM,
+  DEFAULT_SCREEN_BASE,
 } from "./geometry.js";
 
 /**
@@ -90,31 +92,61 @@ describe("where a sprite is", () => {
 });
 
 describe("the same thing written into an address argument", () => {
-  it("accepts a call with integer arguments, in the spellings addresses use", () => {
+  it("indexes with brackets, in the spellings addresses use", () => {
+    expect(parseGeometry("screen[10,2]")).toBe(0x0592);
+    expect(parseGeometry("screen[402]")).toBe(0x0592);
+    expect(parseGeometry("sprite[$9D]")).toBe(0x2740);
+    expect(parseGeometry("sprite[157]")).toBe(0x2740);
+    expect(parseGeometry(" SCREEN[ 10 , 2 ] ")).toBe(0x0592);
+  });
+
+  it("locates the array in parentheses, because a base is not an index", () => {
+    // The distinction the old form could not draw: a third number inside
+    // `screen(10,2,$4000)` reads as a third dimension and is nothing of the
+    // sort. Outside the brackets it is what it is — where the array starts.
+    expect(parseGeometry("screen($4000)[10,2]")).toBe(0x4192);
+    expect(parseGeometry("sprite($4000)[$9D]")).toBe(0x6740);
+    expect(() => parseGeometry("screen($4000,1)[10,2]")).toThrow(/locates the array/);
+  });
+
+  it("still reads the parenthesised form, because three runs' notes use it", () => {
+    // A place resolves to an address and is never stored, so there is nothing
+    // to migrate — and nothing gained by refusing what everybody already typed.
     expect(parseGeometry("screen(10,2)")).toBe(0x0592);
     expect(parseGeometry("screen(402)")).toBe(0x0592);
     expect(parseGeometry("sprite($9D)")).toBe(0x2740);
-    expect(parseGeometry("sprite(157)")).toBe(0x2740);
-    expect(parseGeometry(" SCREEN( 10 , 2 ) ")).toBe(0x0592);
-  });
-
-  it("takes a base or a bank, so a moved screen is expressible", () => {
     expect(parseGeometry("screen(10,2,$4000)")).toBe(0x4192);
     expect(parseGeometry("sprite($9D,$4000)")).toBe(0x6740);
   });
 
   it("is not an expression language, and does not pretend to be", () => {
-    // The line: a call is a lookup with parentheses. Arithmetic would be a
-    // grammar, with precedence to define and four consumers to keep identical.
-    expect(parseGeometry("sprite($9D)+3")).toBeUndefined();
-    expect(parseGeometry("screen(10,2) - 1")).toBeUndefined();
+    // The line: an index list is a lookup. Arithmetic would be a grammar, with
+    // precedence to define and four consumers to keep identical.
+    expect(parseGeometry("sprite[$9D]+3")).toBeUndefined();
+    expect(parseGeometry("screen[10,2] - 1")).toBeUndefined();
     expect(parseGeometry("$8000")).toBeUndefined();
-    expect(parseGeometry("zone(5)")).toBeUndefined();
+    expect(parseGeometry("zone[5]")).toBeUndefined();
+    // A place is an address, and the array itself is not one.
+    expect(parseGeometry("screen")).toBeUndefined();
   });
 
   it("refuses arguments that are not a place", () => {
-    expect(() => parseGeometry("screen(99,0)")).toThrow(/not on the screen/);
-    expect(() => parseGeometry("screen(1,2,3,4)")).toThrow(/takes a cell/);
-    expect(() => parseGeometry("sprite(999)")).toThrow(/one byte/);
+    expect(() => parseGeometry("screen[99,0]")).toThrow(/not on the screen/);
+    expect(() => parseGeometry("screen[1,2,3]")).toThrow(/a row and a column/);
+    expect(() => parseGeometry("sprite[999]")).toThrow(/one byte/);
+    expect(() => parseGeometry("sprite[1,2]")).toThrow(/takes a pointer/);
+  });
+
+  it("writes an address back as the place it is", () => {
+    // The round trip, which is what makes `where`'s answer usable: paste it
+    // into any address argument and arrive back where you started.
+    expect(placeText("screen", [10, 2], 0x0400, DEFAULT_SCREEN_BASE)).toBe("screen[10,2]");
+    expect(placeText("sprite", [0x9d], 0, 0)).toBe("sprite[157]");
+    expect(placeText("screen", [10, 2], 0x4000, DEFAULT_SCREEN_BASE)).toBe(
+      "screen($4000)[10,2]"
+    );
+    expect(parseGeometry(placeText("screen", [10, 2], 0x4000, DEFAULT_SCREEN_BASE))).toBe(
+      0x4192
+    );
   });
 });

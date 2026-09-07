@@ -42,7 +42,7 @@ const INSTRUCTIONS = [
   // **How to say what you find**, which no per-tool description can carry
   // because it is about choosing between tools rather than using one.
   //
-  // Written from what three runs did instead. `sprite(...)` and `where` went
+  // Written from what three runs did instead. `sprite[...]` and `where` went
   // unused while a reader computed sprite addresses by hand eight times and
   // then asked for "sprite-index-aware addressing". `find_immediates` was
   // called six times and `add_constant` never, across two runs that declared
@@ -64,10 +64,12 @@ const INSTRUCTIONS = [
     "with is:\"record\" says a span is instances of it. If you are about to " +
     "nest a claim inside another to express structure — text inside data, a " +
     "name inside a table — you want a field instead. " +
-    "A **place** is written into any address argument: screen(row,column), " +
-    "screen(cell) and sprite(pointer), each taking an optional base or VIC " +
-    "bank, since both depend on where the program put them. `where` goes the " +
-    "other way and tells you which cell or sprite an address is.",
+    "A **place** is written into any address argument: screen[row,column], " +
+    "screen[cell] and sprite[pointer] — array references into the screen and " +
+    "the sprite blocks, indexed with brackets, with the array's own base in " +
+    "parentheses before them if the program moved it: screen($8400)[10,2]. " +
+    "`where` goes the other way and tells you which cell or sprite an address " +
+    "is, written as a place you can paste back.",
 ].join("\n\n");
 
 export interface McpContext {
