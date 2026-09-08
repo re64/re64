@@ -95,6 +95,30 @@ together are several MCP clients or one shared client is a property of the host,
 not the protocol, and it decides how agent sessions have to be keyed. Counting
 them here settles it without setting anything up.
 
+## Ending a run
+
+```
+./teardown.sh                     # the run in ./run, from an experiment directory
+./teardown.sh 10-relations/run    # a particular one, from here
+./teardown.sh --all --dry-run     # what is still up anywhere, stopping nothing
+./teardown.sh --all               # stop all of it
+```
+
+**Every `setup.sh` starts a server and nothing ever stopped one.** Nine stale
+`server.pid` files had accumulated before this existed, one of them still
+serving a run from the previous day. The worse half is the chat watchers — the
+`while true` loops that relay `read_messages` between agents. They are started
+by hand, recorded in no file, and three of them had been polling a dead port
+every few seconds for **37 hours**.
+
+So teardown looks for a watcher by *port*, which is the only thing one carries
+that says which run it belongs to, and `--all` additionally sweeps for any that
+no run directory claims — the case that prompted this, since experiment 9's run
+directory had been renamed to `run1/` on archiving and took its pid file with it.
+
+It stops processes and deletes nothing: the database, the transcript and the
+captures are the run's output.
+
 ## Experiment 1: expressiveness
 
 `01-expressiveness/` — `./setup.sh` builds a stripped project, starts a server,
