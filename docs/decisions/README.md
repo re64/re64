@@ -1,6 +1,6 @@
 # Decisions
 
-Why re64 is shaped the way it is. Seven files, split by subject, holding the
+Why re64 is shaped the way it is. Eight files, split by subject, holding the
 argument and the history that used to live in `CLAUDE.md`.
 
 | | |
@@ -11,6 +11,7 @@ argument and the history that used to live in `CLAUDE.md`.
 | [`analysis.md`](analysis.md) | the disassembler, the lifter, the abstract domain |
 | [`machine.md`](machine.md) | running code, ROMs, decoders, targets |
 | [`ui.md`](ui.md) | the browser |
+| [`types.md`](types.md) | record layouts — arrays, counts, index origin, bits, and what stays parked |
 | [`platform.md`](platform.md) | what is C64-specific, what transfers, and what a second machine would cost |
 | [`redesign-claims.md`](redesign-claims.md) | the design document the claims model was built from — a plan that was executed, kept because every number in it is something the code measured |
 
