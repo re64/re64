@@ -488,6 +488,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "with the place written out, so it goes straight back into an argument. " +
       "Where a record claim covers the address it also answers with the field, " +
       "as a path — zones[2].name — so you need not count offsets by hand. " +
+      "For a hardware register it answers with what the bits mean: $D011 is " +
+      "not a byte, it is seven fields, and `mask` names the ones an AND or ORA " +
+      "touches — SCROLY.rasterBit8 for $80. " +
       "Both conversions depend on runtime state rather than on the project — " +
       "the screen base in `$D018`, the VIC bank in `$DD00` — so the answer " +
       "names the bases it assumed, and you can override them.",
@@ -498,6 +501,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         .optional()
         .describe("Where this program keeps its screen; $0400 at power-on"),
       bank: address.optional().describe("The VIC's 16K bank; $0000 at power-on"),
+      mask: address
+        .optional()
+        .describe("An AND/ORA operand: names the register fields it touches"),
     },
     ({
       project: id,
@@ -505,13 +511,15 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       address: at,
       screenBase,
       bank,
+      mask,
     }: {
       project?: string;
       target?: string;
       address: number;
       screenBase?: number;
       bank?: number;
-    }) => context().workspace(id, target).where(at, screenBase, bank)
+      mask?: number;
+    }) => context().workspace(id, target).where(at, screenBase, bank, mask)
   );
 
   tool(

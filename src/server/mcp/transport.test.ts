@@ -1222,6 +1222,35 @@ describe("editing as an agent", () => {
     expect(where.field?.path).toBe("control[0].yScroll");
   });
 
+  it("says what a register's bits mean, and which ones a mask touches", async () => {
+    // Write the whole byte and it is SCROLY; touch one bit and the answer says
+    // which. The layouts are the machine's, not this project's, so they need no
+    // declaring and appear beside `field` rather than inside it.
+    const whole = (await callTool("where", { address: "$D011" })).value as {
+      register?: { name: string; bits: { at: string; name: string }[] };
+    };
+    expect(whole.register?.name).toBe("SCROLY");
+    // High bit first, because that is the order a byte is written in.
+    expect(whole.register?.bits[0]).toMatchObject({ at: "b7", name: "rasterBit8" });
+    expect(whole.register?.bits.at(-1)).toMatchObject({ at: "b2..0", name: "yScroll" });
+
+    const masked = (await callTool("where", { address: "$D011", mask: "$80" })).value as {
+      register?: { touches: string[] };
+    };
+    expect(masked.register?.touches).toEqual(["SCROLY.rasterBit8"]);
+
+    // And the one the 2021 patch turned into an AND: clearing the raster bit.
+    const rest = (await callTool("where", { address: "$D011", mask: "$7F" })).value as {
+      register?: { touches: string[] };
+    };
+    expect(rest.register?.touches).not.toContain("SCROLY.rasterBit8");
+    expect(rest.register?.touches).toContain("SCROLY.yScroll");
+
+    // An ordinary address has no register layout and says nothing about one.
+    const plain = (await callTool("where", { address: "$8100" })).value as { register?: unknown };
+    expect(plain.register).toBeUndefined();
+  });
+
   it("takes a patch as bytes, with no file to upload", async () => {
     // The schema half of the layer kind the file format has always had. `path`
     // had to stop being required for this to be sayable at all, so the two

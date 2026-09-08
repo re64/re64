@@ -165,3 +165,31 @@ by refusing what everybody already typed.
 
 `where` now answers with the place written out, so the two directions round-trip:
 what it says goes straight back into any address argument.
+
+---
+
+## Note, appended: the machine declares its own bit layouts
+
+`src/core/c64/registers.ts` is a second platform table beside `symbols.ts`: what
+the *bits* of a hardware register mean, as records whose offsets count bits.
+
+It was added because the workaround was already in this repository, twice.
+`symbols.ts` carries bit meanings as English inside comment strings — "Bit 7
+control messages, bit 6 errors" — and `devices/vic.ts` hand-writes the mask and
+the shift ten times over: `$D011 & $80` is the ninth raster bit, `$D018 >> 4 &
+$0F` the screen base, `$D018 >> 1 & $07` the character base. Every reader of a
+C64 program does that arithmetic too, and it has one right answer.
+
+It is the same noun as everything else — a record, with named things at offsets
+and holes legal — which is what kept it from being a special case. The only
+thing that makes it platform rather than project is who declares it, and that is
+why `where` reports it under `register` rather than under `field`: one is a fact
+about the hardware and the other is something somebody in this project said,
+and running them together would make it impossible to tell which.
+
+The table row above should now read: **a register's bit layout** — its own,
+behind the seam, and reached only through `registerAt`/`fieldsInMask`.
+
+Deliberately partial. These are the registers a program touches every frame and
+the ones three runs of readers reached for; adding the rest is data entry, and
+an empty entry is better than a guessed one.

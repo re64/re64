@@ -69,7 +69,9 @@ const INSTRUCTIONS = [
     "the sprite blocks, indexed with brackets, with the array's own base in " +
     "parentheses before them if the program moved it: screen($8400)[10,2]. " +
     "`where` goes the other way and tells you which cell or sprite an address " +
-    "is, written as a place you can paste back.",
+    "is, written as a place you can paste back — and for a hardware register, " +
+    "what its bits mean: $D011 is seven fields, not a byte, and `mask` names " +
+    "the ones an AND or ORA touches.",
 ].join("\n\n");
 
 export interface McpContext {

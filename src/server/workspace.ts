@@ -159,6 +159,7 @@ import {
   screenCell,
   spriteAt,
 } from "../core/c64/geometry.js";
+import { fieldsInMask, registerAt } from "../core/c64/registers.js";
 import type { SidWrite } from "../core/c64/devices/sid.js";
 
 /**
@@ -2520,7 +2521,12 @@ export class Workspace {
    * bases it used would be a confident wrong answer for any program that moved
    * its screen.
    */
-  where(address: number, screenBase?: number, bank?: number): Record<string, unknown> {
+  where(
+    address: number,
+    screenBase?: number,
+    bank?: number,
+    mask?: number
+  ): Record<string, unknown> {
     const base = screenBase ?? DEFAULT_SCREEN_BASE;
     const vicBank = bank ?? 0;
     const cell = screenCell(address, base);
@@ -2589,6 +2595,7 @@ export class Workspace {
       // is not a word.
       ...(word === undefined ? {} : { word }),
       ...(this.fieldAt(address) ?? {}),
+      ...(this.registerAt(address, mask) ?? {}),
       assumed: {
         screenBase: hex4(base),
         vicBank: hex4(vicBank),
@@ -2631,6 +2638,56 @@ export class Workspace {
       return { field: { path: `${array}[${index}]${found.path}${within}`, of: type.name } };
     }
     return undefined;
+  }
+
+  /**
+   * What the bits of a hardware register mean, when the machine declares them.
+   *
+   * The other half of "what is this address", and the one three runs of readers
+   * did by hand: `$D011` is not a byte, it is seven fields, and `AND #$80` is a
+   * question about one of them. With a mask this names the fields that mask
+   * touches — `SCROLY.rasterBit8` — which is the sentence a reader was writing
+   * into a comment.
+   *
+   * Platform-owned, so it is reported separately from `field`: one is a fact
+   * about the hardware and the other is something somebody in this project
+   * said, and running them together would make it impossible to tell which.
+   */
+  private registerAt(
+    address: number,
+    mask?: number
+  ): { register: Record<string, unknown> } | undefined {
+    const found = registerAt(address);
+    if (!found) return undefined;
+    const byte = this.program().loaded.map.readByte(address);
+    return {
+      register: {
+        name: found.type.name,
+        // High bit first, because that is the order a byte is written in. The
+        // offset is still the bit number, so b7 is the $80 one.
+        bits: Object.entries(found.type.fields)
+          .map(([key, field]) => ({ offset: Number(key), field }))
+          .sort((a, b) => b.offset - a.offset)
+          .map(({ offset, field }) => {
+            const width = field.type.is === "bits" ? field.type.width : 8;
+            const at = width === 1 ? `b${offset}` : `b${offset + width - 1}..${offset}`;
+            const held =
+              byte === undefined ? undefined : (byte >>> offset) & ((1 << width) - 1);
+            return {
+              at,
+              name: field.name,
+              ...(held === undefined ? {} : { value: held }),
+              ...(field.description === undefined ? {} : { description: field.description }),
+            };
+          }),
+        ...(mask === undefined
+          ? {}
+          : {
+              mask: `$${mask.toString(16).toUpperCase().padStart(2, "0")}`,
+              touches: fieldsInMask(address, mask),
+            }),
+      },
+    };
   }
 
   /**

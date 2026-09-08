@@ -167,13 +167,14 @@ Read a span **as** something, without saying it is that. Writes nothing. `as: "t
 
 #### `where`
 
-What an address is, in the units the machine uses: which screen cell, which sprite pointer, and where its colour byte is. The inverse of the `screen[...]` and `sprite[...]` forms every address argument accepts — you can write `screen[10,2]` to get to `$0592`, and this is how you go the other way while reading a listing. It answers with the place written out, so it goes straight back into an argument. Where a record claim covers the address it also answers with the field, as a path — zones[2].name — so you need not count offsets by hand. Both conversions depend on runtime state rather than on the project — the screen base in `$D018`, the VIC bank in `$DD00` — so the answer names the bases it assumed, and you can override them.
+What an address is, in the units the machine uses: which screen cell, which sprite pointer, and where its colour byte is. The inverse of the `screen[...]` and `sprite[...]` forms every address argument accepts — you can write `screen[10,2]` to get to `$0592`, and this is how you go the other way while reading a listing. It answers with the place written out, so it goes straight back into an argument. Where a record claim covers the address it also answers with the field, as a path — zones[2].name — so you need not count offsets by hand. For a hardware register it answers with what the bits mean: $D011 is not a byte, it is seven fields, and `mask` names the ones an AND or ORA touches — SCROLY.rasterBit8 for $80. Both conversions depend on runtime state rather than on the project — the screen base in `$D018`, the VIC bank in `$DD00` — so the answer names the bases it assumed, and you can override them.
 
 | argument | type | | |
 |---|---|---|---|
 | `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `screenBase` | `string,number` | optional | Where this program keeps its screen; $0400 at power-on |
 | `bank` | `string,number` | optional | The VIC's 16K bank; $0000 at power-on |
+| `mask` | `string,number` | optional | An AND/ORA operand: names the register fields it touches |
 
 #### `list_claims`
 
