@@ -340,6 +340,7 @@ export function applyOp(raw: string, op: Op): string {
         id: op.id,
         name: op.name,
         size: op.size,
+        ...(op.unit === undefined ? {} : { unit: op.unit }),
         fields: Object.fromEntries(
           Object.entries(op.fields).map(([offset, field]) => [String(offset), field])
         ),
@@ -360,6 +361,9 @@ export function applyOp(raw: string, op: Op): string {
         id: op.id,
         name: op.fields.name ?? held.name,
         size: op.fields.size ?? held.size,
+        ...((op.fields.unit ?? held.unit) === undefined
+          ? {}
+          : { unit: op.fields.unit ?? held.unit }),
         fields,
       });
     }

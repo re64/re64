@@ -324,7 +324,14 @@ export function diffProjects(from: Project, to: Project): Op[] {
       ])
     );
     if (!before) {
-      ops.push({ op: "type.add", id, name: type.name, size, fields: asFields });
+      ops.push({
+        op: "type.add",
+        id,
+        name: type.name,
+        size,
+        ...(type.unit === undefined ? {} : { unit: type.unit }),
+        fields: asFields,
+      });
       continue;
     }
     if (sameType(before, type)) continue;
@@ -349,6 +356,7 @@ export function diffProjects(from: Project, to: Project): Op[] {
       fields: {
         ...(before.name === type.name ? {} : { name: type.name }),
         ...(beforeSize === size ? {} : { size }),
+        ...(before.unit === type.unit || type.unit === undefined ? {} : { unit: type.unit }),
         ...(Object.keys(fields).length ? { fields } : {}),
       },
     });
@@ -602,6 +610,7 @@ function sameType(a: ProjectType, b: ProjectType): boolean {
   return (
     a.name === b.name &&
     size(a.size) === size(b.size) &&
+    (a.unit ?? "bytes") === (b.unit ?? "bytes") &&
     JSON.stringify(normaliseFields(a.fields)) === JSON.stringify(normaliseFields(b.fields))
   );
 }

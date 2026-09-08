@@ -94,7 +94,14 @@ import {
   ClaimMethod,
 } from "../core/claims/model.js";
 import { NamedClaim, labelTypeOf } from "../core/claims/names.js";
-import { fieldSize, formatFieldType, parseFieldType, pathAt } from "../core/memory/type.js";
+import {
+  FieldType,
+  fieldBits,
+  fieldSize,
+  formatFieldType,
+  parseFieldType,
+  pathAt,
+} from "../core/memory/type.js";
 import { ClaimEdit } from "../core/ops/types.js";
 import { ClaimSet, disagreements, describeDisagreement } from "../core/claims/set.js";
 
@@ -2303,6 +2310,7 @@ export class Workspace {
       name: string;
       size: number;
       fields: Record<string, { name: string; type: string; description?: string }>;
+      unit?: "bytes" | "bits";
       id?: string;
     }
   ): EditResult & { type: string } {
@@ -2313,6 +2321,10 @@ export class Workspace {
       throw new Error(`No type ${type.id}. list_types shows what this project has.`);
     }
 
+    // An edit that does not restate the unit keeps the one the type has. A
+    // bit record whose offsets started being read as bytes halfway through an
+    // edit would reject every field it already held.
+    const unit = type.unit ?? existing?.unit;
     const idForName = (name: string) => declared.find((t) => t.name === name)?.id;
     // A count written as a constant — `u8[LevelCount]` — resolved through the
     // one constant with that name. Two with the same name resolve to neither,
@@ -2334,8 +2346,18 @@ export class Workspace {
         rejected.push({ address: key, reason: "not an offset" });
         continue;
       }
-      if (offset >= type.size) {
-        rejected.push({ address: key, reason: `outside a ${type.size}-byte record` });
+      // A bit record's offsets count bits, and `size` still counts bytes — so
+      // the bound is eight times as far, and that is the only place the unit
+      // changes anything on this path.
+      const bound = unit === "bits" ? type.size * 8 : type.size;
+      if (offset >= bound) {
+        rejected.push({
+          address: key,
+          reason:
+            unit === "bits"
+              ? `outside a ${type.size}-byte record, which is ${bound} bits`
+              : `outside a ${type.size}-byte record`,
+        });
         continue;
       }
       // A fact about the request, which is the only kind of reason a write here
@@ -2344,6 +2366,28 @@ export class Workspace {
       const parsed = parseFieldType(field.type, idForName, countForName);
       if ("error" in parsed) {
         rejected.push({ address: key, reason: parsed.error });
+        continue;
+      }
+      // `bits(n)` needs somewhere to sit, and a byte-addressed record has no
+      // sub-byte offsets to give it. Refused rather than rounded up, because a
+      // field silently taking a whole byte would be a confident wrong answer
+      // about every field after it.
+      const widthInBits = fieldBits(parsed, (id) => {
+        const held = declared.find((t) => t.id === id)?.size;
+        return typeof held === "string" ? Number.parseInt(held.replace("$", ""), 16) : held;
+      });
+      if (unit !== "bits" && holdsBits(parsed)) {
+        rejected.push({
+          address: key,
+          reason: `bits(n) needs a record whose offsets count bits: declare it unit:"bits"`,
+        });
+        continue;
+      }
+      if (widthInBits !== undefined && offset + (unit === "bits" ? widthInBits : 0) > bound) {
+        rejected.push({
+          address: key,
+          reason: `${field.name} is ${widthInBits} bits and would run past bit ${bound}`,
+        });
         continue;
       }
       // Minted here: a field is addressed on its own, and no caller supplies
@@ -2368,10 +2412,24 @@ export class Workspace {
             {
               op: "type.set" as const,
               id,
-              fields: { name: type.name, size: type.size, fields },
+              fields: {
+                name: type.name,
+                size: type.size,
+                ...(unit === undefined ? {} : { unit }),
+                fields,
+              },
             },
           ]
-        : [{ op: "type.add" as const, id, name: type.name, size: type.size, fields }]
+        : [
+            {
+              op: "type.add" as const,
+              id,
+              name: type.name,
+              size: type.size,
+              ...(unit === undefined ? {} : { unit }),
+              fields,
+            },
+          ]
     );
     return { ...result, type: id, ...(rejected.length ? { rejected } : {}) };
   }
@@ -2418,6 +2476,8 @@ export class Workspace {
           id: type.id,
           name: type.name,
           size: type.size,
+          // Said out loud, because it changes what every offset below means.
+          ...(type.unit === undefined ? {} : { unit: type.unit }),
           fields: laid.map(({ offset, field }) => ({
             offset: `+$${offset.toString(16).toUpperCase().padStart(2, "0")}`,
             name: field.name,
@@ -5392,4 +5452,9 @@ function explainsBytes(kind: ByteReading | undefined): boolean {
       return unhandled;
     }
   }
+}
+
+/** Whether a field type is, or contains, a run of bits. */
+function holdsBits(type: FieldType): boolean {
+  return type.is === "bits" || (type.is === "array" && holdsBits(type.of));
 }

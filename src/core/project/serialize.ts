@@ -161,6 +161,11 @@ export function formatProject(project: Project): string {
           `      "id": ${JSON.stringify(t.id)}`,
           `      "name": ${JSON.stringify(t.name)}`,
           `      "size": ${JSON.stringify(t.size)}`,
+          // A hand-written list of keys, which is why this is spelled out with
+          // the rest rather than left implicit: `unit` reached the operation,
+          // the document and the diff and stopped here, silently, exactly as
+          // `layer.add` did twice. Anything added to `ProjectType` needs a line.
+          ...(t.unit === undefined ? [] : [`      "unit": ${JSON.stringify(t.unit)}`]),
         ].join(",\n");
         return `    {\n${head},\n      "fields": {\n${fields}\n      }\n    }`;
       })

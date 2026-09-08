@@ -10,7 +10,7 @@
 
 import { Claim, Interpretation } from "../claims/model.js";
 import { labelTypeOf } from "../claims/names.js";
-import { FieldType, fieldSize } from "../memory/type.js";
+import { FieldType, fieldBits, fieldSize } from "../memory/type.js";
 import { MemoryMap } from "../memory/memory-map.js";
 import { analyzeProgram } from "../analysis/program.js";
 import { describeWarning } from "../arch/mos6502/disassembler.js";
@@ -729,27 +729,65 @@ export function analyze(
         tokens: [],
       });
 
-      let within = 0;
-      for (const { offset, field } of laid) {
-        // A hole is a hole. Rendering it is the field-level form of the gap a
-        // listing shows between claims: somebody has proved nineteen fields of
-        // a 200-byte record, and the rest is not padding, it is unexplained.
-        if (offset > within) pushHole(recordAt, within, offset);
+      // A record whose offsets count bits: every field sits in the same byte or
+      // two, so the address column repeats and the offset column carries the
+      // bit. Written high bit first, because that is how a byte is written —
+      // the *offset* is still the bit number, so `+b7` is the $80 one.
+      if (type.unit === "bits") {
+        const total = type.size * 8;
+        const named = new Set<number>();
+        for (const { offset, field } of laid) {
+          const wide = fieldBits(field.type, loaded.types.sizeOf) ?? 1;
+          for (let b = offset; b < offset + wide; b++) named.add(b);
+        }
+        for (const { offset, field } of [...laid].reverse()) {
+          const wide = fieldBits(field.type, loaded.types.sizeOf) ?? 1;
+          const label = wide === 1 ? `+b${offset}` : `+b${offset + wide - 1}..${offset}`;
+          push({
+            address: recordAt,
+            kind: "field",
+            text:
+              `${hex4(recordAt)}    ${label.padEnd(9)}` +
+              `${field.name}: ${bitValue(map, recordAt, offset, wide)}`,
+            tokens: [],
+          });
+        }
+        // Unnamed bits, said as bits. The same honesty as an unexplained byte
+        // run, one level down: nobody has said what bit 4 of this register is.
+        const spare = [...Array(total).keys()].filter((b) => !named.has(b)).reverse();
+        if (spare.length) {
+          push({
+            address: recordAt,
+            kind: "field",
+            text: `${hex4(recordAt)}    ${"".padEnd(9)}; unexplained: ${spare
+              .map((b) => `b${b}`)
+              .join(" ")}`,
+            tokens: [],
+          });
+        }
+      } else {
+        let within = 0;
+        for (const { offset, field } of laid) {
+          // A hole is a hole. Rendering it is the field-level form of the gap a
+          // listing shows between claims: somebody has proved nineteen fields of
+          // a 200-byte record, and the rest is not padding, it is unexplained.
+          if (offset > within) pushHole(recordAt, within, offset);
 
-        const at = recordAt + offset;
-        const width = fieldSize(field.type, loaded.types.sizeOf) ?? 1;
-        push({
-          address: at,
-          kind: "field",
-          text:
-            `${hex4(at)}    +$${offset.toString(16).toUpperCase().padStart(2, "0")}  ` +
-            `${field.name}: ${fieldValue(map, at, field.type, width, allLabels)}`,
-          tokens: [],
-        });
-        within = offset + width;
+          const at = recordAt + offset;
+          const width = fieldSize(field.type, loaded.types.sizeOf) ?? 1;
+          push({
+            address: at,
+            kind: "field",
+            text:
+              `${hex4(at)}    +$${offset.toString(16).toUpperCase().padStart(2, "0")}  ` +
+              `${field.name}: ${fieldValue(map, at, field.type, width, allLabels)}`,
+            tokens: [],
+          });
+          within = offset + width;
+        }
+
+        if (within < type.size) pushHole(recordAt, within, type.size);
       }
-
-      if (within < type.size) pushHole(recordAt, within, type.size);
 
       // A whole record at a time, never less than a byte: the loop-foot guard
       // fires on a strategy that consumes nothing, and would here on `size: 0`.
@@ -991,6 +1029,11 @@ export function fieldValue(
       // of *this* record keeps every row navigable, and the inner layout is one
       // `list_types` call away.
       return `<${type.typeId}>`;
+    case "bits":
+      // Reachable only from a byte-addressed record, where a bit width has no
+      // offset to sit at. Rendered as the bytes it covers rather than refused,
+      // since a listing is a listing; `add_type` is where it is refused.
+      return hexBytes([...bytes]);
     case "array": {
       // On one row, for the same reason a nested record is: an eight-element
       // field is one thing the reader named, and eight rows would bury the
@@ -1015,6 +1058,24 @@ export function fieldValue(
       throw new Error(`unhandled field type: ${String(unhandled)}`);
     }
   }
+}
+
+/**
+ * One field of a bit record, masked and shifted out of the bytes it sits in.
+ *
+ * Bit `n` is the one worth `2^n`, so offset 0 is the low bit of the first byte
+ * and offset 8 is the low bit of the next. That is the numbering every
+ * datasheet uses — "bit 7" is `$80` — and the display order is reversed
+ * separately, because how a byte is *written* is not what an offset means.
+ */
+function bitValue(map: MemoryMap, at: number, offset: number, width: number): string {
+  const first = Math.floor(offset / 8);
+  const bytes = map.readBytes(at + first, Math.ceil((offset % 8) + width) / 8 + 1);
+  if (bytes.length === 0 || bytes[0] === undefined) return "??";
+  let held = 0;
+  for (let i = bytes.length - 1; i >= 0; i--) held = (held << 8) | (bytes[i] ?? 0);
+  const value = (held >>> offset % 8) & ((1 << width) - 1);
+  return width === 1 ? String(value) : `%${value.toString(2).padStart(width, "0")} ($${value.toString(16).toUpperCase()})`;
 }
 
 function viewOf(claim: Claim | undefined): string | undefined {

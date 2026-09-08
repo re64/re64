@@ -391,6 +391,13 @@ export interface ProjectType {
   name: string;
   /** Bytes per record. Holes are legal, so this is declared, not derived. */
   size: number | string;
+  /**
+   * What a field's offset counts. Bytes unless said otherwise.
+   *
+   * `size` stays in bytes either way, so a bit record of `size: 1` is one byte
+   * with eight offsets in it. Nothing that already reads a size has to know.
+   */
+  unit?: "bytes" | "bits";
   fields: Record<string, ProjectField>;
 }
 

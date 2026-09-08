@@ -381,7 +381,7 @@ migration never deletes somebody's claims to make a layout fit.
 
 **F1 · The vocabulary being closed is checked by the compiler. Whether anything
 *emits* or *reads* a member of it is not.** This file's most repeated failure, now
-**eight** instances: `meta.set` with no emitter; `layer.add` filtered to symbols;
+**nine** instances: `meta.set` with no emitter; `layer.add` filtered to symbols;
 `decoders` missing from `withIds`; `constants` missing from the undo whitelist; 382
 platform `description`s reaching no consumer; `Provenance.confidence`, which
 round-trips through five layers and is exposed by **no tool, no UI and no CLI**;
@@ -389,7 +389,12 @@ and then the same `layer.add` filter twice more — widened from symbols to `prg
 and `raw` and left stale under `rom`, so the machine view could be declared, run
 against and reported, and vanished on export; and `bytes`, a layer kind the file
 format always had and no operation could make.
-*Note:* the last two are the instance that proves the shape is about *hand-written
+The ninth is `unit` on a record type — carried by the operation, the diff and the
+document schema, and dropped by the text serializer's hand-written key list, the
+loader's hand-written field list, the CRDT's own `type.add`, and `list_types`.
+Nothing failed: a bit record simply became a byte record on the next load, and
+every offset in it silently meant something else.
+*Note:* those are the instances that prove the shape is about *hand-written
 lists*, not about new features. The fix is the one that could not go stale: the
 diff now assigns `layer.type` to `LayerAddOp["layerType"]`, so the two
 vocabularies are the same set or it does not compile.

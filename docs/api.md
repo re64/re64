@@ -600,6 +600,7 @@ Declare a record layout: what the bytes of one array element mean. The thing a c
 |---|---|---|---|
 | `name` | `string` | **required** |  |
 | `size` | `integer` | **required** | Bytes per record |
+| `unit` | `bytes` \| `bits` | optional | What a field's offset counts. "bits" declares a bitmask — $D011 is seven fields in one byte — which is the same shape as a record one level down: named things at offsets, holes legal. `size` stays in bytes either way, so a one-byte register is size 1 with offsets 0 to 7, and bit n is the one worth 2^n. Fields in one take bits(n). |
 | `fields` | `object` | **required** | By offset. Two fields cannot share one, so the key is the identity. |
 | `expectVersion` | `string` | optional |  |
 
@@ -612,6 +613,7 @@ Correct a record layout, by its id. The fields are given whole: send the layout 
 | `id` | `string` | **required** | Type id, from list_types or add_type |
 | `name` | `string` | **required** |  |
 | `size` | `integer` | **required** |  |
+| `unit` | `bytes` \| `bits` | optional | Kept as it was when omitted |
 | `fields` | `object` | **required** |  |
 | `expectVersion` | `string` | optional |  |
 

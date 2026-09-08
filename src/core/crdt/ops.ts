@@ -291,7 +291,12 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
           entry = new Y.Map<unknown>();
           types.set(op.id, entry);
         }
-        assign(entry, { id: op.id, name: op.name, size: op.size });
+        assign(entry, {
+          id: op.id,
+          name: op.name,
+          size: op.size,
+          ...(op.unit === undefined ? {} : { unit: op.unit }),
+        });
         const fields = fieldsOf(entry);
         for (const [offset, field] of Object.entries(op.fields)) fields.set(offset, field);
         break;
@@ -314,6 +319,7 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
           revise(entry, {
             ...(op.fields.name === undefined ? {} : { name: op.fields.name }),
             ...(op.fields.size === undefined ? {} : { size: op.fields.size }),
+            ...(op.fields.unit === undefined ? {} : { unit: op.fields.unit }),
           });
           if (op.fields.fields) {
             const fields = fieldsOf(entry);

@@ -249,6 +249,7 @@ function typeMapFrom(type: ProjectType): Y.Map<unknown> {
   map.set("id", type.id);
   map.set("name", type.name);
   map.set("size", type.size);
+  if (type.unit !== undefined) map.set("unit", type.unit);
 
   const fields = new Y.Map<unknown>();
   for (const key of Object.keys(type.fields).sort((a, b) => Number(a) - Number(b))) {
@@ -425,7 +426,7 @@ const USE_FIELDS = ["id", "address", "constant"] as const;
 const LABEL_USE_FIELDS = ["id", "address", "label"] as const;
 const CONSTANT_FIELDS = ["id", "name", "value"] as const;
 const DECODER_FIELDS = ["id", "name", "source"] as const;
-const TYPE_FIELDS = ["id", "name", "size", "fields"] as const;
+const TYPE_FIELDS = ["id", "name", "size", "unit", "fields"] as const;
 /**
  * Field order for a claim in the file.
  *

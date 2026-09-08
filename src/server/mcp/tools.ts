@@ -1245,6 +1245,16 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       project,
       name: z.string().min(1),
       size: z.number().int().min(1).max(0x10000).describe("Bytes per record"),
+      unit: z
+        .enum(["bytes", "bits"])
+        .optional()
+        .describe(
+          "What a field's offset counts. \"bits\" declares a bitmask — $D011 is " +
+            "seven fields in one byte — which is the same shape as a record one " +
+            "level down: named things at offsets, holes legal. `size` stays in " +
+            "bytes either way, so a one-byte register is size 1 with offsets 0 " +
+            "to 7, and bit n is the one worth 2^n. Fields in one take bits(n)."
+        ),
       fields: z
         .record(
           z.string().describe("Offset into the record: 0, 160, or \"$A0\""),
@@ -1254,7 +1264,8 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
               .string()
               .describe(
                 "u8, i8, u16, u16be, ptr, ptrbe, char(n), char(n,screen), " +
-                  "bytes(n), or the name of another type. Byte order is part of " +
+                  "bytes(n), bits(n) inside a unit:\"bits\" record, or the name " +
+                  "of another type. Byte order is part of " +
                   "the type rather than a flag beside it, because a hand-written " +
                   "table on this machine is not always little-endian. " +
                   "Any of them takes [n] for an array of them — u8[8], " +
@@ -1279,13 +1290,19 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       target?: string;
       name: string;
       size: number;
+      unit?: "bytes" | "bits";
       fields: Record<string, { name: string; type: string; description?: string }>;
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project, args.target);
       space.expect(args.expectVersion);
-      return space.setType(caller, { name: args.name, size: args.size, fields: args.fields });
+      return space.setType(caller, {
+        name: args.name,
+        size: args.size,
+        ...(args.unit === undefined ? {} : { unit: args.unit }),
+        fields: args.fields,
+      });
     }
   );
 
@@ -1301,6 +1318,10 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       id: z.string().describe("Type id, from list_types or add_type"),
       name: z.string().min(1),
       size: z.number().int().min(1).max(0x10000),
+      unit: z
+        .enum(["bytes", "bits"])
+        .optional()
+        .describe("Kept as it was when omitted"),
       fields: z.record(
         z.string(),
         z.strictObject({
@@ -1317,6 +1338,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       id: string;
       name: string;
       size: number;
+      unit?: "bytes" | "bits";
       fields: Record<string, { name: string; type: string; description?: string }>;
       expectVersion?: string;
     }) => {
@@ -1327,6 +1349,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         id: args.id,
         name: args.name,
         size: args.size,
+        ...(args.unit === undefined ? {} : { unit: args.unit }),
         fields: args.fields,
       });
     }

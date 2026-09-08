@@ -284,6 +284,8 @@ export interface TypeAddOp {
   name: string;
   /** Bytes per record. Holes are legal, so this is declared, not derived. */
   size: number;
+  /** What a field's offset counts. Bytes unless said otherwise. */
+  unit?: "bytes" | "bits";
   /** By offset. Two fields cannot share one, so the key is the identity. */
   fields: Record<number, TypeField>;
 }
@@ -304,6 +306,7 @@ export interface TypeSetOp {
   fields: {
     name?: string;
     size?: number;
+    unit?: "bytes" | "bits";
     fields?: Record<number, TypeField | null>;
   };
 }

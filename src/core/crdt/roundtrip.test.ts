@@ -461,6 +461,46 @@ describe("every operation reaches every path", () => {
  * cannot do without. A ROM layer reached the document, was reported by
  * `describe_project`, and vanished on export.
  */
+/**
+ * A record whose offsets count bits, through every path.
+ *
+ * `unit` was dropped in **four** places on the way out — the text serializer's
+ * hand-written key list, the loader's hand-written field list, the CRDT's
+ * `type.add`, and `list_types` — while the operation, the diff and the document
+ * schema all carried it. Nothing failed; a bit record simply became a byte
+ * record on the next load, and every offset in it silently meant something
+ * else. F1 again, and the reason this case exists rather than a note.
+ */
+describe("a bit record survives the round trip", () => {
+  const op: Op = {
+    op: "type.add",
+    id: "typ_bits",
+    name: "VicControl1",
+    size: 1,
+    unit: "bits",
+    fields: {
+      0: { id: "fld_scroll", name: "yScroll", type: "bits(3)" },
+      7: { id: "fld_raster", name: "rasterBit8", type: "bits(1)" },
+    },
+  };
+
+  it("keeps its unit through the text and the document alike", () => {
+    const throughText = parseProject(applyOp(BASE, op));
+    expect(throughText.types?.find((t) => t.id === "typ_bits")?.unit).toBe("bits");
+
+    const doc = docFromProject(parseProject(BASE));
+    applyOpToDoc(doc, op);
+    expect(projectFromDoc(doc).types?.find((t) => t.id === "typ_bits")?.unit).toBe("bits");
+  });
+
+  it("is emitted by the diff, so it reaches the file it was made in", () => {
+    const before = parseProject(BASE);
+    const after = parseProject(applyOp(BASE, op));
+    const emitted = diffProjects(before, after);
+    expect(emitted).toContainEqual(expect.objectContaining({ op: "type.add", unit: "bits" }));
+  });
+});
+
 describe("a layer of every kind reaches the file", () => {
   const LAYERS: Record<LayerAddOp["layerType"], Omit<LayerAddOp, "op" | "id">> = {
     symbols: { layerType: "symbols", name: "io" },

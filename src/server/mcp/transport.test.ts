@@ -1164,6 +1164,64 @@ describe("editing as an agent", () => {
     expect(await path("$9000")).toBeUndefined();
   });
 
+  it("declares a bitmask as a record whose offsets count bits", async () => {
+    // $D011 is seven fields in one byte, and until this the only way to say so
+    // was English inside a comment — which is what `c64/symbols.ts` does, and
+    // what `vic.ts` works around by hand-writing the mask and the shift ten
+    // times over. Structurally it is a record: named things at offsets, holes
+    // legal, two people editing different offsets. Only the unit differs.
+    const type = await callTool("add_type", {
+      name: "VicControl1",
+      size: 1,
+      unit: "bits",
+      fields: {
+        0: { name: "yScroll", type: "bits(3)" },
+        3: { name: "rowSelect", type: "bits(1)" },
+        4: { name: "displayEnable", type: "bits(1)" },
+        5: { name: "bitmapMode", type: "bits(1)" },
+        7: { name: "rasterBit8", type: "bits(1)", description: "The ninth bit of $D012" },
+      },
+    });
+    expect(type.isError, type.text).toBe(false);
+    const typeId = (type.value as { type: string }).type;
+
+    // `size` is still bytes, so the bound is eight times as far and an offset
+    // past it is refused by number rather than silently wrapping.
+    const past = await callTool("edit_type", {
+      id: typeId,
+      name: "VicControl1",
+      size: 1,
+      fields: { 8: { name: "nowhere", type: "bits(1)" } },
+    });
+    expect(past.text).toMatch(/8 bits|bit 8/);
+
+    // And bits(n) needs somewhere to sit: a byte-addressed record has no
+    // sub-byte offsets, so it is refused rather than rounded up to a byte.
+    const wrongUnit = await callTool("add_type", {
+      name: "NotBits",
+      size: 2,
+      fields: { 0: { name: "flag", type: "bits(1)" } },
+    });
+    expect(`${wrongUnit.text}${JSON.stringify(wrongUnit.value)}`).toMatch(/unit/);
+
+    // The path notation reaches through, which is the payoff and needed no new
+    // machinery: a bit record nests inside a byte record like any other.
+    const claimed = await callTool("add_claim", {
+      at: "$8100",
+      name: "control",
+      is: "record",
+      typeId,
+      extent: 1,
+      method: "read",
+    });
+    expect(claimed.isError, claimed.text).toBe(false);
+    const where = (await callTool("where", { address: "$8100" })).value as {
+      field?: { path: string };
+    };
+    // Offset 0 is the low bit, so the first field the walk finds is yScroll.
+    expect(where.field?.path).toBe("control[0].yScroll");
+  });
+
   it("takes a patch as bytes, with no file to upload", async () => {
     // The schema half of the layer kind the file format has always had. `path`
     // had to stop being required for this to be sayable at all, so the two

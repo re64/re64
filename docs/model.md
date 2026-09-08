@@ -194,6 +194,22 @@ against ties the layout to the program. Resolved on load and never stored: the
 document holds the text, so changing the constant changes the layout that named
 it, and a constant that has gone falls back to the number it had.
 
+**A bitmask is a record at bit granularity.** `unit: "bits"` makes a type's
+field offsets count bits instead of bytes, and fields in one take `bits(n)`.
+`$D011` is seven fields in one byte — three bits of scroll, a row select, a
+blank, a bitmap flag and the ninth raster bit — which is structurally a record:
+named things at offsets, holes legal, two people editing different offsets. Bit
+*n* is the one worth 2^*n*, as every datasheet numbers them; the listing prints
+them high to low, because that is how a byte is written and it is a display
+choice rather than what an offset means.
+
+**`size` stays in bytes either way, and so does `fieldSize`.** A unit that
+silently changed what an existing number meant is the defect shape this project
+keeps catching, so a bit record of `size: 1` occupies one byte and nothing that
+already reads a size has to learn anything. Only code walking *inside* one asks
+`fieldBits`. A bit record nests inside a byte record like any other type, which
+is what gives `zones[2].flags.doubleWidth` with no new path machinery.
+
 **A path is derived from a type, never stored.** Given a record claim and an
 address inside it, `zones[2].name` — or `zones[0].slots[3]`, or
 `waves[1].name + 2` where the address is inside a fixed string rather than at

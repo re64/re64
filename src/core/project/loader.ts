@@ -318,6 +318,7 @@ export function buildMemoryMap(
       id: declared.id,
       name: declared.name,
       size: typeof declared.size === "string" ? parseProjectAddress(declared.size) : declared.size,
+      ...(declared.unit === undefined ? {} : { unit: declared.unit }),
       fields: Object.fromEntries(
         Object.entries(declared.fields).map(([offset, field]) => [
           Number(offset),

@@ -34,6 +34,23 @@ export interface RecordType {
    */
   readonly size: number;
   /**
+   * What a field's offset counts.
+   *
+   * **A bitmask is a record at bit granularity**, and that observation is what
+   * kept this from being a fourth field type with its own rules. `$D011` is
+   * seven fields in one byte: three bits of scroll, a row-select, a blank, a
+   * bitmap flag and the ninth bit of the raster compare. Structurally that is a
+   * record — named things at offsets, holes legal, two people editing different
+   * offsets — and the only difference is the unit the offsets count in.
+   *
+   * **`size` stays in bytes either way**, and so does `fieldSize`. A unit that
+   * silently changed what an existing number meant is the defect shape this
+   * repository keeps catching, so nothing that already reads a size has to
+   * learn about this: a bit record of `size: 1` occupies one byte, and only
+   * code that walks *inside* one asks for bits, through `fieldBits`.
+   */
+  readonly unit?: "bytes" | "bits";
+  /**
    * Fields by offset.
    *
    * **Keyed by offset, and carrying no ids.** The identity rule this project
@@ -95,6 +112,16 @@ export type FieldType =
   | { readonly is: "char"; readonly length: number; readonly encoding?: TextEncoding }
   /** Bytes this reader has not explained. Never inferred — only declared. */
   | { readonly is: "bytes"; readonly length: number }
+  /**
+   * A run of bits, inside a record whose offsets count bits.
+   *
+   * `bits(1)` is a flag and `bits(3)` is `$D011`'s vertical scroll. Legal only
+   * in a bit record, because a bit width means nothing where offsets are bytes
+   * — and refused there rather than rounded up, since a field silently three
+   * bits wide in a byte-addressed record would be a confident wrong answer
+   * about every field after it.
+   */
+  | { readonly is: "bits"; readonly width: number }
   /** A nested record, so `Creature` can sit inside `Zone`. */
   | { readonly is: "record"; readonly typeId: string }
   /**
@@ -158,6 +185,11 @@ export function fieldSize(
     case "char":
     case "bytes":
       return type.length;
+    case "bits":
+      // Rounded up, because this answers a question in bytes and a caller
+      // asking it is placing something in memory. Inside a bit record the
+      // question is asked in bits, through `fieldBits`.
+      return Math.ceil(type.width / 8);
     case "record":
       return sizeOf(type.typeId);
     case "array": {
@@ -169,6 +201,26 @@ export function fieldSize(
       throw new Error(`unhandled field type: ${String(unhandled)}`);
     }
   }
+}
+
+/**
+ * Bits a field occupies, which is the question a bit record's walk asks.
+ *
+ * Separate from `fieldSize` rather than replacing it: everything already built
+ * places things in memory and wants bytes, and a single function whose unit
+ * depended on context is exactly the mistake this file is avoiding.
+ */
+export function fieldBits(
+  type: FieldType,
+  sizeOf: (typeId: string) => number | undefined
+): number | undefined {
+  if (type.is === "bits") return type.width;
+  if (type.is === "array") {
+    const each = fieldBits(type.of, sizeOf);
+    return each === undefined ? undefined : each * type.count;
+  }
+  const bytes = fieldSize(type, sizeOf);
+  return bytes === undefined ? undefined : bytes * 8;
 }
 
 /**
@@ -220,6 +272,16 @@ export class TypeIndex {
     return Object.entries(type.fields)
       .map(([offset, field]) => ({ offset: Number(offset), field }))
       .sort((a, b) => a.offset - b.offset);
+  }
+
+  /** Whether this type's offsets count bits rather than bytes. */
+  inBits = (id: string): boolean => this.byId.get(id)?.unit === "bits";
+
+  /** How wide a field is, in the unit its own record counts in. */
+  widthIn(type: RecordType, field: Field): number | undefined {
+    return type.unit === "bits"
+      ? fieldBits(field.type, this.sizeOf)
+      : fieldSize(field.type, this.sizeOf);
   }
 
   /**
@@ -365,6 +427,14 @@ export function parseFieldType(
   };
   if (trimmed in scalar) return scalar[trimmed];
 
+  const asBits = /^bits\(\s*(\d+)\s*\)$/.exec(trimmed);
+  if (asBits) {
+    const width = Number(asBits[1]);
+    if (width < 1 || width > 32) return { error: `${trimmed}: a bit width is 1 to 32` };
+    return { is: "bits", width };
+  }
+  if (/^bits\b/.test(trimmed)) return { error: `${trimmed} needs a width, as bits(n)` };
+
   const call = /^(char|bytes)\(\s*(\d+)\s*(?:,\s*([a-z]+)\s*)?\)$/.exec(trimmed);
   if (call) {
     const [, kind, count, encoding] = call;
@@ -410,6 +480,8 @@ export function formatFieldType(
       return type.encoding ? `char(${type.length},${type.encoding})` : `char(${type.length})`;
     case "bytes":
       return `bytes(${type.length})`;
+    case "bits":
+      return `bits(${type.width})`;
     case "record":
       // The name, so a `.re64` reads as somebody wrote it. A reference to a type
       // that has gone keeps the id, which is honest — it says what it pointed
@@ -467,10 +539,12 @@ export function pathAt(
   index: TypeIndex
 ): { path: string; within: number } | undefined {
   for (const { offset: at, field } of index.layout(type.id)) {
-    const width = fieldSize(field.type, index.sizeOf);
+    const width = index.widthIn(type, field);
     if (width === undefined || offset < at || offset >= at + width) continue;
-    const inner = within(field.type, offset - at, index);
-    return inner === undefined ? undefined : { path: `.${field.name}${inner.path}`, within: inner.within };
+    const inner = within(field.type, offset - at, index, type.unit === "bits");
+    return inner === undefined
+      ? undefined
+      : { path: `.${field.name}${inner.path}`, within: inner.within };
   }
   return undefined;
 }
@@ -478,20 +552,23 @@ export function pathAt(
 function within(
   type: FieldType,
   offset: number,
-  index: TypeIndex
+  index: TypeIndex,
+  inBits: boolean
 ): { path: string; within: number } | undefined {
   if (type.is === "array") {
-    const each = fieldSize(type.of, index.sizeOf);
+    const each = inBits ? fieldBits(type.of, index.sizeOf) : fieldSize(type.of, index.sizeOf);
     if (each === undefined || each === 0) return undefined;
     const at = Math.floor(offset / each);
-    const inner = within(type.of, offset % each, index);
+    const inner = within(type.of, offset % each, index, inBits);
     if (inner === undefined) return undefined;
     return { path: `[${at + (type.origin ?? 0)}]${inner.path}`, within: inner.within };
   }
   if (type.is === "record") {
     const nested = index.get(type.typeId);
     if (!nested) return undefined;
-    const inner = pathAt(nested, offset, index);
+    // A byte offset becomes a bit offset crossing into a bit record, which is
+    // the one place the unit changes and the only place anything converts.
+    const inner = pathAt(nested, nested.unit === "bits" && !inBits ? offset * 8 : offset, index);
     return inner === undefined ? undefined : { path: inner.path, within: inner.within };
   }
   return { path: "", within: offset };
