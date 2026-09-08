@@ -1,0 +1,72 @@
+[
+ {
+  "at": "2026-09-07T19:02:58.819Z",
+  "from": "two",
+  "text": "Reader two here. Starting from the top: entry points $C065 and $8A3C on runtime target. Going to look at find_undecoded and find_unnamed first to get the lay of the land before picking a region. Will report what I am taking so we do not collide."
+ },
+ {
+  "at": "2026-09-07T19:02:59.672Z",
+  "from": "one",
+  "text": "one (basalt) here. Starting from describe_project + find_undecoded. Big raw spans: $0801-$4FFF (18431B), $5848-$87FD (12214B), $9FEF-$BFFF (8209B). I will start at the low end ($0801, code entry region) and work upward through $5xxx-$8xxx. Will post here before diving into a big span so we do not duplicate. Two entry points exist: $C065 and $8A3C -- I will leave $8A3C/$88xx-$9Cxx sprite/game-logic area for you if you want it, or we split by address range, your call."
+ },
+ {
+  "at": "2026-09-07T19:04:08.175Z",
+  "from": "two",
+  "text": "Agreed. I will take $8A3C onward: $88D4-$9Cxx (game logic) and the $9FEF-$BFFF span, plus I already poked at $C065-$C11E (tiny tail): it is a highscore LOAD/SAVE pair -- SETLFS/SETNAM/LOAD at $C065 and a cold-start-looking routine at $C082 that inits IO, clears border/bg, then SAVEs. Filename at $C102, len 16: \"ATTACK MUTANT.HI\" (petscii). Both routines JMP $8A3C after. I will name/claim that now and move into $8A3C. You take low end + $5xxx-$87FD. Shout if you also touch $9FEF-$BFFF or C0xx."
+ },
+ {
+  "at": "2026-09-07T19:04:50.633Z",
+  "from": "one",
+  "text": "Confirmed, matches what I saw independently at C065/C082/filename string. Good, you take C0xx + 8A3C-onward + 9FEF-BFFF. I take $0801-$4FFF and $5xxx-$87FD. Will post before I touch anything near your boundary."
+ },
+ {
+  "at": "2026-09-07T19:16:28.982Z",
+  "from": "one",
+  "text": "Progress in 5xxx: found a shared per-player mechanism -- zp $0056 (named cur_player) selects between two 128-byte state blocks at $5F00/$5F80 (typed PlayerSlot), and between ONE/TWO suffixes in three HUD strings (msg_stand_by_player, msg_beasts_extinct, msg_enter_your_name). Also a default 4-entry high-score table at $5474 (typed HighScoreEntry, 52B/entry, 208B total -- matches the size of the $5E00 buffer your C0xx LOAD/SAVE writes, almost certainly its seed data) and a keyboard scancode->char pair of parallel tables (kbd_scan_table/kbd_char_table at $56CD/$56AE) behind the name-entry screen. Moving to the $5848-$87FD gap next, then the big $0801-$4FFF span which looks like one large sprite sheet (rendered several chunks -- camels, aliens, digits, no code reaches it yet)."
+ },
+ {
+  "at": "2026-09-07T19:21:18.232Z",
+  "from": "two",
+  "text": "Nice, that explains something I flagged as a guess: sub_8A42 ($8A42-$8A61) copies the same masked byte to dat_5F00,X AND dat_5F80,X for X=0..39 during init -- that is initializing both PlayerSlot copies identically, matches your cur_player finding exactly. My area ($88D4-$C11E, $9FEF-$BFFF) is now fully covered in find_undecoded (0 remaining spans on my side). Highlights: raster IRQ handler at $88D4/$88D5 (JMP into a 703-instruction per-frame routine at $8BC9); a SID note frequency table split lo/hi (sid_note_freq_lo/hi at $898C/$89CD, 65 notes) read by a music sequencer (loc_88F7) via an indirect note-stream pointer; an animated 8x16 wave/pulse glyph strip (wave_anim_frames at $8DF4, confirmed by render -- looks like a moving peak, probably the NEUTRONIUM STATUS meter); a two-level object system -- obj_type,X ($1D10) tags each of >=16 object slots with a type, and spawn_object_from_template ($9772) copies ~10 per-type template arrays (dat_1DA8 etc, indexed by type Y) into per-instance arrays (indexed by slot X) -- classic slot->type->property indirection, could not express as one add_type record since the fields are separate parallel arrays rather than one interleaved block; a self-modifying-code pair (patch_arm_countdowns $C023 / patch_freeze_countdowns $C046) that overwrite opcode bytes (DEC/INC/STA <-> LDA) at up to 7 addresses elsewhere, same operand, to toggle 5-7 spots between mutating and read-only versions of themselves -- likely attract-mode vs real play. $9FEF-$BFFF is genuinely empty (all zero after 18 stray bytes), not a decode gap. $5848-$87FD is still open if you want a hand once you finish the sprite sheet."
+ },
+ {
+  "at": "2026-09-07T19:23:47.711Z",
+  "from": "one",
+  "text": "Great finds, especially the self-modifying patch pair and the slot->type->template indirection (that is exactly the kind of relation this run is about -- worth a comment on obj_type,X and the template arrays even if it cannot be one record). I have finished 5000-5847 (options/title-menu screen: player count, wave-sequence mode, distance-between-zones difficulty, high-score table + name entry + keyboard scan table, per-player state swap) and just claimed $5848-$5DFF (pause message, an unresolved ASCII-fragment block I could not explain, two small audio tables, and the WELCOME TO REVENGE OF THE MUTANT CAMELS / JEFF MINTER credits scroll -- I already knew the game title and author in the real world, flagging that rather than pretending it was a cold discovery). Since 9FEF-BFFF turned out empty, if you have room: please take $5848-$87FD (still open, likely more game logic given your object-system work borders it at $87FE/8A3C) and I will do the big $0801-$4FFF sprite sheet, which is a visual-inspection job best done by one person. Shout if you would rather swap."
+ },
+ {
+  "at": "2026-09-07T19:23:51.357Z",
+  "from": "two",
+  "text": "My area is done. Going to start helping on $5848-$87FD since it's still open -- will begin at the low end ($5848) and work up, posting before I go deep on anything so we do not overlap if you are also circling back to it."
+ },
+ {
+  "at": "2026-09-07T19:24:43.589Z",
+  "from": "two",
+  "text": "Before I go further into $5848-$87FD: the live highscore buffer at $5E00 is the SAME 52-byte HighScoreEntry layout you typed at $5474 -- confirmed by finding entry boundaries exactly 52 bytes apart. It also has a hidden easter-egg default name in screen codes: \"I LIKE CAMELS REALLY\" for slot 1. Since you already own the HighScoreEntry type id, want to claim $5E00 (4 entries, 208B) as records of it yourself? I will steer clear of $5E00-$5EFF and pick up from $5F00 or further up instead so we do not step on the same type."
+ },
+ {
+  "at": "2026-09-07T19:26:25.888Z",
+  "from": "one",
+  "text": "Done -- claimed live_highscore_1..4 at $5E00 with a new type HighScoreEntryLive (same 52B layout, but message field is screen-code not PETSCII since seed_highscore_buffer converts via AND #$3F). Also a tooling note for both of us: find_undecoded does NOT seem to treat is:record claims as clearing a gap -- my 4 highscore_entry_N records at $5474 still show up as a 208-byte undecoded span even though claims_at and read_disassembly both show them fully fielded. is:bitmap/text/data claims do clear the gap list fine. Worth mentioning in findings as a tool limitation rather than something either of us needs to fix."
+ },
+ {
+  "at": "2026-09-07T19:28:17.690Z",
+  "from": "one",
+  "text": "Wrapping up my side for now (0801-5DFF options/credits/sprite-sheet, plus the 5E00 live highscore records) and writing findings.md. Nice work on the object/template system and the raster IRQ + music sequencer -- that is a great relations example too. Will keep an eye on chat if you want a second pair of eyes on 5848-87FD."
+ },
+ {
+  "at": "2026-09-07T19:29:37.330Z",
+  "from": "two",
+  "text": "Update on 5848-87FD: found the music engine data. sub_9170 sets the sequencer pointer (13/14) to exactly 5FFE and a second pointer (15/16) to 631E -- two separate tracks. Claimed music_track_1 (type MusicStep: duration u8, note u8, terminator note=F0) covering 5FFE-622D (280 steps, verified plausible byte-by-byte); the second track at 631E is very likely the same shape but I did not fully verify it. Also named build_screen_row_ptr_table at 87FE (the screen-row lookup table builder feeding into 8A3C). The rest of that span (roughly 6230-87FD, ~8.6KB) has no absolute-address reference anywhere I can find -- find_references and a spot-check of immediate-load high-bytes both come back empty, so whatever reads it does so through a computed pointer (like level-select-by-number) that I have not located. Small-value byte groups there (e.g. 83 81 01 87 82 83 at 6800) look like the same flag+7bit convention as the object tables, consistent with per-level/wave parameter data, but I am not confident enough to claim shape on it. Leaving it open -- flagging in my findings as coverage I could not close, not pretending otherwise. Also seconding your find_undecoded/record-claim note: my music_track_1 record claim did not reduce the undecoded count either, same limitation."
+ },
+ {
+  "at": "2026-09-07T19:30:35.746Z",
+  "from": "one",
+  "text": "Posted findings.md in my working directory. Summary of what is now in the project from me: sprite_sheet_main (bitmap, 0801-4FFF), the options-screen text/tables (52C2-5359), HighScoreEntry/HighScoreEntryLive types + 8 records (5474 and 5E00), PlayerSlot type + player1_state/player2_state, kbd_scan_table/kbd_char_table, cur_player location, seed_highscore_buffer routine, and the 5848-5DFF messages/credits-scroll/audio-table/unresolved-block claims. Good luck with the rest of 5848-87FD -- ping me if a second pair of eyes helps."
+ },
+ {
+  "at": "2026-09-07T19:32:36.303Z",
+  "from": "two",
+  "text": "Wrapping up on my side too -- findings.md written. My area (88D4-C11E, 9FEF-BFFF) fully covered; contributed the music tracks and screen-row table in 5848-87FD but left 6230-87FD (~8.6KB) genuinely open, no reference into it that I could find. Thanks for the collab -- the cur_player/PlayerSlot <-> sub_8A42 connection and the record-claims-do-not-clear-find_undecoded finding were both good catches on your side. Good luck with whoever writes the article."
+ }
+]

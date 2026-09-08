@@ -1,6 +1,6 @@
 # The experiments, and what each one changed
 
-Nine runs. They exist to find gaps in re64 by watching agents hit them, rather
+Ten runs. They exist to find gaps in re64 by watching agents hit them, rather
 than by imagining what an agent would want — so what matters about each is not
 whether it "went well" but which line of code it moved.
 
@@ -241,7 +241,7 @@ piece was done.
 **The prior memo changed the run, and improved it.** The readers found 249 lines
 of findings from experiment 7 on the same binary within ninety seconds, and
 flagged it rather than transcribing it. The editor's response is the most
-productive instruction anybody gave in nine runs: *anything already in that memo
+productive instruction anybody gave in ten runs: *anything already in that memo
 is not news unless you can show it to me — a sentence I cannot photograph, play
 or watch happen is the weakest thing I can print.* Three of the article's best
 findings are **corrections** to that memo, and each came from somebody being made
@@ -345,6 +345,106 @@ conflict: the run's best unresolved question, whether cheat mode does anything
 beyond its banner, existed only as two chat messages that happened to be read by
 the same person.
 
+### 10 — Coverage first, then the article, and what a field cannot say
+
+**Question.** Two things at once. First, a re-run of 7's shape on the new claims
+model: does a surface with one noun cover ground as fast as one with three? So
+stage one is **two readers, coverage and structure, no prose**. Second, and the
+reason for the run: can the model hold what a reader finds *between* things — a
+field whose value selects another, a byte whose bits pick out members of a set, a
+table indexed by a variable? Stage two puts an editor over the same document to
+write an article, as run 9 did, with the previous stage's work as its input.
+
+Both briefs forbade reading this repository. Run 9's readers found a prior memo
+in ninety seconds and it changed what that run measured; this one starts from the
+bytes.
+
+**The measurement.** 418 tool calls over about ninety minutes: reader one 92,
+reader two 215, the editor 111.
+
+| | after stage one | after stage two |
+|---|---|---|
+| claims | 80 | **80** |
+| record types / fields | 4 / 12 | **4 / 12** |
+| comments | 93 | **93** |
+| constants | **0** | **0** |
+| scenarios / captures | 1 / 1 | 14 / 59 |
+| evidence records | **0** | **0** |
+
+**Stage two added no analysis to the document at all.** The editor read, ran
+fourteen scenarios, took fifty-nine captures, and wrote a 257KB article and 514
+lines of notes — and the claims, types, comments and constants are unchanged to
+the object. Run 9 ended with the same complaint from the other side: there was
+nothing to attach an editorial judgement *to*. This run says it in numbers.
+
+**`add_evidence` was never called.** Not once, by anybody, across fourteen
+scenarios and fifty-nine captures. The mechanism built specifically so a finding
+re-verifies rather than resting on a sentence went unused by the agent that
+produced every scenario in the project. That is the strongest instance yet of
+this file's own rule: the vocabulary being closed is checked by the compiler,
+and whether anything reaches for a member of it is not.
+
+**The constants half is not confounded, and neither is the ROM half.**
+
+- `add_constant`: **0**. `bind_constants`: **0**. `find_immediates`: 6, all by
+  reader two. Diagnosed and fixed twice over — the answer now names the next
+  call, and `add_constant`'s description carries four idioms rather than one
+  example, because the shapes those readers skipped all turned out to be wanted.
+- `add_rom_layer`: **3**. `set_target`: **0**. Three ROM layers declared, linked
+  into nothing, and the editor's `read_bytes $FFF8` failed as a result. Its notes
+  conclude *"the host has none"* — on a host with all three. Run 9's editor
+  reached the same wrong explanation by accident; this one **inherited it**,
+  and then hand-wrote a seventeen-byte KERNAL shim. Fixed by making the write
+  that declares a layer say it is linked into no target, and by giving the
+  machine a `vectorless` stop reason instead of running into zeros.
+- `where`: **2**, both by the editor, neither by a reader — while reader one did
+  sprite-row address arithmetic **eight times by hand**, got the stride wrong the
+  first time (63, the sprite's data size, rather than 64, the stored pitch) and
+  rendered garbage before noticing.
+
+**What the readers did reach for unprompted is the interesting half.** Both
+declared record types without being told to — `add_type` four times between them,
+`edit_type` once, to correct an encoding. They found the *complex* feature and
+missed the simple ones, which says the barrier was never expressiveness. It was
+signposting, and that is where the fixes went.
+
+**The relations question got its manufactured evidence.** Both readers hit the
+same wall and worked around it in the same shape, counted in their own reports:
+
+- Reader two computed a **hi/lo byte pair into an address by hand** three times —
+  a jump table's entries, two music pointer pairs, a screen row to its colour-RAM
+  twin — and wrote: *"there is no tool here that resolves 'the word at this
+  address, read as an address' for me."* The editor did it four more times from
+  pairs of immediates.
+- Reader two probed undecoded spans by **force-adding `root:"routine"` and
+  reverting**, roughly twenty times, **six of which had to be reverted**. That is
+  the only way either reader found to ask "is this code" before committing.
+- Both decoded text by hand in throwaway Python — reader one six times, reader
+  two more than a dozen — because nothing previewed an unclaimed span under an
+  encoding. Reader one typed a field `char(38,screen)` by analogy, saw
+  card-suit glyphs, and corrected it to ASCII.
+
+Those are workarounds rather than wishes, which is the standard this file sets,
+and they produced `preview`, `where`'s word reading, and the field types.
+
+**Thirteen defects came out of the run.** The headline: `find_undecoded`
+reported **1,230 bytes of proved record layouts as untouched** — both readers
+noticed independently, told each other in chat, and neither could tell whether it
+was their mistake; and `list_claims` returned 399 of 1,035 claims with nothing
+saying so. Reader one's report is exact about the cost: *"I cross-checked each
+record claim by hand rather than trusting the gap count."*
+
+**A defect the log records and no report does.** `add_claims`, the batch form,
+had no `method` or `typeId`. Reader two therefore **never used it** — 53
+individual `add_claim` calls, one at a time, to keep provenance honest. The
+report mentions it in a list; only the call counts show what it cost.
+
+**Read the reports and the log together.** The editor's notes say record claims
+*were* cleared by `find_undecoded` and that the readers may have misread it. They
+did not: the tool was broken and was fixed between the stages. The document
+recorded neither the observation nor the correction, because both went to chat —
+which is itself the finding run 9 ended on, arriving a second time.
+
 ---
 
 ## What the sequence shows
@@ -389,6 +489,12 @@ part of the hypothesis with weight behind it. What it does not survive is the
 naming forty addresses, and run 10's brief redirected it deliberately. Run 10
 also produced four proved record types, which run 7's model could not express at
 all — that is the `zoneDataTable` finding running the other way.
+
+**Run 10's own entry above carries the numbers**, and one of them sharpens this:
+stage two added *no* claims, types, comments or constants at all. Whatever the
+naming rate says about the interface, an editor writing prose over a shared
+document contributed nothing to it — which is a second question wearing the same
+clothes, and the one a long-term baseline would separate.
 
 **The constants half is not confounded, and it has been diagnosed.**
 `find_immediates` was called six times by the two readers and `add_constant`
