@@ -32,8 +32,8 @@ const PROJECT = `{
     }
   ],
   "claims": [
-    { "id": "lbl_1", "at": "$8000", "name": "Start", "root": "routine", "author": "m", "source": "user" },
-    { "id": "lbl_2", "at": "$8004", "name": "Loop", "author": "m", "source": "user" }
+    { "id": "lbl_1", "at": "$8000", "name": "Start", "root": "routine", "origin": "user" },
+    { "id": "lbl_2", "at": "$8004", "name": "Loop", "origin": "user" }
   ]
 }
 `;
@@ -103,7 +103,7 @@ describe("a database, which two processes may hold at once", () => {
   it("does not react to its own writes", async () => {
     const s = store();
     s.runOps(
-      [{ op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Mine", root: "routine", by: { author: "test", source: "user" } } }],
+      [{ op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Mine", root: "routine", origin: "user" } }],
       "me",
       1
     );
@@ -171,14 +171,14 @@ describe("a project file, which has one writer", () => {
     // This is what makes not watching affordable: latency, not correctness.
     const s = store();
     s.runOps(
-      [{ op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Mine", root: "routine", by: { author: "test", source: "user" } } }],
+      [{ op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Mine", root: "routine", origin: "user" } }],
       "me",
       1
     );
 
     open().writeText(open().readText().replace('"Loop"', '"Elsewhere"'));
     s.runOps(
-      [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Later", by: { author: "test", source: "user" } } }],
+      [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Later", origin: "user" } }],
       "me",
       2
     );

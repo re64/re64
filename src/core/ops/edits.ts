@@ -21,7 +21,15 @@ import { newId } from "../project/identity.js";
 import { parseProjectAddress } from "../project/project.js";
 import { resolveOwningLayer } from "../project/ownership.js";
 import { ClaimEdit, Op } from "./types.js";
-import { Claim, Frame, Interpretation, Provenance, RootKind, scopeFor } from "../claims/model.js";
+import {
+  Claim,
+  ClaimMethod,
+  Frame,
+  Interpretation,
+  Provenance,
+  RootKind,
+  scopeFor,
+} from "../claims/model.js";
 
 /**
  * Make sure some layer can own an annotation at this address.
@@ -147,7 +155,15 @@ const TYPE_FOR_ROOT: Partial<Record<RootKind, LabelType>> = {
  * itself is not yet. Threading the caller through every builder is a mechanical
  * change across some thirty call sites and is deliberately not in this step.
  */
-const AUTHOR: Provenance = { author: "project", source: "user" };
+/**
+ * What these builders make: somebody's judgement, not machinery.
+ *
+ * The author used to live here too and now belongs to the evidence that vouches
+ * for a claim. These builders mint no evidence — an edit is attributed in the
+ * ops log, which is where it always was — so what a claim built here records is
+ * that a person decided it, and who is a question for the log.
+ */
+const ORIGIN = "user" as const;
 
 /**
  * Where a claim about this address belongs, as the file and document store it.
@@ -223,15 +239,25 @@ export function claimAddOps(
     root?: RootKind;
     extent?: number;
     /** How the claimer knows. See `ClaimMethod`. */
-    method?: Provenance["method"];
-  }
+    method?: ClaimMethod;
+  },
+  /**
+   * Who is saying it, when the caller knows.
+   *
+   * Given, an evidence record is minted beside the claim carrying the author
+   * and the method — because that is where provenance lives now, and a claim
+   * with nobody vouching for it is a statement nobody made. Omitted for the
+   * builders that have no caller to hand (the browser session, the CLI), which
+   * is honest: the ops log attributes the edit either way.
+   */
+  by?: Provenance
 ): { ops: Op[]; addedBeside?: string } {
   const index = loaded.map.getLabels();
   // Only a name a *person* chose is somebody's judgement to be joined rather
   // than quietly doubled. An invented `dat_XXXX`, a PRG layer's entry label
   // named after its file, and a region's name are all machinery — naming such an
   // address is the ordinary act of naming an unnamed one.
-  const chosenHere = index.getLabelsAt(address).filter((l) => l.by.source === "user");
+  const chosenHere = index.getLabelsAt(address).filter((l) => l.origin === "user");
 
   // Always adds — even the same name twice. Two labels are told apart by id,
   // and two people each making one is simpler than making the second react to a
@@ -240,6 +266,7 @@ export function claimAddOps(
   // exactly one address, and the reference project ships ten such pairs.
   const showing = index.resolve(address)?.label;
   const chosen = loaded.map.primaryLabels.has(address);
+  const id = newId("clm");
   return {
     ops: [
       // Pin what is showing, unless somebody has chosen. Two user labels tie on
@@ -251,15 +278,32 @@ export function claimAddOps(
       {
         op: "claim.add",
         claim: {
-          id: newId("clm"),
+          id,
           ...placed(loaded, address),
           ...(claim.name === undefined ? {} : { name: claim.name }),
           ...(claim.says === undefined ? {} : { says: claim.says }),
           ...(claim.root === undefined ? {} : { root: claim.root }),
           ...(claim.extent === undefined ? {} : { extent: claim.extent }),
-          by: claim.method === undefined ? AUTHOR : { ...AUTHOR, method: claim.method },
+          origin: ORIGIN,
         },
       } as Op,
+      // Who said it, and how they know. One `supports` beside the claim rather
+      // than fields on it, so a second reader reaching the same finding adds a
+      // second record to the *same* claim instead of a claim nobody can merge.
+      ...(by === undefined
+        ? []
+        : [
+            {
+              op: "evidence.add",
+              id: newId("evd"),
+              claim: id,
+              kind: "supports",
+              by: {
+                ...by,
+                ...(claim.method === undefined ? {} : { method: claim.method }),
+              },
+            } as Op,
+          ]),
     ],
     ...(chosenHere.length > 0 ? { addedBeside: chosenHere[0].name } : {}),
   };
@@ -321,7 +365,7 @@ export function labelAddOp(
       name,
       ...(type && ROOT_FOR_TYPE[type] ? { root: ROOT_FOR_TYPE[type] } : {}),
       ...(extent !== undefined ? { extent } : {}),
-      by: AUTHOR,
+      origin: ORIGIN,
     },
   };
 }

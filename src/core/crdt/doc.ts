@@ -448,16 +448,24 @@ export const CLAIM_FIELDS = [
   "typeId",
   "root",
   "description",
-  "author",
-  "source",
-  "when",
-  "method",
+  "origin",
 ] as const;
 const FILE_FIELDS = ["name", "hash", "size"] as const;
 export const TARGET_FIELDS = ["id", "name", "layers", "entryPoints", "order", "description"] as const;
 const SCENARIO_FIELDS = ["id", "name", "description", "steps"] as const;
 const CAPTURE_FIELDS = ["id", "scenario", "step", "kind", "file", "when"] as const;
-const EVIDENCE_FIELDS = ["id", "claim", "kind", "scenario", "capture", "other", "note"] as const;
+const EVIDENCE_FIELDS = [
+  "id",
+  "claim",
+  "kind",
+  "author",
+  "method",
+  "when",
+  "scenario",
+  "capture",
+  "other",
+  "note",
+] as const;
 const LAYER_FIELDS = [
   "id",
   "type",

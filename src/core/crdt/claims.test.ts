@@ -14,7 +14,7 @@ import { ClaimSet, disagreements } from "../claims/set.js";
  */
 
 const claim = (over: Partial<Claim> & Pick<Claim, "id" | "at">): Claim => ({
-  by: { author: "somebody", source: "user" },
+  origin: "user",
   ...over,
 });
 
@@ -46,7 +46,7 @@ describe("two peers on one claims root", () => {
       claim: claim({
         id: "clm_a", at: 0x1800, extent: 0x800, name: "spriteBank",
         says: { is: "bitmap", view: "sprite" },
-        by: { author: "gfx", source: "user" },
+        origin: "user",
       }),
     }, "gfx");
     applyClaimOp(b, {
@@ -54,7 +54,7 @@ describe("two peers on one claims root", () => {
       claim: claim({
         id: "clm_b", at: 0x1800, extent: 0x800, name: "levelData",
         says: { is: "data" },
-        by: { author: "lead", source: "user" },
+        origin: "user",
       }),
     }, "lead");
 
@@ -132,11 +132,11 @@ describe("two peers on one claims root", () => {
 
     applyClaimOp(a, {
       op: "claim.add",
-      claim: claim({ id: "clm_gfx", at: 0x1800, name: "spriteBank", by: { author: "gfx", source: "user" } }),
+      claim: claim({ id: "clm_gfx", at: 0x1800, name: "spriteBank", origin: "user" }),
     }, "gfx");
     applyClaimOp(b, {
       op: "claim.add",
-      claim: claim({ id: "clm_lead", at: 0x2000, name: "levelData", by: { author: "lead", source: "user" } }),
+      claim: claim({ id: "clm_lead", at: 0x2000, name: "levelData", origin: "user" }),
     }, "lead");
     reconcile(a, b);
     expect(sorted(a)).toHaveLength(2);
@@ -154,12 +154,12 @@ describe("two peers on one claims root", () => {
         id: "clm_1", at: 0x8e00, extent: 0x200, name: "characterSet",
         says: { is: "bitmap", view: "char:8" },
         description: "the game's own glyphs",
-        by: { author: "amber", source: "user", when: 1_700_000_000_000, method: "guessed" },
+        origin: "user",
       }),
       claim({
         id: "clm_2", at: 0x10, frame: { space: "layer", layer: "decruncher" },
         name: "fetchBit", root: "routine",
-        by: { author: "stone", source: "user" },
+        origin: "user",
       }),
       claim({ id: "clm_3", at: 0x5000, extent: 0x40, says: { is: "text", encoding: "petscii" } }),
     ];

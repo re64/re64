@@ -181,7 +181,7 @@ describe("editing", () => {
 
   it("removes a claim by id, which is the only thing that names one", async () => {
     const session = await open();
-    const claim = session.claimsAt(0x8100).find((c) => c.by.source === "user")!;
+    const claim = session.claimsAt(0x8100).find((c) => c.origin === "user")!;
     expect(claim).toBeDefined();
 
     session.removeClaim(claim.id);

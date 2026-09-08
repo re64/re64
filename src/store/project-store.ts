@@ -599,7 +599,15 @@ export class ProjectStore {
       }
 
       return {
-        undone: applying.length > 0 ? describeOp(newest.op, absolute) : null,
+        // **What the action was, not its last side effect.** `newest` is the
+        // final op of the changeset, and since a claim now mints the vouching
+        // that says who made it, that op is "supports clm_x" rather than the
+        // naming somebody actually did. The group is in log order, so its first
+        // entry is the one that started the action and is what a reader means.
+        undone:
+          applying.length > 0
+            ? describeOp((group[0] ?? newest).op, absolute)
+            : null,
         applied: applying.length,
         skipped,
       };

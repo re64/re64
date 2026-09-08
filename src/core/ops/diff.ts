@@ -375,6 +375,15 @@ export function diffProjects(from: Project, to: Project): Op[] {
         id,
         claim: item.claim,
         kind: item.kind,
+        ...(item.author === undefined && item.method === undefined && item.when === undefined
+          ? {}
+          : {
+              by: {
+                author: item.author ?? "unknown",
+                ...(item.method === undefined ? {} : { method: item.method }),
+                ...(item.when === undefined ? {} : { when: item.when }),
+              },
+            }),
         ...(item.scenario === undefined ? {} : { scenario: item.scenario }),
         ...(item.capture === undefined ? {} : { capture: item.capture }),
         ...(item.other === undefined ? {} : { other: item.other }),
@@ -388,6 +397,20 @@ export function diffProjects(from: Project, to: Project): Op[] {
       id,
       fields: {
         ...(before.kind === item.kind ? {} : { kind: item.kind }),
+        // Flat in the file, nested in the operation. Emitted whenever any of
+        // the three moved, because `by` is one value to the op even though it
+        // is three keys here.
+        ...(before.author === item.author &&
+        before.method === item.method &&
+        before.when === item.when
+          ? {}
+          : {
+              by: {
+                author: item.author ?? "unknown",
+                ...(item.method === undefined ? {} : { method: item.method }),
+                ...(item.when === undefined ? {} : { when: item.when }),
+              },
+            }),
         ...(before.scenario === item.scenario ? {} : { scenario: item.scenario ?? null }),
         ...(before.capture === item.capture ? {} : { capture: item.capture ?? null }),
         ...(before.other === item.other ? {} : { other: item.other ?? null }),

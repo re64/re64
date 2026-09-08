@@ -77,9 +77,10 @@ describe("what the document persists against what a tool can write", () => {
     id: "minted by the server and returned; a caller never supplies one",
     layer: "the scope, derived from the address — never chosen (see docs/model.md)",
     target: "the same, for a claim no layer supplies bytes for",
-    author: "from the X-Re64-User header, never a tool argument",
-    source: "how the claim arose; `user` for anything a tool writes",
-    when: "the server's clock",
+    origin:
+      "machinery or judgement; `user` for anything a tool writes, and the one " +
+      "part of provenance that is a property of the claim rather than of an " +
+      "act of vouching — who and how now live on the supporting evidence",
     description:
       "what a name means on this *machine*, carried by the built-in platform " +
       "table — a person's note about an address is a comment, deliberately a " +
@@ -92,7 +93,10 @@ describe("what the document persists against what a tool can write", () => {
    * Empty, and that is the news. It held `confidence` — a field carried by the
    * model, the CRDT, the serializer, the ops and the export, and settable by
    * nothing — until it was replaced by `method`, which is the axis experiment-0
-   * established and which `add_claim` now takes.
+   * established, and which has since moved off the claim entirely onto the
+   * evidence that vouches for it. `add_claim` still takes it and still records
+   * it; it simply lands somewhere a second reader can add to rather than
+   * overwrite.
    *
    * Kept rather than deleted, because this asserts the set *exactly*: a seventh
    * instance of the shape fails the test, and so does leaving an entry here

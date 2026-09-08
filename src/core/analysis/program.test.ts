@@ -16,7 +16,7 @@ const gridrunner = () => analyzeProgram(loadProjectFile("assets/gridrunner/gridr
 describe("what an agent can now ask", () => {
   it("which branch targets are still auto-named", () => {
     const program = gridrunner();
-    const auto = program.labels.filter({ source: "auto" });
+    const auto = program.labels.filter({ origin: "auto" });
 
     expect(auto.length).toBeGreaterThan(0);
     // The prefix says what the disassembly could tell about each.
@@ -95,7 +95,7 @@ describe("what an agent can now ask", () => {
 
   it("how much is named by a person rather than by the disassembler", () => {
     const program = gridrunner();
-    const auto = program.labels.filter({ source: "auto" }).length;
+    const auto = program.labels.filter({ origin: "auto" }).length;
     const chosen = program.labels.getAllLabels().length - auto;
 
     expect(chosen).toBeGreaterThan(0);
@@ -155,7 +155,7 @@ describe("filtering labels", () => {
   });
 
   it("combines criteria", () => {
-    const autoCode = gridrunner().labels.filter({ source: "auto", type: "code" });
+    const autoCode = gridrunner().labels.filter({ origin: "auto", type: "code" });
     expect(autoCode.every((l) => l.name.startsWith("loc_"))).toBe(true);
   });
 });

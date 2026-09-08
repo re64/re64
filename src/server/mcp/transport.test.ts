@@ -491,12 +491,14 @@ describe("the three claim writers carry the same fields", () => {
     expect(made.isError, made.text).toBe(false);
 
     const at = (await callTool("claims_at", { at: "$8110" })).value as {
-      claims: { name?: string; is?: string; typeId?: string; method?: string }[];
+      claims: { name?: string; is?: string; typeId?: string; by?: { method?: string }[] }[];
     };
     const mine = at.claims.find((c) => c.name === "batchTwo")!;
     expect(mine.is).toBe("record");
     expect(mine.typeId).toBe(typeId);
-    expect(mine.method).toBe("ran");
+    // The batch mints a vouching per claim, exactly as the single writer does —
+    // which is the property this test exists for: three writers, same fields.
+    expect(mine.by?.[0].method).toBe("ran");
   });
 
   it("revises how you know, without forgetting who said it", async () => {
@@ -514,10 +516,19 @@ describe("the three claim writers carry the same fields", () => {
     expect(edited.isError, edited.text).toBe(false);
 
     const at = (await callTool("claims_at", { at: "$8120" })).value as {
-      claims: { id: string; method?: string; by?: string }[];
+      claims: { id: string; origin?: string; by?: { author: string; method?: string }[] }[];
     };
     const mine = at.claims.find((c) => c.id === id)!;
-    expect(mine.method).toBe("ran");
+
+    // **Revised in place, not stacked.** How you know lives on *your own*
+    // vouching now, so changing it edits that record rather than adding a
+    // second — somebody else's account of the same claim is theirs, and
+    // rewriting it would be the overwrite this model was rebuilt to stop.
+    expect(mine.by).toHaveLength(1);
+    expect(mine.by![0].method).toBe("ran");
+    expect(mine.by![0].author).toBeTruthy();
+    // And the claim itself says only what kind of thing it is.
+    expect(mine.origin).toBe("user");
   });
 });
 
@@ -959,8 +970,10 @@ describe("editing as an agent", () => {
     const { value } = await callTool("changes_since", { cursor: 0 });
     const { changes } = value as { changes: { did: string; by: string }[] };
 
-    expect(changes).toHaveLength(1);
-    expect(changes[0].by).toBe("usr_agent");
+    // The naming and the vouching that records who did it: two operations, one
+    // action, both attributed. The feed is per operation on purpose.
+    expect(changes).toHaveLength(2);
+    expect(changes.every((c) => c.by === "usr_agent")).toBe(true);
     expect(changes[0].did).toContain("Attributed");
   });
 
@@ -973,7 +986,7 @@ describe("editing as an agent", () => {
     const { value: next } = await callTool("changes_since", { cursor });
 
     const { changes } = next as { changes: { did: string }[] };
-    expect(changes).toHaveLength(1);
+    expect(changes).toHaveLength(2);
     expect(changes[0].did).toContain("Second");
   });
 
@@ -2028,12 +2041,22 @@ describe("evidence, and saying things about a claim", () => {
     const about = (await callTool("list_evidence", { claim: now })).value as {
       evidence: { kind: string; other?: string }[];
     };
-    expect(about.evidence[0]).toMatchObject({ kind: "supersedes", other: old });
+    expect(about.evidence.some((e) => e.kind === "supersedes" && e.other === old)).toBe(true);
     // And the superseded claim is still there to be read.
     const still = (await callTool("claims_at", { at: "$8F10" })).value as {
       claims: { id?: string }[];
     };
     expect(still.claims.some((c) => c.id === old)).toBe(true);
+
+    // **And the pair stops being reported as an open contradiction.** Both
+    // claims cover the same bytes and say different things, so the geometric
+    // sweep finds them — until somebody says one replaced the other, which is
+    // what a supersession is. Reading only `refutes` meant keeping the earlier
+    // reading was punished with a disagreement that could never be settled.
+    const open = (await callTool("disagreements", {})).value as {
+      findings: { kind: string; what: string }[];
+    };
+    expect(open.findings.filter((f) => f.what.includes("$8F10"))).toEqual([]);
   });
 
   it("says how a claim was reached, so agreement can be told from repetition", async () => {
@@ -2041,9 +2064,14 @@ describe("evidence, and saying things about a claim", () => {
     expect(made.isError).toBe(false);
 
     const here = (await callTool("claims_at", { at: "$8F20" })).value as {
-      claims: { name?: string; method?: string }[];
+      claims: { name?: string; by?: { author: string; method?: string }[] }[];
     };
-    expect(here.claims.find((c) => c.name === "watched")?.method).toBe("ran");
+    const mine = here.claims.find((c) => c.name === "watched");
+    // **On the vouching, not on the claim** — which is what makes the next part
+    // possible: a second reader reaching the same finding a different way adds
+    // an account to this list rather than a claim nobody can merge with it.
+    expect(mine?.by?.[0]).toMatchObject({ method: "ran" });
+    expect(mine?.by?.[0].author).toBeTruthy();
   });
 
   it("backs a claim with a scenario, which re-verifies rather than asserting", async () => {

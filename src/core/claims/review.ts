@@ -47,7 +47,7 @@ export function describeFinding(f: Finding): string {
       return (
         `$${f.address.toString(16).toUpperCase()}: ${f.instructions} instruction(s) decode here and ` +
         `${f.targeted ? "something jumps here" : "control falls through"}, ` +
-        `inside ${f.claim.name ?? "a claim"} declared ${f.claim.says!.is} by ${f.claim.by.author}`
+        `inside ${f.claim.name ?? "a claim"} declared ${f.claim.says!.is}`
       );
     case "unreached":
       return `${f.claim.name ?? `$${f.claim.at.toString(16).toUpperCase()}`}: nothing reaches this claim and nothing roots it, so it renders nowhere`;

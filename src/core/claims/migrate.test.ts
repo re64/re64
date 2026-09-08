@@ -123,8 +123,7 @@ describe("migrating every project in the repository", () => {
       at: "$8000",
       name: "main",
       root: "entry",
-      author: "project",
-      source: "user",
+      origin: "user",
     });
     // The data one keeps its span and gains a root, or it stops rendering.
     expect(claims.find((c) => c.id === "rgn_d")).toMatchObject({

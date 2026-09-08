@@ -94,6 +94,22 @@ export function checkHygiene(
 ): HygieneFinding[] {
   const found: HygieneFinding[] = [];
   const comments: CommentIndex = loaded.comments;
+
+  /**
+   * How a claim was reached, across everyone who vouched for it.
+   *
+   * A set rather than a value, because a claim can now carry more than one
+   * account — which is the whole reason provenance moved off it. Empty where
+   * nobody said how, which reads as one unstated account rather than none.
+   */
+  const methodsFor = (claimId: string): Set<string> => {
+    const out = new Set<string>();
+    for (const item of loaded.project.evidence ?? []) {
+      if (item.claim !== claimId || item.kind !== "supports") continue;
+      out.add(item.method ?? "unstated");
+    }
+    return out.size === 0 ? new Set(["unstated"]) : out;
+  };
   const constants: ConstantIndex = loaded.constants;
 
   // A name two labels hold identifies neither, and the offset form is worse
@@ -112,7 +128,7 @@ export function checkHygiene(
     // wrong, and they agreed because they used the *same* static reasoning and
     // shared its blind spot — so "two accounts agree" was read as corroboration
     // when it was one account arriving twice. See invariant E10.
-    const methods = new Set(twins.map((label) => label.by.method ?? "unstated"));
+    const methods = new Set(twins.flatMap((label) => [...methodsFor(label.id)]));
     const corroborated =
       methods.size > 1
         ? ` They were reached ${methods.size} different ways (${[...methods].join(", ")}), so ` +
@@ -179,7 +195,7 @@ export function checkHygiene(
     });
   }
   for (const label of labels.getAllLabels()) {
-    if (label.by.source === "platform" || label.by.source === "auto") continue;
+    if (label.origin === "platform" || label.origin === "auto") continue;
     const inside = insideInstruction(instructions, label.at);
     if (inside === undefined) continue;
     found.push({

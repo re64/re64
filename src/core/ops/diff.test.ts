@@ -14,10 +14,10 @@ const TEXT = `{
     { "id": "lay_a", "type": "prg", "path": "game.prg" }
   ],
   "claims": [
-    { "id": "clm_1", "at": "$8000", "name": "Start", "root": "routine", "author": "marcus", "source": "user" },
-    { "id": "clm_2", "at": "$8080", "extent": 32, "name": "copyright", "is": "text", "author": "marcus", "source": "user" },
+    { "id": "clm_1", "at": "$8000", "name": "Start", "root": "routine", "origin": "user" },
+    { "id": "clm_2", "at": "$8080", "extent": 32, "name": "copyright", "is": "text", "origin": "user" },
 
-    { "id": "clm_3", "at": "$8100", "name": "Loop", "author": "marcus", "source": "user" }
+    { "id": "clm_3", "at": "$8100", "name": "Loop", "origin": "user" }
   ]
 }
 `;
@@ -55,7 +55,7 @@ describe("diffProjects", () => {
   it("deletes before it re-adds, so a moved entry never exists twice", () => {
     const after = edited((p) => {
       p.claims!.splice(0, 1);
-      p.claims!.push({ id: "clm_4", at: "$8200", name: "New", author: "marcus", source: "user" });
+      p.claims!.push({ id: "clm_4", at: "$8200", name: "New", origin: "user" });
     });
 
     const ops = diffProjects(parseProject(TEXT), after);

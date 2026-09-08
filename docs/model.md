@@ -220,6 +220,40 @@ its start. Silent in a hole, because a hole is a real gap in interpretation.
 A reference to a declaration that has gone renders the bytes, the literal, or
 the plain value. Nothing sweeps.
 
+### Provenance lives on the evidence, not on the claim
+
+A claim carries **`origin`** — `user | layer | platform | auto | analysis` — and
+nothing else about who. That is intrinsic: it says whether this is somebody's
+judgement or machinery, and hygiene gates on it because 855 of a seeded Camels
+project's names are `platform` or `auto`.
+
+**Who vouched and how they know are properties of an act of vouching**, so they
+sit on an evidence record: `{author, method?, when?}` beside `kind`. `add_claim`
+mints one — a `supports` — alongside the claim, which is two operations under
+one changeset.
+
+The reason is merging. A claim carrying its own author cannot be shared: two
+readers reaching the same finding produce two claims, and merging them would
+erase one. Four runs on Camels independently re-derived the zone table, the
+cheat, the IRQ handler and the high-score file — one finding with four accounts,
+which the old shape could only say as four findings. Now it is **one claim with
+four supporting records**, each keeping its author and method, and "do these
+accounts differ" is finally computable rather than a thing `method` could only
+hint at.
+
+There is no fourth verb for "created it". An `asserts` kind was considered and
+rejected: it would distinguish only *arrival order*, which the log already
+records, and it breaks under parallel collaboration — two agents independently
+creating the same claim both assert it, and merging would mean rewriting one
+into a support to preserve a fact that carries no information. Strength lives in
+`method` and in whether a scenario is attached, never in the verb.
+
+**All three kinds are read.** `refutes` reports a declared disagreement;
+`supersedes` *settles* the pair it names, so keeping an earlier reading is no
+longer punished with a contradiction that can never be closed; `supports` backs
+a claim. The switch is exhaustive with a `never` default, because for a long
+time only `refutes` was read and the other two reached no consumer at all.
+
 ---
 
 ## 6. Comments

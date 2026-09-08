@@ -38,6 +38,6 @@ export function spanClaim(region: {
     ...(name === undefined ? {} : { name }),
     ...(says ? { says, root: "data" as const } : {}),
     ...(kind === "code" ? { root: "location" as const } : {}),
-    by: { author: "test", source: "user" },
+    origin: "user",
   };
 }

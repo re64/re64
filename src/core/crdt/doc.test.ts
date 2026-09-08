@@ -28,10 +28,10 @@ const PROJECT: Project = {
     { id: "lay_p", type: "prg", path: "game.prg" },
   ],
   claims: [
-    { id: "lbl_a", at: "$0002", name: "playerX", author: "marcus", source: "user" },
-    { id: "lbl_b", at: "$8000", name: "Start", root: "routine", author: "marcus", source: "user" },
-    { id: "rgn_1", at: "$8080", extent: 32, name: "copyright", is: "text", root: "data", author: "marcus", source: "user" },
-    { id: "lbl_c", at: "$8100", name: "Loop", author: "marcus", source: "user" },
+    { id: "lbl_a", at: "$0002", name: "playerX", origin: "user" },
+    { id: "lbl_b", at: "$8000", name: "Start", root: "routine", origin: "user" },
+    { id: "rgn_1", at: "$8080", extent: 32, name: "copyright", is: "text", root: "data", origin: "user" },
+    { id: "lbl_c", at: "$8100", name: "Loop", origin: "user" },
   ],
   entryPoints: ["$8000"],
   primaryLabels: { $8000: "lbl_b" },
@@ -80,7 +80,7 @@ describe("round trip", () => {
 
   it("orders entries by address regardless of insertion order", () => {
     const doc = docFromProject(PROJECT);
-    applyOpToDoc(doc, { op: "claim.add", claim: { id: "lbl_z", at: 0x8050, name: "Between", by: { author: "test", source: "user" } } });
+    applyOpToDoc(doc, { op: "claim.add", claim: { id: "lbl_z", at: 0x8050, name: "Between", origin: "user" } });
 
     const named = projectFromDoc(doc).claims!.filter((c) => c.at !== "$0002");
     expect(named.map((c) => c.name)).toEqual(["Start", "Between", "copyright", "Loop"]);
@@ -124,8 +124,8 @@ describe("rebuilding from stored updates", () => {
     const updates: Uint8Array[] = [];
     source.on("update", (u: Uint8Array) => updates.push(u));
 
-    applyOpToDoc(source, { op: "claim.add", claim: { id: "lbl_b", at: 0x8000, name: "One", root: "routine", by: { author: "test", source: "user" } } });
-    applyOpToDoc(source, { op: "claim.add", claim: { id: "lbl_c", at: 0x8100, name: "Two", by: { author: "test", source: "user" } } });
+    applyOpToDoc(source, { op: "claim.add", claim: { id: "lbl_b", at: 0x8000, name: "One", root: "routine", origin: "user" } });
+    applyOpToDoc(source, { op: "claim.add", claim: { id: "lbl_c", at: 0x8100, name: "Two", origin: "user" } });
 
     const base = encodeDoc(docFromProject(PROJECT));
     const forwards = docFromUpdates([base, ...updates]);
@@ -157,8 +157,8 @@ describe("merge", () => {
 
   it("keeps both sides of divergent edits", () => {
     const [a, b] = twoClients();
-    applyOpToDoc(a, { op: "claim.add", claim: { id: "lbl_c", at: 0x8100, name: "MainLoop", by: { author: "test", source: "user" } } });
-    applyOpToDoc(b, { op: "claim.add", claim: { id: "rgn_1", at: 0x8080, extent: 0x80a0 - 0x8080, name: "copyright", says: { is: "data" }, root: "data", by: { author: "test", source: "user" } } });
+    applyOpToDoc(a, { op: "claim.add", claim: { id: "lbl_c", at: 0x8100, name: "MainLoop", origin: "user" } });
+    applyOpToDoc(b, { op: "claim.add", claim: { id: "rgn_1", at: 0x8080, extent: 0x80a0 - 0x8080, name: "copyright", says: { is: "data" }, root: "data", origin: "user" } });
     sync(a, b);
 
     const merged = projectFromDoc(a);
@@ -181,7 +181,7 @@ describe("merge", () => {
   it("survives a delete racing an edit", () => {
     const [a, b] = twoClients();
     applyOpToDoc(a, { op: "claim.remove", id: "lbl_c" });
-    applyOpToDoc(b, { op: "claim.add", claim: { id: "lbl_c", at: 0x8100, name: "Renamed", by: { author: "test", source: "user" } } });
+    applyOpToDoc(b, { op: "claim.add", claim: { id: "lbl_c", at: 0x8100, name: "Renamed", origin: "user" } });
     sync(a, b);
 
     expect(projectFromDoc(a)).toEqual(projectFromDoc(b));
@@ -194,8 +194,8 @@ describe("undo", () => {
     doc.clientID = 1;
     const undo = undoManagerFor(doc, "me");
 
-    applyOpToDoc(doc, { op: "claim.add", claim: { id: "lbl_b", at: 0x8000, name: "Mine", by: { author: "test", source: "user" } } }, "me");
-    applyOpToDoc(doc, { op: "claim.add", claim: { id: "lbl_c", at: 0x8100, name: "Theirs", by: { author: "test", source: "user" } } }, "them");
+    applyOpToDoc(doc, { op: "claim.add", claim: { id: "lbl_b", at: 0x8000, name: "Mine", origin: "user" } }, "me");
+    applyOpToDoc(doc, { op: "claim.add", claim: { id: "lbl_c", at: 0x8100, name: "Theirs", origin: "user" } }, "them");
 
     undo.undo();
 
@@ -209,7 +209,7 @@ describe("undo", () => {
     doc.clientID = 1;
     const undo = undoManagerFor(doc, "me");
 
-    applyOpToDoc(doc, { op: "claim.add", claim: { id: "lbl_b", at: 0x8000, name: "Mine", by: { author: "test", source: "user" } } }, "me");
+    applyOpToDoc(doc, { op: "claim.add", claim: { id: "lbl_b", at: 0x8000, name: "Mine", origin: "user" } }, "me");
     undo.undo();
     undo.redo();
 
@@ -230,7 +230,7 @@ describe("one action, one undo step", () => {
     applyOpsToDoc(
       doc,
       [
-        { op: "claim.add", claim: { id: "lbl_c", at: 0x8100, name: "sub_8100", root: "routine", by: { author: "test", source: "user" } } },
+        { op: "claim.add", claim: { id: "lbl_c", at: 0x8100, name: "sub_8100", root: "routine", origin: "user" } },
         { op: "primary.bind", address: 0x8100, labelId: "lbl_c" },
       ],
       "me"
@@ -249,9 +249,9 @@ describe("one action, one undo step", () => {
     const um = undoManagerFor(doc, "me");
 
     applyOpsToDoc(doc,
-      [{ op: "claim.add", claim: { id: "lbl_b", at: 0x8000, name: "First", root: "routine", by: { author: "test", source: "user" } } }], "me");
+      [{ op: "claim.add", claim: { id: "lbl_b", at: 0x8000, name: "First", root: "routine", origin: "user" } }], "me");
     applyOpsToDoc(doc,
-      [{ op: "claim.add", claim: { id: "lbl_c", at: 0x8100, name: "Second", by: { author: "test", source: "user" } } }], "me");
+      [{ op: "claim.add", claim: { id: "lbl_c", at: 0x8100, name: "Second", origin: "user" } }], "me");
 
     um.undo();
     expect(names(doc)).toContain("First");
@@ -279,8 +279,8 @@ describe("session squashing", () => {
     session.on("update", (u: Uint8Array) => updates.push(u));
 
     const ops: Op[] = [
-      { op: "claim.add", claim: { id: "lbl_b", at: 0x8000, name: "One", by: { author: "test", source: "user" } } },
-      { op: "claim.add", claim: { id: "lbl_c", at: 0x8100, name: "Two", by: { author: "test", source: "user" } } },
+      { op: "claim.add", claim: { id: "lbl_b", at: 0x8000, name: "One", origin: "user" } },
+      { op: "claim.add", claim: { id: "lbl_c", at: 0x8100, name: "Two", origin: "user" } },
       { op: "primary.unbind", address: 0x8000 },
     ];
     for (const op of ops) applyOpToDoc(session, op);
@@ -295,7 +295,7 @@ describe("session squashing", () => {
   it("sends only what a peer is missing", () => {
     const base = docFromProject(PROJECT);
     const before = stateVector(base);
-    applyOpToDoc(base, { op: "claim.add", claim: { id: "lbl_b", at: 0x8000, name: "Changed", by: { author: "test", source: "user" } } });
+    applyOpToDoc(base, { op: "claim.add", claim: { id: "lbl_b", at: 0x8000, name: "Changed", origin: "user" } });
 
     expect(diffSince(base, before).length).toBeLessThan(encodeDoc(base).length);
   });
@@ -312,14 +312,14 @@ describe("what a flatten may and may not assume", () => {
     const back = projectFromDoc(doc);
 
     expect(back.claims!.map((c) => c.id)).toEqual(["lbl_a", "lbl_b", "rgn_1", "lbl_c"]);
-    expect(Object.keys(back.claims![1])).toEqual(["id", "at", "name", "root", "author", "source"]);
+    expect(Object.keys(back.claims![1])).toEqual(["id", "at", "name", "root", "origin"]);
   });
 
   it("orders entries by address, whatever order they arrived in", () => {
     // Map iteration order differs between clients that inserted concurrently,
     // so something has to impose one; address is the order a reader expects.
     const doc = docFromProject(PROJECT);
-    applyOpToDoc(doc, { op: "claim.add", claim: { id: "rgn_early", at: 0x8000, extent: 0x8010 - 0x8000, says: { is: "data" }, root: "data", by: { author: "test", source: "user" } } });
+    applyOpToDoc(doc, { op: "claim.add", claim: { id: "rgn_early", at: 0x8000, extent: 0x8010 - 0x8000, says: { is: "data" }, root: "data", origin: "user" } });
 
     const spans = projectFromDoc(doc)
       .claims!.filter((c) => c.is !== undefined)

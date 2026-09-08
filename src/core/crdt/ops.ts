@@ -416,6 +416,9 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
           id: op.id,
           claim: op.claim,
           kind: op.kind,
+          author: op.by?.author,
+          method: op.by?.method,
+          when: op.by?.when,
           scenario: op.scenario,
           capture: op.capture,
           other: op.other,
@@ -426,7 +429,20 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
 
       case "evidence.set": {
         const entry = entryFor(doc.getMap<Y.Map<unknown>>("evidence"), op.id);
-        if (entry) revise(entry, { ...op.fields });
+        // `by` is spread into the flat keys the document stores, like `says` on
+        // a claim: a revision touches exactly the keys it names, so two peers
+        // revising different halves of one record do not revert each other.
+        if (entry) {
+          const { by, ...rest } = op.fields;
+          revise(entry, { ...rest });
+          if (by !== undefined) {
+            revise(entry, {
+              author: by === null ? undefined : by.author,
+              method: by === null ? undefined : by.method,
+              when: by === null ? undefined : by.when,
+            });
+          }
+        }
         break;
       }
 

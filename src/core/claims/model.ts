@@ -98,17 +98,35 @@ export type ClaimMethod =
   /** Watched happening in the machine. */
   | "ran";
 
+/**
+ * What kind of thing a claim is: machinery, or somebody's judgement.
+ *
+ * Intrinsic to the claim and therefore the one part of the old `by` that stayed
+ * on it. `user` is a person or an agent deciding something; the rest are
+ * generated, and the distinction decides hygiene — warning that two invented
+ * `dat_XXXX` names collide would be noise on the first day of every project.
+ * Camels' seeded document has 383 platform names and 472 automatic ones against
+ * none by hand, which is the scale that makes the gate matter.
+ */
+export type ClaimOrigin = "user" | "layer" | "platform" | "auto" | "analysis";
+
+/**
+ * Who vouched for something, and how they know.
+ *
+ * **This belongs to an act of vouching, not to the thing vouched for**, which is
+ * why it lives on evidence rather than on a claim. A claim carrying its own
+ * author cannot be shared: two readers reaching the same finding produce two
+ * claims, and merging them would erase one of them. Four runs on Camels
+ * independently re-derived the zone table, the cheat, the IRQ handler and the
+ * high-score file — that is one finding with four accounts, and the old shape
+ * could only say it as four findings.
+ *
+ * The same category error this project already fixed once, when labels and
+ * regions turned out to be two halves of one noun.
+ */
 export interface Provenance {
   /** A user id, an agent codename, or `cli`. Never resolved on read. */
   readonly author: string;
-  /**
-   * How the claim arose.
-   *
-   * `user` is somebody's judgement. The rest are machinery, and the distinction
-   * decides hygiene: warning that two invented `dat_XXXX` names collide would be
-   * noise on the first day of every project.
-   */
-  readonly source: "user" | "layer" | "platform" | "auto" | "analysis";
   /** Milliseconds since the epoch, supplied by the caller. */
   readonly when?: number;
   /**
@@ -208,7 +226,14 @@ export interface Claim {
   readonly root?: RootKind;
   /** What the name means on this machine, where somebody else decided. */
   readonly description?: string;
-  readonly by: Provenance;
+  /**
+   * Machinery or judgement — see `ClaimOrigin`.
+   *
+   * All that remains of the old `by`. Who said it and how they know moved to
+   * the evidence that says so, because those describe an act and this describes
+   * the object.
+   */
+  readonly origin: ClaimOrigin;
 }
 
 /**

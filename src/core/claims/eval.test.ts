@@ -101,14 +101,14 @@ describe("what the claim model recovers", () => {
 });
 
 describe("what the claim model can express that the old one could not", () => {
-  const person = (author: string) => ({ author, source: "user" as const });
+  const person = (author: string) => ({ author, origin: "user" as const });
 
   it("two readers disagreeing about one span both stand", () => {
     // Experiment 7: two readers concluded different things about one byte and one
     // silently won. Here neither wins and the disagreement is the output.
     const claims: Claim[] = [
-      { id: "c1", at: 0x1800, extent: 0x800, name: "spriteBank", says: { is: "bitmap", view: "sprite" }, by: person("gfx") },
-      { id: "c2", at: 0x1800, extent: 0x800, name: "levelData", says: { is: "data" }, by: person("lead") },
+      { id: "c1", at: 0x1800, extent: 0x800, name: "spriteBank", says: { is: "bitmap", view: "sprite" }, origin: "user" },
+      { id: "c2", at: 0x1800, extent: 0x800, name: "levelData", says: { is: "data" }, origin: "user" },
     ];
     const set = new ClaimSet(claims);
     const ds = disagreements(set);
@@ -122,8 +122,8 @@ describe("what the claim model can express that the old one could not", () => {
 
   it("a routine root inside somebody's data claim is a reported conflict, not a deletion", () => {
     const claims: Claim[] = [
-      { id: "r1", at: 0x8cf6, extent: 0x22, name: "laserFrameRateForLevel", says: { is: "data" }, by: person("marcus") },
-      { id: "r2", at: 0x8d16, name: "PlayNewLevelSounds", root: "routine", by: person("agate") },
+      { id: "r1", at: 0x8cf6, extent: 0x22, name: "laserFrameRateForLevel", says: { is: "data" }, origin: "user" },
+      { id: "r2", at: 0x8d16, name: "PlayNewLevelSounds", root: "routine", origin: "user" },
     ];
     const ds = disagreements(new ClaimSet(claims));
     const conflict = ds.find((d) => d.kind === "rootInData");
@@ -142,7 +142,7 @@ describe("what the claim model can express that the old one could not", () => {
         frame: { space: "layer", layer: "decruncher" },
         name: "fetchBit",
         root: "routine",
-        by: person("stone"),
+        origin: "user",
       },
     ];
     const placements: LayerPlacement[] = [
@@ -161,15 +161,21 @@ describe("what the claim model can express that the old one could not", () => {
     expect(set.all()[0].relativeTo).toEqual({ layer: "decruncher", offset: 0x10 });
   });
 
-  it("a claim records how its author knows, not how sure they are", () => {
-    // The axis changed: `confidence: guess` said how strongly it was meant and
-    // could not distinguish an independent confirmation from a correlated one.
-    // `method` says *how*, which can — see invariant E10.
+  it("a claim records whether it is judgement or machinery, and nothing more", () => {
+    // **How its author knows is no longer here**, and neither is who they are.
+    // `confidence: guess` became `method` because strength could not tell an
+    // independent confirmation from a correlated one; `method` then moved to
+    // the evidence, because it describes an *act of vouching* rather than the
+    // thing vouched for — which is what lets two readers who reached the same
+    // finding share one claim instead of producing two nobody can merge.
+    //
+    // What is left is intrinsic: this claim is somebody's judgement rather
+    // than a generated name, which is the distinction hygiene gates on.
     const claims: Claim[] = [
       { id: "g1", at: 0x2000, extent: 0x800, says: { is: "bitmap", view: "char:8" },
-        by: { author: "amber", source: "user", method: "guessed" } },
+        origin: "user" },
     ];
     const set = new ClaimSet(claims);
-    expect(set.covering(0x2100)[0].by.method).toBe("guessed");
+    expect(set.covering(0x2100)[0].origin).toBe("user");
   });
 });

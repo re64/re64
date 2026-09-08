@@ -23,9 +23,9 @@ import { newId } from "../project/identity.js";
 const PROJECT: Project = {
   layers: [{ id: "lay_a", type: "prg", path: "game.prg" }],
   claims: [
-    { id: "lbl_1", at: "$8000", name: "Start", root: "routine", author: "m", source: "user" },
-    { id: "lbl_2", at: "$8100", name: "Loop", author: "m", source: "user" },
-    { id: "rgn_1", at: "$8200", extent: 16, is: "data", root: "data", author: "m", source: "user" },
+    { id: "lbl_1", at: "$8000", name: "Start", root: "routine", origin: "user" },
+    { id: "lbl_2", at: "$8100", name: "Loop", origin: "user" },
+    { id: "rgn_1", at: "$8200", extent: 16, is: "data", root: "data", origin: "user" },
   ],
 };
 
@@ -161,7 +161,7 @@ describe("working apart and rejoining", () => {
     for (const name of ["One", "Two", "Three"]) {
       applyOpToDoc(offline, rename("lbl_2", name));
     }
-    applyOpToDoc(offline, { op: "claim.add", claim: { id: "lbl_new", at: 0x8300, name: "AddedOffline", by: { author: "test", source: "user" } } });
+    applyOpToDoc(offline, { op: "claim.add", claim: { id: "lbl_new", at: 0x8300, name: "AddedOffline", origin: "user" } });
 
     syncAll(online, offline);
 

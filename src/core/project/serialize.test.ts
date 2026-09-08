@@ -32,7 +32,7 @@ const TEXT = `{
   "name": "harness",
   "layers": [{ "id": "lay_a", "type": "prg", "path": "game.prg" }],
   "claims": [
-    { "id": "clm_1", "at": "$8000", "name": "Start", "root": "routine", "author": "marcus", "source": "user" }
+    { "id": "clm_1", "at": "$8000", "name": "Start", "root": "routine", "origin": "user" }
   ],
   "constants": [{ "id": "cst_1", "name": "WHITE", "value": "$01" }]
 }
@@ -53,8 +53,8 @@ describe("formatProject", () => {
   it("orders claims by address, then id, so two peers produce the same text", () => {
     const project = parseProject(TEXT);
     project.claims!.push(
-      { id: "clm_3", at: "$8100", name: "Later", author: "m", source: "user" },
-      { id: "clm_2", at: "$8100", name: "Also", author: "m", source: "user" }
+      { id: "clm_3", at: "$8100", name: "Later", origin: "user" },
+      { id: "clm_2", at: "$8100", name: "Also", origin: "user" }
     );
     const order = formatProject(project)
       .split("\n")
@@ -77,8 +77,7 @@ describe("claim writers", () => {
       at: "$8080",
       extent: 32,
       is: "text",
-      author: "m",
-      source: "user",
+      origin: "user",
     });
     expect(parseProject(added).claims).toHaveLength(2);
 
@@ -87,8 +86,7 @@ describe("claim writers", () => {
       at: "$8080",
       extent: 64,
       is: "text",
-      author: "m",
-      source: "user",
+      origin: "user",
     });
     const claims = parseProject(revised).claims!;
     expect(claims).toHaveLength(2);
@@ -96,7 +94,7 @@ describe("claim writers", () => {
   });
 
   it("is idempotent, or undo could not replay it forward to check", () => {
-    const claim = { id: "clm_1", at: "$8000", name: "Start", root: "routine" as const, author: "marcus", source: "user" as const };
+    const claim = { id: "clm_1", at: "$8000", name: "Start", root: "routine" as const, origin: "user" as const };
     expect(upsertClaim(TEXT, claim)).toBe(TEXT);
   });
 

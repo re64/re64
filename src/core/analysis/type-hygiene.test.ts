@@ -50,8 +50,7 @@ describe("what a record layout can be wrong about", () => {
           extent: 400,
           is: "record",
           typeId: "typ_gone",
-          author: "t",
-          source: "user",
+          origin: "user",
         },
       ];
     });
@@ -71,8 +70,7 @@ describe("what a record layout can be wrong about", () => {
           extent: 450,
           is: "record",
           typeId: "typ_zone",
-          author: "t",
-          source: "user",
+          origin: "user",
         },
       ];
     });
@@ -102,8 +100,7 @@ describe("what a record layout can be wrong about", () => {
           extent: 8400,
           is: "record",
           typeId: "typ_zone",
-          author: "t",
-          source: "user",
+          origin: "user",
         },
       ];
     });

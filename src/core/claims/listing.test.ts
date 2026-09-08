@@ -120,7 +120,7 @@ describe("one address-sorted listing", () => {
   });
 });
 
-const by = (author: string) => ({ author, source: "user" as const });
+const by = (author: string) => ({ author, origin: "user" as const });
 
 describe("the extent bug this design must not be able to restate", () => {
   it("a code root offers no offsets to operand rendering", () => {
@@ -132,15 +132,15 @@ describe("the extent bug this design must not be able to restate", () => {
     // combination and the constraint has to be stated instead.
     const routine: Claim = {
       id: "r", at: 0x8040, extent: 0x40, name: "UpdateExplosion",
-      root: "routine", by: by("marcus"),
+      root: "routine", origin: "user",
     };
     const array: Claim = {
       id: "a", at: 0x0400, extent: 0x3e8, name: "SCREEN_RAM",
-      says: { is: "data" }, by: by("marcus"),
+      says: { is: "data" }, origin: "user",
     };
     const sprites: Claim = {
       id: "s", at: 0x2000, extent: 0x800, name: "spriteBank",
-      says: { is: "bitmap" }, root: "data", by: by("marcus"),
+      says: { is: "bitmap" }, root: "data", origin: "user",
     };
 
     expect(arrayExtent(routine)).toBeUndefined();

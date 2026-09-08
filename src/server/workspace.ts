@@ -598,12 +598,12 @@ export class Workspace {
     const program = this.program();
     const { loaded } = program;
     const exportStatus = this.room.store.exportStatus();
-    const auto = program.labels.filter({ source: "auto" });
+    const auto = program.labels.filter({ origin: "auto" });
     // Supplied by re64 rather than decided by anyone: the built-in C64 symbol
     // table, and the entry point a PRG layer labels from its load address.
     const supplied = [
-      ...program.labels.filter({ source: "platform" }),
-      ...program.labels.filter({ source: "layer" }),
+      ...program.labels.filter({ origin: "platform" }),
+      ...program.labels.filter({ origin: "layer" }),
     ];
 
     return {
@@ -1332,7 +1332,7 @@ export class Workspace {
           ...(instruction ? { mnemonic: instruction.mnemonic, flow: instruction.flow } : {}),
           ...(outbound ? { target: hex4(outbound.to), targetType: outbound.type } : {}),
           ...(label
-            ? { name: label.name, labelType: labelTypeOf(label), source: label.by.source }
+            ? { name: label.name, labelType: labelTypeOf(label), source: label.origin }
             : {}),
           ...(row.illegal ? { illegal: true } : {}),
         };
@@ -1425,7 +1425,7 @@ export class Workspace {
 
   labels(
     criteria: {
-      source?: Claim["by"]["source"];
+      origin?: Claim["origin"];
       type?: LabelType;
       namePattern?: string;
       range?: { start: number; end: number };
@@ -1457,7 +1457,7 @@ export class Workspace {
     const prefix = { calls: "sub_", jumps: "loc_", data: "dat_", any: "" }[kind];
 
     const found = program.labels
-      .filter({ source: "auto" })
+      .filter({ origin: "auto" })
       .filter((l) => l.name.startsWith(prefix))
       .map((label) => this.summarise(label))
       .sort((a, b) => b.references - a.references);
@@ -1479,14 +1479,14 @@ export class Workspace {
     // and a write carrying one names nothing. `layer` was missing here and
     // reported `writable: true` — a PRG layer names its own load address, and
     // the project cannot edit that any more than it can edit a platform name.
-    const invented = label.by.source === "auto";
-    const builtIn = label.by.source === "platform" || label.by.source === "layer";
+    const invented = label.origin === "auto";
+    const builtIn = label.origin === "platform" || label.origin === "layer";
     return {
       ...(invented || builtIn ? {} : { id: label.id }),
       address: hex4(label.at),
       name: label.name,
       type: labelTypeOf(label),
-      source: label.by.source,
+      source: label.origin,
       // What it belongs to, so a reader can see whether it follows its bytes.
       scope: describeScope(label.frame),
       references: program.xrefs.count(label.at),
@@ -3627,7 +3627,7 @@ export class Workspace {
       (loaded) => {
         const ops: Op[] = [];
         for (const claim of usable) {
-          const built = this.claimOps(loaded, claim);
+          const built = this.claimOps(loaded, claim, caller);
           for (const id of claimIds(built)) made.push({ at: hex4(claim.at), claim: id });
           ops.push(...built);
         }
@@ -3673,22 +3673,44 @@ export class Workspace {
           ? { ...fields, says: { ...held.says, ...fields.says } as Claim["says"] }
           : fields;
 
-      // `method` is offered as its own argument because that is how a caller
-      // thinks about it, and it lives inside `by` beside the author and the
-      // source — so it merges, or revising how you know would forget who said
-      // it. Settable only at creation until now, which made "I guessed, then I
-      // ran it" unsayable: exactly the movement this axis exists to record.
+      // **How you know is no longer on the claim, so revising it edits the
+      // vouching instead.** `method` stays an argument here because that is how
+      // a caller thinks about it — "I guessed, then I ran it" is the movement
+      // this axis exists to record — but it now lands on *this caller's own*
+      // supporting evidence. Somebody else's account of the same claim is
+      // theirs, and silently rewriting it would be the overwrite this whole
+      // model was rebuilt to stop.
+      const mine = (loaded.project.evidence ?? []).find(
+        (e) => e.claim === id && e.kind === "supports" && e.author === caller.userId
+      );
+      const methodOps = (raw: ClaimEdit & { method?: ClaimMethod | null }): Op[] => {
+        if (raw.method === undefined) return [];
+        if (mine?.id !== undefined) {
+          return [
+            {
+              op: "evidence.set",
+              id: mine.id,
+              fields: { by: { author: caller.userId, ...(raw.method === null ? {} : { method: raw.method }) } },
+            } as Op,
+          ];
+        }
+        // Nobody has vouched for this claim as this caller yet — saying how you
+        // know is the act of vouching, so it makes one.
+        return raw.method === null
+          ? []
+          : [
+              {
+                op: "evidence.add",
+                id: newId("evd"),
+                claim: id,
+                kind: "supports",
+                by: { author: caller.userId, method: raw.method },
+              } as Op,
+            ];
+      };
       const withMethod = (raw: ClaimEdit & { method?: ClaimMethod | null }): ClaimEdit => {
-        if (raw.method === undefined) return raw;
-        const { method, ...rest } = raw;
-        return {
-          ...rest,
-          by: {
-            ...held.by,
-            ...(method === null ? {} : { method }),
-            ...(method === null && held.by.method !== undefined ? { method: undefined } : {}),
-          } as Claim["by"],
-        };
+        const { method: _method, ...rest } = raw;
+        return rest;
       };
 
       // **`at` is absolute here, as it is in every tool, and is converted.**
@@ -3708,7 +3730,12 @@ export class Workspace {
           ? withMethod(merged)
           : { ...withMethod(merged), ...placed(loaded, merged.at) };
 
-      return [{ op: "claim.set", id, fields: edit }];
+      return [
+        ...(Object.keys(edit).length > 0
+          ? [{ op: "claim.set", id, fields: edit } as Op]
+          : []),
+        ...methodOps(merged as ClaimEdit & { method?: ClaimMethod | null }),
+      ];
     });
   }
 
@@ -3749,7 +3776,7 @@ export class Workspace {
     const result = this.edit(
       caller,
       (loaded) => {
-        const ops = this.claimOps(loaded, claim);
+        const ops = this.claimOps(loaded, claim, caller);
         for (const id of claimIds(ops)) made.push({ at: hex4(claim.at), claim: id });
         return ops;
       },
@@ -3841,7 +3868,7 @@ export class Workspace {
    * and `add_comments` disagreed about their own contract precisely because the
    * batch restated what the single call did rather than calling it.
    */
-  private claimOps(loaded: LoadedProject, claim: ClaimInput): Op[] {
+  private claimOps(loaded: LoadedProject, claim: ClaimInput, caller: Caller): Op[] {
     // **Always adds.** Every kind of claim mints, and none of them upserts.
     //
     // A claim carrying an `is` or a `root` used to route through `regionSetOp`,
@@ -3886,7 +3913,7 @@ export class Workspace {
           ? { root: "data" as const }
           : {}),
       ...(claim.extent === undefined ? {} : { extent: claim.extent }),
-    });
+    }, { author: caller.userId, when: Date.now() });
 
     // A comment is its own object and always was. It used to be handed to the
     // span writer as a field that no longer exists, so a claim carrying both an
@@ -3930,12 +3957,24 @@ export class Workspace {
       root?: string;
       /** `layer:<id>`, `target:<name>` or `machine` — what this claim belongs to. */
       scope: string;
-      by: string;
+      /** Everyone who vouched for it, and how they know. */
+      by?: { author: string; method?: string }[];
+      /** Machinery or judgement: user, layer, platform, auto, analysis. */
+      origin: string;
     }[];
   } {
-    const covering = this.program()
-      .loaded.claims.filter((c) => address >= c.at && address < c.at + (c.extent ?? 1))
+    const program = this.program();
+    const covering = program.loaded.claims
+      .filter((c) => address >= c.at && address < c.at + (c.extent ?? 1))
       .sort(compareClaims);
+
+    const vouchings = (claimId: string) =>
+      (program.loaded.project.evidence ?? [])
+        .filter((e) => e.claim === claimId && e.kind === "supports" && e.author !== undefined)
+        .map((e) => ({
+          author: e.author!,
+          ...(e.method === undefined ? {} : { method: e.method }),
+        }));
 
     return {
       address: hex4(address),
@@ -3954,16 +3993,18 @@ export class Workspace {
           : {}),
         ...(c.says?.is === "record" ? { typeId: c.says.typeId } : {}),
         ...(c.root !== undefined ? { root: c.root } : {}),
-        // **How the author knows.** Reported because two claims agreeing is
-        // only evidence when the methods differ — a reader looking at several
-        // claims here has to be able to tell corroboration from one account
-        // arriving twice. See invariant E10.
-        ...(c.by.method !== undefined ? { method: c.by.method } : {}),
+        // **Who vouched, and how they know** — now a list, because a claim can
+        // carry more than one account. Reported because two accounts agreeing
+        // is only evidence when the methods differ: a reader has to be able to
+        // tell corroboration from one account arriving twice, and with several
+        // vouchings on one claim that is finally a question this can answer.
+        // See invariant E10.
+        ...(vouchings(c.id).length > 0 ? { by: vouchings(c.id) } : {}),
         // The read that verifies the write can see what the write chose. It is
         // not something the caller picks, but it decides whether the claim
         // follows its bytes when a layer is relinked.
         scope: describeScope(c.frame),
-        by: c.by.author,
+        origin: c.origin,
       })),
     };
   }
@@ -4000,11 +4041,16 @@ export class Workspace {
     // label — one action, two operations, so undo takes both back together.
     let beside: { address: number; from: string }[] = [];
     const result = this.edit(caller, (loaded) => {
-      const built = claimAddOps(loaded, address, {
-        name,
-        ...(type && ROOT_FOR_TYPE[type] ? { root: ROOT_FOR_TYPE[type] } : {}),
-        ...(extent === undefined ? {} : { extent }),
-      });
+      const built = claimAddOps(
+        loaded,
+        address,
+        {
+          name,
+          ...(type && ROOT_FOR_TYPE[type] ? { root: ROOT_FOR_TYPE[type] } : {}),
+          ...(extent === undefined ? {} : { extent }),
+        },
+        { author: caller.userId, when: Date.now() }
+      );
       if (built.addedBeside) beside = [{ address, from: built.addedBeside }];
 
       // A comment still needs a layer to hold it; a name no longer does. That

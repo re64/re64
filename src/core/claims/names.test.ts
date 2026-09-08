@@ -23,7 +23,7 @@ const userClaim = (
   ...(type === "function" ? { root: "routine" as const } : {}),
   ...(type === "code" ? { root: "location" as const } : {}),
   ...(extent === undefined ? {} : { extent }),
-  by: { author: "test", source: "user" },
+  origin: "user",
 });
 
 import { describe, it, expect } from "vitest";
@@ -35,7 +35,7 @@ describe("a name a layer brings with it", () => {
     expect(claim.at).toBe(0x1000);
     expect(claim.name).toBe("main");
     expect(claim.root).toBe("entry");
-    expect(claim.by.source).toBe("layer");
+    expect(claim.origin).toBe("layer");
   });
 
   it("allows $10000 for end-of-memory", () => {
@@ -54,7 +54,7 @@ describe("a name somebody chose", () => {
     expect(claim.at).toBe(0x2000);
     expect(claim.name).toBe("player_x");
     expect(claim.root).toBeUndefined();
-    expect(claim.by.source).toBe("user");
+    expect(claim.origin).toBe("user");
   });
 });
 

@@ -83,7 +83,7 @@ describe("two readers declaring the same span, offline", () => {
         extent: SPAN.end - SPAN.start,
         name: "spriteSheet",
         says: { is: "bitmap", view: "sprite" },
-        by: { author: "gfx", source: "user" },
+        origin: "user",
       },
     ];
     const offlineLead: Claim[] = [
@@ -93,7 +93,7 @@ describe("two readers declaring the same span, offline", () => {
         extent: SPAN.end - SPAN.start,
         name: "levelTable",
         says: { is: "data" },
-        by: { author: "lead", source: "user" },
+        origin: "user",
       },
     ];
 
@@ -125,7 +125,7 @@ describe("two readers declaring the same span, offline", () => {
       extent: 0x10,
       name: "playerState",
       says: { is: "data" },
-      by: { author: "gfx", source: "user" },
+      origin: "user",
     };
     const set = new ClaimSet([claim]);
     expect(set.covering(0x0018)).toHaveLength(1);
@@ -141,7 +141,7 @@ describe("two readers declaring the same span, offline", () => {
       extent: 0x20,
       name: "charSet",
       says: { is: "bitmap", view: "char:8" },
-      by: { author: "gfx", source: "user" },
+      origin: "user",
     };
     const gfxRenames: Claim = { ...base, name: "characterSet" };
     const leadAddsTheirOwn: Claim = {
@@ -150,7 +150,7 @@ describe("two readers declaring the same span, offline", () => {
       extent: 0x20,
       name: "glyphs",
       says: { is: "bitmap", view: "char:8" },
-      by: { author: "lead", source: "user" },
+      origin: "user",
     };
 
     const merged = new ClaimSet([gfxRenames, leadAddsTheirOwn]);

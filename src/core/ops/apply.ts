@@ -56,7 +56,7 @@ import {
   deleteClaim,
 } from "../project/serialize.js";
 import { ClaimEdit, EvidenceSetOp, Op, TypeAddOp, TypeField } from "./types.js";
-import { Claim } from "../claims/model.js";
+import { Claim, Provenance } from "../claims/model.js";
 import { ProjectClaim, ProjectEvidence, ProjectField, projectClaims } from "../project/project.js";
 
 /** Position of a layer in the project, by id. */
@@ -148,10 +148,7 @@ function projectClaimOf(claim: Claim): ProjectClaim {
     ...(claim.says?.is === "record" ? { typeId: claim.says.typeId } : {}),
     ...(claim.root !== undefined ? { root: claim.root } : {}),
     ...(claim.description !== undefined ? { description: claim.description } : {}),
-    author: claim.by.author,
-    source: claim.by.source,
-    ...(claim.by.when !== undefined ? { when: claim.by.when } : {}),
-    ...(claim.by.method !== undefined ? { method: claim.by.method } : {}),
+    origin: claim.origin,
   };
 }
 
@@ -423,6 +420,9 @@ export function applyOp(raw: string, op: Op): string {
         id: op.id,
         claim: op.claim,
         kind: op.kind,
+        ...(op.by?.author === undefined ? {} : { author: op.by.author }),
+        ...(op.by?.method === undefined ? {} : { method: op.by.method }),
+        ...(op.by?.when === undefined ? {} : { when: op.by.when }),
         ...(op.scenario === undefined ? {} : { scenario: op.scenario }),
         ...(op.capture === undefined ? {} : { capture: op.capture }),
         ...(op.other === undefined ? {} : { other: op.other }),
@@ -434,6 +434,21 @@ export function applyOp(raw: string, op: Op): string {
       const merged: Record<string, unknown> = { ...held };
       for (const [key, value] of Object.entries(op.fields)) {
         if (value === undefined) continue;
+        // `by` is nested in the operation and flat in the file, like `says` on
+        // a claim — spread rather than stored whole, so the two write paths
+        // produce the same bytes and a revision touches only the keys it names.
+        if (key === "by") {
+          delete merged.author;
+          delete merged.method;
+          delete merged.when;
+          if (value !== null) {
+            const by = value as Provenance;
+            merged.author = by.author;
+            if (by.method !== undefined) merged.method = by.method;
+            if (by.when !== undefined) merged.when = by.when;
+          }
+          continue;
+        }
         if (value === null) delete merged[key];
         else merged[key] = value;
       }
@@ -802,6 +817,20 @@ export function invertOp(raw: string, op: Op): Op {
       const was = found as unknown as Record<string, unknown>;
       const fields: Record<string, unknown> = {};
       for (const key of Object.keys(op.fields)) {
+        // `by` is three flat keys here and one nested value in the operation,
+        // so the inverse has to reassemble it — reading `was["by"]` finds
+        // nothing and would clear a provenance the undo was meant to restore.
+        if (key === "by") {
+          fields.by =
+            was.author === undefined && was.method === undefined && was.when === undefined
+              ? null
+              : {
+                  author: (was.author as string) ?? "unknown",
+                  ...(was.method === undefined ? {} : { method: was.method }),
+                  ...(was.when === undefined ? {} : { when: was.when }),
+                };
+          continue;
+        }
         fields[key] = was[key] ?? null;
       }
       return { op: "evidence.set", id: op.id, fields: fields as EvidenceSetOp["fields"] };

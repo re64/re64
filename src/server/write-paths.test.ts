@@ -37,8 +37,8 @@ const PROJECT = `{
     }
   ],
   "claims": [
-    { "id": "lbl_1", "at": "$8000", "name": "Start", "author": "m", "source": "user" },
-    { "id": "lbl_2", "at": "$8004", "name": "Loop", "author": "m", "source": "user" }
+    { "id": "lbl_1", "at": "$8000", "name": "Start", "origin": "user" },
+    { "id": "lbl_2", "at": "$8004", "name": "Loop", "origin": "user" }
   ]
 }
 `;
@@ -171,7 +171,7 @@ describe("an HTTP write racing a live session", () => {
 
     const alice = await connect("alice");
     await settle();
-    applyOpToDoc(alice.doc, { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Changed", by: { author: "test", source: "user" } } });
+    applyOpToDoc(alice.doc, { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Changed", origin: "user" } });
     await settle();
 
     const after = (await fetchProject()).version;
@@ -215,9 +215,9 @@ describe("three clients over sockets", () => {
     const [a, b, c] = await Promise.all([connect("alice"), connect("bob"), connect("agent-1")]);
     await settle();
 
-    applyOpToDoc(a.doc, { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "A", by: { author: "test", source: "user" } } });
-    applyOpToDoc(b.doc, { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "B", by: { author: "test", source: "user" } } });
-    applyOpToDoc(c.doc, { op: "claim.add", claim: { id: "lbl_3", at: 0x8008, name: "C", by: { author: "test", source: "user" } } });
+    applyOpToDoc(a.doc, { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "A", origin: "user" } });
+    applyOpToDoc(b.doc, { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "B", origin: "user" } });
+    applyOpToDoc(c.doc, { op: "claim.add", claim: { id: "lbl_3", at: 0x8008, name: "C", origin: "user" } });
     await settle();
 
     for (const client of [a, b, c]) {

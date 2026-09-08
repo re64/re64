@@ -381,7 +381,7 @@ migration never deletes somebody's claims to make a layout fit.
 
 **F1 · The vocabulary being closed is checked by the compiler. Whether anything
 *emits* or *reads* a member of it is not.** This file's most repeated failure, now
-**nine** instances: `meta.set` with no emitter; `layer.add` filtered to symbols;
+**ten** instances: `meta.set` with no emitter; `layer.add` filtered to symbols;
 `decoders` missing from `withIds`; `constants` missing from the undo whitelist; 382
 platform `description`s reaching no consumer; `Provenance.confidence`, which
 round-trips through five layers and is exposed by **no tool, no UI and no CLI**;
@@ -394,6 +394,13 @@ document schema, and dropped by the text serializer's hand-written key list, the
 loader's hand-written field list, the CRDT's own `type.add`, and `list_types`.
 Nothing failed: a bit record simply became a byte record on the next load, and
 every offset in it silently meant something else.
+The tenth is `EvidenceKind`: `refutes` was read by `disagreements()` and
+`supports` and `supersedes` were read by **nothing**, having been written,
+validated, stored, round-tripped and exposed by two tools. Worse than inert — a
+superseded claim and its replacement still overlap and still differ, so the
+inferred sweep reported them as a live contradiction for ever, with the record
+that resolves it being skipped three lines above. Now a `switch` with a `never`
+default, so the next member cannot be added without deciding what reads it.
 *Note:* those are the instances that prove the shape is about *hand-written
 lists*, not about new features. The fix is the one that could not go stale: the
 diff now assigns `layer.type` to `LayerAddOp["layerType"]`, so the two

@@ -15,7 +15,7 @@
  * candidate shared a position, plus the one thing specificity cannot express.
  */
 
-import { Claim, Provenance } from "./model.js";
+import { Claim, ClaimOrigin } from "./model.js";
 
 /**
  * A claim that has a name, which is the only kind this index holds.
@@ -43,7 +43,7 @@ import { LabelType } from "../memory/label-type.js";
  * built-in `CHROUT` must lose to a project's `ROM_CHROUT` however wide either
  * is, so specificity alone would decide it by id — at random.
  */
-export const CLAIM_RANK: Record<Provenance["source"], number> = {
+export const CLAIM_RANK: Record<ClaimOrigin, number> = {
   user: 4,
   analysis: 3,
   layer: 2,
@@ -87,7 +87,7 @@ function compareForDisplay(a: Claim, b: Claim, primaryId?: string): number {
     if (a.id === primaryId) return -1;
     if (b.id === primaryId) return 1;
   }
-  const rank = CLAIM_RANK[b.by.source] - CLAIM_RANK[a.by.source];
+  const rank = CLAIM_RANK[b.origin] - CLAIM_RANK[a.origin];
   if (rank !== 0) return rank;
   // Narrower is more specific: a name on the exact byte beats the name of the
   // table it sits in, which is what the old `region` rank was really saying.
@@ -280,7 +280,7 @@ export class NameIndex {
     for (const [address, here] of this.byAddress) {
       const byName = new Map<string, NamedClaim[]>();
       for (const label of here) {
-        if (label.by.source !== "user") continue;
+        if (label.origin !== "user") continue;
         // Naming an address and naming the array that starts there are one
         // person saying one thing, and the reference project does it ten times
         // over. Only a bare name repeated is somebody having done the work
@@ -336,7 +336,7 @@ export class NameIndex {
    * every label and testing its source by hand.
    */
   filter(criteria: {
-    source?: Provenance["source"];
+    origin?: ClaimOrigin;
     type?: LabelType;
     /** Matched against the name, case-insensitively, as a substring. */
     namePattern?: string;
@@ -346,7 +346,7 @@ export class NameIndex {
     const pattern = criteria.namePattern?.toLowerCase();
 
     return this.getAllLabels().filter((label) => {
-      if (criteria.source !== undefined && label.by.source !== criteria.source) return false;
+      if (criteria.origin !== undefined && label.origin !== criteria.origin) return false;
       if (criteria.type !== undefined && labelTypeOf(label) !== criteria.type) return false;
       if (pattern !== undefined && !(label.name ?? "").toLowerCase().includes(pattern))
         return false;
@@ -450,7 +450,7 @@ export class NameIndex {
       // `JMP laserFrameRateForLevel + $0020` — a jump into the middle of a
       // table, which is a confident wrong answer about what the program does.
       // A root is exactly the difference: `dat_` has none, the other two do.
-      if (best.by.source !== "auto" || best.root !== undefined) {
+      if (best.origin !== "auto" || best.root !== undefined) {
         return { label: best, offset: 0 };
       }
       const inside = this.containing(address);
@@ -517,7 +517,7 @@ export function platformClaim(
     name,
     ...rootFor(type),
     ...(description === undefined ? {} : { description }),
-    by: { author: "platform", source: "platform" },
+    origin: "platform",
   };
 }
 
@@ -528,7 +528,7 @@ export function layerClaim(id: string, at: number, name: string, type: LabelType
     at: checkedAddress(at),
     name,
     ...rootFor(type),
-    by: { author: "layer", source: "layer" },
+    origin: "layer",
   };
 }
 
@@ -545,7 +545,7 @@ export function autoClaim(id: string, at: number, name: string, type: LabelType)
     at: checkedAddress(at),
     name,
     ...rootFor(type),
-    by: { author: "analysis", source: "auto" },
+    origin: "auto",
   };
 }
 

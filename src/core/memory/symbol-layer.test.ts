@@ -15,7 +15,7 @@ const userClaim = (id: string, at: number, name: string, type: LabelType = "addr
   ...(type === "function" ? { root: "routine" as const } : {}),
   ...(type === "code" ? { root: "location" as const } : {}),
   ...(extent === undefined ? {} : { extent }),
-  by: { author: "test", source: "user" },
+  origin: "user",
 });
 
 import { createC64PlatformLayer, C64_SYMBOLS } from "../c64/symbols.js";

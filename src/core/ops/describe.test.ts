@@ -17,7 +17,7 @@ const at = (position: number, framed = true) =>
       at: position,
       ...(framed ? { frame: { space: "layer" as const, layer: "lay_a" } } : {}),
       root: "entry" as const,
-      by: { author: "t", source: "user" as const },
+      origin: "user" as const,
     },
   });
 
@@ -40,7 +40,7 @@ describe("describing a claim", () => {
         at: 0,
         extent: 32,
         says: { is: "text" as const },
-        by: { author: "t", source: "user" as const },
+        origin: "user" as const,
       },
     };
     // `covers` says `$8F00-$8F1F` for 32 bytes; this said `-$8F20`.

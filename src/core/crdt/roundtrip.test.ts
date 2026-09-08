@@ -63,12 +63,11 @@ const BASE = `{
       "at": "$0002",
       "layer": "lay_a",
       "name": "insideTheLayer",
-      "author": "m",
-      "source": "user"
+      "origin": "user"
     },
-    { "id": "clm_1", "at": "$8000", "name": "Start", "root": "routine", "author": "marcus", "source": "user" },
-    { "id": "clm_2", "at": "$8080", "extent": 32, "name": "copyright", "is": "text", "encoding": "petscii", "root": "data", "author": "marcus", "source": "user" },
-    { "id": "clm_3", "at": "$8100", "name": "Loop", "author": "marcus", "source": "user" }
+    { "id": "clm_1", "at": "$8000", "name": "Start", "root": "routine", "origin": "user" },
+    { "id": "clm_2", "at": "$8080", "extent": 32, "name": "copyright", "is": "text", "encoding": "petscii", "root": "data", "origin": "user" },
+    { "id": "clm_3", "at": "$8100", "name": "Loop", "origin": "user" }
   ],
   "constants": [{ "id": "cst_1", "name": "WHITE", "value": "$01" }],
   "decoders": [{ "id": "dec_1", "name": "plain", "source": "return [...bytes];" }],
@@ -135,7 +134,7 @@ const CASES: { [K in Op["op"]]: Case } = {
         frame: { space: "layer", layer: "lay_a" },
         name: "spriteBank",
         says: { is: "bitmap", view: "sprite" },
-        by: { author: "gfx", source: "user" },
+        origin: "user",
       },
     },
   },
@@ -292,18 +291,27 @@ const CASES: { [K in Op["op"]]: Case } = {
   // A refutation that shares no bytes with what it refutes — the shape
   // `disagreements()` sweeps for and can never find, because `$8DF9` holding
   // `$3B` is about the *glyph* `$3B`, somewhere else entirely.
+  // Carrying `by`, because that is where a claim's provenance lives now and
+  // this is the path it has to survive. The nested shape is spread into flat
+  // keys on the way into the document, exactly as `says` is on a claim, so a
+  // revision touches only the halves it names.
   "evidence.add": {
     op: {
       op: "evidence.add",
       id: "evd_2",
       claim: "clm_2",
       kind: "refutes",
+      by: { author: "beryl", method: "ran", when: 1720000000000 },
       other: "clm_1",
       note: "$8DF9 holds $3B, so it is drawn",
     },
   },
   "evidence.set": {
-    op: { op: "evidence.set", id: "evd_1", fields: { note: "reworded", capture: "cap_1" } },
+    op: {
+      op: "evidence.set",
+      id: "evd_1",
+      fields: { note: "reworded", capture: "cap_1", by: { author: "amber", method: "read" } },
+    },
   },
   "evidence.remove": { op: { op: "evidence.remove", id: "evd_1" } },
 };

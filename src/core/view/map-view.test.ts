@@ -15,7 +15,7 @@ const span = (
   extent: end - start,
   says: { is } as Interpretation,
   ...(name ? { name } : {}),
-  by: { author: "test", source: "user" },
+  origin: "user",
 });
 
 describe("buildRegionTree", () => {

@@ -27,8 +27,8 @@ const PROJECT = `{
     }
   ],
   "claims": [
-    { "id": "lbl_1", "at": "$8000", "name": "Start", "author": "m", "source": "user" },
-    { "id": "lbl_2", "at": "$8004", "name": "Loop", "author": "m", "source": "user" }
+    { "id": "lbl_1", "at": "$8000", "name": "Start", "origin": "user" },
+    { "id": "lbl_2", "at": "$8004", "name": "Loop", "origin": "user" }
   ]
 }
 `;
@@ -120,7 +120,7 @@ describe("two participants on one project", () => {
     const bob = await Client.connect(url(), "bob");
     await settle();
 
-    applyOpToDoc(alice.doc, { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "MainLoop", by: { author: "test", source: "user" } } });
+    applyOpToDoc(alice.doc, { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "MainLoop", origin: "user" } });
     await settle();
 
     const seen = projectFromDoc(bob.doc).claims!.find((l) => l.id === "lbl_2");
@@ -135,8 +135,8 @@ describe("two participants on one project", () => {
     const bob = await Client.connect(url(), "bob");
     await settle();
 
-    applyOpToDoc(alice.doc, { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Begin", by: { author: "test", source: "user" } } });
-    applyOpToDoc(bob.doc, { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Repeat", by: { author: "test", source: "user" } } });
+    applyOpToDoc(alice.doc, { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Begin", origin: "user" } });
+    applyOpToDoc(bob.doc, { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Repeat", origin: "user" } });
     await settle();
 
     for (const doc of [alice.doc, bob.doc]) {
@@ -153,8 +153,8 @@ describe("two participants on one project", () => {
     const bob = await Client.connect(url(), "bob");
     await settle();
 
-    applyOpToDoc(alice.doc, { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Begin", by: { author: "test", source: "user" } } });
-    applyOpToDoc(bob.doc, { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Repeat", by: { author: "test", source: "user" } } });
+    applyOpToDoc(alice.doc, { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Begin", origin: "user" } });
+    applyOpToDoc(bob.doc, { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Repeat", origin: "user" } });
     await settle();
 
     await alice.close();
@@ -177,7 +177,7 @@ describe("two participants on one project", () => {
     const alice = await Client.connect(url(), "alice");
     await settle();
 
-    applyOpToDoc(alice.doc, { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Rescued", by: { author: "test", source: "user" } } });
+    applyOpToDoc(alice.doc, { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Rescued", origin: "user" } });
     await settle();
 
     await alice.close();
@@ -205,7 +205,7 @@ describe("keeping the file current during a session", () => {
     const alice = await Client.connect(url(), "alice");
     await settle();
 
-    applyOpToDoc(alice.doc, { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Live", by: { author: "test", source: "user" } } });
+    applyOpToDoc(alice.doc, { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Live", origin: "user" } });
     await new Promise((r) => setTimeout(r, 120));
 
     expect(currentText()).toContain(`"name": "Live"`);
@@ -238,7 +238,7 @@ describe("keeping the file current during a session", () => {
     await settle();
 
     for (let i = 0; i < 10; i++) {
-      applyOpToDoc(alice.doc, { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: `Rapid${i}`, by: { author: "test", source: "user" } } });
+      applyOpToDoc(alice.doc, { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: `Rapid${i}`, origin: "user" } });
     }
     await new Promise((r) => setTimeout(r, 120));
 

@@ -8,8 +8,8 @@ const RAW = `{
   "name": "Test",
   "layers": [{ "id": "lay_a", "type": "prg", "path": "game.prg" }],
   "claims": [
-    { "id": "clm_1", "at": "$8000", "name": "Start", "root": "routine", "author": "marcus", "source": "user" },
-    { "id": "clm_2", "at": "$8080", "extent": 32, "name": "copyright", "is": "text", "author": "marcus", "source": "user" }
+    { "id": "clm_1", "at": "$8000", "name": "Start", "root": "routine", "origin": "user" },
+    { "id": "clm_2", "at": "$8080", "extent": 32, "name": "copyright", "is": "text", "origin": "user" }
   ]
 }
 `;
@@ -37,13 +37,13 @@ const roundTrips = (op: Op, from = PROJECT) => {
   return applyOp(applyOp(from, op), inverse) === from;
 };
 
-const by = { author: "test", source: "user" as const };
+const by = { origin: "user" as const };
 
 describe("claim operations", () => {
   it("adds one, and undoing removes it", () => {
     const op: Op = {
       op: "claim.add",
-      claim: { id: "clm_3", at: 0x8200, name: "Added", by },
+      claim: { id: "clm_3", at: 0x8200, name: "Added", ...by },
     };
     expect(parseProject(applyOp(PROJECT, op)).claims).toHaveLength(3);
     expect(roundTrips(op)).toBe(true);
@@ -107,7 +107,7 @@ describe("meta operations", () => {
 describe("sequences", () => {
   it("undoes a batch by reversing it", () => {
     const ops: Op[] = [
-      { op: "claim.add", claim: { id: "clm_3", at: 0x8200, name: "One", by } },
+      { op: "claim.add", claim: { id: "clm_3", at: 0x8200, name: "One", ...by } },
       { op: "claim.set", id: "clm_1", fields: { name: "Two" } },
       { op: "claim.remove", id: "clm_2" },
     ];
@@ -132,7 +132,7 @@ describe("errors", () => {
 
   it("keeps the file parseable after every operation", () => {
     const ops: Op[] = [
-      { op: "claim.add", claim: { id: "clm_3", at: 0x9000, extent: 8, says: { is: "data" }, by } },
+      { op: "claim.add", claim: { id: "clm_3", at: 0x9000, extent: 8, says: { is: "data" }, ...by } },
       { op: "claim.set", id: "clm_3", fields: { name: "table" } },
       { op: "primary.bind", address: 0x8000, labelId: "clm_1" },
     ];

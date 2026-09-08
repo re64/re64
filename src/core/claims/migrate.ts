@@ -110,8 +110,7 @@ export function migrateToClaims(project: Project): {
         ...(ROOT_FOR_LABEL[label.type ?? "address"]
           ? { root: ROOT_FOR_LABEL[label.type ?? "address"] }
           : {}),
-        author: "project",
-        source: "user",
+        origin: "user",
       });
       fromLabels++;
 
@@ -155,8 +154,7 @@ export function migrateToClaims(project: Project): {
           at: hex(start),
           ...(region.name !== undefined ? { name: region.name } : {}),
           root: "entry",
-          author: "project",
-          source: "user",
+          origin: "user",
         });
         codeRegionsRooted++;
         fromRegions++;
@@ -173,8 +171,7 @@ export function migrateToClaims(project: Project): {
         ...(region.view !== undefined ? { view: region.view } : {}),
         // Rooted so it still renders once inclusion is reachability.
         root: "data",
-        author: "project",
-        source: "user",
+        origin: "user",
       });
       autoRooted++;
       fromRegions++;

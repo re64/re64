@@ -112,7 +112,7 @@ describe("finding what to work on", () => {
   });
 
   it("marks labels somebody chose as writable", () => {
-    const chosen = workspace.labels({ source: "user" }).labels;
+    const chosen = workspace.labels({ origin: "user" }).labels;
     expect(chosen.length).toBeGreaterThan(0);
     expect(chosen.every((l) => l.writable)).toBe(true);
   });
@@ -218,9 +218,14 @@ describe("editing", () => {
     workspace.addLabel(agent, 0x8f00, "Recorded");
     const recorded = storage.readOps();
 
-    expect(recorded).toHaveLength(1);
-    expect(recorded[0].author).toBe("usr_agent");
-    expect(recorded[0].inverse).toBeDefined();
+    // **Two ops, one action.** Naming an address mints the claim and the
+    // vouching that says who made it, which is where provenance lives now —
+    // and they share a changeset, so undo and the change feed still treat the
+    // pair as the single decision it was.
+    expect(recorded).toHaveLength(2);
+    expect(new Set(recorded.map((r) => r.changeset)).size).toBe(1);
+    expect(recorded.every((r) => r.author === "usr_agent")).toBe(true);
+    expect(recorded.every((r) => r.inverse !== undefined)).toBe(true);
   });
 
   it("can take an edit back", () => {
@@ -258,9 +263,13 @@ describe("catching up after being away", () => {
     workspace.addLabel(agent, 0x8f10, "Second");
     const since = workspace.changesSince(cursor);
 
-    expect(since.changes).toHaveLength(1);
+    // The naming and the vouching that says who made it, in that order and
+    // under one action — the feed is per operation on purpose, so a reader can
+    // see what actually happened, and `action` is what groups them back up.
+    expect(since.changes).toHaveLength(2);
     expect(since.changes[0].did).toContain("Second");
     expect(since.changes[0].by).toBe("usr_agent");
+    expect(new Set(since.changes.map((c) => c.action)).size).toBe(1);
   });
 
   it("returns nothing when nothing has happened", () => {
@@ -291,8 +300,12 @@ describe("catching up after being away", () => {
     expect(page.truncated).toBe(true);
     expect(page.changes).toHaveLength(2);
 
+    // Each naming is two ops, so a page of two lands mid-action — which is the
+    // property being tested: the next page resumes from the last entry
+    // *returned*, so nothing is skipped even when a page cuts an action in half.
     const next = workspace.changesSince(page.cursor, 2);
-    expect(next.changes[0].did).toContain("L2");
+    expect(next.changes[0].did).toContain("L1");
+    expect(next.changes.map((c) => c.seq)).toEqual([3, 4]);
   });
 });
 
@@ -399,14 +412,14 @@ describe("what a reader is told it may edit", () => {
     // The field a reader uses to decide what to edit. Platform labels belong
     // to the built-in layer that no project owns, so a write is refused a
     // layer down — after it has already been planned against.
-    const platform = workspace.labels({ source: "platform" }).labels[0];
+    const platform = workspace.labels({ origin: "platform" }).labels[0];
 
     expect(platform.source).toBe("platform");
     expect(platform.writable).toBe(false);
   });
 
   it("still marks a project's own label writable", () => {
-    const own = workspace.labels({ source: "user" }).labels[0];
+    const own = workspace.labels({ origin: "user" }).labels[0];
     expect(own.writable).toBe(true);
   });
 });
@@ -699,7 +712,10 @@ describe("naming many addresses at once", () => {
       { at: 0x8230, name: "BatchedThree" },
     ]);
 
-    expect(result.did).toHaveLength(3);
+    // Six ops — a claim and a vouching apiece — under one changeset, which is
+    // what "one action" means and why the field exists.
+    expect(result.did).toHaveLength(6);
+    expect(new Set(storage.readOps().map((r) => r.changeset)).size).toBe(1);
     // Distinctive names on purpose: namePattern matches case-insensitively and
     // the built-in C64 table is full of ordinary words.
     expect(workspace.labels({ namePattern: "Batched" }).total).toBe(3);
@@ -726,7 +742,7 @@ describe("naming many addresses at once", () => {
     const symbols = blank.describe().layers.filter((l) => l.name.includes("symbols"));
     expect(symbols).toHaveLength(0);
     expect(blank.labels({ namePattern: "current" }).total).toBe(3);
-    expect(blank.labels({ source: "user" }).total).toBe(3);
+    expect(blank.labels({ origin: "user" }).total).toBe(3);
   });
 
   it("carries comments through the batch", () => {
@@ -1007,7 +1023,7 @@ describe("two names for one address", () => {
     workspace.addLabel(agent, 0x08, "randomValue");
     workspace.addLabel(agent, 0x08, "gridXPos");
 
-    const names = workspace.labels({ source: "user" }).labels
+    const names = workspace.labels({ origin: "user" }).labels
       .filter((l) => l.address === "$0008")
       .map((l) => l.name);
     expect(names).toContain("randomValue");
@@ -1154,7 +1170,7 @@ describe("two names for one address", () => {
     // belongs to the built-in layer. Handing either out invites a write
     // carrying an identity nothing owns.
     const blank = blankWorkspace();
-    const auto = blank.labels({ source: "auto" }, 5).labels[0];
+    const auto = blank.labels({ origin: "auto" }, 5).labels[0];
     expect(auto?.id).toBeUndefined();
     expect(auto?.writable).toBe(false);
   });

@@ -16,7 +16,7 @@ const userClaim = (id: string, at: number, name: string, type: LabelType): Claim
   ...(type === "entry" ? { root: "entry" as const } : {}),
   ...(type === "function" ? { root: "routine" as const } : {}),
   ...(type === "code" ? { root: "location" as const } : {}),
-  by: { author: "test", source: "user" },
+  origin: "user",
 });
 import { CommentIndex } from "../memory/comment.js";
 import { ConstantIndex } from "../memory/constant.js";
@@ -73,7 +73,7 @@ function project(
         extent: r.end - r.start,
         name: r.name,
         says: { is: r.kind === "code" || r.kind === "unknown" ? "data" : r.kind },
-        by: { author: "test", source: "user" },
+        origin: "user",
       });
     }
   }

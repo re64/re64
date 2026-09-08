@@ -18,7 +18,7 @@ import { CommentPlacement } from "../memory/comment.js";
 import { LabelType } from "../memory/label-type.js";
 import { TextEncoding } from "../c64/text.js";
 import { LayerDefault } from "../memory/region.js";
-import { Claim } from "../claims/model.js";
+import { Claim, Provenance } from "../claims/model.js";
 import { EvidenceKind, ProjectCapture, ProjectStep } from "../project/project.js";
 
 
@@ -413,6 +413,8 @@ export interface EvidenceAddOp {
   id: string;
   claim: string;
   kind: EvidenceKind;
+  /** Who vouched, and how they know. A claim's own provenance lives here. */
+  by?: Provenance;
   scenario?: string;
   capture?: string;
   other?: string;
@@ -425,6 +427,8 @@ export interface EvidenceSetOp {
   id: string;
   fields: {
     kind?: EvidenceKind;
+    /** `null` clears it, like every other field here: an undo has to be able to. */
+    by?: Provenance | null;
     scenario?: string | null;
     capture?: string | null;
     other?: string | null;

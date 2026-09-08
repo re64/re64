@@ -427,8 +427,8 @@ export function analyze(
     const here = allLabels.getLabelsAt(addr);
     // The built-in name is redundant wherever the project supplied one, and
     // rendering both would show CHROUT and ROM_CHROUT on consecutive rows.
-    const shown = here.some((l) => l.by.source !== "platform")
-      ? here.filter((l) => l.by.source !== "platform")
+    const shown = here.some((l) => l.origin !== "platform")
+      ? here.filter((l) => l.origin !== "platform")
       : here;
 
     // Each name at an address renders once — unless a person wrote it twice, and
@@ -451,7 +451,7 @@ export function analyze(
     // the hygiene check uses, which is the sign it is the right one.
     const written = new Map<string, number>();
     for (const label of shown) {
-      if (label.by.source !== "user") continue;
+      if (label.origin !== "user") continue;
       written.set(label.name, (written.get(label.name) ?? 0) + 1);
     }
 
@@ -491,7 +491,7 @@ export function analyze(
           name: shownName,
           labelType: labelTypeOf(label),
           // Only a stored claim has an id worth handing to an editor.
-          ...(label.by.source === "auto" || label.by.source === "platform"
+          ...(label.origin === "auto" || label.origin === "platform"
             ? {}
             : { claimId: label.id }),
         },

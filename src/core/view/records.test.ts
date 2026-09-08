@@ -61,8 +61,7 @@ function withZones(): LoadedProject {
         is: "record" as const,
         typeId: "typ_zone",
         root: "data" as const,
-        author: "test",
-        source: "user" as const,
+        origin: "user" as const,
       },
     ],
   };

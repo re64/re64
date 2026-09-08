@@ -10,7 +10,13 @@ import { LabelUse, createLabelUse } from "../claims/names.js";
 import { TEXT_ENCODINGS, TextEncoding } from "../c64/text.js";
 import { LayerDefault } from "../memory/region.js";
 import { derivedId } from "./identity.js";
-import { Claim, Interpretation, Provenance, RootKind } from "../claims/model.js";
+import {
+  Claim,
+  ClaimMethod,
+  ClaimOrigin,
+  Interpretation,
+  RootKind,
+} from "../claims/model.js";
 
 /**
  * The old `RegionKind`, as it appears in a file that still has one.
@@ -587,6 +593,20 @@ export interface ProjectEvidence {
   /** The claim this is about. */
   claim: string;
   kind: EvidenceKind;
+  /**
+   * Who vouched, and how they know.
+   *
+   * Flat here, like every other provenance field this file has ever spelled,
+   * and on the evidence rather than on the claim because that is what it
+   * describes. A claim made by one person is a claim with one of these; a
+   * finding two readers reached separately is **one claim with two**, which is
+   * the fact the old shape could not hold.
+   */
+  author?: string;
+  /** Milliseconds since the epoch. */
+  when?: number;
+  /** How this vouching was done — see `ClaimMethod`. */
+  method?: ClaimMethod;
   /** A scenario that can be re-run to check it — the strongest form. */
   scenario?: string;
   /** A capture it produced, so the check does not have to be re-run to be read. */
@@ -689,14 +709,16 @@ export interface ProjectClaim {
    * space — only a layer frame is relocatable.
    */
   target?: string;
-  /** Who made it: a user id, an agent codename, or `cli`. */
-  author?: string;
-  /** How it arose. */
-  source?: Provenance["source"];
-  /** Milliseconds since the epoch. */
-  when?: number;
-  /** How strongly it is meant. Absent means asserted. */
-  method?: Provenance["method"];
+  /**
+   * Machinery or judgement.
+   *
+   * All that is left of the old flat provenance here. **Who** made it and
+   * **how they know** are properties of an act of vouching rather than of the
+   * claim, so they live on an evidence entry that names this claim — which is
+   * what lets two readers who reached the same finding share one claim instead
+   * of producing two that cannot be merged without losing an author.
+   */
+  origin?: ClaimOrigin;
   /** The layer `at` is an offset into, for a claim that follows its bytes. */
   layer?: string;
 }
@@ -739,12 +761,7 @@ export function projectClaims(claims: readonly ProjectClaim[] = []): Claim[] {
         : c.target !== undefined
           ? { frame: { space: "target" as const, target: c.target } }
           : {}),
-      by: {
-        author: c.author ?? "project",
-        source: c.source ?? "user",
-        ...(c.when !== undefined ? { when: c.when } : {}),
-        ...(c.method !== undefined ? { method: c.method } : {}),
-      },
+      origin: c.origin ?? "user",
     };
   });
 }
@@ -781,7 +798,7 @@ const INTERPRETATIONS: readonly Interpretation["is"][] = [
   "record",
 ];
 const ROOT_KINDS: readonly RootKind[] = ["entry", "routine", "location", "data"];
-const PROVENANCE_SOURCES: readonly Provenance["source"][] = [
+const CLAIM_ORIGINS: readonly ClaimOrigin[] = [
   "user",
   "layer",
   "platform",
@@ -827,7 +844,7 @@ export function projectLabelsToLabels(
       name: pl.name,
       ...(root ? { root } : {}),
       ...(pl.extent === undefined ? {} : { extent: pl.extent }),
-      by: { author: "project", source: "user" as const },
+      origin: "user" as const,
     };
   });
 }
@@ -935,7 +952,7 @@ export function projectRegionsToRegions(
             } as Interpretation,
             root: "data" as const,
           }),
-      by: { author: "project", source: "user" as const },
+      origin: "user" as const,
     };
   });
 }
@@ -1059,10 +1076,10 @@ export function parseProject(json: string): Project {
           `Expected one of: ${TEXT_ENCODINGS.join(", ")}`
       );
     }
-    if (claim.source !== undefined && !PROVENANCE_SOURCES.includes(claim.source)) {
+    if (claim.origin !== undefined && !CLAIM_ORIGINS.includes(claim.origin)) {
       throw new Error(
-        `Unknown source "${claim.source}" on ${where}. ` +
-          `Expected one of: ${PROVENANCE_SOURCES.join(", ")}`
+        `Unknown origin "${claim.origin}" on ${where}. ` +
+          `Expected one of: ${CLAIM_ORIGINS.join(", ")}`
       );
     }
   }

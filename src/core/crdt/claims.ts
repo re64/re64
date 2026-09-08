@@ -25,7 +25,7 @@
  */
 
 import * as Y from "yjs";
-import { Claim, Interpretation, Provenance, RootKind } from "../claims/model.js";
+import { Claim, ClaimOrigin, Interpretation, RootKind } from "../claims/model.js";
 import { parseProjectAddress } from "../project/project.js";
 
 export const ROOT_CLAIMS = "claims";
@@ -63,15 +63,12 @@ export function encodeClaim(claim: Claim): Record<string, unknown> {
     // `"at": 33792` in a file whose every other address is `$8400`, and two
     // write paths would disagree about the same claim.
     at: `$${claim.at.toString(16).toUpperCase().padStart(4, "0")}`,
-    author: claim.by.author,
-    source: claim.by.source,
+    origin: claim.origin,
   };
   if (claim.extent !== undefined) out.extent = claim.extent;
   if (claim.name !== undefined) out.name = claim.name;
   if (claim.description !== undefined) out.description = claim.description;
   if (claim.root !== undefined) out.root = claim.root;
-  if (claim.by.when !== undefined) out.when = claim.by.when;
-  if (claim.by.method !== undefined) out.method = claim.by.method;
   if (claim.frame?.space === "layer") out.layer = claim.frame.layer;
   if (claim.frame?.space === "target") out.target = claim.frame.target;
   if (claim.says !== undefined) {
@@ -97,15 +94,6 @@ export function decodeClaim(entry: Y.Map<unknown>): Claim {
   else if (is === "record") says = { is, typeId: get("typeId") ?? "" };
   else if (is === "data" || is === "jumptable") says = { is };
 
-  const by: Provenance = {
-    author: get<string>("author") ?? "unknown",
-    source: get<Provenance["source"]>("source") ?? "user",
-    ...(get<number>("when") !== undefined ? { when: get<number>("when") } : {}),
-    ...(get<Provenance["method"]>("method")
-      ? { method: get<Provenance["method"]>("method") }
-      : {}),
-  };
-
   const layer = get<string>("layer");
   const target = get<string>("target");
   const at = get<number | string>("at")!;
@@ -124,7 +112,7 @@ export function decodeClaim(entry: Y.Map<unknown>): Claim {
       : target
         ? { frame: { space: "target" as const, target } }
         : {}),
-    by,
+    origin: get<ClaimOrigin>("origin") ?? "user",
   };
 }
 
@@ -179,7 +167,7 @@ export function applyClaimOp(doc: Y.Doc, op: ClaimOp, origin: unknown = "local")
         // into the flat keys `encode` uses, so a revision touches exactly the
         // keys it names and no others — which is what lets two peers revise
         // different fields of one claim without either reverting the other.
-        const { says, frame, by, ...scalars } = op.fields;
+        const { says, frame, ...scalars } = op.fields;
         for (const [key, value] of Object.entries(scalars)) {
           if (value !== undefined) entry.set(key, value as unknown);
         }
@@ -195,12 +183,6 @@ export function applyClaimOp(doc: Y.Doc, op: ClaimOp, origin: unknown = "local")
           if (frame.space === "layer") entry.set("layer", frame.layer);
           else if (frame.space === "target") entry.set("target", frame.target);
           else entry.delete("layer");
-        }
-        if (by !== undefined) {
-          entry.set("author", by.author);
-          entry.set("source", by.source);
-          if (by.when !== undefined) entry.set("when", by.when);
-          if (by.method !== undefined) entry.set("method", by.method);
         }
         break;
       }

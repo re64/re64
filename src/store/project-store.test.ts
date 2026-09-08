@@ -18,8 +18,8 @@ const PROJECT = `{
     }
   ],
   "claims": [
-    { "id": "lbl_1", "at": "$8000", "name": "Start", "root": "routine", "author": "marcus", "source": "user" },
-    { "id": "lbl_2", "at": "$8004", "name": "Loop", "author": "marcus", "source": "user" }
+    { "id": "lbl_1", "at": "$8000", "name": "Start", "root": "routine", "origin": "user" },
+    { "id": "lbl_2", "at": "$8004", "name": "Loop", "origin": "user" }
   ]
 }
 `;
@@ -74,8 +74,8 @@ describe.each(BACKENDS)("$name", (b) => {
     it("writes the file and records one entry, not one per edit", () => {
       const s = store();
       s.addAuthor("alice");
-      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "MainLoop", by: { author: "test", source: "user" } } });
-      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Begin", by: { author: "test", source: "user" } } });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "MainLoop", origin: "user" } });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Begin", origin: "user" } });
 
       const entry = s.flatten(1000);
 
@@ -89,7 +89,7 @@ describe.each(BACKENDS)("$name", (b) => {
       // The reason flatten diffs rather than writing the document out: the
       // document knows the content, not how the file was laid out.
       const s = store();
-      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "MainLoop", by: { author: "test", source: "user" } } });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "MainLoop", origin: "user" } });
       s.flatten(1000);
 
       const after = currentText();
@@ -138,7 +138,7 @@ describe.each(BACKENDS)("$name", (b) => {
     it("recovers edits from the update log", () => {
       // A killed browser or server must not lose work that was never flattened.
       const first = store();
-      applyOpToDoc(first.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Survived", by: { author: "test", source: "user" } } });
+      applyOpToDoc(first.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Survived", origin: "user" } });
       // No flatten: simulate the process dying here.
 
       expect(storage().hasUpdates()).toBe(true);
@@ -155,7 +155,7 @@ describe.each(BACKENDS)("$name", (b) => {
       // flatten meant the log had served its purpose; now discarding it would
       // discard the work itself.
       const s = store();
-      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Done", by: { author: "test", source: "user" } } });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Done", origin: "user" } });
       s.flatten(1000);
 
       expect(storage().hasUpdates()).toBe(true);
@@ -172,7 +172,7 @@ describe.each(BACKENDS)("$name", (b) => {
       // it had served its purpose and could go. Now the log *is* the project
       // and the text is the export, so clearing it here deletes everything.
       const s = store();
-      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Kept", by: { author: "test", source: "user" } } });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Kept", origin: "user" } });
       s.writeFile();
 
       expect(storage().hasUpdates()).toBe(true);
@@ -184,7 +184,7 @@ describe.each(BACKENDS)("$name", (b) => {
 
     it("comes back after the process dies mid-edit", () => {
       const s = store();
-      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Survived", by: { author: "test", source: "user" } } });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Survived", origin: "user" } });
       // No write, no flatten, no clean exit — just gone.
 
       const reopened = store();
@@ -196,8 +196,8 @@ describe.each(BACKENDS)("$name", (b) => {
 
     it("reaches the same state however many times it is reopened", () => {
       const s = store();
-      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "One", root: "routine", by: { author: "test", source: "user" } } });
-      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Two", by: { author: "test", source: "user" } } });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "One", root: "routine", origin: "user" } });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Two", origin: "user" } });
 
       const first = JSON.stringify(projectFromDoc(store().document()));
       const second = JSON.stringify(projectFromDoc(store().document()));
@@ -237,9 +237,9 @@ describe.each(BACKENDS)("$name", (b) => {
 
     it("restores that value when undone", () => {
       const s = store();
-      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "ByAHuman", by: { author: "test", source: "user" } } });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "ByAHuman", origin: "user" } });
       s.runOps(
-        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "ByAnAgent", by: { author: "test", source: "user" } } }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "ByAnAgent", origin: "user" } }],
         "agent",
         1
       );
@@ -256,7 +256,7 @@ describe.each(BACKENDS)("$name", (b) => {
       // every write finds a difference and writes again. It would look like a
       // phantom collaborator editing in a loop rather than like a bug here.
       const s = store();
-      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Renamed", by: { author: "test", source: "user" } } });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Renamed", origin: "user" } });
 
       s.writeFile();
       expect(diffProjects(parseProject(currentText()), projectFromDoc(s.document()))).toEqual([]);
@@ -264,7 +264,7 @@ describe.each(BACKENDS)("$name", (b) => {
 
     it("stops writing once there is nothing left to say", () => {
       const s = store();
-      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Once", root: "routine", by: { author: "test", source: "user" } } });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Once", root: "routine", origin: "user" } });
 
       expect(s.writeFile().length).toBeGreaterThan(0);
       expect(s.writeFile()).toEqual([]);
@@ -273,7 +273,7 @@ describe.each(BACKENDS)("$name", (b) => {
 
     it("holds for regions and the primary index too, not just labels", () => {
       const s = store();
-      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "rgn_x", at: 0x8008, extent: 0x800c - 0x8008, name: "blurb", says: { is: "text" }, root: "data", by: { author: "test", source: "user" } } });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "rgn_x", at: 0x8008, extent: 0x800c - 0x8008, name: "blurb", says: { is: "text" }, root: "data", origin: "user" } });
       applyOpToDoc(s.document(), { op: "primary.bind", address: 0x8000, labelId: "lbl_1" });
 
       s.writeFile();
@@ -288,10 +288,10 @@ describe.each(BACKENDS)("$name", (b) => {
 
     it("does not revert an edit the other made", () => {
       const [server, cli] = two();
-      applyOpToDoc(server.document(), { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "FromWeb", root: "routine", by: { author: "test", source: "user" } } });
+      applyOpToDoc(server.document(), { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "FromWeb", root: "routine", origin: "user" } });
 
       cli.runOps(
-        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "FromCli", by: { author: "test", source: "user" } } }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "FromCli", origin: "user" } }],
         "cli",
         1
       );
@@ -310,11 +310,11 @@ describe.each(BACKENDS)("$name", (b) => {
       // CLI is about to read — so the CLI replays it rather than writing a text
       // that silently drops it.
       const [server, cli] = two();
-      applyOpToDoc(server.document(), { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "NotYetWritten", root: "routine", by: { author: "test", source: "user" } } });
+      applyOpToDoc(server.document(), { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "NotYetWritten", root: "routine", origin: "user" } });
       expect(currentText()).not.toContain("NotYetWritten");
 
       cli.runOps(
-        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Cli", by: { author: "test", source: "user" } } }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Cli", origin: "user" } }],
         "cli",
         1
       );
@@ -327,7 +327,7 @@ describe.each(BACKENDS)("$name", (b) => {
     it("restores the exact bytes it started from", () => {
       const s = store();
       s.runOps(
-        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Renamed", by: { author: "test", source: "user" } } }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Renamed", origin: "user" } }],
         "cli",
         1
       );
@@ -342,12 +342,12 @@ describe.each(BACKENDS)("$name", (b) => {
       // silently revert what a browser user just did.
       const s = store();
       s.runOps(
-        [{ op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "ByAlice", root: "routine", by: { author: "test", source: "user" } } }],
+        [{ op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "ByAlice", root: "routine", origin: "user" } }],
         "alice",
         1
       );
       s.runOps(
-        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "ByBob", by: { author: "test", source: "user" } } }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "ByBob", origin: "user" } }],
         "bob",
         2
       );
@@ -360,7 +360,7 @@ describe.each(BACKENDS)("$name", (b) => {
     it("reaches anyone's edit when asked to", () => {
       const s = store();
       s.runOps(
-        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "ByBob", by: { author: "test", source: "user" } } }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "ByBob", origin: "user" } }],
         "bob",
         1
       );
@@ -370,7 +370,7 @@ describe.each(BACKENDS)("$name", (b) => {
     it("has nothing to undo when the author did nothing", () => {
       const s = store();
       s.runOps(
-        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "ByBob", by: { author: "test", source: "user" } } }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "ByBob", origin: "user" } }],
         "bob",
         1
       );
@@ -384,8 +384,8 @@ describe.each(BACKENDS)("$name", (b) => {
       const s = store();
       s.runOps(
         [
-          { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "First", by: { author: "test", source: "user" } } },
-          { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Second", by: { author: "test", source: "user" } } },
+          { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "First", origin: "user" } },
+          { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Second", origin: "user" } },
         ],
         "cli",
         1
@@ -403,13 +403,13 @@ describe.each(BACKENDS)("$name", (b) => {
       // browser tabs are, and neither may take back the other's work.
       const s = store();
       s.runOps(
-        [{ op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "ByOne", by: { author: "test", source: "user" } } }],
+        [{ op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "ByOne", origin: "user" } }],
         "usr_agent",
         1,
         "ses_one"
       );
       s.runOps(
-        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "ByTwo", by: { author: "test", source: "user" } } }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "ByTwo", origin: "user" } }],
         "usr_agent",
         2,
         "ses_two"
@@ -427,14 +427,14 @@ describe.each(BACKENDS)("$name", (b) => {
       const s = store();
       s.runOps(
         [
-          { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Mine", by: { author: "test", source: "user" } } },
-          { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "AlsoMine", by: { author: "test", source: "user" } } },
+          { op: "claim.add", claim: { id: "lbl_1", at: 0x8000, name: "Mine", origin: "user" } },
+          { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "AlsoMine", origin: "user" } },
         ],
         "alice",
         1
       );
       s.runOps(
-        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "BobWasHere", by: { author: "test", source: "user" } } }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "BobWasHere", origin: "user" } }],
         "bob",
         2
       );
@@ -452,7 +452,7 @@ describe.each(BACKENDS)("$name", (b) => {
     it("redoes what it undid, and stops there", () => {
       const s = store();
       s.runOps(
-        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Renamed", by: { author: "test", source: "user" } } }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Renamed", origin: "user" } }],
         "cli",
         1
       );
@@ -476,7 +476,7 @@ describe.each(BACKENDS)("$name", (b) => {
       const s = store();
       s.addAuthor("alice");
       s.runOps(
-        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Renamed", by: { author: "test", source: "user" } } }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Renamed", origin: "user" } }],
         "alice",
         1
       );
@@ -491,7 +491,7 @@ describe.each(BACKENDS)("$name", (b) => {
     it("distinguishes an undone operation from a missing one", () => {
       const s = store();
       s.runOps(
-        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Renamed", by: { author: "test", source: "user" } } }],
+        [{ op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Renamed", origin: "user" } }],
         "alice",
         1
       );
@@ -503,7 +503,7 @@ describe.each(BACKENDS)("$name", (b) => {
     it("says where the snapshot reaches, so a long log is visible", () => {
       const s = store();
       s.document();
-      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Edited", by: { author: "test", source: "user" } } });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_2", at: 0x8004, name: "Edited", origin: "user" } });
       expect(s.debug().updates.count).toBeGreaterThan(0);
       expect(s.debug().updates.snapshotAt).toBe(0);
     });
@@ -512,7 +512,7 @@ describe.each(BACKENDS)("$name", (b) => {
   describe("joining", () => {
     it("hands a newcomer the state it is missing", () => {
       const s = store();
-      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_new", at: 0x8008, name: "Added", by: { author: "test", source: "user" } } });
+      applyOpToDoc(s.document(), { op: "claim.add", claim: { id: "lbl_new", at: 0x8008, name: "Added", origin: "user" } });
 
       expect(s.snapshot().length).toBeGreaterThan(0);
       expect(Buffer.from(s.snapshot())).toEqual(Buffer.from(encodeDoc(s.document())));

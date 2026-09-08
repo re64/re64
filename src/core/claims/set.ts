@@ -13,6 +13,7 @@
  */
 
 import { Claim, RootKind, compareClaims, covers, claimEnd } from "./model.js";
+import { EvidenceKind } from "../project/project.js";
 
 /**
  * Where a target puts a layer's bytes.
@@ -123,7 +124,7 @@ export class ClaimSet {
   sharedNames(): Map<string, PlacedClaim[]> {
     const byName = new Map<string, PlacedClaim[]>();
     for (const claim of this.claims) {
-      if (claim.name === undefined || claim.by.source !== "user") continue;
+      if (claim.name === undefined || claim.origin !== "user") continue;
       const list = byName.get(claim.name);
       if (list) list.push(claim);
       else byName.set(claim.name, [claim]);
@@ -189,6 +190,15 @@ export type Disagreement =
       readonly claim: PlacedClaim;
       readonly other?: PlacedClaim;
       readonly note?: string;
+      /**
+       * Who said so, taken from the evidence rather than from the claim.
+       *
+       * The inferred findings above carry no author on purpose: a claim is a
+       * statement and no longer records who made it, because that belongs to
+       * the vouching. Here there *is* a vouching — that is what "declared"
+       * means — so the name is available and worth printing.
+       */
+      readonly author?: string;
     };
 
 /**
@@ -219,6 +229,9 @@ export const OPERAND_TOLERANCE = 1;
  * 44 interpretation findings down to one, and the one is real: a sprite set and
  * a tune stream disagreeing about six bytes.
  */
+/** Order-independent, so a supersession settles the pair whichever way it is swept. */
+const pairKey = (a: string, b: string) => (a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`);
+
 function refines(a: PlacedClaim, b: PlacedClaim): boolean {
   const aEnd = claimEnd(a);
   const bEnd = claimEnd(b);
@@ -255,25 +268,63 @@ export function disagreements(
     kind: string;
     other?: string;
     note?: string;
+    author?: string;
   }[] = []
 ): Disagreement[] {
   const found: Disagreement[] = [];
 
   // Declared first: somebody saying "this is wrong, and here is why" outranks
   // anything inferred from where the bytes happen to sit.
+  //
+  // **Every kind is decided here, and the `never` is what makes that true.**
+  // This read `if (item.kind !== "refutes") continue;` — so `supports` and
+  // `supersedes` could be written, validated, stored and round-tripped, and
+  // reached no reader at all. Worse than doing nothing: a superseded claim and
+  // its replacement still overlap and still differ, so the inferred sweep below
+  // reported them as a live contradiction for ever, with the record that
+  // resolves it sitting right here being skipped. Ninth instance of the shape
+  // this repository keeps catching, and the last one that can be added silently.
   const byId = new Map(set.all().map((c) => [c.id, c]));
+  const resolved = new Set<string>();
   for (const item of declared) {
-    if (item.kind !== "refutes") continue;
     const claim = byId.get(item.claim);
     if (!claim) continue;
     const other = item.other === undefined ? undefined : byId.get(item.other);
-    found.push({
-      kind: "declared",
-      evidence: item.id ?? "",
-      claim,
-      ...(other ? { other } : {}),
-      ...(item.note === undefined ? {} : { note: item.note }),
-    });
+
+    const kind = item.kind as EvidenceKind;
+    switch (kind) {
+      case "refutes":
+        found.push({
+          kind: "declared",
+          evidence: item.id ?? "",
+          claim,
+          ...(other ? { other } : {}),
+          ...(item.note === undefined ? {} : { note: item.note }),
+          ...(item.author === undefined ? {} : { author: item.author }),
+        });
+        break;
+
+      // **Settles the pair rather than reporting it.** A supersession is
+      // somebody saying "this reading replaced that one" — the earlier claim is
+      // kept on purpose, because the wrong model that led to the right place is
+      // worth keeping, and reporting the pair as an open contradiction for ever
+      // would make keeping it a punishment.
+      case "supersedes":
+        if (other) resolved.add(pairKey(claim.id, other.id));
+        break;
+
+      // Backing, not conflict. Two of these by different authors reaching a
+      // claim different ways is an independent confirmation, which is the fact
+      // this whole shape exists to make sayable — but it is not a disagreement,
+      // and nothing here reports it.
+      case "supports":
+        break;
+
+      default: {
+        const unhandled: never = kind;
+        throw new Error(`unhandled evidence kind: ${String(unhandled)}`);
+      }
+    }
   }
 
   for (const [name, claims] of set.sharedNames()) {
@@ -296,7 +347,13 @@ export function disagreements(
       const to = Math.min(claimEnd(claim), claimEnd(other));
       if (to <= from) continue;
 
-      if (claim.says && other.says && claim.says.is !== other.says.is && !refines(claim, other)) {
+      if (
+        claim.says &&
+        other.says &&
+        claim.says.is !== other.says.is &&
+        !refines(claim, other) &&
+        !resolved.has(pairKey(claim.id, other.id))
+      ) {
         found.push({ kind: "interpretation", address: from, end: to, claims: [other, claim] });
       }
       // A decode root inside somebody's "these are not instructions". The shape
@@ -320,21 +377,21 @@ export function describeDisagreement(d: Disagreement): string {
   switch (d.kind) {
     case "nameShared":
       return `"${d.name}" names ${new Set(d.claims.map((c) => c.at)).size} addresses: ${d.claims
-        .map((c) => `$${c.at.toString(16).toUpperCase()} (${c.by.author})`)
+        .map((c) => `$${c.at.toString(16).toUpperCase()}`)
         .join(", ")}`;
     case "interpretation":
       return (
         `$${d.address.toString(16).toUpperCase()}-$${d.end.toString(16).toUpperCase()} is claimed as ` +
-        d.claims.map((c) => `${c.says!.is} by ${c.by.author}`).join(" and ")
+        d.claims.map((c) => c.says!.is).join(" and ")
       );
     case "rootInData":
       return (
-        `$${d.address.toString(16).toUpperCase()} is a ${d.root.root} root (${d.root.by.author}) ` +
-        `inside ${d.data.name ?? "a claim"} declared ${d.data.says!.is} (${d.data.by.author})`
+        `$${d.address.toString(16).toUpperCase()} is a ${d.root.root} root ` +
+        `inside ${d.data.name ?? "a claim"} declared ${d.data.says!.is}`
       );
     case "declared":
       return (
-        `${d.claim.by.author} says ${d.other ? `${d.other.id} is wrong` : "this is contradicted"}` +
+        `${d.author ?? "somebody"} says ${d.other ? `${d.other.id} is wrong` : "this is contradicted"}` +
         `${d.other ? ` — ${d.other.name ?? `the claim at $${d.other.at.toString(16).toUpperCase()}`}` : ""}` +
         `${d.note ? `: ${d.note}` : ""}`
       );
