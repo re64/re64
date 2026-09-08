@@ -59,7 +59,11 @@ const INSTRUCTIONS = [
     "A **value** is a constant: a sprite number, a creature type, a colour — " +
     "the program writes $C0, never $3000, so the number is the thing it " +
     "manipulates. add_constant names one and bind_constants attaches it to the " +
-    "sites that mean it; find_immediates finds those sites. " +
+    "sites that mean it; find_immediates finds those sites. Also name a "
+    + "**count** (and use it as an array bound in add_type), a **bit mask** so " +
+    "`AND #$80` reads as `AND #RASTER_BIT8`, and the **members of a set**. " +
+    "add_constant is the most under-reached-for tool here: one run declared " +
+    "eighteen and the two after it declared none. " +
     "A **shape** is a type: add_type declares fields at offsets, and a claim " +
     "with is:\"record\" says a span is instances of it. If you are about to " +
     "nest a claim inside another to express structure — text inside data, a " +

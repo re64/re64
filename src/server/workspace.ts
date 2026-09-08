@@ -2676,6 +2676,13 @@ export class Workspace {
             return {
               at,
               name: field.name,
+              // **The number you would `#define`.** A field's identity in code
+              // is its mask: `AND #$80` is the question "is the raster bit
+              // set", and naming that operand with add_constant and
+              // bind_constant is how it reads as one. Nothing here has to trace
+              // where a value came from — the literal in the instruction is the
+              // field, and it always was.
+              mask: `$${(((1 << width) - 1) << offset).toString(16).toUpperCase().padStart(2, "0")}`,
               ...(held === undefined ? {} : { value: held }),
               ...(field.description === undefined ? {} : { description: field.description }),
             };

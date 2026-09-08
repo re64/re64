@@ -124,25 +124,45 @@ meanings as English inside comment strings, and `vic.ts` hand-writing the mask
 and shift ten times. `registers.ts` now declares them, platform-owned, and
 `where` answers with them.
 
-## Open: naming a masked value from the abstract domain
+## A bit *is* a constant, which is why there is nothing open here
 
-The next thing this wants is for `LDA $D011 / AND #$80` to say that A holds
-`SCROLY.rasterBit8` — in an effect summary, a comment, or a claim's method.
+The next thing this looked like it wanted was for `LDA $D011 / AND #$80` to say
+that A holds `SCROLY.rasterBit8` — and the first plan for it was to widen
+`Bits.origin` so per-bit provenance could name a memory address, since the tags
+are one byte naming a register at routine entry.
 
-**The domain is the right shape and the state is already there.** `known-bits.ts`
-is per-bit rather than per-byte, `ValueAnalysis.before` holds an `AbstractState`
-for every instruction, and after that `AND` the bits still unknown in A are
-exactly `$80` — the field selector, derived rather than pattern-matched.
+**That was over-engineering, and the C idiom says why.**
 
-**What is missing is provenance to memory.** `Bits.origin` already tracks per-bit
-identity and survives shifts and ORs — it was built for `PHP`, which is the same
-shape one level down — but a tag is one byte naming a *register* at routine
-entry, with no room for an address. "This bit came from `$D011` bit 7" is not
-representable yet.
+```c
+#define RASTER_BIT8 0x80
+flags = FLAG1 | FLAG2;
+```
 
-So the cheap version would have to infer the register from what the block read,
-and inference is what this project refuses. Widening the tag is the honest fix,
-and it is not urgent.
+The bit's identity in code *is* its mask. `AND #$80` does not need an analysis
+that traces where the value came from; it needs its operand named, and naming a
+value at a site is `add_constant` plus `bind_constant`, which have existed since
+experiment 3. Then the listing reads `AND #RASTER_BIT8` and the question is
+answered by the thing that was already there.
+
+So `where` reports each field's mask — the number you would `#define` — and the
+loop closes with no new mechanism. This is the third time the answer turned out
+to be the constants noun: counts, masks, and the enum half of the parked
+relations question. **That noun is systematically underused** — by agents as
+well as by this design work. One run declared eighteen constants; the two after
+it declared *zero* while calling `find_immediates` six times. Reading that
+silence as "not needed" would have been reading a limitation of the method as a
+finding, and the four shapes are now written into `add_constant`'s own
+description, which is where the earlier gap-of-signposting fixes went.
+
+What the bit record is actually for is narrower than it first looked, and still
+worth having: decoding a *stored* byte into named fields, and declaring a
+register's seven constants in one place rather than seven.
+
+**The residual cases, which are not worth machinery.** A shifted mask — `LSR`
+three times then `AND #$07`, where the literal no longer sits where the field
+does — and a mask computed from a table. Both are rare, and in both a reader
+names the constant `Y_SCROLL_MASK` and is finished. Widening the tag would buy
+those two cases and cost a per-bit provenance system.
 
 ---
 

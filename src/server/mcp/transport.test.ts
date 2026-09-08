@@ -102,6 +102,13 @@ describe("speaking the protocol", () => {
     expect(said).toContain("screen[row,column]");
     // And the one that says nesting is the wrong tool for structure.
     expect(said.toLowerCase()).toContain("field instead");
+    // The four things worth naming as a constant. One run declared eighteen and
+    // the two after it declared none, while calling find_immediates six times —
+    // and every one of these shapes turned out to be wanted. What was missing
+    // was never the mechanism, so it is the description that carries the fix.
+    for (const idiom of ["count", "bit mask", "members of a set"]) {
+      expect(said, idiom).toContain(idiom);
+    }
   });
 
   it("answers more than one request, which a shared transport would not", async () => {
@@ -1227,12 +1234,23 @@ describe("editing as an agent", () => {
     // which. The layouts are the machine's, not this project's, so they need no
     // declaring and appear beside `field` rather than inside it.
     const whole = (await callTool("where", { address: "$D011" })).value as {
-      register?: { name: string; bits: { at: string; name: string }[] };
+      register?: { name: string; bits: { at: string; name: string; mask: string }[] };
     };
     expect(whole.register?.name).toBe("SCROLY");
     // High bit first, because that is the order a byte is written in.
-    expect(whole.register?.bits[0]).toMatchObject({ at: "b7", name: "rasterBit8" });
-    expect(whole.register?.bits.at(-1)).toMatchObject({ at: "b2..0", name: "yScroll" });
+    expect(whole.register?.bits[0]).toMatchObject({
+      at: "b7",
+      name: "rasterBit8",
+      // The number you would `#define`. A field's identity in code is its mask,
+      // so this is what add_constant takes and bind_constant puts at the site —
+      // which is why naming a masked value needs no provenance analysis at all.
+      mask: "$80",
+    });
+    expect(whole.register?.bits.at(-1)).toMatchObject({
+      at: "b2..0",
+      name: "yScroll",
+      mask: "$07",
+    });
 
     const masked = (await callTool("where", { address: "$D011", mask: "$80" })).value as {
       register?: { touches: string[] };

@@ -490,7 +490,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "as a path — zones[2].name — so you need not count offsets by hand. " +
       "For a hardware register it answers with what the bits mean: $D011 is " +
       "not a byte, it is seven fields, and `mask` names the ones an AND or ORA " +
-      "touches — SCROLY.rasterBit8 for $80. " +
+      "touches — SCROLY.rasterBit8 for $80. Each field reports the mask that " +
+      "*is* it, which is the number to add_constant and bind_constant at the " +
+      "site, so `AND #$80` reads as `AND #RASTER_BIT8`. " +
       "Both conversions depend on runtime state rather than on the project — " +
       "the screen base in `$D018`, the VIC bank in `$DD00` — so the answer " +
       "names the bases it assumed, and you can override them.",
@@ -1722,7 +1724,26 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
 
   tool(
     "add_constant",
-    "Declare a name for a byte value: EMPTY_CELL = $00, ORANGE = $08. " +
+    "Declare a name for a value: EMPTY_CELL = $00, ORANGE = $08. " +
+      // **Four idioms, because absence of use is not absence of need.** One run
+      // declared eighteen constants; the two after it declared *zero* while
+      // calling find_immediates six times — and every one of the shapes below
+      // turned out to be wanted, twice over, in the design work that followed.
+      // What was missing was never the mechanism. It was anything saying which
+      // questions this answers.
+      "**Four things are worth naming, and all four come up in every program:** " +
+      "(1) a **value the program manipulates** — a sprite number, a creature " +
+      "type, a colour. The code writes $C0, never $3000, so the number is the " +
+      "thing it handles and the label on the bytes is not. " +
+      "(2) a **count** — LevelCount = 32. Use it as an array bound in add_type " +
+      "(u8[LevelCount]) *and* bind it to the immediate the code compares " +
+      "against, and the layout and the program are tied by one name instead of " +
+      "two numbers that happen to agree. " +
+      "(3) a **bit mask** — RASTER_BIT8 = $80, so `AND #$80` reads as " +
+      "`AND #RASTER_BIT8`. `where` gives you the mask of every field of a " +
+      "hardware register, which is the number to declare. " +
+      "(4) a **member of a set** — the eight creature types, the nineteen " +
+      "glyphs. Naming them is what makes a table of them readable. " +
       "**This adds a declaration; it never replaces one.** Declaring the same " +
       "name twice gives two constants, because a name is prose somebody chose " +
       "and two readers can pick the same word for different things — use " +
