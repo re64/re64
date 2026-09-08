@@ -83,12 +83,20 @@ async function call(tool, argsObject = {}, who = "curator") {
   const parsed = JSON.parse(line || text);
   if (parsed.error) throw new Error(`${tool}: ${parsed.error.message}`);
   const content = parsed.result?.content?.[0]?.text;
-  const value = content ? JSON.parse(content) : parsed.result;
-  if (parsed.result?.isError) throw new Error(`${tool}: ${content}`);
-  return value;
+  // A refusal is prose, not JSON — and this parsed it anyway, so every real
+  // message came back as "Unexpected token" and the friction this script exists
+  // to measure was unreadable. Check the flag before trusting the body.
+  if (parsed.result?.isError) throw new Error(content ?? "refused, with no message");
+  try {
+    return content ? JSON.parse(content) : parsed.result;
+  } catch {
+    return content;
+  }
 }
 
 const hex = (n) => `$${n.toString(16).toUpperCase().padStart(4, "0")}`;
+const addressOf = (a) =>
+  typeof a === "number" ? a : a.startsWith("$") ? parseInt(a.slice(1), 16) : parseInt(a, 10);
 const say = (...parts) => console.log(...parts);
 
 /** Where the two builds live, and what they are. */
@@ -224,6 +232,114 @@ async function main() {
     layers: [{ layer: withRoms.original }, ...patchLinks],
   });
   say("  five targets: loader, runtime, machine, standalone, patched");
+
+  // ------------------------------------------------------------- the import
+  //
+  // **Replayed under the original authors, not attributed to this script.**
+  // Run 7's document is the pre-claims format and carries no provenance at all
+  // — the loader synthesises `author: "project"` for such a file — but its
+  // *operations log* has one row per write with the reader who made it, and all
+  // 742 objects are traceable: 400 labels, 114 regions, 210 comments and 18
+  // constants, made by reader-1, reader-2 and reader-3.
+  //
+  // So each write here is sent with that reader's own user header, and
+  // `add_claim` mints the supporting record naming them. Nothing is
+  // manufactured and nothing is laundered into one curator's name — which is
+  // the whole point of the shape: when the next run adds its own account of one
+  // of these, the claim carries both, and the difference between them is the
+  // measurement.
+  //
+  // `method` is left unstated, honestly: run 7 predates the axis, and absent
+  // means nobody said, which is true of every one of these.
+  const seven = JSON.parse(readFileSync(join(HERE, "sources", "run07.re64"), "utf-8"));
+  const authors = JSON.parse(readFileSync(join(HERE, "sources", "run07-authors.json"), "utf-8"));
+  const who = (id) => authors[id] ?? "project";
+
+  let imported = 0;
+  const failed = [];
+  const attempt = async (tool, argsObject, by) => {
+    try {
+      await call(tool, argsObject, by);
+      imported += 1;
+    } catch (error) {
+      failed.push(`${tool} ${JSON.stringify(argsObject).slice(0, 90)}: ${error.message}`);
+    }
+  };
+
+  // Constants first: a binding needs the name it means to exist already.
+  const constantIds = {};
+  for (const c of seven.constants ?? []) {
+    try {
+      const made = await call("add_constant", { name: c.name, value: c.value }, who(c.id));
+      constantIds[c.id] = made.constant;
+      imported += 1;
+    } catch (error) {
+      failed.push(`add_constant ${c.name}: ${error.message}`);
+    }
+  }
+
+  // A region is a claim with an extent, and the legacy kinds map straight over
+  // except `code`, which was never about the bytes: it seeded the decode, so it
+  // becomes a root and says nothing about what the span is.
+  const IS_FOR = { data: "data", text: "text", jumptable: "jumptable", bitmap: "bitmap" };
+  for (const layer of seven.layers ?? []) {
+    for (const r of layer.regions ?? []) {
+      const extent = addressOf(r.end) - addressOf(r.start);
+      const is = IS_FOR[r.kind];
+      await attempt(
+        "add_claim",
+        {
+          target: "runtime",
+          at: r.start,
+          ...(extent > 0 ? { extent } : {}),
+          ...(r.name ? { name: r.name } : {}),
+          ...(is ? { is, root: "data" } : r.kind === "code" ? { root: "routine" } : {}),
+          // How to read or draw the bytes, which the legacy model made optional
+          // and the claims model requires for a bitmap. Run 7 recorded it on
+          // every one — `sprite` for the six banks, `char:8` for the character
+          // set — so this is carried across rather than guessed.
+          ...(r.view ? { view: r.view } : {}),
+          ...(r.encoding ? { encoding: r.encoding } : {}),
+          ...(r.comment ? { comment: r.comment } : {}),
+        },
+        who(r.id)
+      );
+    }
+    for (const l of layer.labels ?? []) {
+      await attempt("add_claim", { target: "runtime", at: l.address, name: l.name }, who(l.id));
+    }
+    for (const c of layer.comments ?? []) {
+      // `address`, not `at` — and `add_claim` next door takes `at`. That
+      // inconsistency cost experiment 10's editor three round trips in a row
+      // and cost this script 238 refusals on its first run, which is a fair
+      // measure of how much a reader pays for it.
+      await attempt(
+        "add_comment",
+        {
+          target: "runtime",
+          address: c.address,
+          text: c.text,
+          ...(c.placement ? { placement: c.placement } : {}),
+        },
+        who(c.id)
+      );
+    }
+    for (const u of layer.constantUses ?? []) {
+      const constant = constantIds[u.constant];
+      if (!constant) continue;
+      await attempt(
+        "bind_constants",
+        { target: "runtime", bindings: [{ address: u.address, constant }] },
+        who(u.id)
+      );
+    }
+  }
+  say(`  imported ${imported} objects from experiment 7 under their own authors`);
+  if (failed.length) {
+    say(`  ${failed.length} refused:`);
+    for (const f of failed.slice(0, 12)) say(`    ${f}`);
+    if (failed.length > 12) say(`    ... ${failed.length - 12} more`);
+  }
 
   // ------------------------------------------------------- the build checks
   //
