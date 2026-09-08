@@ -185,6 +185,15 @@ modifier on a field type rather than a kind of its own, so it needed no change
 to the schema, the CRDT, the operations or the file format: a field type is one
 string.
 
+**A count may name a constant** — `u8[CreatureCount]`, `u8[1..LevelCount]` —
+which is the equate an assembler source would write. It earns its keep when the
+same number appears more than once: two arrays written `[CreatureCount]` say
+their counts are the *same* count, which is the whole content of a shared index
+without a new noun, and binding that constant to the immediate the code compares
+against ties the layout to the program. Resolved on load and never stored: the
+document holds the text, so changing the constant changes the layout that named
+it, and a constant that has gone falls back to the number it had.
+
 **A path is derived from a type, never stored.** Given a record claim and an
 address inside it, `zones[2].name` — or `zones[0].slots[3]`, or
 `waves[1].name + 2` where the address is inside a fixed string rather than at

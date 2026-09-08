@@ -24,6 +24,7 @@ import {
   Project,
   ProjectLayer,
   parseProjectAddress,
+  ProjectConstant,
   projectCommentsToComments,
   projectConstantUses,
   projectConstants,
@@ -325,7 +326,7 @@ export function buildMemoryMap(
             // Unparseable is not an error here: a field naming a type that has
             // gone renders its bytes, exactly as a dangling constant renders
             // the literal. Hygiene reports it; loading does not refuse.
-            type: resolveFieldType(field.type, project.types ?? []),
+            type: resolveFieldType(field.type, project.types ?? [], project.constants ?? []),
             ...(field.description === undefined ? {} : { description: field.description }),
           },
         ])
@@ -481,8 +482,24 @@ export function buildMemoryMap(
  * how a dangling reference stays loadable — the honest reading of "this field
  * is a Zone" when there is no Zone is "these bytes, and I cannot say how many".
  */
-function resolveFieldType(text: string, declared: readonly ProjectType[]): FieldType {
-  const parsed = parseFieldType(text, (name) => declared.find((t) => t.name === name)?.id);
+function resolveFieldType(
+  text: string,
+  declared: readonly ProjectType[],
+  constants: readonly ProjectConstant[]
+): FieldType {
+  const parsed = parseFieldType(
+    text,
+    (name) => declared.find((t) => t.name === name)?.id,
+    (name) => {
+      // The count a constant names, resolved on load rather than stored, so a
+      // constant whose value changes changes the layout that named it. The
+      // document holds `u8[LevelCount]`; the number lives only here.
+      const found = constants.find((c) => c.name === name);
+      if (!found || found.id === undefined) return undefined;
+      const value = typeof found.value === "number" ? found.value : parseProjectAddress(found.value);
+      return value === undefined ? undefined : { id: found.id, value };
+    }
+  );
   return "error" in parsed ? { is: "bytes", length: 1 } : parsed;
 }
 

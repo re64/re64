@@ -1261,7 +1261,12 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
                   "Creature[42], char(40)[3] — or [first..last] where the first " +
                   "index is not zero, which some tables are. An array field is " +
                   "how you say that eight slots are one thing rather than eight " +
-                  "fields whose relationship lives in a comment."
+                  "fields whose relationship lives in a comment. " +
+                  "A count may be a declared constant — u8[CreatureCount] — " +
+                  "which is worth doing when the same number appears more than " +
+                  "once: two arrays written [CreatureCount] say their counts are " +
+                  "the same count, and binding that constant to the immediate " +
+                  "the code compares against ties the layout to the program."
               ),
             description: z.string().optional(),
           })

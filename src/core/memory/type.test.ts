@@ -113,7 +113,11 @@ describe("the types a listing has to declare", () => {
 
 describe("a field type, as somebody types it", () => {
   const names: Record<string, string> = { Creature: "typ_creature" };
-  const parse = (text: string) => parseFieldType(text, (n) => names[n]);
+  const counts: Record<string, { id: string; value: number }> = {
+    LevelCount: { id: "con_level", value: 32 },
+    CreatureCount: { id: "con_creature", value: 8 },
+  };
+  const parse = (text: string) => parseFieldType(text, (n) => names[n], (n) => counts[n]);
 
   it("reads the scalars, including the byte order", () => {
     // Two types rather than one type and a flag: a flag is a second field every
@@ -184,8 +188,43 @@ describe("a field type, as somebody types it", () => {
     expect(parse("Zone[8]")).toMatchObject({ error: expect.stringContaining("list_types") });
   });
 
+  it("takes a count from a constant, so the same number is named once", () => {
+    // Gridrunner holds the same 32 in four places within a dozen instructions —
+    // a `CMP #$20` and three tables. Naming it says they are the same 32
+    // instead of leaving four numbers that happen to agree.
+    expect(parse("u8[LevelCount]")).toEqual({
+      is: "array",
+      of: { is: "u8" },
+      count: 32,
+      countId: "con_level",
+    });
+    // And two arrays written `[CreatureCount]` say their eights are the *same*
+    // eight, which is the whole content of a shared index without a new noun.
+    expect(parse("u8[CreatureCount]")).toMatchObject({ count: 8, countId: "con_creature" });
+    // `[1..LevelCount]` is 32 elements numbered 1 to 32, which is the sentence
+    // somebody means. The upper bound is what the constant names.
+    expect(parse("u8[1..LevelCount]")).toEqual({
+      is: "array",
+      of: { is: "u8" },
+      count: 32,
+      origin: 1,
+      countId: "con_level",
+    });
+    expect(parse("u8[Nonesuch]")).toMatchObject({
+      error: expect.stringContaining("is not a constant this project declares"),
+    });
+  });
+
   it("writes back what it read", () => {
     const nameOf = (id: string) => (id === "typ_creature" ? "Creature" : undefined);
+    const countOf = (id: string) =>
+      ({ con_level: "LevelCount", con_creature: "CreatureCount" })[id];
+    for (const text of ["u8[LevelCount]", "u8[1..LevelCount]", "Creature[CreatureCount][4]"]) {
+      expect(formatFieldType(parse(text) as never, nameOf, countOf)).toBe(text);
+    }
+    // A constant that has gone falls back to the number, which is honest: the
+    // count is still what it was when it was read.
+    expect(formatFieldType(parse("u8[LevelCount]") as never, nameOf)).toBe("u8[32]");
     for (const text of [
       "u8",
       "i8",

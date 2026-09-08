@@ -120,6 +120,25 @@ export type FieldType =
       readonly of: FieldType;
       readonly count: number;
       readonly origin?: number;
+      /**
+       * The constant the count was written as, when it was written as one.
+       *
+       * `u8[LevelCount]` rather than `u8[32]`, which is the equate an assembler
+       * source would write and the reason it is worth having: Gridrunner holds
+       * the same 32 in four places within a dozen instructions — a `CMP #$20`
+       * and three tables — and naming it once says they are the same 32 instead
+       * of leaving four numbers that happen to agree.
+       *
+       * Two arrays written `[CreatureCount]` also say their counts are the
+       * *same* count, which is the whole content of what a shared index would
+       * have been, using the noun that already exists. Camels' zone record has
+       * roughly nineteen eight-wide fields and every one of those eights is the
+       * same eight.
+       *
+       * The id, so a renamed constant carries the reference with it. The
+       * document holds the text, so this is resolved on load and never at rest.
+       */
+      readonly countId?: string;
     };
 
 /** Bytes a field occupies, or undefined when it names a type nothing declares. */
@@ -257,37 +276,81 @@ export class TypeIndex {
  */
 export function parseFieldType(
   text: string,
-  idForName: (name: string) => string | undefined
+  idForName: (name: string) => string | undefined,
+  countForName: (name: string) => { id: string; value: number } | undefined
 ): FieldType | { readonly error: string } {
   let trimmed = text.trim();
 
   // Dimensions come off the right and go back on inside-out, which is what
   // makes `u8[4][8]` read as C reads it: four of eight, outer dimension first.
-  const dimensions: { count: number; origin: number }[] = [];
+  const dimensions: { count: number; origin: number; countId?: string }[] = [];
   for (;;) {
-    const found = /\[\s*(-?\d+)\s*(?:\.\.\s*(-?\d+)\s*)?\]$/.exec(trimmed);
+    const found = /\[\s*([A-Za-z_][A-Za-z0-9_]*|-?\d+)\s*(?:\.\.\s*([A-Za-z_][A-Za-z0-9_]*|-?\d+)\s*)?\]$/.exec(
+      trimmed
+    );
     if (!found) break;
     const [whole, first, last] = found;
-    const from = Number(first);
-    const to = last === undefined ? undefined : Number(last);
-    if (to === undefined) {
-      if (from < 1) return { error: `${trimmed}: an array needs at least one element` };
-      dimensions.unshift({ count: from, origin: 0 });
+
+    // A bound may be a declared constant, which is how `[LevelCount]` and
+    // `[1..LevelCount]` are written. Resolved here and never stored: the
+    // document holds the text, so renaming the constant rewrites the field type
+    // on the next save rather than leaving two facts to disagree.
+    const bound = (word: string): { value: number; id?: string } | { error: string } => {
+      if (/^-?\d+$/.test(word)) return { value: Number(word) };
+      const named = countForName(word);
+      return named === undefined
+        ? {
+            error:
+              `"${word}" is not a number and is not a constant this project declares. ` +
+              `add_constant names one; list_constants shows what there is.`,
+          }
+        : { value: named.value, id: named.id };
+    };
+
+    const low = bound(first);
+    if ("error" in low) return low;
+    const high = last === undefined ? undefined : bound(last);
+    if (high !== undefined && "error" in high) return high;
+
+    if (high === undefined) {
+      if (low.value < 1) return { error: `${trimmed}: an array needs at least one element` };
+      dimensions.unshift({
+        count: low.value,
+        origin: 0,
+        ...(low.id === undefined ? {} : { countId: low.id }),
+      });
     } else {
-      if (to < from) return { error: `${trimmed}: ${first}..${last} runs backwards` };
-      dimensions.unshift({ count: to - from + 1, origin: from });
+      if (high.value < low.value) {
+        return { error: `${trimmed}: ${first}..${last} runs backwards` };
+      }
+      dimensions.unshift({
+        count: high.value - low.value + 1,
+        origin: low.value,
+        // The *upper* bound is what a count constant names here: `[1..Levels]`
+        // with Levels = 32 is 32 elements, which is the sentence somebody
+        // means. It only reads that way while the origin is 1, and neither
+        // program has a table where it is not.
+        ...(high.id === undefined ? {} : { countId: high.id }),
+      });
     }
     trimmed = trimmed.slice(0, found.index).trim();
     if (trimmed.length === 0) return { error: `${whole} needs an element type before it` };
   }
 
-  const element = dimensions.length === 0 ? undefined : parseFieldType(trimmed, idForName);
+  const element =
+    dimensions.length === 0 ? undefined : parseFieldType(trimmed, idForName, countForName);
   if (element !== undefined) {
     if ("error" in element) return element;
     let built = element;
     for (let i = dimensions.length - 1; i >= 0; i--) {
-      const { count, origin } = dimensions[i];
-      built = { is: "array", of: built, count, ...(origin === 0 ? {} : { origin }) };
+      const { count, origin, countId } = dimensions[i];
+      built = {
+        is: "array",
+        of: built,
+        count,
+        ...(origin === 0 ? {} : { origin }),
+        ...(countId === undefined ? {} : { countId }),
+      };
     }
     return built;
   }
@@ -339,7 +402,8 @@ export function parseFieldType(
 /** A field type, written back out the way it was typed. */
 export function formatFieldType(
   type: FieldType,
-  nameOf: (typeId: string) => string | undefined
+  nameOf: (typeId: string) => string | undefined,
+  countName: (constantId: string) => string | undefined = () => undefined
 ): string {
   switch (type.is) {
     case "char":
@@ -359,10 +423,18 @@ export function formatFieldType(
       let element: FieldType = type;
       while (element.is === "array") {
         const origin = element.origin ?? 0;
-        bounds.push(origin === 0 ? `${element.count}` : `${origin}..${origin + element.count - 1}`);
+        // The constant's *current* name, so renaming it rewrites the field type
+        // rather than leaving a reference to a word nothing answers to. A
+        // constant that has gone falls back to the number, which is honest: the
+        // count is still what it was.
+        const upper = element.countId === undefined ? undefined : countName(element.countId);
+        const last = upper ?? `${origin + element.count - 1}`;
+        bounds.push(
+          origin === 0 ? (upper ?? `${element.count}`) : `${origin}..${last}`
+        );
         element = element.of;
       }
-      return `${formatFieldType(element, nameOf)}${bounds.map((b) => `[${b}]`).join("")}`;
+      return `${formatFieldType(element, nameOf, countName)}${bounds.map((b) => `[${b}]`).join("")}`;
     }
     default:
       return type.is;

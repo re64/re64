@@ -86,6 +86,11 @@ export class ConstantIndex {
     return this.declared.get(use.constantId)?.name;
   }
 
+  /** One declared constant by id, for a reference that holds one. */
+  get(id: string): Constant | undefined {
+    return this.declared.get(id);
+  }
+
   /** Every declared name for a value, which is what a chooser offers. */
   named(value: number): readonly Constant[] {
     return [...this.declared.values()]

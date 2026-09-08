@@ -2314,6 +2314,14 @@ export class Workspace {
     }
 
     const idForName = (name: string) => declared.find((t) => t.name === name)?.id;
+    // A count written as a constant — `u8[LevelCount]` — resolved through the
+    // one constant with that name. Two with the same name resolve to neither,
+    // which `byName` already decides: declaring is additive, so a name is not
+    // an identity, and a layout is not the place to guess which was meant.
+    const countForName = (name: string) => {
+      const found = this.program().loaded.constants.byName(name);
+      return found === undefined ? undefined : { id: found.id, value: found.value };
+    };
     // `address`, not `offset`, because every batch tool here reports what it
     // declined in one shape and the shape is the contract. The value is spelled
     // as an offset — `+$A0` — so nobody reads it as an address in memory.
@@ -2333,7 +2341,7 @@ export class Workspace {
       // A fact about the request, which is the only kind of reason a write here
       // may refuse for — and partial, like every batch: one bad field must not
       // lose the nineteen somebody proved from a copy routine.
-      const parsed = parseFieldType(field.type, idForName);
+      const parsed = parseFieldType(field.type, idForName, countForName);
       if ("error" in parsed) {
         rejected.push({ address: key, reason: parsed.error });
         continue;
@@ -2413,7 +2421,11 @@ export class Workspace {
           fields: laid.map(({ offset, field }) => ({
             offset: `+$${offset.toString(16).toUpperCase().padStart(2, "0")}`,
             name: field.name,
-            type: formatFieldType(field.type, (id) => index.get(id)?.name),
+            type: formatFieldType(
+              field.type,
+              (id) => index.get(id)?.name,
+              (id) => loaded.constants.get(id)?.name
+            ),
             ...(field.description === undefined ? {} : { description: field.description }),
           })),
           // Holes are legal and are the point: a reader who has proved nineteen
