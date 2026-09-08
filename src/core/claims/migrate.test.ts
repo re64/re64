@@ -52,10 +52,17 @@ describe("migrating every project in the repository", () => {
         `(${code} code -> rootless roots, ${rooted} auto-rooted, ${unknown} unknown dropped)`
     );
 
-    // The design document's own table: 475 regions, 88 of them `code` (18%),
-    // 0 `unknown`. Every region becomes exactly one claim or nothing.
-    expect(code + rooted + unknown).toBe(475);
-    expect(code).toBe(88);
+    // The design document's own table was 475 regions, 88 of them `code`
+    // (18%), 0 `unknown`. It is 589 and 91 since
+    // `assets/mutant-camels/sources/run07.re64` joined the repository — that is
+    // experiment 7's document, kept because the gold standard is built from it,
+    // and it is a legacy project like every other file counted here. Its 114
+    // regions are the difference, three of them `code`.
+    //
+    // The invariant is unchanged and is what this asserts: every region becomes
+    // exactly one claim or nothing, and nothing is dropped.
+    expect(code + rooted + unknown).toBe(589);
+    expect(code).toBe(91);
     expect(unknown).toBe(0);
     expect(regions).toBe(code + rooted);
   });
