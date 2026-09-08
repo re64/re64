@@ -553,11 +553,24 @@ export function analyze(
       // in another, and on a machine that switches banks under a fixed address
       // that is the difference between two unrelated things.
       const bound = allLabels.labelForSite(addr);
+      // **With the offset, not only on an exact hit.** The binding used to
+      // apply when the operand landed exactly on the bound label and fall
+      // through to the heuristic otherwise — which dropped it in precisely the
+      // case it is wanted for. `LDA base-1,X` over a 1-indexed table is the
+      // idiom, and it was reached by `labelTolerance` defaulting to 1: a guess,
+      // made silently, with nothing behind it. Resolving to `base-1` is an
+      // *interpretation* of what the instruction means, and an interpretation
+      // belongs in a claim somebody can attach evidence to.
+      //
+      // Keyed by the referring instruction's address, so a decode that starts
+      // elsewhere never reaches this at all: a moved boundary makes a binding
+      // inert rather than wrong, which is the safe failure and the reason no
+      // plausibility check guards it.
       const resolveHere = bound
-        ? (target: number) =>
-            target === bound.at
-              ? { name: bound.name, offset: 0 }
-              : resolveLabel(target)
+        ? (target: number) => ({
+            name: allLabels.displayName(bound),
+            offset: target - bound.at,
+          })
         : resolveLabel;
 
       const operandStr = constant

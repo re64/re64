@@ -1590,7 +1590,12 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     "Say which name the operands referring to an address mean, over a span. " +
       "Give `from` alone for one instruction, or `from` and `to` for a whole " +
       "routine. Stored per site, so a binding travels with its instruction " +
-      "rather than with a range that may stop being the right one.",
+      "rather than with a range that may stop being the right one. " +
+      "Pass `at` when the label is not at the address the operands hold, which " +
+      "is the 1-indexed table idiom: `LDA base-1,X` with X from 1 refers to a " +
+      "byte just outside the table it means, and binding it renders `base-1` " +
+      "rather than a bare address. That reading is an interpretation, so say " +
+      "it here and back it with a claim rather than leaving it to be guessed.",
     {
       project,
       // Named `address`, not `target`: every tool takes a `target` meaning
@@ -1598,6 +1603,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       // one schema is the ambiguity refused everywhere else here.
       address: address.describe("The address being referred to"),
       name: z.string().min(1).describe("Which of its labels these sites mean"),
+      at: address
+        .optional()
+        .describe("Where that label is, if not at `address`; renders as name±n"),
       from: address.describe("First instruction to bind"),
       to: address.optional().describe("Last instruction; just `from` if omitted"),
       expectVersion: z.string().optional(),
@@ -1607,6 +1615,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       target?: string;
       address: number;
       name: string;
+      at?: number;
       from: number;
       to?: number;
       expectVersion?: string;
@@ -1614,7 +1623,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       const { workspace, caller } = context();
       const space = workspace(args.project, args.target);
       space.expect(args.expectVersion);
-      return space.bindLabel(caller, args.name, args.address, args.from, args.to);
+      return space.bindLabel(caller, args.name, args.address, args.from, args.to, args.at);
     }
   );
 

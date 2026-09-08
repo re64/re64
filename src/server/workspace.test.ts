@@ -1075,6 +1075,46 @@ describe("two names for one address", () => {
     expect(elsewhere).not.toContain("gridXPos");
   });
 
+  it("renders base-1 from a binding rather than from a guess", () => {
+    // The 1-indexed table idiom, which is the reason `labelTolerance` defaults
+    // to 1: `LDA base-1,X` with X from 1 reaches the table's first byte, so the
+    // operand points one byte *outside* the thing it means. Gridrunner does it
+    // three times in four consecutive instructions at $8C8C — three 32-byte
+    // tables all declared `=*-$01`, all read with the same X.
+    //
+    // Reading $8C99 as `noOfDroidSquadsForLevel-1` is an interpretation, not a
+    // fact: the bytes cannot distinguish `base = *-$01` with `LDA base,X` from
+    // `base = *` with `LDA base-1,X`, and the disassembly we have is generated
+    // output rather than anybody's source. So it belongs in a binding somebody
+    // can attach a claim to, not in a tolerance the renderer applies silently.
+    const blank = blankWorkspace();
+    blank.markFunction(agent, 0x8011);
+
+    const site = blank
+      .program()
+      .instructions.all()
+      .find((i) => (i.operand as { address?: number }).address === 0x08)!;
+
+    // The label one byte after what the site's operand holds — the table's real
+    // base, so the symbol names its object rather than the byte before it.
+    blank.addLabel(agent, 0x09, "levelTable");
+    blank.bindLabel(agent, "levelTable", 0x08, site.address, undefined, 0x09);
+
+    expect(blank.disassembly(site.address, 1).lines[0].text).toContain("levelTable-1");
+  });
+
+  it("says which of the two addresses it could not find the label at", () => {
+    const blank = blankWorkspace();
+    blank.markFunction(agent, 0x8011);
+    const site = blank
+      .program()
+      .instructions.all()
+      .find((i) => (i.operand as { address?: number }).address === 0x08)!;
+    expect(() =>
+      blank.bindLabel(agent, "levelTable", 0x08, site.address, undefined, 0x09)
+    ).toThrow(/`at` is where the label is/);
+  });
+
   it("binds a whole span in one call", () => {
     const blank = blankWorkspace();
     blank.markFunction(agent, 0x8011);

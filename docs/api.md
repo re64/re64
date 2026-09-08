@@ -443,12 +443,13 @@ Stop choosing, so the name at this address falls back to rank. There was no way 
 
 #### `bind_name`
 
-Say which name the operands referring to an address mean, over a span. Give `from` alone for one instruction, or `from` and `to` for a whole routine. Stored per site, so a binding travels with its instruction rather than with a range that may stop being the right one.
+Say which name the operands referring to an address mean, over a span. Give `from` alone for one instruction, or `from` and `to` for a whole routine. Stored per site, so a binding travels with its instruction rather than with a range that may stop being the right one. Pass `at` when the label is not at the address the operands hold, which is the 1-indexed table idiom: `LDA base-1,X` with X from 1 refers to a byte just outside the table it means, and binding it renders `base-1` rather than a bare address. That reading is an interpretation, so say it here and back it with a claim rather than leaving it to be guessed.
 
 | argument | type | | |
 |---|---|---|---|
 | `address` | `string,number` | **required** | The address being referred to |
 | `name` | `string` | **required** | Which of its labels these sites mean |
+| `at` | `string,number` | optional | Where that label is, if not at `address`; renders as name±n |
 | `from` | `string,number` | **required** | First instruction to bind |
 | `to` | `string,number` | optional | Last instruction; just `from` if omitted |
 | `expectVersion` | `string` | optional |  |

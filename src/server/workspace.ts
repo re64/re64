@@ -3932,20 +3932,42 @@ export class Workspace {
    * whenever code moves or a region changes; a binding attached to an
    * instruction simply travels with it. The range is expanded here, so a caller
    * can still say "throughout this routine" in one call.
+   *
+   * **`at` is what makes `base-1` sayable.** The 1-indexed table idiom — `LDA
+   * base-1,X` with X from 1 — has an operand that points one byte *outside* the
+   * table it means, so the label the site refers to is not at the address the
+   * site holds. Until now that reading came from `labelTolerance` defaulting to
+   * 1: a guess, made silently, with nothing behind it and no way to disagree
+   * with it. Resolving `$8C99` to `noOfDroidSquadsForLevel-1` is an
+   * interpretation of what the instruction means, and an interpretation belongs
+   * in something a person can attach evidence to.
+   *
+   * The operand filter stays exact against `target`, which is the safety: a
+   * caller says which address the sites hold and which label that means, and a
+   * span still cannot sweep up instructions that refer to something else.
    */
   bindLabel(
     caller: Caller,
     name: string,
     target: number,
     from: number,
-    to?: number
+    to?: number,
+    at?: number
   ): EditResult {
     return this.edit(caller, (loaded) => {
+      const lives = at ?? target;
       const label = loaded.map
         .getLabels()
-        .getLabelsAt(target)
+        .getLabelsAt(lives)
         .find((l) => l.name === name);
-      if (!label) throw new Error(`${hex4(target)} has no label called ${name}.`);
+      if (!label) {
+        throw new Error(
+          `${hex4(lives)} has no label called ${name}.` +
+            (at === undefined
+              ? ""
+              : ` \`at\` is where the label is; \`address\` is what the operands hold.`)
+        );
+      }
 
       const end = to ?? from;
       const sites = this.program()
