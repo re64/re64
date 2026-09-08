@@ -978,6 +978,25 @@ export function fieldValue(
       // of *this* record keeps every row navigable, and the inner layout is one
       // `list_types` call away.
       return `<${type.typeId}>`;
+    case "array": {
+      // On one row, for the same reason a nested record is: an eight-element
+      // field is one thing the reader named, and eight rows would bury the
+      // nineteen fields around it. Long ones are cut with an ellipsis rather
+      // than wrapped, because the row model is a row model.
+      const each = width / type.count;
+      const parts: string[] = [];
+      let shown = 0;
+      for (let i = 0; i < type.count; i++) {
+        const one = fieldValue(map, at + i * each, type.of, each, names);
+        if (shown + one.length > 48) {
+          parts.push("…");
+          break;
+        }
+        parts.push(one);
+        shown += one.length + 2;
+      }
+      return `[${parts.join(", ")}]`;
+    }
     default: {
       const unhandled: never = type;
       throw new Error(`unhandled field type: ${String(unhandled)}`);

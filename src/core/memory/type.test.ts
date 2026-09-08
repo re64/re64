@@ -149,9 +149,57 @@ describe("a field type, as somebody types it", () => {
     expect(parse("Zone")).toMatchObject({ error: expect.stringContaining("list_types") });
   });
 
+  it("reads an array of anything, including of another array", () => {
+    // The shape both programs wanted and neither could say. Camels' zone record
+    // is nineteen fields each eight wide; Gridrunner's level tables are three
+    // `LevelParams[32]`.
+    expect(parse("u8[8]")).toEqual({ is: "array", of: { is: "u8" }, count: 8 });
+    expect(parse("Creature[42]")).toEqual({
+      is: "array",
+      of: { is: "record", typeId: "typ_creature" },
+      count: 42,
+    });
+    expect(parse("char(40)[3]")).toEqual({
+      is: "array",
+      of: { is: "char", length: 40 },
+      count: 3,
+    });
+    // Outer dimension first, as C reads it: four of eight, not eight of four.
+    expect(parse("u8[4][8]")).toEqual({
+      is: "array",
+      count: 4,
+      of: { is: "array", of: { is: "u8" }, count: 8 },
+    });
+  });
+
+  it("takes an index origin, because nine of Gridrunner's tables are 1-based", () => {
+    // `=*-$01`: element one sits at offset zero, and a reader who forgets is
+    // off by one for the whole table. Not decoration.
+    expect(parse("u8[1..32]")).toEqual({ is: "array", of: { is: "u8" }, count: 32, origin: 1 });
+    // Zero origin is the default, and is not written down twice.
+    expect(parse("u8[0..7]")).toEqual({ is: "array", of: { is: "u8" }, count: 8 });
+    expect(parse("u8[8..1]")).toMatchObject({ error: expect.stringContaining("backwards") });
+    expect(parse("u8[0]")).toMatchObject({ error: expect.stringContaining("at least one") });
+    expect(parse("[8]")).toMatchObject({ error: expect.stringContaining("element type") });
+    expect(parse("Zone[8]")).toMatchObject({ error: expect.stringContaining("list_types") });
+  });
+
   it("writes back what it read", () => {
     const nameOf = (id: string) => (id === "typ_creature" ? "Creature" : undefined);
-    for (const text of ["u8", "i8", "u16be", "ptr", "char(40)", "char(40,screen)", "bytes(8)"]) {
+    for (const text of [
+      "u8",
+      "i8",
+      "u16be",
+      "ptr",
+      "char(40)",
+      "char(40,screen)",
+      "bytes(8)",
+      "u8[8]",
+      "u8[1..32]",
+      "char(40)[3]",
+      "u8[4][8]",
+      "Creature[42]",
+    ]) {
       expect(formatFieldType(parse(text) as never, nameOf)).toBe(text);
     }
     expect(formatFieldType({ is: "record", typeId: "typ_creature" }, nameOf)).toBe("Creature");

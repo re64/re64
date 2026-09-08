@@ -1178,6 +1178,29 @@ somebody trips over the absence rather than predicts it.
 
 ## Parked: what a field's *value* refers to
 
+> **Note, appended: the array half is built; the three below are still parked.**
+> A field can now be `u8[8]`, `Creature[42]`, `char(40)[3]`, or `u8[1..32]` where
+> the first index is not zero. That is the *layout* half of what this entry
+> wanted, and it was decided on different evidence from what is discussed below:
+> a counted list from **two** programs rather than a prediction from one, which
+> is the standard this entry itself asks for. Camels' zone record is nineteen
+> fields each eight wide, one slot per creature type; Gridrunner's three level
+> tables are `LevelParams[32]` each and nine more are declared `=*-$01`.
+>
+> The three rows in the table below — index-into, bitmask-over, enum — are
+> untouched, and they are one mechanism rather than three: each is a field
+> saying what its value *refers to*, and none can be built until there is a way
+> to name the referent. The array is what makes that nameable, which is the
+> order they had to come in.
+>
+> What the array already settles is smaller than it looks and larger than it
+> sounds: `zones[2].name` is now derivable, and so is `zones[].nextType`. So an
+> effect summary that today reads `reads: memory at a computed address` — which
+> is what `effects` says about `$9A39`, the creature-ageing routine and the most
+> important in the program — has both ends nameable for the first time. A
+> relation **noun** stays parked for the reason given below, and this makes that
+> refusal cheaper rather than harder.
+
 **Not built, and the interesting part is why the usual signal cannot decide it.**
 
 `add_type` answered "these 8,400 bytes are 42 records of 200" — the shape that

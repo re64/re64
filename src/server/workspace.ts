@@ -94,7 +94,7 @@ import {
   ClaimMethod,
 } from "../core/claims/model.js";
 import { NamedClaim, labelTypeOf } from "../core/claims/names.js";
-import { fieldSize, formatFieldType, parseFieldType } from "../core/memory/type.js";
+import { fieldSize, formatFieldType, parseFieldType, pathAt } from "../core/memory/type.js";
 import { ClaimEdit } from "../core/ops/types.js";
 import { ClaimSet, disagreements, describeDisagreement } from "../core/claims/set.js";
 
@@ -2516,6 +2516,7 @@ export class Workspace {
       // Only where both bytes are there; a word running off the end of the map
       // is not a word.
       ...(word === undefined ? {} : { word }),
+      ...(this.fieldAt(address) ?? {}),
       assumed: {
         screenBase: hex4(base),
         vicBank: hex4(vicBank),
@@ -2524,6 +2525,40 @@ export class Workspace {
           "Pass screenBase or bank if this program moved them.",
       },
     };
+  }
+
+  /**
+   * Which field of which record an address is, written as a path.
+   *
+   * `zones[2].name`, and the same notation whether the array is the program's
+   * or the machine's — which is why the places moved to brackets. It is the
+   * half of "what is this address" that the model could answer and nothing
+   * asked: a reader with a typed table still counted offsets by hand to work
+   * out which of nineteen fields a `LDA ($3E),Y` was reaching.
+   *
+   * Silent where a record claim does not cover the address, and silent inside a
+   * hole, because a hole is a real gap in interpretation and naming it would be
+   * the confident wrong answer this project refuses.
+   */
+  private fieldAt(address: number): { field: { path: string; of: string } } | undefined {
+    const program = this.program();
+    for (const claim of program.loaded.claims) {
+      if (claim.says?.is !== "record" || claim.extent === undefined) continue;
+      if (address < claim.at || address >= claim.at + claim.extent) continue;
+      const type = program.loaded.types.get(claim.says.typeId);
+      if (!type || type.size <= 0) continue;
+
+      const index = Math.floor((address - claim.at) / type.size);
+      const found = pathAt(type, (address - claim.at) % type.size, program.loaded.types);
+      if (!found) continue;
+
+      // The array is named by the claim, so the path reads the way somebody
+      // would say it out loud rather than starting at a type name.
+      const array = claim.name ?? type.name;
+      const within = found.within === 0 ? "" : ` + ${found.within}`;
+      return { field: { path: `${array}[${index}]${found.path}${within}`, of: type.name } };
+    }
+    return undefined;
   }
 
   /**

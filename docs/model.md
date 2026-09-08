@@ -178,6 +178,20 @@ one record both survive. Field types: `u8`, `i8`, `u16`, `u16be`,
 `ptr`, `ptrbe`, `char(n)`, `char(n,encoding)`, `bytes(n)`, or another type's
 name. How many records a claim holds is `extent / size`, derived.
 
+Any of them takes `[n]` for an array — `u8[8]`, `Creature[42]`, `char(40)[3]` —
+or `[first..last]` where the first index is not zero, which some tables are.
+`u8[4][8]` nests the way C reads it, outer dimension first. An array is a
+modifier on a field type rather than a kind of its own, so it needed no change
+to the schema, the CRDT, the operations or the file format: a field type is one
+string.
+
+**A path is derived from a type, never stored.** Given a record claim and an
+address inside it, `zones[2].name` — or `zones[0].slots[3]`, or
+`waves[1].name + 2` where the address is inside a fixed string rather than at
+its start. Silent in a hole, because a hole is a real gap in interpretation.
+`where` answers with it. The same brackets index the machine's arrays:
+`screen[10,2]`, `sprite[13]`.
+
 A reference to a declaration that has gone renders the bytes, the literal, or
 the plain value. Nothing sweeps.
 

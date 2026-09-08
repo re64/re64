@@ -198,6 +198,10 @@ const CASES: { [K in Op["op"]]: Case } = {
       // 200-byte record should not have to invent padding for the rest.
       fields: {
         0: { id: "fld_a", name: "kind", type: "u8" },
+        // An array field, so the notation goes through all seven paths: it is
+        // one string like every other field type, and that is exactly why it
+        // needed no schema change anywhere below this line.
+        8: { id: "fld_c", name: "slots", type: "u8[8]" },
         160: { id: "fld_b", name: "label", type: "char(40,screen)" },
       },
     },

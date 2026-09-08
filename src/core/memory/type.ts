@@ -96,7 +96,31 @@ export type FieldType =
   /** Bytes this reader has not explained. Never inferred — only declared. */
   | { readonly is: "bytes"; readonly length: number }
   /** A nested record, so `Creature` can sit inside `Zone`. */
-  | { readonly is: "record"; readonly typeId: string };
+  | { readonly is: "record"; readonly typeId: string }
+  /**
+   * Several of something, laid end to end.
+   *
+   * **The shape both programs wanted and neither could say.** Camels' zone
+   * record is nineteen fields each eight wide — one slot per creature type — so
+   * without this it is nineteen separate `bytes(8)` fields whose relationship to
+   * each other lives in prose. Gridrunner's three 32-entry level tables are one
+   * `LevelParams[32]` each. Two programs, four shapes in common, which is the
+   * standard `docs/decisions/claims.md` asks for before a shape is added.
+   *
+   * A modifier rather than a kind: `u8[8]`, `Creature[42]`, `char(40)[3]`, and
+   * `u8[4][8]` nests the way C reads it — four of eight, outer dimension first.
+   *
+   * `origin` is the index the first element answers to, and it is not
+   * decoration: nine of Gridrunner's tables are declared `=*-$01`, so element
+   * one is at offset zero and every reader who forgets is off by one for the
+   * whole table.
+   */
+  | {
+      readonly is: "array";
+      readonly of: FieldType;
+      readonly count: number;
+      readonly origin?: number;
+    };
 
 /** Bytes a field occupies, or undefined when it names a type nothing declares. */
 export function fieldSize(
@@ -117,6 +141,10 @@ export function fieldSize(
       return type.length;
     case "record":
       return sizeOf(type.typeId);
+    case "array": {
+      const each = fieldSize(type.of, sizeOf);
+      return each === undefined ? undefined : each * type.count;
+    }
     default: {
       const unhandled: never = type;
       throw new Error(`unhandled field type: ${String(unhandled)}`);
@@ -191,7 +219,17 @@ export class TypeIndex {
       const type = this.byId.get(id);
       if (!type) return;
       for (const field of Object.values(type.fields)) {
-        if (field.type.is === "record") visit(field.type.typeId);
+        // Through arrays as well as directly: `Creature[8]` depends on
+        // `Creature` exactly as a bare `Creature` field does, and a TYPE block
+        // that declared one and not the other would not assemble.
+        for (let inner = field.type; ; ) {
+          if (inner.is === "array") {
+            inner = inner.of;
+            continue;
+          }
+          if (inner.is === "record") visit(inner.typeId);
+          break;
+        }
       }
       out.push(type);
     };
@@ -221,7 +259,38 @@ export function parseFieldType(
   text: string,
   idForName: (name: string) => string | undefined
 ): FieldType | { readonly error: string } {
-  const trimmed = text.trim();
+  let trimmed = text.trim();
+
+  // Dimensions come off the right and go back on inside-out, which is what
+  // makes `u8[4][8]` read as C reads it: four of eight, outer dimension first.
+  const dimensions: { count: number; origin: number }[] = [];
+  for (;;) {
+    const found = /\[\s*(-?\d+)\s*(?:\.\.\s*(-?\d+)\s*)?\]$/.exec(trimmed);
+    if (!found) break;
+    const [whole, first, last] = found;
+    const from = Number(first);
+    const to = last === undefined ? undefined : Number(last);
+    if (to === undefined) {
+      if (from < 1) return { error: `${trimmed}: an array needs at least one element` };
+      dimensions.unshift({ count: from, origin: 0 });
+    } else {
+      if (to < from) return { error: `${trimmed}: ${first}..${last} runs backwards` };
+      dimensions.unshift({ count: to - from + 1, origin: from });
+    }
+    trimmed = trimmed.slice(0, found.index).trim();
+    if (trimmed.length === 0) return { error: `${whole} needs an element type before it` };
+  }
+
+  const element = dimensions.length === 0 ? undefined : parseFieldType(trimmed, idForName);
+  if (element !== undefined) {
+    if ("error" in element) return element;
+    let built = element;
+    for (let i = dimensions.length - 1; i >= 0; i--) {
+      const { count, origin } = dimensions[i];
+      built = { is: "array", of: built, count, ...(origin === 0 ? {} : { origin }) };
+    }
+    return built;
+  }
 
   const scalar: Record<string, FieldType> = {
     u8: { is: "u8" },
@@ -262,7 +331,8 @@ export function parseFieldType(
     error:
       `"${trimmed}" is not a field type and is not a type this project declares. ` +
       `Use u8, i8, u16, u16be, ptr, ptrbe, char(n), char(n,screen), bytes(n), ` +
-      `or the name of a type from list_types.`,
+      `or the name of a type from list_types. Any of those takes [n] for an ` +
+      `array of them, or [first..last] where the first index is not zero.`,
   };
 }
 
@@ -281,7 +351,76 @@ export function formatFieldType(
       // that has gone keeps the id, which is honest — it says what it pointed
       // at rather than inventing a name for something that is not there.
       return nameOf(type.typeId) ?? type.typeId;
+    case "array": {
+      // All the dimensions at once, outermost first, so `u8[4][8]` writes back
+      // as it was read. Recursing one level per dimension would emit them
+      // inside-out — which is what it did until the round trip said so.
+      const bounds: string[] = [];
+      let element: FieldType = type;
+      while (element.is === "array") {
+        const origin = element.origin ?? 0;
+        bounds.push(origin === 0 ? `${element.count}` : `${origin}..${origin + element.count - 1}`);
+        element = element.of;
+      }
+      return `${formatFieldType(element, nameOf)}${bounds.map((b) => `[${b}]`).join("")}`;
+    }
     default:
       return type.is;
   }
+}
+
+/**
+ * Where an offset lands, written the way somebody would say it.
+ *
+ * `zones[2].name`, `zones[0].creatures[3].speed` — the notation a reader
+ * already uses in a comment, made derivable so it can be *the* answer rather
+ * than something restated by hand at every site.
+ *
+ * The point is not the listing, where a 6502's addressing modes often cannot
+ * express it anyway. It is everywhere else: an effect summary that says
+ * `reads: zones[].nextType` instead of "memory at a computed address", a
+ * comment, the note on a claim's method. The transformation graph of Camels'
+ * creature types is *derivable* from typed fields, and was prose because there
+ * was no way to name the two ends.
+ *
+ * `within` is how far into the innermost scalar the offset sits, which is not a
+ * detail: an offset landing on the second byte of a `ptr` is somebody reading
+ * the high half, and a path that quietly rounded it down would say otherwise.
+ * `undefined` where the offset falls in a hole — those are real, and a made-up
+ * field name for one would be exactly the confident wrong answer.
+ */
+export function pathAt(
+  type: RecordType,
+  offset: number,
+  index: TypeIndex
+): { path: string; within: number } | undefined {
+  for (const { offset: at, field } of index.layout(type.id)) {
+    const width = fieldSize(field.type, index.sizeOf);
+    if (width === undefined || offset < at || offset >= at + width) continue;
+    const inner = within(field.type, offset - at, index);
+    return inner === undefined ? undefined : { path: `.${field.name}${inner.path}`, within: inner.within };
+  }
+  return undefined;
+}
+
+function within(
+  type: FieldType,
+  offset: number,
+  index: TypeIndex
+): { path: string; within: number } | undefined {
+  if (type.is === "array") {
+    const each = fieldSize(type.of, index.sizeOf);
+    if (each === undefined || each === 0) return undefined;
+    const at = Math.floor(offset / each);
+    const inner = within(type.of, offset % each, index);
+    if (inner === undefined) return undefined;
+    return { path: `[${at + (type.origin ?? 0)}]${inner.path}`, within: inner.within };
+  }
+  if (type.is === "record") {
+    const nested = index.get(type.typeId);
+    if (!nested) return undefined;
+    const inner = pathAt(nested, offset, index);
+    return inner === undefined ? undefined : { path: inner.path, within: inner.within };
+  }
+  return { path: "", within: offset };
 }

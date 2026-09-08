@@ -167,7 +167,7 @@ Read a span **as** something, without saying it is that. Writes nothing. `as: "t
 
 #### `where`
 
-What an address is, in the units the machine uses: which screen cell, which sprite pointer, and where its colour byte is. The inverse of the `screen[...]` and `sprite[...]` forms every address argument accepts — you can write `screen[10,2]` to get to `$0592`, and this is how you go the other way while reading a listing. It answers with the place written out, so it goes straight back into an argument. Both conversions depend on runtime state rather than on the project — the screen base in `$D018`, the VIC bank in `$DD00` — so the answer names the bases it assumed, and you can override them.
+What an address is, in the units the machine uses: which screen cell, which sprite pointer, and where its colour byte is. The inverse of the `screen[...]` and `sprite[...]` forms every address argument accepts — you can write `screen[10,2]` to get to `$0592`, and this is how you go the other way while reading a listing. It answers with the place written out, so it goes straight back into an argument. Where a record claim covers the address it also answers with the field, as a path — zones[2].name — so you need not count offsets by hand. Both conversions depend on runtime state rather than on the project — the screen base in `$D018`, the VIC bank in `$DD00` — so the answer names the bases it assumed, and you can override them.
 
 | argument | type | | |
 |---|---|---|---|

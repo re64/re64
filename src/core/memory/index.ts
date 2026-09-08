@@ -27,6 +27,7 @@ export {
   fieldSize,
   parseFieldType,
   formatFieldType,
+  pathAt,
 } from "./type.js";
 export {
   Comment,

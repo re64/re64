@@ -486,6 +486,8 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "argument accepts — you can write `screen[10,2]` to get to `$0592`, and " +
       "this is how you go the other way while reading a listing. It answers " +
       "with the place written out, so it goes straight back into an argument. " +
+      "Where a record claim covers the address it also answers with the field, " +
+      "as a path — zones[2].name — so you need not count offsets by hand. " +
       "Both conversions depend on runtime state rather than on the project — " +
       "the screen base in `$D018`, the VIC bank in `$DD00` — so the answer " +
       "names the bases it assumed, and you can override them.",
@@ -1254,7 +1256,12 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
                 "u8, i8, u16, u16be, ptr, ptrbe, char(n), char(n,screen), " +
                   "bytes(n), or the name of another type. Byte order is part of " +
                   "the type rather than a flag beside it, because a hand-written " +
-                  "table on this machine is not always little-endian."
+                  "table on this machine is not always little-endian. " +
+                  "Any of them takes [n] for an array of them — u8[8], " +
+                  "Creature[42], char(40)[3] — or [first..last] where the first " +
+                  "index is not zero, which some tables are. An array field is " +
+                  "how you say that eight slots are one thing rather than eight " +
+                  "fields whose relationship lives in a comment."
               ),
             description: z.string().optional(),
           })

@@ -1120,6 +1120,50 @@ describe("editing as an agent", () => {
     expect(refused.text).toMatch(/holds no file/i);
   });
 
+  it("says which field of which record an address is, as a path", async () => {
+    // The notation the whole model turns on: `zones[2].name`, the same shape
+    // whether the array is the program's or the machine's. Until this, a reader
+    // with a proved layout still counted offsets by hand to work out which of
+    // nineteen fields an indexed load was reaching.
+    const type = await callTool("add_type", {
+      name: "Wave",
+      size: 16,
+      fields: {
+        0: { name: "kind", type: "u8" },
+        1: { name: "slots", type: "u8[4]" },
+        8: { name: "name", type: "char(4)" },
+      },
+    });
+    expect(type.isError, type.text).toBe(false);
+    const typeId = (type.value as { type: string }).type;
+
+    const claimed = await callTool("add_claim", {
+      at: "$8100",
+      name: "waves",
+      is: "record",
+      typeId,
+      extent: 48,
+      method: "derived",
+    });
+    expect(claimed.isError, claimed.text).toBe(false);
+
+    const path = async (at: string) =>
+      ((await callTool("where", { address: at })).value as { field?: { path: string } }).field
+        ?.path;
+
+    expect(await path("$8100")).toBe("waves[0].kind");
+    // Into the third record, into the array field, at its second element.
+    expect(await path("$8122")).toBe("waves[2].slots[1]");
+    // Inside a fixed string, which is not the string's start — and saying so is
+    // the point, because rounding it down would claim the wrong byte.
+    expect(await path("$811A")).toBe("waves[1].name + 2");
+    // A hole is a hole: offsets 5, 6 and 7 are not any field, and no name is
+    // invented for them.
+    expect(await path("$8105")).toBeUndefined();
+    // And nothing at all where no record claim covers the address.
+    expect(await path("$9000")).toBeUndefined();
+  });
+
   it("takes a patch as bytes, with no file to upload", async () => {
     // The schema half of the layer kind the file format has always had. `path`
     // had to stop being required for this to be sayable at all, so the two
