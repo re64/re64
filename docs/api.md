@@ -195,7 +195,7 @@ Every claim covering an address, with nothing resolved. The read that makes an a
 
 | argument | type | | |
 |---|---|---|---|
-| `at` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
+| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 
 #### `list_roots`
 
@@ -350,7 +350,7 @@ Say something about an address. **This adds; it never replaces.** A claim carrie
 
 | argument | type | | |
 |---|---|---|---|
-| `at` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
+| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `name` | `string` | optional |  |
 | `is` | `data` \| `text` \| `bitmap` \| `jumptable` \| `record` | optional | What the bytes are. There is no `code`: code is what bytes are when nobody has said otherwise, so to have an address decoded set a root. `record` is an array of a layout from list_types, and needs typeId. |
 | `typeId` | `string` | optional | With is:"record": which layout, from list_types |
@@ -378,7 +378,7 @@ Correct a claim, by its id. The way to change what you said rather than say some
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** | Claim id, from claims_at or add_claim |
-| `at` | `string,number` | optional | Move it. Absolute, like every address here — a claim is stored relative to the layer holding its bytes, and this is converted |
+| `address` | `string,number` | optional | Move it. Absolute, like every address here — a claim is stored relative to the layer holding its bytes, and this is converted |
 | `name` | `any` | optional |  |
 | `is` | `any` | optional |  |
 | `typeId` | `string,null` | optional | With is:"record", the layout |
@@ -450,7 +450,7 @@ Say which name the operands referring to an address mean, over a span. Give `fro
 |---|---|---|---|
 | `address` | `string,number` | **required** | The address being referred to |
 | `name` | `string` | **required** | Which of its labels these sites mean |
-| `at` | `string,number` | optional | Where that label is, if not at `address`; renders as name±n |
+| `labelAddress` | `string,number` | optional | Where that label is, if not at `address`; renders as name±n |
 | `from` | `string,number` | **required** | First instruction to bind |
 | `to` | `string,number` | optional | Last instruction; just `from` if omitted |
 | `expectVersion` | `string` | optional |  |
@@ -723,7 +723,7 @@ Run the program from an address until it leaves the bytes this project holds —
 
 | argument | type | | |
 |---|---|---|---|
-| `from` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
+| `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `stopAt` | `string,number` | optional | Stop here instead of running on |
 | `maxInstructions` | `integer` | optional | Default 20 million, about ten seconds |
 | `capture` | `object` | optional |  |

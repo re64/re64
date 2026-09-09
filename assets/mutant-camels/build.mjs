@@ -312,7 +312,7 @@ async function main() {
         "add_claim",
         {
           target: "runtime",
-          at: r.start,
+          address: r.start,
           ...(extent > 0 ? { extent } : {}),
           ...(r.name ? { name: r.name } : {}),
           ...(is ? { is, root: "data" } : r.kind === "code" ? { root: "routine" } : {}),
@@ -328,7 +328,11 @@ async function main() {
       );
     }
     for (const l of layer.labels ?? []) {
-      await attempt("add_claim", { target: "runtime", at: l.address, name: l.name }, who(l.id));
+      await attempt(
+        "add_claim",
+        { target: "runtime", address: l.address, name: l.name },
+        who(l.id)
+      );
     }
     for (const c of layer.comments ?? []) {
       // `address`, not `at` — and `add_claim` next door takes `at`. That
@@ -414,7 +418,7 @@ async function main() {
       "add_claim",
       {
         target: "runtime",
-        at: absolute(c),
+        address: absolute(c),
         ...(c.extent !== undefined ? { extent: c.extent } : {}),
         ...(c.name ? { name: c.name } : {}),
         ...(c.is ? { is: c.is } : {}),
@@ -517,7 +521,7 @@ async function main() {
         "add_claim",
         {
           target: "runtime",
-          at: c.at,
+          address: c.at,
           ...(c.extent !== undefined ? { extent: c.extent } : {}),
           ...(c.name ? { name: c.name } : {}),
           ...(c.is ? { is: c.is } : {}),

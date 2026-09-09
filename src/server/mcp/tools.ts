@@ -23,7 +23,21 @@ import type { ProjectStep } from "../../core/project/project.js";
 import type { ClaimInput } from "../workspace.js";
 
 /** One entry of `add_claims`, which is one claim. */
-type ClaimArg = ClaimInput;
+/**
+ * One claim as the *wire* spells it.
+ *
+ * `address` where the model says `at`, because fifteen tools already called a
+ * point `address` and three called it `at` — and three independent agents paid
+ * round trips for the difference. The model keeps `at`: a claim's position is
+ * `at` and always was. Only the argument moved.
+ */
+type ClaimArg = Omit<ClaimInput, "at"> & { address: number };
+
+/** The wire spelling back to the model's. */
+const asClaimInput = (c: ClaimArg): ClaimInput => {
+  const { address, ...rest } = c;
+  return { ...rest, at: address };
+};
 
 /**
  * Accepts `$8100`, `0x8100`, `"33024"` **or the number 33024**, and says so.
@@ -1136,7 +1150,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "linked somewhere else.",
     {
       project,
-      at: address,
+      address,
       name: z.string().min(1).optional(),
       is: z
         .enum(["data", "text", "bitmap", "jumptable", "record"])
@@ -1187,7 +1201,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     (args: {
       project?: string;
       target?: string;
-      at: number;
+      address: number;
       name?: string;
       is?: "data" | "text" | "bitmap" | "jumptable";
       extent?: number;
@@ -1201,7 +1215,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       const { workspace, caller } = context();
       const space = workspace(args.project, args.target);
       space.expect(args.expectVersion);
-      return space.addClaim(caller, args);
+      return space.addClaim(caller, asClaimInput(args as ClaimArg));
     }
   );
 
@@ -1416,9 +1430,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "adding beside it — and how you get the id to correct one instead. " +
       "Several claims covering an address is ordinary, not a fault; which of " +
       "them renders is a separate question.",
-    { project, at: address },
-    (args: { project?: string; target?: string; at: number }) =>
-      context().workspace(args.project, args.target).claimsAt(args.at)
+    { project, address },
+    (args: { project?: string; target?: string; address: number }) =>
+      context().workspace(args.project, args.target).claimsAt(args.address)
   );
 
   tool(
@@ -1447,7 +1461,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       claims: z
         .array(
           z.strictObject({
-            at: address,
+            address,
             name: z.string().min(1).optional(),
             is: z
               .enum(["data", "text", "bitmap", "jumptable", "record"])
@@ -1482,7 +1496,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       const { workspace, caller } = context();
       const space = workspace(args.project, args.target);
       space.expect(args.expectVersion);
-      return space.addClaims(caller, args.claims);
+      return space.addClaims(caller, args.claims.map(asClaimInput));
     }
   );
 
@@ -1501,7 +1515,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     {
       project,
       id: z.string().describe("Claim id, from claims_at or add_claim"),
-      at: address
+      address: address
         .optional()
         .describe(
           "Move it. Absolute, like every address here — a claim is stored " +
@@ -1530,7 +1544,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       project?: string;
       target?: string;
       id: string;
-      at?: number;
+      address?: number;
       name?: string | null;
       is?: Interpretation["is"] | null;
       extent?: number | null;
@@ -1558,7 +1572,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         name: args.name,
         // Absolute; `setClaim` converts it to the layer-relative pair, which is
         // why this can be offered at all.
-        at: args.at,
+        at: args.address,
         extent: args.extent,
         root: args.root,
       })) {
@@ -1644,7 +1658,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       // one schema is the ambiguity refused everywhere else here.
       address: address.describe("The address being referred to"),
       name: z.string().min(1).describe("Which of its labels these sites mean"),
-      at: address
+      labelAddress: address
         .optional()
         .describe("Where that label is, if not at `address`; renders as name±n"),
       from: address.describe("First instruction to bind"),
@@ -1656,7 +1670,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       target?: string;
       address: number;
       name: string;
-      at?: number;
+      labelAddress?: number;
       from: number;
       to?: number;
       expectVersion?: string;
@@ -1664,7 +1678,14 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       const { workspace, caller } = context();
       const space = workspace(args.project, args.target);
       space.expect(args.expectVersion);
-      return space.bindLabel(caller, args.name, args.address, args.from, args.to, args.at);
+      return space.bindLabel(
+        caller,
+        args.name,
+        args.address,
+        args.from,
+        args.to,
+        args.labelAddress
+      );
     }
   );
 
@@ -1918,7 +1939,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "answer, and an undocumented opcode stops it rather than being guessed.",
     {
       project,
-      from: address,
+      address,
       stopAt: address.optional().describe("Stop here instead of running on"),
       maxInstructions: z
         .number()
@@ -1939,7 +1960,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     (args: {
       project?: string;
       target?: string;
-      from: number;
+      address: number;
       stopAt?: number;
       maxInstructions?: number;
       capture?: { name: string; from: number; to: number };
@@ -1948,7 +1969,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       const { workspace, caller } = context();
       const space = workspace(args.project, args.target);
       space.expect(args.expectVersion);
-      return space.runProgram(caller, args.from, {
+      return space.runProgram(caller, args.address, {
         ...(args.stopAt === undefined ? {} : { stopAt: args.stopAt }),
         ...(args.maxInstructions === undefined
           ? {}

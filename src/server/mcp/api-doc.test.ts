@@ -75,6 +75,11 @@ describe("what the document persists against what a tool can write", () => {
   /** Persisted, and deliberately not writable. Each needs a reason. */
   const NOT_WRITTEN: Record<string, string> = {
     id: "minted by the server and returned; a caller never supplies one",
+    at:
+      "the model's name for a claim's position, and the document's. The " +
+      "*argument* is `address`, because fifteen tools already called a point " +
+      "that and three called it `at` — which cost three independent agents " +
+      "round trips. The field did not move; the wire spelling did.",
     layer: "the scope, derived from the address — never chosen (see docs/model.md)",
     target: "the same, for a claim no layer supplies bytes for",
     origin:

@@ -59,11 +59,11 @@ describe("the transcript", () => {
   });
 
   it("records what was asked for, not just that something happened", async () => {
-    await call("add_claim", { at: "$8870", name: "Named" });
+    await call("add_claim", { address: "$8870", name: "Named" });
 
     const [entry] = transcript().filter((e) => e.tool === "add_claim");
     expect(entry.method).toBe("tools/call");
-    expect(entry.args).toEqual({ at: "$8870", name: "Named" });
+    expect(entry.args).toEqual({ address: "$8870", name: "Named" });
     expect(entry.caller).toBe("usr_agent");
     expect(entry.ok).toBe(true);
     expect(entry.ms).toBeGreaterThanOrEqual(0);

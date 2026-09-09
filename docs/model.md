@@ -172,6 +172,31 @@ rest of provenance left: `CLAIM_RANK` in `claims/names.ts` orders names by it,
 with it. A seeded Camels project has 383 `platform` names and 472 `auto` ones
 against none by hand, which is the scale that makes the gate matter.
 
+### One concept, one argument name
+
+The surface names an address three ways, and the difference is real:
+
+| | | |
+|---|---|---|
+| `address` | a **point** | 19 tools |
+| `start` + `length`/`lines` | a **span you read** | 6 tools |
+| `from` + `to` | a **range you filter** | 2 tools |
+
+It used to name it four ways: `at` on the three claim tools and `from` on
+`run_program`, against `address` everywhere else, with nothing to justify the
+split. **Three independent readers paid for it** — experiment 10's editor missed
+on three tools in a row, the silver image's build script took 238 refusals
+passing `at` to `add_comment`, and experiment 11's reviewer took six passing
+`address` to `preview` and never registered the message.
+
+`at` did not move in the *model*: a claim's position is `at`, in the document
+and in the file. Only the wire spelling changed, and `api-doc.test.ts` records
+it as persisted-and-deliberately-unwritable so the two cannot quietly diverge.
+
+Nested structures keep their own names — a scenario step is `{kind, at}` and a
+target link is `{layer, at}` — because those are stored in documents, and
+renaming them would rewrite every scenario in every project.
+
 ### Scope
 
 Derived from the address, never chosen: the topmost layer supplying the byte,

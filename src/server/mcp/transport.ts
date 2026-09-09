@@ -40,6 +40,12 @@ const INSTRUCTIONS = [
     "the caveats on an answer: they are the difference between a fact about " +
     "the program and an assumption that happened to render.",
 
+  "**Addresses are named three ways, and the difference is real.** A point is " +
+    "`address`. A span you read is `start` with a `length` or `lines`. A range " +
+    "you filter is `from` and `to`. Nothing else — three independent readers " +
+    "have lost round trips guessing between them, which is why this is said " +
+    "here rather than left to each tool.",
+
   // **How to say what you find**, which no per-tool description can carry
   // because it is about choosing between tools rather than using one.
   //
