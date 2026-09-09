@@ -35,9 +35,14 @@ which. Sessions come from `Mcp-Session-Id` where the host issues one, or
 
 ## Conventions
 
-**Every tool takes `project` and `target`.** `project` selects the project;
-`target` selects the view to answer for, and every answer reports the one it
-used.
+**Every tool takes `project`. Only the ones that answer for a view take
+`target`**, and those report the one they used. The rule is whether the answer
+contains an **address**: an address is a fact about a stack, and everything else
+here is a fact about the project. So a type, a field, a constant, a decoder, a
+piece of evidence, a layer and a target are written without naming a view, and
+`list_targets` — which cannot need one, since it is how you find out what there
+is — takes none. A tool advertising an argument it cannot use is worse than one
+that is inconsistent.
 
 **Say which view, and there is no default.** A project declaring more than one
 target refuses a call that names none, and lists them. There used to be a

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RunningServer, startServer } from "../index.js";
 import { importProject } from "../../store/index.js";
+import { VIEWLESS } from "./views.js";
 
 /**
  * The agent-facing endpoint, spoken to as an agent would.
@@ -2255,5 +2256,60 @@ describe("evidence, and saying things about a claim", () => {
     };
     expect(run.passed).toBe(true);
     expect(run.checks![0].said).toContain("CBM80 signature");
+  });
+});
+
+describe("a target only where a target means something", () => {
+  /**
+   * **The schema is the surface, and it used to say something untrue.**
+   *
+   * `target` was injected onto all ninety-four tools — convenient, and a lie in
+   * the one place agents read: a tool advertising an argument it cannot use
+   * tells a reader it matters. It was not only cosmetic. A view could *break* a
+   * call whose meaning it could not change: `add_evidence` refused three writes
+   * during a silver-image build because the claims were framed on a layer that
+   * the view nobody had chosen did not link, and reported them as retired.
+   *
+   * Every tool is now in exactly one class, so a new one cannot be added
+   * without the decision being made — the same shape as the exhaustive op table
+   * in `roundtrip.test.ts` and the section list in `api-doc-source.ts`.
+   */
+  it("puts every tool in exactly one class, and names no tool that is not there", async () => {
+    const listed = ((await rpc("tools/list")) as {
+      result: { tools: { name: string; inputSchema: { properties?: object } }[] };
+    }).result.tools;
+    expect(listed.length).toBeGreaterThan(80);
+
+    const declares = (t: (typeof listed)[number]) =>
+      Object.keys(t.inputSchema.properties ?? {}).includes("target");
+
+    for (const tool of listed) {
+      expect(
+        VIEWLESS.has(tool.name) ? !declares(tool) : declares(tool),
+        `${tool.name} is ${VIEWLESS.has(tool.name) ? "view-free but declares" : "view-bound but omits"} target`
+      ).toBe(true);
+    }
+
+    const real = new Set(listed.map((t) => t.name));
+    for (const name of VIEWLESS) {
+      expect(real.has(name), `VIEWLESS names ${name}, which is not a tool`).toBe(true);
+    }
+  });
+
+  it("does not answer with a view where no view was involved", async () => {
+    // A document edit belongs to every view, so naming one would be inventing a
+    // scope for it — the same reason it takes no target in the first place.
+    const made = await callTool("add_constant", { name: "VIEWLESS_PROBE", value: "$2A" });
+    expect(made.isError, made.text).toBe(false);
+    expect(made.value).not.toHaveProperty("target");
+    // And no instruction delta: there is no view for that count to be about.
+    expect(made.value).not.toHaveProperty("instructions");
+  });
+
+  it("refuses a target on a tool that has none, rather than ignoring it", async () => {
+    // `strictObject`, which is why: "ok, did nothing" is the worst answer for
+    // something probing what an API can do.
+    const refused = await callTool("list_evidence", { target: "runtime" });
+    expect(refused.isError).toBe(true);
   });
 });

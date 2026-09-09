@@ -1,66 +1,83 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { VIEWLESS } from "./views.js";
 
 /**
- * Every tool answers for the view it was asked about.
+ * Every tool answers for the view it was asked about — or for no view at all.
  *
- * A `Workspace` *is* a view — it is constructed for a project **and** a target,
+ * A `Workspace` *is* a view: it is constructed for a project **and** a target,
  * which is why the target reaches seventy methods without appearing in any of
  * their signatures. So a handler that builds one without passing `target` does
- * not fail; it silently answers for the project's default view, and on a
- * project built by running a loader that is the packed file rather than the
- * program.
+ * not fail. It answers for a different stack.
  *
  * Two tools shipped with exactly that defect. `export_listing` returned the
  * loader's bytes whatever you asked for. `list_claims` reported **399** labels
- * on a project holding 1,035, and one hand-made claim out of thirty-four — so
- * the tool an agent uses to ask "what has been named here" would have told the
- * next run's readers that a heavily annotated project was nearly empty.
+ * on a project holding 1,035 — so the tool an agent uses to ask "what has been
+ * named here" told the next run that a heavily annotated project was nearly
+ * empty. Neither was catchable by testing what the tools *do*: `Workspace`
+ * answers correctly for whatever view it is given, and the defect is in the
+ * wiring.
  *
- * Neither was catchable by testing what the tools *do*: `Workspace` is tested
- * thoroughly and answers correctly for whatever view it was given. The defect
- * is in the wiring, which is the layer that reads its arguments — so this
- * checks the source, in the same spirit as the CRDT allowlist.
+ * **This is the source-level half of `views.ts`.** The schema half —
+ * `transport.test.ts` — asserts what the published surface says; this asserts
+ * that each handler does what its schema promises. A view-bound tool that
+ * forgets its target would advertise `target` and ignore it, which is the
+ * original bug wearing the new design's clothes.
  */
 
 const SOURCE = readFileSync("src/server/mcp/tools.ts", "utf8");
 
-/**
- * Tools whose answer genuinely does not depend on a view, with the reason.
- *
- * Keeping this an explicit list rather than a rule is the point: adding a name
- * here is a decision somebody makes and a reviewer can see, where a heuristic
- * would quietly absorb the next mistake.
- */
-const VIEWLESS: Record<string, string> = {
-  targetName: "asks which view is the default — the question itself",
-  tagProject: "a tag names a point in the op log, which is project-wide",
-  prepareUpload: "issues an upload token; no bytes are read",
-  undo: "inverts operations, which are recorded per project rather than per view",
-  catalogue: "lists the projects on this server, so there is no project yet, let alone a view",
-  createProject: "makes a project; nothing exists to have a view of until it returns",
-};
+/** Each `tool("name", …)` registration, as text. */
+function registrations(): { name: string; body: string }[] {
+  const found: { name: string; body: string }[] = [];
+  const starts = [...SOURCE.matchAll(/\n {2}tool\(\n {4}"([a-z_]+)",/g)];
+  starts.forEach((match, index) => {
+    const from = match.index!;
+    const to = index + 1 < starts.length ? starts[index + 1].index! : SOURCE.length;
+    found.push({ name: match[1], body: SOURCE.slice(from, to) });
+  });
+  return found;
+}
 
 describe("every tool answers for the view it was asked about", () => {
-  it("passes target wherever a workspace is built", () => {
-    // `workspace(...)` followed by the method called on it, across line breaks.
-    const calls = [...SOURCE.matchAll(/workspace\(([^()]*)\)\s*\.?\s*\n?\s*\.?(\w+)?/g)];
-    expect(calls.length).toBeGreaterThan(5);
-
-    const dropped = calls
-      .filter(([, args]) => !args.includes(","))
-      .map(([, , method]) => method ?? "(unknown)")
-      .filter((method) => !(method in VIEWLESS));
-
-    expect(dropped).toEqual([]);
+  it("finds the registrations at all", () => {
+    // The rest of this file is a text search, so a regex that stopped matching
+    // would pass everything silently. That failure mode has happened here.
+    expect(registrations().length).toBeGreaterThan(80);
   });
 
-  it("names a reason for each tool that does not need one", () => {
-    // So the list cannot grow by accident: an entry with no reason is somebody
-    // silencing this test rather than deciding something.
-    for (const [method, why] of Object.entries(VIEWLESS)) {
-      expect(why.length, method).toBeGreaterThan(20);
-      expect(SOURCE).toContain(`${method}(`);
+  it("passes a target wherever a view-bound tool builds a workspace", () => {
+    const missing = registrations()
+      .filter(({ name }) => !VIEWLESS.has(name))
+      .filter(({ body }) => {
+        const builds = [...body.matchAll(/workspace\(([^()]*)\)/g)];
+        return builds.length > 0 && builds.some(([, args]) => !args.includes(","));
+      })
+      .map(({ name }) => name);
+
+    expect(missing).toEqual([]);
+  });
+
+  it("passes none where the tool has no view to pass", () => {
+    // The mirror, and the one that keeps `views.ts` honest: a tool that takes no
+    // `target` cannot be reading one, and a handler still threading `args.target`
+    // is reading `undefined` while looking like it works.
+    const stale = registrations()
+      .filter(({ name }) => VIEWLESS.has(name))
+      .filter(({ body }) => /workspace\([^()]*,/.test(body) || /args\.target|target\?: string/.test(body))
+      .map(({ name }) => name);
+
+    expect(stale).toEqual([]);
+  });
+
+  it("classifies every registered tool exactly once", () => {
+    // The same shape as the exhaustive op table in `roundtrip.test.ts`: a new
+    // tool cannot be added without the decision being made. The schema test in
+    // `transport.test.ts` checks the other direction — that `VIEWLESS` names no
+    // tool that does not exist.
+    const names = new Set(registrations().map((r) => r.name));
+    for (const name of VIEWLESS) {
+      expect(names.has(name), `VIEWLESS names ${name}, which is not registered here`).toBe(true);
     }
   });
 });

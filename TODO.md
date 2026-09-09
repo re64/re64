@@ -29,13 +29,16 @@ Removing `defaultTarget` left `target` declared on all 94 tools, including the
 ones that now ignore it. A tool advertising a parameter it does not use is a lie
 in the one place agents read.
 
-- [ ] Split the registration so a tool declares whether it answers for a view.
-- [ ] Classify all 94. The rule is **does the answer contain an address**, not
+- [x] Split the registration so a tool declares whether it answers for a view.
+- [x] Classify all 94. The rule is **does the answer contain an address**, not
       "is the subject an id" — `list_retired` looked view-free and reports
       absolute addresses; `list_types` is view-free except for `usedAt`, and now
       answers partially and says what it left out.
-- [ ] A test that every tool is in exactly one class, so a new one cannot be
+- [x] A test that every tool is in exactly one class, so a new one cannot be
       added without deciding.
+- [ ] **Second pass: scenarios and comments.** A scenario's steps carry addresses
+      the author typed rather than ones this resolved; a comment is addressed by
+      id but lives inside a layer. Both are arguable and neither is argued yet.
 
 ## 3. Read the Codex review
 

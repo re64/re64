@@ -13,6 +13,7 @@
  */
 
 import { z } from "zod";
+import { VIEWLESS } from "./views.js";
 import type { LabelType } from "../../core/index.js";
 import type { McpContext } from "./transport.js";
 import type { Claim, Interpretation, RootKind } from "../../core/claims/model.js";
@@ -197,30 +198,36 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       name,
       {
         description,
-        // Every tool takes a target, injected here rather than declared
-        // seventy times. A view is a parameter of the request: there is no
-        // "current" target on the server, so a browser showing two side by
-        // side is two calls rather than a setting two panes fight over.
+        // **A target only where a target means something.** It used to be
+        // injected onto every tool, "declared here rather than seventy times",
+        // and a tool advertising an argument it cannot use is a lie in the one
+        // place agents read — one that could break a call whose meaning it could
+        // not change. `views.ts` holds the rule and the borderline cases.
         inputSchema: z.strictObject({
           ...(inputSchema as z.ZodRawShape),
-          target: z
-            .string()
-            .optional()
-            .describe(
-              "Which view to answer for, from list_targets. **There is no " +
-                "default**: a project with more than one view refuses a call that " +
-                "names none and lists them, because the bytes at an address differ " +
-                "between them. Where there is only one there is nothing to say. " +
-                "The answer reports the view it used."
-            ),
+          ...(VIEWLESS.has(name)
+            ? {}
+            : {
+                target: z
+                  .string()
+                  .optional()
+                  .describe(
+                    "Which view to answer for, from list_targets. **There is no " +
+                      "default**: a project with more than one view refuses a call " +
+                      "that names none and lists them, because the bytes at an " +
+                      "address differ between them. Where there is only one there " +
+                      "is nothing to say. The answer reports the view it used."
+                  ),
+              }),
         }),
       },
       async (args: never) => {
         const result = await handler(args);
-        // Which view answered, on every answer. A caller that named none got
-        // the project's declared default, and seeing which is the difference
-        // between learning to say and reading the wrong stack without knowing.
-        if (result && typeof result === "object" && !Array.isArray(result)) {
+        // Which view answered, on every answer that had one. Seeing it is the
+        // difference between learning to say and reading the wrong stack without
+        // knowing — and saying nothing where no view was involved is the same
+        // honesty, since a document edit belongs to all of them.
+        if (!VIEWLESS.has(name) && result && typeof result === "object" && !Array.isArray(result)) {
           const { target } = args as unknown as { target?: string };
           const named = target ?? tryDefaultTarget(context, args);
           if (named !== undefined && !("target" in result)) {
@@ -287,8 +294,8 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "Newest last. This is where somebody tells you what they are already " +
       "working on, or what they have concluded that is not yet in the listing.",
     { project, limit: z.number().int().min(1).max(200).optional().describe("Default 50") },
-    ({ project: id, target, limit  }: { project?: string; target?: string; limit?: number  }) =>
-      context().workspace(id, target).messages(limit ?? 50)
+    ({ project: id, limit  }: { project?: string; limit?: number  }) =>
+      context().workspace(id).messages(limit ?? 50)
   );
 
   tool(
@@ -299,7 +306,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "shows — and somebody who has left is still listed, marked offline, " +
       "rather than vanishing.",
     { project },
-    ({ project: id, target  }: { project?: string; target?: string;  }) => context().workspace(id, target).participants()
+    ({ project: id }: { project?: string; }) => context().workspace(id).participants()
   );
 
   tool(
@@ -313,9 +320,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "At most 2000 characters, and it refuses rather than truncating — a " +
       "long status post is several messages.",
     { project, text: z.string().min(1).max(2000) },
-    ({ project: id, target, text  }: { project?: string; target?: string; text: string  }) => {
+    ({ project: id, text  }: { project?: string; text: string  }) => {
       const { workspace, caller } = context();
-      return workspace(id, target).postMessage(caller, text);
+      return workspace(id).postMessage(caller, text);
     }
   );
 
@@ -337,7 +344,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "exportStale when a write to the stored copy has failed, which is " +
       "otherwise silent.",
     { project },
-    ({ project: id, target  }: { project?: string; target?: string;  }) => context().workspace(id, target).exportProject()
+    ({ project: id }: { project?: string; }) => context().workspace(id).exportProject()
   );
 
   // --- reading --------------------------------------------------------
@@ -759,7 +766,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     "Decoders this project carries, with their source. One kept here can be run " +
       "again, and by anyone else in the project, without pasting it.",
     { project },
-    ({ project: id, target  }: { project?: string; target?: string;  }) => context().workspace(id, target).decoders()
+    ({ project: id }: { project?: string; }) => context().workspace(id).decoders()
   );
 
   tool(
@@ -777,13 +784,12 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      target?: string;
       name: string;
       source: string;
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.addDecoder(caller, args.name, args.source);
     }
@@ -803,14 +809,13 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      target?: string;
       id: string;
       name?: string;
       source?: string;
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.editDecoder(caller, args.id, {
         ...(args.name === undefined ? {} : { name: args.name }),
@@ -824,9 +829,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     "Drop a decoder from the project. Anything referring to it falls back to " +
       "showing the bytes, the way a dangling constant renders its literal.",
     { project, id: z.string(), expectVersion: z.string().optional() },
-    (args: { project?: string; target?: string; id: string; expectVersion?: string }) => {
+    (args: { project?: string; id: string; expectVersion?: string }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.removeDecoder(caller, args.id);
     }
@@ -1077,17 +1082,15 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     ({
       project: id,
-      target,
       cursor,
       tag,
       limit,
     }: {
       project?: string;
-      target?: string;
       cursor?: number;
       tag?: string;
       limit?: number;
-    }) => context().workspace(id, target).changesSince(tag ?? cursor ?? 0, limit ?? 100)
+    }) => context().workspace(id).changesSince(tag ?? cursor ?? 0, limit ?? 100)
   );
 
   tool(
@@ -1101,7 +1104,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       name: z.string().describe("Short, and unique within the project"),
       note: z.string().optional().describe("Why this point is worth marking"),
     },
-    ({ project: id, target, name, note  }: { project?: string; target?: string; name: string; note?: string  }) => {
+    ({ project: id, name, note  }: { project?: string; name: string; note?: string  }) => {
       const { workspace, caller } = context();
       return workspace(id).tagProject(caller, name, note);
     }
@@ -1114,15 +1117,15 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "did — which are different questions, since an edit and its undo move " +
       "the count and not the content.",
     { project },
-    ({ project: id, target  }: { project?: string; target?: string;  }) => context().workspace(id, target).listTags()
+    ({ project: id }: { project?: string; }) => context().workspace(id).listTags()
   );
 
   tool(
     "remove_tag",
     "Forget a tag. The history it pointed at is untouched.",
     { project, name: z.string() },
-    ({ project: id, target, name  }: { project?: string; target?: string; name: string  }) =>
-      context().workspace(id, target).removeTag(name)
+    ({ project: id, name  }: { project?: string; name: string  }) =>
+      context().workspace(id).removeTag(name)
   );
 
   // --- editing --------------------------------------------------------
@@ -1244,12 +1247,11 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      target?: string;
       rom: "basic" | "kernal" | "characters";
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.addRomLayer(caller, args.rom);
     }
@@ -1313,7 +1315,6 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      target?: string;
       name: string;
       size: number;
       unit?: "bytes" | "bits";
@@ -1321,7 +1322,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.setType(caller, {
         name: args.name,
@@ -1361,7 +1362,6 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      target?: string;
       id: string;
       name: string;
       size: number;
@@ -1370,7 +1370,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.setType(caller, {
         id: args.id,
@@ -1404,7 +1404,6 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      target?: string;
       typeId: string;
       offset: number;
       name: string;
@@ -1413,7 +1412,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.addField(caller, args.typeId, args.offset, {
         name: args.name,
@@ -1442,7 +1441,6 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      target?: string;
       typeId: string;
       id: string;
       name?: string;
@@ -1452,9 +1450,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
-      const { project: _p, target: _t, typeId, id, expectVersion: _v, ...fields } = args;
+      const { project: _p, typeId, id, expectVersion: _v, ...fields } = args;
       return space.editField(caller, typeId, id, fields);
     }
   );
@@ -1475,13 +1473,12 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      target?: string;
       typeId: string;
       id: string;
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.removeField(caller, args.typeId, args.id);
     }
@@ -1494,9 +1491,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "the same rule a dangling constant follows, so a delete racing somebody " +
       "else's binding heals itself instead of needing a sweep.",
     { project, id: z.string(), expectVersion: z.string().optional() },
-    (args: { project?: string; target?: string; id: string; expectVersion?: string }) => {
+    (args: { project?: string; id: string; expectVersion?: string }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.removeType(caller, args.id);
     }
@@ -1890,9 +1887,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       value: address.describe("A byte, $00-$FF"),
       expectVersion: z.string().optional(),
     },
-    (args: { project?: string; target?: string; name: string; value: number; expectVersion?: string }) => {
+    (args: { project?: string; name: string; value: number; expectVersion?: string }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.addConstant(caller, args.name, args.value);
     }
@@ -1912,14 +1909,13 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      target?: string;
       id: string;
       name?: string;
       value?: number;
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.editConstant(caller, args.id, args.name, args.value);
     }
@@ -1931,9 +1927,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "Operands bound to it go back to showing the literal; nothing needs " +
       "unbinding first.",
     { project, id: z.string().describe("From add_constant or list_constants"), expectVersion: z.string().optional() },
-    (args: { project?: string; target?: string; id: string; expectVersion?: string }) => {
+    (args: { project?: string; id: string; expectVersion?: string }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.removeConstant(caller, args.id);
     }
@@ -1971,9 +1967,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "reader should know before the first line. A hand-written listing keeps " +
       "this in its file header.",
     { project, description: z.string(), expectVersion: z.string().optional() },
-    (args: { project?: string; target?: string; description: string; expectVersion?: string }) => {
+    (args: { project?: string; description: string; expectVersion?: string }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.setDescription(caller, args.description);
     }
@@ -2094,7 +2090,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "layers the current selection hides, since that is how you find the view " +
       "that shows them.",
     { project },
-    ({ project: id, target  }: { project?: string; target?: string;  }) => context().workspace(id, target).targets()
+    ({ project: id }: { project?: string; }) => context().workspace(id).targets()
   );
 
   tool(
@@ -2129,7 +2125,6 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      target?: string;
       name: string;
       layers: { layer: string; at?: number }[];
       entryPoints?: number[];
@@ -2138,7 +2133,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.addTarget(
         caller,
@@ -2177,7 +2172,6 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      target?: string;
       id: string;
       name?: string;
       layers?: { layer: string; at?: number }[];
@@ -2187,7 +2181,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.editTarget(caller, args.id, {
         ...(args.name === undefined ? {} : { name: args.name }),
@@ -2203,9 +2197,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     "remove_target",
     "Forget a view, by id. The layers and everything in them are untouched.",
     { project, id: z.string().describe("From list_targets"), expectVersion: z.string().optional() },
-    (args: { project?: string; target?: string; id: string; expectVersion?: string }) => {
+    (args: { project?: string; id: string; expectVersion?: string }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.removeTarget(caller, args.id);
     }
@@ -2300,8 +2294,8 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "holding `$3B` refutes a claim about the *glyph* `$3B`, somewhere else " +
       "entirely, which `disagreements` could never find by sweeping addresses.",
     { project, claim: z.string().optional().describe("Only evidence about this claim") },
-    (args: { project?: string; target?: string; claim?: string }) =>
-      context().workspace(args.project, args.target).evidenceFor(args.claim)
+    (args: { project?: string; claim?: string }) =>
+      context().workspace(args.project).evidenceFor(args.claim)
   );
 
   tool(
@@ -2332,7 +2326,6 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      target?: string;
       claim: string;
       kind: "supports" | "refutes" | "retires";
       method?: "guessed" | "transcribed" | "read" | "derived" | "ran";
@@ -2343,7 +2336,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.addEvidence(caller, args.claim, args.kind, {
         ...(args.method === undefined ? {} : { method: args.method }),
@@ -2376,7 +2369,6 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      target?: string;
       id: string;
       kind?: "supports" | "refutes" | "retires";
       method?: "guessed" | "transcribed" | "read" | "derived" | "ran";
@@ -2387,7 +2379,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.editEvidence(caller, args.id, {
         ...(args.kind === undefined ? {} : { kind: args.kind }),
@@ -2406,9 +2398,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "— unless it was what retired the claim, in which case restore_claim is the " +
       "call that says so.",
     { project, id: z.string(), expectVersion: z.string().optional() },
-    (args: { project?: string; target?: string; id: string; expectVersion?: string }) => {
+    (args: { project?: string; id: string; expectVersion?: string }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.removeEvidence(caller, args.id);
     }
@@ -2560,7 +2552,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       project,
       name: z.string().min(1).describe('What layers will call it, e.g. "revenge.d64"'),
     },
-    ({ project: id, target, name  }: { project?: string; target?: string; name: string  }) => {
+    ({ project: id, name  }: { project?: string; name: string  }) => {
       const { workspace, caller } = context();
       return workspace(id).prepareUpload(caller, name);
     }
@@ -2571,8 +2563,8 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     "The directory of a .d64 disk image this project holds — what is on the " +
       "disk, and the path to give add_layer for each entry.",
     { project, name: z.string().min(1).describe("The image, as uploaded") },
-    ({ project: id, target, name  }: { project?: string; target?: string; name: string  }) =>
-      context().workspace(id, target).diskFiles(name)
+    ({ project: id, name  }: { project?: string; name: string  }) =>
+      context().workspace(id).diskFiles(name)
   );
 
   tool(
@@ -2604,7 +2596,6 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      target?: string;
       type: "prg" | "raw" | "bytes";
       path?: string;
       bytes?: string;
@@ -2614,7 +2605,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.addByteLayer(caller, {
         type: args.type,
@@ -2638,9 +2629,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       name: z.string().min(1),
       expectVersion: z.string().optional(),
     },
-    (args: { project?: string; target?: string; name: string; expectVersion?: string }) => {
+    (args: { project?: string; name: string; expectVersion?: string }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.addSymbolsLayer(caller, args.name);
     }
@@ -2661,9 +2652,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       id: z.string().describe("Layer id, from list_targets"),
       expectVersion: z.string().optional(),
     },
-    (args: { project?: string; target?: string; id: string; expectVersion?: string }) => {
+    (args: { project?: string; id: string; expectVersion?: string }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.removeLayer(caller, args.id);
     }
@@ -2755,12 +2746,11 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      target?: string;
       constants: { name: string; value: number }[];
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.addConstants(caller, args.constants);
     }
@@ -2901,7 +2891,6 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     },
     (args: {
       project?: string;
-      target?: string;
       id: string;
       note?: string;
       other?: string;
@@ -2911,7 +2900,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       expectVersion?: string;
     }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.retireClaim(caller, args.id, {
         ...(args.note === undefined ? {} : { note: args.note }),
@@ -2929,9 +2918,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "it. Everything it said is exactly as it was — retiring changed nothing " +
       "about the claim itself.",
     { project, id: z.string().min(1), expectVersion: z.string().optional() },
-    (args: { project?: string; target?: string; id: string; expectVersion?: string }) => {
+    (args: { project?: string; id: string; expectVersion?: string }) => {
       const { workspace, caller } = context();
-      const space = workspace(args.project, args.target);
+      const space = workspace(args.project);
       space.expect(args.expectVersion);
       return space.restoreClaim(caller, args.id);
     }
@@ -2975,9 +2964,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "or in a browser. Any part of it that somebody else has changed since is " +
       "left alone and reported rather than reverted over the top of them.",
     { project },
-    ({ project: id, target  }: { project?: string; target?: string;  }) => {
+    ({ project: id, target }: { project?: string; target?: string }) => {
       const { workspace, caller } = context();
-      return workspace(id).undo(caller);
+      return workspace(id, target).undo(caller);
     }
   );
 }
