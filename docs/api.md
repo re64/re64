@@ -800,6 +800,7 @@ Say something about a **claim** rather than about an address. `supports` backs i
 |---|---|---|---|
 | `claim` | `string` | **required** | The claim this is about, from claims_at |
 | `kind` | `supports` \| `refutes` \| `retires` | **required** |  |
+| `method` | `guessed` \| `transcribed` \| `read` \| `derived` \| `ran` | optional | How you know this, on the same axis as a claim's: guessed, transcribed, read, derived, ran |
 | `scenario` | `string` | optional | A scenario that checks it — the strongest form, because it re-runs |
 | `capture` | `string` | optional | Something a run produced, from list_scenarios |
 | `other` | `string` | optional | Another claim, for a refutation that names it |
@@ -808,12 +809,13 @@ Say something about a **claim** rather than about an address. `supports` backs i
 
 #### `edit_evidence`
 
-Revise a piece of evidence by id. Omitted fields are left alone; `null` clears one. An id nothing holds is an error.
+Revise a piece of evidence by id. Omitted fields are left alone; `null` clears one. An id nothing holds is an error. Revising `method` keeps the author and the time the record already carries.
 
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** |  |
 | `kind` | `supports` \| `refutes` \| `retires` | optional |  |
+| `method` | `guessed` \| `transcribed` \| `read` \| `derived` \| `ran` | optional | How you know this. The author and time on the record are kept. |
 | `scenario` | `string,null` | optional |  |
 | `capture` | `string,null` | optional |  |
 | `other` | `string,null` | optional |  |
@@ -838,6 +840,7 @@ Take a claim out of the working set, keeping it and the reason in the document. 
 | `id` | `string` | **required** | The claim, from claims_at or list_claims |
 | `note` | `string` | optional | Why, so a later reader can follow it |
 | `other` | `string` | optional | The claim that replaced it, if one did |
+| `method` | `guessed` \| `transcribed` \| `read` \| `derived` \| `ran` | optional | How you know this, on the same axis as a claim's: guessed, transcribed, read, derived, ran |
 | `scenario` | `string` | optional | A scenario that settled it |
 | `capture` | `string` | optional | What that run produced, from list_scenarios |
 | `expectVersion` | `string` | optional |  |

@@ -2,8 +2,8 @@
 //
 // Build the Camels **silver** image, through the API that agents use.
 //
-// Silver, not gold: this is everything three runs established, imported
-// faithfully and reviewed by nobody. It becomes a gold standard when agents and
+// Silver, not gold: this is everything four runs established, imported
+// faithfully and reviewed once. It becomes a gold standard when agents and
 // a person have been over it — enriching what is thin and *correcting* what is
 // wrong — and not before. What it is today is a baseline good enough to measure
 // the next run as a delta against, which is the job it has to do first.
@@ -30,6 +30,11 @@
 //                  transcript, which replay. The only run that used evidence.
 //   experiment 10  80 claims, 4 record types, 93 comments, 14 scenarios, made
 //                  by two readers forbidden to read either of the above.
+//   experiment 11  the one review pass, and the only source that read the other
+//                  three rather than the bytes: 25 record fields, a constant, a
+//                  naming, a rename, two refutations and a retirement. Imported
+//                  last and qualified, because a reviewing author is not the
+//                  same kind of source as a reading one — see the stage itself.
 //   this repository  the 2021 patch, the keyboard matrix, the OATS reading, and
 //                  the errata — findings verified in tests rather than in prose.
 //
@@ -539,7 +544,193 @@ async function main() {
     if (w.tool === "add_comment" && a.address)
       await attempt("add_comment", { target: "runtime", address: a.address, text: a.text }, by);
   }
-  say(`  imported ${imported} objects in total, from three runs under nine authors`);
+
+  // -------------------------------------- experiment 11: the one review pass
+  //
+  // **The first source that read the others rather than the bytes.** Runs 7, 9
+  // and 10 each started from an empty document; run 11 started from the silver
+  // image above and was briefed to resolve conflicts, fill gaps and refine
+  // overly broad claims. What it found first was a defect in the thing it was
+  // reviewing — all 79 of run 10's layer-framed claims sat $0801 below the bytes
+  // they described — and that repair is *not* imported from here. It is fixed at
+  // the source, in the import above, and the two documents then agree address
+  // for address across 530 named claims. Importing the fix twice would have
+  // credited the corrected addresses to a reader who only found the error.
+  //
+  // So what comes across is what the review *added*, and it is qualified three
+  // ways, because a reviewing author is not the same kind of source as a reading
+  // one:
+  //
+  //   - **`method: "read"`, not `"ran"`, on every judgement it signs.** Nothing
+  //     in this pass was watched happening in the machine; all of it is reasoned
+  //     from the code and from what the other runs wrote. The copy loop tells you
+  //     what column $1DA0+k *is*; it does not tell you what the number in it
+  //     means, and nineteen of the twenty-five fields below say "copied to
+  //     tmpl…" and stop there. That is honest, and it is weaker than a trace.
+  //   - **One author, `exp11-rev`, and one pass.** Where a claim already carried
+  //     an account from run 7 or run 10, this adds a second — which is the
+  //     corroboration reading the provenance shape exists for. Where it does
+  //     not, one account by one reviewer is all this says.
+  //   - **The judgements are marked as judgements.** One claim is retired and
+  //     two are refuted; each carries the reasoning, and the retirement says
+  //     which half of the reviewer's argument survives this build and which does
+  //     not.
+  //
+  // Two of its comments are deliberately left behind, listed in the source file
+  // with the reason: both are review notes about the displacement, and both
+  // would describe a document that this build does not produce.
+  const eleven = JSON.parse(readFileSync(join(HERE, "sources", "run11-review.json"), "utf-8"));
+  const rev = `exp${eleven.run}-${eleven.author}`;
+  let reviewed = 0;
+  const did = async (tool, argsObject) => {
+    try {
+      const result = await call(tool, argsObject, rev);
+      reviewed += 1;
+      return result;
+    } catch (error) {
+      failed.push(`${tool} ${JSON.stringify(argsObject).slice(0, 90)}: ${error.message}`);
+      return undefined;
+    }
+  };
+
+  /**
+   * One claim, by where it is and what it is called.
+   *
+   * The ids in the reviewer's document are its own and mean nothing here, so
+   * every reference has to be resolved against what this build actually made.
+   * Matched on name *and* extent because both high-score tables carry two
+   * claims at one address — a 208-byte text reading and a 52-byte record — and
+   * the whole point of the refutations below is the difference between them.
+   */
+  const claimAt = async (address, name, extent) => {
+    const here = await call("claims_at", { target: "runtime", address });
+    const hit = (here.claims ?? []).find(
+      (c) => c.name === name && (extent === undefined || c.extent === extent)
+    );
+    if (!hit) throw new Error(`no claim ${name} at ${address} to point at`);
+    return hit.id;
+  };
+
+  // **The zone table, and the first real use of `add_field`.** 8,400 bytes had
+  // been `record`/`ZoneRecord` with 4 of its 19 columns declared and 128 bytes
+  // unexplained. The shape is the copy loop: `LoadZoneTemplates` ($9699) moves
+  // exactly $98 bytes from `(zoneDataPtr),Y` to `tmplSpawnInterval,Y`, so offset
+  // *k* of the record is $1DA0+*k* — and nineteen `tmpl*` arrays were already
+  // named at the other end, eight bytes apart. Nineteen columns of eight, one
+  // per creature type. The eight bytes at +$98 are not a hole either:
+  // `LoadZoneScalars` ($9CB5) reads them one at a time into $53, $52, $51, $42,
+  // $02, SPMC0, SPMC1 and discards the eighth.
+  //
+  // The reviewer could not declare these as it wanted to. It replaced four
+  // per-index columns with `u8[8]` arrays, the arrays appeared *and* the 28
+  // original fields stayed, and it had to revert — `edit_type` merges per offset
+  // and cannot un-declare another author's field. `add_field` exists because of
+  // that, and adding one field at a time is what it was always supposed to be.
+  const typeIds = {};
+  for (const t of (await call("list_types", {})).types ?? []) typeIds[t.name] = t.id;
+  for (const f of eleven.fields) {
+    const typeId = typeIds[f.type];
+    if (!typeId) {
+      failed.push(`add_field ${f.type}.${f.name}: no type called ${f.type} in this build`);
+      continue;
+    }
+    await did("add_field", {
+      typeId,
+      offset: f.offset,
+      name: f.name,
+      type: f.fieldType,
+      ...(f.description ? { description: f.description } : {}),
+    });
+  }
+
+  // A constant and the site it was read at. `ZONE_STRIDE` is the $C8 in
+  // `ADC #$C8` at $93E7 — the record stride, which the leftover source writes as
+  // an equate — and binding it is what makes the line say so.
+  for (const c of eleven.constants) {
+    const made = await did("add_constant", { name: c.name, value: c.value });
+    if (!made) continue;
+    for (const address of c.bindAt ?? []) {
+      await did("bind_constants", {
+        target: "runtime",
+        bindings: [{ address, constant: made.constant }],
+      });
+    }
+  }
+
+  // The one address this pass named that nobody had: $3F, the high byte of the
+  // author's own NEXINI, matched instruction for instruction against the
+  // assembler residue at $5F26. Second routine recovered from that residue;
+  // SSET at $92F6 was the first, by an earlier reader.
+  for (const c of eleven.claims) {
+    await did("add_claim", {
+      target: "runtime",
+      address: c.address,
+      name: c.name,
+      ...(c.is ? { is: c.is } : {}),
+      ...(c.extent !== undefined ? { extent: c.extent } : {}),
+      ...(c.method ? { method: c.method } : {}),
+    });
+  }
+
+  // A rename, by id, on somebody else's claim — which is what the model is for.
+  // The claim keeps its identity and its original account; this adds a second.
+  for (const r of eleven.renames) {
+    try {
+      const id = await claimAt(r.address, r.from, r.extent);
+      // `target`, because `edit_claim` works on a view — it can move a claim,
+      // and where a claim is depends on which target you are looking through.
+      await did("edit_claim", { target: "runtime", id, name: r.to });
+    } catch (error) {
+      failed.push(`rename ${r.from}: ${error.message}`);
+    }
+  }
+
+  // Two refutations, kept as refutations. Both flat text readings are wrong and
+  // both stay, because the record claim beside each is the correction and a
+  // reader meeting the pair learns what the shape of the table is.
+  for (const r of eleven.refutes) {
+    try {
+      const claim = await claimAt(r.claim.address, r.claim.name, r.claim.extent);
+      const other = await claimAt(r.other.address, r.other.name, r.other.extent);
+      await did("add_evidence", {
+        claim,
+        kind: "refutes",
+        other,
+        note: r.note,
+        ...(r.method ? { method: r.method } : {}),
+      });
+    } catch (error) {
+      failed.push(`refute ${r.claim.name}: ${error.message}`);
+    }
+  }
+
+  // **And one retirement, which is the reason `retire_claim` exists.** Under
+  // "What I would want that does not exist" the reviewer wrote: *"A way to
+  // retire a claim without erasing it. Not remove_claim, not refutes."* It had
+  // to delete this one, losing the authorship record attached to it. Here it
+  // does not: the claim, run 10's account of it and rev's reason all stay in the
+  // document, out of the working set, and `list_retired` shows them.
+  for (const r of eleven.retire) {
+    try {
+      const id = await claimAt(r.address, r.name, r.extent);
+      await did("retire_claim", { id, note: r.note, ...(r.method ? { method: r.method } : {}) });
+    } catch (error) {
+      failed.push(`retire ${r.name}: ${error.message}`);
+    }
+  }
+
+  for (const c of eleven.comments) {
+    await did("add_comment", {
+      target: "runtime",
+      address: c.address,
+      text: c.text,
+      ...(c.placement ? { placement: c.placement } : {}),
+    });
+  }
+
+  say(`  experiment 11: ${reviewed} objects under ${rev}, the one review pass`);
+
+  say(`  imported ${imported} objects in total, from four runs under ten authors`);
   if (failed.length) {
     say(`  ${failed.length} refused:`);
     for (const f of failed.slice(0, 8)) say(`    ${f}`);

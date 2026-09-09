@@ -1,17 +1,18 @@
 # Revenge of the Mutant Camels — the silver image
 
-`camels.re64` is everything three runs of agents established about this program,
-imported faithfully and **reviewed by nobody**. That is what makes it silver
-rather than gold: it is a baseline, not an answer.
+`camels.re64` is everything four runs of agents established about this program,
+imported faithfully and **reviewed once**. That is what still makes it silver
+rather than gold: one reviewer is not review, and no person has been over it.
 
 | | |
 |---|---|
-| claims | 630, each with one supporting record naming who vouched |
-| hygiene | 184 findings and 11 disagreements — none of it reviewed |
+| claims | 631, each with one supporting record naming who vouched — 1 retired |
+| evidence | 634: 631 supports, 2 refutes, 1 retires |
+| hygiene | 185 findings and 12 disagreements — 2 of them now *declared* |
 | instructions decoded | 3,388 |
-| record types | 6 — `ZoneRecord` with 33 fields, and five smaller |
-| comments | 363 |
-| constants | 18, with 21 sites bound |
+| record types | 6 — `ZoneRecord` with 56 fields, and five smaller |
+| comments | 367 |
+| constants | 19, with 22 sites bound |
 | targets | `loader`, `runtime`, `machine`, `standalone`, `patched` |
 
 Built by `build.mjs`, which does every write over MCP. Run it against an empty
@@ -25,6 +26,15 @@ output, because the question it answers is *how a project of this depth is made*
 | 7 | 400 labels, 114 regions, 210 comments, 18 constants | `exp7-reader-1`, `-2`, `-3` |
 | 9 | 36 claims and 2 record layouts, replayed from its transcript | `exp9-one`, `-two`, `-ed` |
 | 10 | 80 claims, 4 record layouts, 93 comments | `exp10-one`, `-two`, `-ed` |
+| 11 | 25 record fields, a constant, a naming, a rename, 2 refutations, 1 retirement | `exp11-rev` |
+
+**Run 11 is the review pass, and it is a different kind of source.** The other
+three read the bytes; it read them. So its judgements are marked as judgements —
+`method: "read"` on every one, nothing in that pass was watched running — and its
+two contested readings are a `refutes` and a `retires` rather than a quiet
+correction. Its own repair of the $0801 displacement is **not** imported from it:
+that is fixed at the source in run 10's import, and the two documents then agree
+address for address across 530 named claims.
 
 **Authors are namespaced by run and are the original agents', not a curator's.**
 All three runs called their readers `one`, `two` and `ed` or `reader-1..3`, and
@@ -45,9 +55,10 @@ A baseline that hid its problems would measure nothing. These are left standing:
   array of `ZoneRecord` by run 9 — and forty-two zone names sit inside both as
   `text`. That is most of hygiene's 136 `claim.interpretationsDiffer` findings
   and exactly the case it was written for.
-- **Twelve claims cover 71,007 bytes of a 47K program**, because they overlap
-  and because several are true without explaining anything: 18,431 bytes as one
-  `bitmap`, 8,209 as `data`. Size is a fair proxy for vagueness.
+- **Eleven claims cover 52,576 bytes of a 47K program**, because they overlap and
+  because several are true without explaining anything: 8,209 bytes as `data`.
+  Size is a fair proxy for vagueness. The twelfth, 18,431 bytes as one `bitmap`,
+  is the one claim run 11 retired.
 - **Run 9's scenarios did not survive.** Its document is gone and its transcript
   records a create followed by 33 edits by id, against ids nothing can resolve.
   Run 10's fourteen came across; run 9's twenty-nine did not.
@@ -62,10 +73,14 @@ import passed those offsets to `add_claim`, which takes an address. Fixed at
 source, and the numbers above are after that fix — the image now decodes 3,388
 instructions where it decoded 2,451.
 
-Two things it could not do are recorded in `experiments/11-review/run1/`: a
-refuted claim still renders identically, so the only way to stop a wrong reading
-is to destroy it; and record fields merge per offset across authors, so one
-author cannot replace another's per-index fields with an array.
+Two things it could not do are recorded in `experiments/11-review/run1/`, and
+both are now built. It wrote, under what it wanted and did not have: *"A way to
+retire a claim without erasing it. Not remove_claim, not refutes."* — which is
+`retire_claim`, and the one claim it had to delete is retired here instead, with
+its reason and run 10's account of it both still in the document. And record
+fields merged per offset across authors with no way to address one, so it could
+not replace another author's per-index columns with an array and had to revert 28
+fields; `add_field` / `edit_field` / `remove_field` are that.
 
 ## What happens next
 

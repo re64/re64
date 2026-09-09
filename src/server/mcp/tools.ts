@@ -2315,6 +2315,10 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       project,
       claim: z.string().describe("The claim this is about, from claims_at"),
       kind: z.enum(["supports", "refutes", "retires"]),
+      method: z
+        .enum(["guessed", "transcribed", "read", "derived", "ran"])
+        .optional()
+        .describe("How you know this, on the same axis as a claim's: guessed, transcribed, read, derived, ran"),
       scenario: z
         .string()
         .optional()
@@ -2329,6 +2333,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       target?: string;
       claim: string;
       kind: "supports" | "refutes" | "retires";
+      method?: "guessed" | "transcribed" | "read" | "derived" | "ran";
       scenario?: string;
       capture?: string;
       other?: string;
@@ -2339,6 +2344,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       const space = workspace(args.project, args.target);
       space.expect(args.expectVersion);
       return space.addEvidence(caller, args.claim, args.kind, {
+        ...(args.method === undefined ? {} : { method: args.method }),
         ...(args.scenario === undefined ? {} : { scenario: args.scenario }),
         ...(args.capture === undefined ? {} : { capture: args.capture }),
         ...(args.other === undefined ? {} : { other: args.other }),
@@ -2350,11 +2356,16 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   tool(
     "edit_evidence",
     "Revise a piece of evidence by id. Omitted fields are left alone; `null` " +
-      "clears one. An id nothing holds is an error.",
+      "clears one. An id nothing holds is an error. Revising `method` keeps the " +
+      "author and the time the record already carries.",
     {
       project,
       id: z.string(),
       kind: z.enum(["supports", "refutes", "retires"]).optional(),
+      method: z
+        .enum(["guessed", "transcribed", "read", "derived", "ran"])
+        .optional()
+        .describe("How you know this. The author and time on the record are kept."),
       scenario: z.string().nullable().optional(),
       capture: z.string().nullable().optional(),
       other: z.string().nullable().optional(),
@@ -2366,6 +2377,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       target?: string;
       id: string;
       kind?: "supports" | "refutes" | "retires";
+      method?: "guessed" | "transcribed" | "read" | "derived" | "ran";
       scenario?: string | null;
       capture?: string | null;
       other?: string | null;
@@ -2377,6 +2389,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       space.expect(args.expectVersion);
       return space.editEvidence(caller, args.id, {
         ...(args.kind === undefined ? {} : { kind: args.kind }),
+        ...(args.method === undefined ? {} : { method: args.method }),
         ...(args.scenario === undefined ? {} : { scenario: args.scenario }),
         ...(args.capture === undefined ? {} : { capture: args.capture }),
         ...(args.other === undefined ? {} : { other: args.other }),
@@ -2861,6 +2874,10 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       id: z.string().min(1).describe("The claim, from claims_at or list_claims"),
       note: z.string().optional().describe("Why, so a later reader can follow it"),
       other: z.string().optional().describe("The claim that replaced it, if one did"),
+      method: z
+        .enum(["guessed", "transcribed", "read", "derived", "ran"])
+        .optional()
+        .describe("How you know this, on the same axis as a claim's: guessed, transcribed, read, derived, ran"),
       scenario: z.string().optional().describe("A scenario that settled it"),
       capture: z.string().optional().describe("What that run produced, from list_scenarios"),
       expectVersion: z.string().optional(),
@@ -2871,6 +2888,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       id: string;
       note?: string;
       other?: string;
+      method?: "guessed" | "transcribed" | "read" | "derived" | "ran";
       scenario?: string;
       capture?: string;
       expectVersion?: string;
@@ -2880,6 +2898,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       space.expect(args.expectVersion);
       return space.retireClaim(caller, args.id, {
         ...(args.note === undefined ? {} : { note: args.note }),
+        ...(args.method === undefined ? {} : { method: args.method }),
         ...(args.other === undefined ? {} : { other: args.other }),
         ...(args.scenario === undefined ? {} : { scenario: args.scenario }),
         ...(args.capture === undefined ? {} : { capture: args.capture }),

@@ -1,0 +1,277 @@
+{
+ "run": 11,
+ "author": "rev",
+ "note": "Extracted by diffing experiment 11's document against the corrected silver image, so what is here is what the review pass added and nothing it merely moved. The 78-claim displacement repair it also made is not in this file: build.mjs fixes that at the source, in the import of run 10, and the two documents agree address for address.",
+ "fields": [
+  {
+   "type": "PlayerSlot",
+   "offset": 40,
+   "name": "gap28",
+   "fieldType": "bytes(8)",
+   "description": "Between the status row and the three saved zero-page bytes. Nothing writes it. At rest it holds leftover assembler source (see $5F28)."
+  },
+  {
+   "type": "PlayerSlot",
+   "offset": 51,
+   "name": "unusedTail",
+   "fieldType": "bytes(77)",
+   "description": "Nothing in the program reads or writes $5F33-$5F7F or $5FB3-$5FFF. The slot is 128 bytes because $5F00 and $5F80 are 128 apart, not because 128 bytes are used -- 51 are. What is here in the shipped image is leftover assembler source in BASIC line format; see the comments at $5F28 and $5FA8."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 0,
+   "name": "spawnInterval",
+   "fieldType": "u8[8]",
+   "description": "Frames between spawns of this creature type. Copied to tmplSpawnInterval ($1DA0)."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 8,
+   "name": "moveType",
+   "fieldType": "u8[8]",
+   "description": "Which mover runs this type, indexed into moveHandlerTable ($9933). Copied to tmplMoveType ($1DA8)."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 32,
+   "name": "animMode",
+   "fieldType": "u8[8]",
+   "description": "Copied to tmplAnimMode ($1DC0). No settled meaning yet."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 40,
+   "name": "typeWhenShot",
+   "fieldType": "u8[8]",
+   "description": "Creature this type becomes when the bullet hits it. Copied to tmplTypeWhenShot ($1DC8)."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 48,
+   "name": "typeWhenExploded",
+   "fieldType": "u8[8]",
+   "description": "Creature this type becomes when it explodes. Copied to tmplTypeWhenExploded ($1DD0)."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 64,
+   "name": "speedX",
+   "fieldType": "u8[8]",
+   "description": "Copied to tmplSpeedX ($1DE0)."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 72,
+   "name": "speedY",
+   "fieldType": "u8[8]",
+   "description": "Copied to tmplSpeedY ($1DE8)."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 80,
+   "name": "field80",
+   "fieldType": "u8[8]",
+   "description": "Copied to tmplField80 ($1DF0). Named after its address at both ends, which is honest: nobody has established what it does."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 88,
+   "name": "spawnLimit",
+   "fieldType": "u8[8]",
+   "description": "How many of this type may be alive at once. Copied to tmplSpawnLimit ($1DF8) -- the most-read of the nineteen columns."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 96,
+   "name": "spawnX",
+   "fieldType": "u8[8]",
+   "description": "Copied to tmplSpawnX ($1E00)."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 104,
+   "name": "spawnY",
+   "fieldType": "u8[8]",
+   "description": "Copied to tmplSpawnY ($1E08); read by the spawner at $97FD."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 112,
+   "name": "spawnMode",
+   "fieldType": "u8[8]",
+   "description": "Copied to tmplSpawnMode ($1E10)."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 120,
+   "name": "colour",
+   "fieldType": "u8[8]",
+   "description": "Sprite colour for this type. Copied to tmplColour ($1E18)."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 136,
+   "name": "scoreValue",
+   "fieldType": "u8[8]",
+   "description": "Points for killing this type. Copied to tmplScoreValue ($1E28)."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 144,
+   "name": "explodeLength",
+   "fieldType": "u8[8]",
+   "description": "Copied to tmplExplodeLength ($1E30)."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 152,
+   "name": "typeMulticolourMask",
+   "fieldType": "u8",
+   "description": "Per-zone scalar, not part of the $98-byte template copy. LoadZoneScalars ($9CB5) reads the eight bytes here one at a time through ReadZoneByte ($9CFB) and stores this one to $53."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 153,
+   "name": "typeYExpandMask",
+   "fieldType": "u8",
+   "description": "Per-zone scalar, not part of the $98-byte template copy. LoadZoneScalars ($9CB5) reads the eight bytes here one at a time through ReadZoneByte ($9CFB) and stores this one to $52."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 154,
+   "name": "typeXExpandMask",
+   "fieldType": "u8",
+   "description": "Per-zone scalar, not part of the $98-byte template copy. LoadZoneScalars ($9CB5) reads the eight bytes here one at a time through ReadZoneByte ($9CFB) and stores this one to $51."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 155,
+   "name": "objectSlotCount",
+   "fieldType": "u8",
+   "description": "Per-zone scalar, not part of the $98-byte template copy. LoadZoneScalars ($9CB5) reads the eight bytes here one at a time through ReadZoneByte ($9CFB) and stores this one to $42."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 156,
+   "name": "spriteBankIndex",
+   "fieldType": "u8",
+   "description": "Per-zone scalar, not part of the $98-byte template copy. LoadZoneScalars ($9CB5) reads the eight bytes here one at a time through ReadZoneByte ($9CFB) and stores this one to $02."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 157,
+   "name": "spriteMulticolour0",
+   "fieldType": "u8",
+   "description": "Per-zone scalar, not part of the $98-byte template copy. LoadZoneScalars ($9CB5) reads the eight bytes here one at a time through ReadZoneByte ($9CFB) and stores this one to SPMC0 $D025."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 158,
+   "name": "spriteMulticolour1",
+   "fieldType": "u8",
+   "description": "Per-zone scalar, not part of the $98-byte template copy. LoadZoneScalars ($9CB5) reads the eight bytes here one at a time through ReadZoneByte ($9CFB) and stores this one to SPMC1 $D026."
+  },
+  {
+   "type": "ZoneRecord",
+   "offset": 159,
+   "name": "scalarUnused",
+   "fieldType": "u8",
+   "description": "Per-zone scalar, not part of the $98-byte template copy. LoadZoneScalars ($9CB5) reads the eight bytes here one at a time through ReadZoneByte ($9CFB) and stores this one to read and discarded. The eighth is fetched and then overwritten by LDA #$01, so it has no effect."
+  }
+ ],
+ "constants": [
+  {
+   "name": "ZONE_STRIDE",
+   "value": "$C8",
+   "bindAt": [
+    "$93E7"
+   ]
+  }
+ ],
+ "claims": [
+  {
+   "address": "$003F",
+   "name": "zoneDataPtrHi",
+   "method": "read",
+   "why": "NEXINI+1, matched instruction for instruction against the leftover assembler source at $5F26. The address had no name at all."
+  }
+ ],
+ "renames": [
+  {
+   "address": "$64B4",
+   "extent": 236,
+   "is": "data",
+   "from": "orphanTuneStream",
+   "to": "orphanTuneBlock",
+   "why": "Two claims held this name, at $64B4 and $64BA, so both rendered as orphanTuneStream@<id> and neither identified anything. They are not the same thing: the block includes six bytes of $FF padding and a stray $30 before the stream starts.",
+   "method": "read"
+  }
+ ],
+ "retire": [
+  {
+   "address": "$0801",
+   "extent": 18431,
+   "name": "sprite_sheet_main",
+   "note": "Read as intended this is a coarser restatement of seven existing claims \u2014 the six sprite banks and the character set \u2014 which name the same bytes and say more about them. Retired by rev in experiment 11. Its other half of the argument does not apply here: rev found this claim target-scoped and therefore laid over zero page, the stack and the BASIC vectors, which is the displacement this build fixes at the source, so what is retired is the correctly placed claim.",
+   "method": "read"
+  }
+ ],
+ "refutes": [
+  {
+   "claim": {
+    "address": "$5474",
+    "extent": 208,
+    "name": "defaultHighScoreTable"
+   },
+   "other": {
+    "address": "$5474",
+    "extent": 52,
+    "name": "highscore_entry_1"
+   },
+   "note": "Not one 208-byte text run: four 52-byte HighScoreEntry records. Rank, score and message are at fixed offsets in each, which the flat reading cannot say.",
+   "method": "read"
+  },
+  {
+   "claim": {
+    "address": "$5E00",
+    "extent": 208,
+    "name": "highScoreTable"
+   },
+   "other": {
+    "address": "$5E00",
+    "extent": 52,
+    "name": "live_highscore_1"
+   },
+   "note": "Same as $5474 one level on: four 52-byte HighScoreEntryLive records, not one 208-byte text run. This is the live copy the game writes back to.",
+   "method": "read"
+  }
+ ],
+ "comments": [
+  {
+   "address": "$003E",
+   "text": "The author called this pointer NEXINI, and the leftover source at $5F26 proves it rather than suggesting it. Lines 15140-15190 of that fragment read:\n\n  15140   LDA NEXINI        (only \" LDA NEX\" survives, at $5F26)\n  15150   CLC\n  15160   ADC #$C8\n  15170   STA NEXINI\n  15180   LDA NEXINI+1\n  15190   ADC #$00\n\nand $93E4-$93EF is that sequence instruction for instruction, on $3E/$3F:\n\n  93E4  LDA zoneDataPtr / CLC / ADC #$C8 / STA zoneDataPtr / LDA $3F / ADC #$00 / STA $3F\n\nSo NEXINI = $3E and NEXINI+1 = $3F, and $3F is now named zoneDataPtrHi. This is the second routine identified from the residue by instruction-for-instruction match -- SSET at $92F6 was the first -- which is what makes the fragments usable as evidence and not just atmosphere.\n\nThe $C8 being added is 200, the size of one ZoneRecord, so this loop is pointer = $6700 + 200 * zoneNumber. That is also why the same 200 appears as the record stride in the type: the code and the layout agree."
+  },
+  {
+   "address": "$003F",
+   "text": "High byte of the zone-record pointer whose low byte is zoneDataPtr ($3E). The pair is the author own NEXINI."
+  },
+  {
+   "address": "$64B4",
+   "text": "Renamed from orphanTuneStream to orphanTuneBlock (rev). Two claims carried the name orphanTuneStream, this one at $64B4 and another at $64BA, so the name identified neither and both rendered as orphanTuneStream@<claim id> -- unreadable in the listing and useless in an operand.\n\nThey are not the same thing, and the difference is worth having a word for. $64B4-$64B9 is the tail of the padding that follows the real voice-2 stream: $FF at $64B2-$64B8 and one stray $30 at $64B9. The duplicated stream itself begins at $64BA, which is where the byte-for-byte comparison against $63DA-$64B1 lines up. So orphanTuneBlock is the whole unreferenced block including its ragged edge, and orphanTuneStream ($64BA) is the music inside it."
+  },
+  {
+   "address": "$6700",
+   "text": "THE SHAPE OF THIS TABLE IS THE COPY LOOP, and that is derived, not guessed.\n\nLoadZoneTemplates ($9699) does exactly one thing: LDY #0 / LDA (zoneDataPtr),Y / STA tmplSpawnInterval,Y / INY / CPY #$98 / BNE. So bytes $00-$97 of a ZoneRecord land at $1DA0+$00-$97, byte for byte, and every tmpl* array another reader named at $1DA0 upwards IS a field of this record at the same offset. Nineteen arrays are named there, eight bytes apart -- $1DA0, $1DA8, $1DB0 ... $1E30 -- so the record is nineteen columns of eight, one column per creature type 0-7. The type declaration now says that instead of describing four of the nineteen.\n\nThe eight bytes at +$98 are not part of that copy, and they are not a hole either: LoadZoneScalars ($9CB5) reads them one at a time through ReadZoneByte and hands them to $53, $52, $51, $42, $02, SPMC0, SPMC1 and then throws the eighth away (it is fetched and then overwritten by LDA #$01). The same sequential reader carries straight on into +$A0 and copies the 40 name bytes to messageLine-1. So the record is 200 bytes with nothing left over.\n\nStride: 200 = $C8, and StartZone ($93E4) computes zoneDataPtr = $6700 + 200 * zoneNumber with ADC #ZONE_STRIDE. 8400 / 200 = 42 zones exactly.\n\nColumns, offset by offset: $00 spawnInterval, $08 moveType, $10 spriteFirst, $18 spriteLast, $20 animMode, $28 typeWhenShot, $30 typeWhenExploded, $38 nextType, $40 speedX, $48 speedY, $50 field80, $58 spawnLimit, $60 spawnX, $68 spawnY, $70 spawnMode, $78 colour, $80 lifetime, $88 scoreValue, $90 explodeLength; then the eight scalars at $98 and the name at $A0.\n\nSo a zone is not 200 opaque bytes. It is eight creature types with nineteen numbers each, seven VIC scalars, and a title -- and the difficulty curve of the whole game is those 42 x 8 x 19 numbers.\n\nOne tooling note, because it shows in the listing: four of the nineteen columns (spriteFirst, spriteLast, nextType, lifetime) render as eight separate u8 fields rather than as u8[8] like the other fifteen. That is not a judgement about them. Fields merge per offset across authors, so a field another author declared at +$11 cannot be removed by leaving it out of an edit_type call; declaring the column as an array as well produced the array AND its own elements, twice over. Restoring the per-index form for those four was the only way to stop the double render."
+  }
+ ],
+ "skippedComments": [
+  {
+   "address": "$0801",
+   "reason": "REVIEW NOTE explaining that sprite_sheet_main was withdrawn \u2014 the retirement carries its own reason now, and a comment saying a claim is gone is worse than the claim being visibly retired."
+  },
+  {
+   "address": "$0801",
+   "reason": "REVIEW NOTE explaining the $0801 displacement across experiment 10 \u2014 a defect of the old import, fixed here at the source, so the note would describe a document that no longer exists. The account lives in this file's header and in experiments/11-review/run1/findings.md."
+  }
+ ]
+}

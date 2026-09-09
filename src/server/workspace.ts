@@ -1983,6 +1983,18 @@ export class Workspace {
       id: string;
       claim: string;
       kind: string;
+      /**
+       * Who vouched, when, and how they know.
+       *
+       * Absent from this answer for as long as evidence has carried them, so
+       * the one surface whose whole job is "what has been said about this
+       * claim" could not say **who** said it. `claims_at` reads the author of a
+       * supporting record; nothing read a refutation's, and nothing read a
+       * method here at all.
+       */
+      author?: string;
+      when?: number;
+      method?: string;
       scenario?: string;
       capture?: string;
       other?: string;
@@ -1997,6 +2009,9 @@ export class Workspace {
         id: e.id ?? "",
         claim: e.claim,
         kind: e.kind,
+        ...(e.author === undefined ? {} : { author: e.author }),
+        ...(e.when === undefined ? {} : { when: e.when }),
+        ...(e.method === undefined ? {} : { method: e.method }),
         ...(e.scenario === undefined ? {} : { scenario: e.scenario }),
         ...(e.capture === undefined ? {} : { capture: e.capture }),
         ...(e.other === undefined ? {} : { other: e.other }),
@@ -2009,21 +2024,38 @@ export class Workspace {
     caller: Caller,
     claim: string,
     kind: EvidenceKind,
-    about: { scenario?: string; capture?: string; other?: string; note?: string }
+    about: {
+      scenario?: string;
+      capture?: string;
+      other?: string;
+      note?: string;
+      method?: ClaimMethod;
+    }
   ): EditResult & { evidence: string } {
     const loaded = this.program().loaded;
-    if (!claimById(loaded, claim)) {
-      // Retired rather than absent is a different fact and worth saying, or a
-      // caller reads "no such claim" about one they can see in list_claims.
-      if ((loaded.project.claims ?? []).some((c) => c.id === claim)) {
-        throw new Error(
-          `Claim ${claim} is retired, so nothing more is said about it. ` +
-            `restore_claim puts it back first.`
-        );
-      }
+    // **Checked against the project, not against this view.** Evidence is said
+    // about a claim rather than about an address, so a claim framed on a layer
+    // the current target does not link is still a claim and still has things
+    // said about it — and `add_evidence` carries no target of its own, so the
+    // default view decides which claims exist. Reading the loaded list here
+    // refused three writes in the silver-image build and told the caller the
+    // claims were *retired*, which they were not: a confident wrong answer in
+    // the one place that exists to keep the record straight.
+    const known = (id: string): "yes" | "retired" | "no" => {
+      if (!(loaded.project.claims ?? []).some((c) => c.id === id)) return "no";
+      return retiredClaimIds(loaded.project.evidence).has(id) ? "retired" : "yes";
+    };
+    const held = known(claim);
+    if (held === "retired") {
+      throw new Error(
+        `Claim ${claim} is retired, so nothing more is said about it. ` +
+          `restore_claim puts it back first.`
+      );
+    }
+    if (held === "no") {
       throw new Error(`No claim ${claim}. claims_at reports what covers an address, with ids.`);
     }
-    if (about.other !== undefined && !claimById(loaded, about.other)) {
+    if (about.other !== undefined && known(about.other) === "no") {
       throw new Error(`No claim ${about.other} to point at. list_claims shows the ids.`);
     }
     if (
@@ -2048,6 +2080,17 @@ export class Workspace {
         id,
         claim,
         kind,
+        // **Signed, like the supporting record `add_claim` mints.** This did not
+        // carry an author at all, so every refutation in the document was
+        // anonymous while every support named who vouched — the asymmetry
+        // being invisible because `claims_at` only reads the supports. A
+        // judgement about somebody else's claim is the last thing that should
+        // arrive unattributed.
+        by: {
+          author: caller.userId,
+          when: Date.now(),
+          ...(about.method === undefined ? {} : { method: about.method }),
+        },
         ...(about.scenario === undefined ? {} : { scenario: about.scenario }),
         ...(about.capture === undefined ? {} : { capture: about.capture }),
         ...(about.other === undefined ? {} : { other: about.other }),
@@ -2062,17 +2105,52 @@ export class Workspace {
     id: string,
     fields: {
       kind?: EvidenceKind;
+      method?: ClaimMethod;
       scenario?: string | null;
       capture?: string | null;
       other?: string | null;
       note?: string | null;
     }
   ): EditResult & { evidence: string } {
-    this.mustHold(this.program().loaded.project.evidence ?? [], id, "evidence", "list_evidence");
+    const held = this.mustHold(
+      this.program().loaded.project.evidence ?? [],
+      id,
+      "evidence",
+      "list_evidence"
+    );
     if (Object.values(fields).every((v) => v === undefined)) {
-      throw new Error("Give at least one field to change: kind, scenario, capture, other, note.");
+      throw new Error(
+        "Give at least one field to change: kind, method, scenario, capture, other, note."
+      );
     }
-    const result = this.edit(caller, () => [{ op: "evidence.set", id, fields }]);
+    // **`method` lives inside `by`, and revising it must not drop the author.**
+    // `evidence.set` takes the whole of `by` or none of it, so naming only the
+    // method here would replace `{author, when, method}` with `{method}` and
+    // silently unsign the record — which is the shape that made this field
+    // worth adding in the first place.
+    const { method, ...rest } = fields;
+    const previous = held as { author?: string; when?: number };
+    const result = this.edit(caller, () => [
+      {
+        op: "evidence.set",
+        id,
+        fields: {
+          ...rest,
+          ...(method === undefined
+            ? {}
+            : {
+                by: {
+                  // The record's own author, or this caller's for one written
+                  // before evidence was signed at all — never nobody, which is
+                  // what the type refuses and what the field is for.
+                  author: previous.author ?? caller.userId,
+                  ...(previous.when === undefined ? {} : { when: previous.when }),
+                  method,
+                },
+              }),
+        },
+      },
+    ]);
     return { ...result, evidence: id };
   }
 
@@ -3886,20 +3964,46 @@ export class Workspace {
     total: number;
     claims: {
       id: string;
+      /** Absolute, like every other address this surface reports. */
       at: string;
+      /** Said only when it cannot be resolved: `at` is then an offset into this layer. */
+      inLayer?: string;
       name?: string;
       is?: string;
       description?: string;
-      by: { evidence: string; author?: string; when?: number; other?: string; note?: string }[];
+      by: {
+        evidence: string;
+        author?: string;
+        when?: number;
+        method?: string;
+        other?: string;
+        note?: string;
+      }[];
     }[];
   } {
-    const project = this.program().loaded.project;
+    const loaded = this.program().loaded;
+    const project = loaded.project;
     const evidence = project.evidence ?? [];
+    // **Read from the stored form, so the frame has to be undone by hand.**
+    // Every other read path gets absolute addresses from the loader; this one
+    // deliberately reaches past it, because a retired claim is not in
+    // `loaded.claims` at all — and reaching past it means inheriting the
+    // conversion the loader does. Reported raw, `$0000` for the retired sprite
+    // sheet is a layer offset wearing an address, which is the single mistake
+    // this project has made most often.
+    const starts = new Map(loaded.map.getLayers().map((l): [string, number] => [l.id, l.start]));
     const out = (project.claims ?? [])
       .filter((c) => c.id !== undefined && evidence.some((e) => e.claim === c.id && e.kind === "retires"))
-      .map((c) => ({
+      .map((c) => {
+        const raw = parseProjectAddress(c.at);
+        const start = c.layer === undefined ? undefined : starts.get(c.layer);
+        // A claim on a layer this target does not link has no address here, and
+        // saying one anyway would be inventing it.
+        const unresolved = c.layer !== undefined && start === undefined;
+        return {
         id: c.id!,
-        at: hex4(parseProjectAddress(c.at)),
+        at: hex4(raw + (start ?? 0)),
+        ...(unresolved ? { inLayer: c.layer } : {}),
         ...(c.name === undefined ? {} : { name: c.name }),
         ...(c.is === undefined ? {} : { is: c.is }),
         ...(c.description === undefined ? {} : { description: c.description }),
@@ -3909,10 +4013,12 @@ export class Workspace {
             evidence: e.id ?? "",
             ...(e.author === undefined ? {} : { author: e.author }),
             ...(e.when === undefined ? {} : { when: e.when }),
+            ...(e.method === undefined ? {} : { method: e.method }),
             ...(e.other === undefined ? {} : { other: e.other }),
             ...(e.note === undefined ? {} : { note: e.note }),
           })),
-      }));
+        };
+      });
     return { total: out.length, claims: out };
   }
 
@@ -3937,7 +4043,13 @@ export class Workspace {
   retireClaim(
     caller: Caller,
     id: string,
-    about: { note?: string; other?: string; scenario?: string; capture?: string }
+    about: {
+      note?: string;
+      other?: string;
+      scenario?: string;
+      capture?: string;
+      method?: ClaimMethod;
+    }
   ): EditResult & { evidence: string } {
     const project = this.program().loaded.project;
     const stored = (project.claims ?? []).find((c) => c.id === id);

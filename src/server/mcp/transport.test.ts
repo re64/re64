@@ -2107,9 +2107,14 @@ describe("evidence, and saying things about a claim", () => {
     expect(said.isError, said.text).toBe(false);
 
     const about = (await callTool("list_evidence", { claim: now })).value as {
-      evidence: { kind: string; other?: string }[];
+      evidence: { kind: string; other?: string; author?: string }[];
     };
-    expect(about.evidence.some((e) => e.kind === "refutes" && e.other === old)).toBe(true);
+    const written = about.evidence.find((e) => e.kind === "refutes" && e.other === old);
+    expect(written).toBeDefined();
+    // **Signed.** Refutations arrived anonymous — `add_evidence` never recorded
+    // an author — and `list_evidence`, whose whole job is what has been said
+    // about a claim, could not have shown one if it had.
+    expect(written?.author).toBeTruthy();
 
     // Both readings are still there to be read: refuting is not deleting.
     const still = (await callTool("claims_at", { address: "$8F10" })).value as {
@@ -2163,10 +2168,14 @@ describe("evidence, and saying things about a claim", () => {
     // remove_claim, whose record lives only in the operations log.
     const shelved = (await callTool("list_retired", {})).value as {
       total: number;
-      claims: { id: string; name?: string; by: { note?: string; other?: string }[] }[];
+      claims: { id: string; at: string; name?: string; by: { note?: string; other?: string }[] }[];
     };
     const mine = shelved.claims.find((c) => c.id === old);
     expect(mine?.name).toBe("waveTable");
+    // **Absolute, like every other address this surface reports.** This read the
+    // stored form and printed it raw, so a claim framed on a layer came back at
+    // its offset — `$0000` for a claim on the byte at `$0801`.
+    expect(mine?.at).toBe("$8F40");
     expect(mine?.by[0].other).toBe(now);
     expect(mine?.by[0].note).toContain("never as waveforms");
 

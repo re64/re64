@@ -509,13 +509,17 @@ a write agreed with the mistake. Fixed, and pinned by a test.
   `bind_primary_name` is named in the instructions and it called it zero times,
   correctly: that chooses which of several *names* wins, and cannot make a claim
   in the wrong place stop rendering. **There is no way to withdraw a claim
-  without destroying it**, and this is the first run that needed one.
+  without destroying it**, and this is the first run that needed one. *Its own
+  words under what it wanted and did not have: "A way to retire a claim without
+  erasing it. Not `remove_claim`, not `refutes`." Built —* `retire_claim`.
 - **Record fields merge per offset across authors and cannot be un-declared by
   another author.** It replaced four of `ZoneRecord`'s per-index columns with
   `u8[8]` arrays to match the other fifteen; the arrays appeared *and* the 28
   original fields stayed, so each column rendered twice. `edit_type`'s "a field
   you leave out is one you removed" holds only for your own fields. Reverted,
   and noted in the document so the inconsistency does not read as a judgement.
+  *Built —* `add_field` / `edit_field` / `remove_field`, and `edit_type` no
+  longer carries a field list at all.
 - `preview` takes `start`; `add_claim` takes `at`. Six refusals. The **third**
   independent agent to pay for that inconsistency, after run 10's editor and the
   build script's 238.
@@ -534,6 +538,24 @@ nineteen columns of eight, one per creature type, plus seven VIC scalars and a
 40-byte title. `ZoneRecord` went from 128 unexplained bytes to 0, `PlayerSlot`
 from 85 to 0. The leftover assembler source at `$5F26` matches `$93E4`–`$93EF`
 instruction for instruction, which named `$3F` and gave the stride constant.
+
+**And it is in the silver image now, as a fourth source.** Its findings were not
+copied over the document; `build.mjs` imports them the way it imports the other
+three — 25 record fields, `ZONE_STRIDE`, the naming of `$3F`, one rename, two
+refutations and one retirement, all under `exp11-rev`, all `method: "read"`
+because nothing in that pass was watched running. The one repair it is *not*
+credited with is the displacement it found: that is fixed at the source in run
+10's import, and the two documents then agree address for address across 530
+named claims. Importing it twice would have credited the corrected addresses to
+a reader who only found the error.
+
+Folding it in cost four defects, all in surfaces the run had never reached:
+`add_evidence` recorded **no author**, so every refutation in the project was
+anonymous while every support was signed; `list_evidence` could not have shown
+one if it had; `list_retired` printed a layer offset as an address, the same
+frame confusion for the fourth time; and the "claim is retired" refusal fired
+for a claim that was merely outside the default target's view — a confident
+wrong answer in the one place that exists to keep the record straight.
 
 ---
 
