@@ -7,7 +7,8 @@ rather than gold: it is a baseline, not an answer.
 | | |
 |---|---|
 | claims | 630, each with one supporting record naming who vouched |
-| hygiene | **206 findings**, and 43 disagreements — none of it reviewed |
+| hygiene | 184 findings and 11 disagreements — none of it reviewed |
+| instructions decoded | 3,388 |
 | record types | 6 — `ZoneRecord` with 33 fields, and five smaller |
 | comments | 363 |
 | constants | 18, with 21 sites bound |
@@ -52,6 +53,19 @@ A baseline that hid its problems would measure nothing. These are left standing:
   Run 10's fourteen came across; run 9's twenty-nine did not.
 - **Known errors from the runs are uncorrected**, including run 10's sprite
   sheet starting at `$0801` rather than on a 64-byte boundary.
+
+## What experiment 11 found in it
+
+The first reviewer over this image found that **all 79 of run 10's layer-framed
+claims were one load address low**. A layer-framed claim stores an offset; the
+import passed those offsets to `add_claim`, which takes an address. Fixed at
+source, and the numbers above are after that fix — the image now decodes 3,388
+instructions where it decoded 2,451.
+
+Two things it could not do are recorded in `experiments/11-review/run1/`: a
+refuted claim still renders identically, so the only way to stop a wrong reading
+is to destroy it; and record fields merge per offset across authors, so one
+author cannot replace another's per-index fields with an array.
 
 ## What happens next
 

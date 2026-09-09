@@ -416,6 +416,17 @@ persists on a claim against what a tool can write, asserting the orphaned set
 `confidence` (the real gap). Per **E10** the fix for `confidence` is not to wire
 it up: it is on the wrong axis and should be replaced.
 
+**F5 · A write's receipt must speak the caller's units.** A claim is stored as an
+offset into the layer supplying its bytes, and `add_claim` at `$5199` answered
+`name +$4998` — because the resolver rebuilt the memory map with a loader that
+refuses to read files, and a `.prg` layer's load address is *in* its file, so it
+threw on every real project and fell back to the offset. Every *read* surface
+was correct. Only the confirmation a writer reads agreed with the mistake, and
+that is how eighty claims imported one load address low survived three sessions
+and an import. Found by the eleventh run's reviewer, not by anybody here.
+*Pinned:* `server/building.test.ts` — a claim written at an address whose receipt
+contains `+$` fails.
+
 **F2 · Where a report and the request log disagree, the log wins.** An agent is an
 unreliable narrator of its own difficulty: it invents a tool name and then describes
 the invention as a gap, and works silently around whatever actually hurt.
