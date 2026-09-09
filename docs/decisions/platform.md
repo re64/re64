@@ -190,6 +190,21 @@ and running them together would make it impossible to tell which.
 The table row above should now read: **a register's bit layout** — its own,
 behind the seam, and reached only through `registerAt`/`fieldsInMask`.
 
-Deliberately partial. These are the registers a program touches every frame and
-the ones three runs of readers reached for; adding the rest is data entry, and
-an empty entry is better than a guessed one.
+Thirty registers now, the SID included — its three voices are the same seven
+registers three times over, so they are generated from the voice number and the
+names carry it, because `SIDCTRL2.gate` must not be ambiguous about whose gate
+it is. `sid-audio.ts` is the oracle for those the way `vic.ts` is for the VIC: it
+decodes them to render a tune, so a layout disagreeing with it would be wrong
+about a chip this repository can already play.
+
+**They are also the type system's worked examples**, which was not the reason for
+building them and turned out to matter more. `unit: "bits"` and the array
+notation are the two newest things a field type can say, and a project using
+neither teaches neither: the Camels silver image declares six types and every
+field in all of them is a scalar. `list_types` reports the machine's layouts
+beside the project's — apart, because these belong to the hardware and no
+operation can revise them — so a reader meets `bits(3)` in use rather than in a
+paragraph of schema prose.
+
+Still partial. These are the registers a program touches every frame; adding the
+rest is data entry, and an empty entry is better than a guessed one.

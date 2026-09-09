@@ -159,7 +159,7 @@ import {
   screenCell,
   spriteAt,
 } from "../core/c64/geometry.js";
-import { fieldsInMask, registerAt } from "../core/c64/registers.js";
+import { REGISTER_LAYOUTS, fieldsInMask, registerAt } from "../core/c64/registers.js";
 import type { SidWrite } from "../core/c64/devices/sid.js";
 
 /**
@@ -2449,6 +2449,21 @@ export class Workspace {
    */
   listTypes(): {
     total: number;
+    /**
+     * The machine's own layouts, beside the project's.
+     *
+     * **Worked examples, and that is why they are here.** The bit-granular
+     * record and the array notation are the two newest things a field type can
+     * say, and a project that uses neither teaches neither — the Camels silver
+     * image declares six types and every field in them is a scalar. A reader
+     * who wants to know what `unit: "bits"` looks like can now see thirty of
+     * them rather than parse a paragraph in a schema.
+     *
+     * Reported apart from `types` rather than mixed in, because the difference
+     * is real: these belong to the hardware and no operation can revise them,
+     * where everything in `types` is somebody's judgement about this program.
+     */
+    machine: { at: string; name: string; unit: string; bits: string[] }[];
     types: {
       id: string;
       name: string;
@@ -2463,6 +2478,20 @@ export class Workspace {
 
     return {
       total: index.size,
+      machine: REGISTER_LAYOUTS.map((r) => ({
+        at: hex4(r.address),
+        name: r.type.name,
+        unit: r.type.unit ?? "bytes",
+        // High bit first, the order a byte is written in.
+        bits: Object.entries(r.type.fields)
+          .map(([offset, field]) => ({ offset: Number(offset), field }))
+          .sort((a, b) => b.offset - a.offset)
+          .map(({ offset, field }) => {
+            const width = field.type.is === "bits" ? field.type.width : 8;
+            const at = width === 1 ? `b${offset}` : `b${offset + width - 1}..${offset}`;
+            return `${at} ${field.name}: ${formatFieldType(field.type, () => undefined)}`;
+          }),
+      })),
       types: index.all().map((type) => {
         const laid = index.layout(type.id);
         const covered = laid.reduce(

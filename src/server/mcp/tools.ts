@@ -1273,21 +1273,21 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
             type: z
               .string()
               .describe(
-                "u8, i8, u16, u16be, ptr, ptrbe, char(n), char(n,screen), " +
-                  "bytes(n), bits(n) inside a unit:\"bits\" record, or the name " +
-                  "of another type. Byte order is part of " +
-                  "the type rather than a flag beside it, because a hand-written " +
-                  "table on this machine is not always little-endian. " +
-                  "Any of them takes [n] for an array of them — u8[8], " +
-                  "Creature[42], char(40)[3] — or [first..last] where the first " +
-                  "index is not zero, which some tables are. An array field is " +
-                  "how you say that eight slots are one thing rather than eight " +
-                  "fields whose relationship lives in a comment. " +
-                  "A count may be a declared constant — u8[CreatureCount] — " +
-                  "which is worth doing when the same number appears more than " +
-                  "once: two arrays written [CreatureCount] say their counts are " +
-                  "the same count, and binding that constant to the immediate " +
-                  "the code compares against ties the layout to the program."
+                "ONE OF: u8 | i8 | u16 | u16be | ptr | ptrbe | char(n) | " +
+                  "char(n,ENCODING) | bytes(n) | bits(n) | <the name of another " +
+                  "type>. " +
+                  "THEN OPTIONALLY, to make it an array: [n] as in u8[8], " +
+                  "Creature[42], char(40)[3]; or [first..last] when the first " +
+                  "index is not 0, as in u8[1..32]; or [CONSTANT] to name the " +
+                  "size, as in u8[CreatureCount]. " +
+                  "Why each: byte order is in the type rather than a flag beside " +
+                  "it, because a hand-written table here is not always " +
+                  "little-endian. An array says eight slots are one thing rather " +
+                  "than eight fields whose relationship lives in a comment, and " +
+                  "two written [CreatureCount] say their counts are the same " +
+                  "count. bits(n) needs a record declared unit:\"bits\". " +
+                  "list_types shows the machine\'s own layouts, which are worked " +
+                  "examples of all of this."
               ),
             description: z.string().optional(),
           })
@@ -1386,7 +1386,10 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "order and where each type is meant. " +
       "`unexplainedBytes` is how much of a record nobody has accounted for, " +
       "which is a work queue rather than a fault: a reader who has proved " +
-      "nineteen fields of a 200-byte record has said something true.",
+      "nineteen fields of a 200-byte record has said something true. " +
+      "`machine` is the hardware's own layouts — what the bits of the VIC and " +
+      "SID registers mean — reported beside them as worked examples of what a " +
+      "field type can say, and because no operation can revise them.",
     { project },
     (args: { project?: string; target?: string }) => context().workspace(args.project, args.target).listTypes()
   );

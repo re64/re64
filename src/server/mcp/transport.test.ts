@@ -1242,6 +1242,34 @@ describe("editing as an agent", () => {
     expect(where.field?.path).toBe("control[0].yScroll");
   });
 
+  it("shows the machine's layouts beside the project's, as worked examples", async () => {
+    // **The discoverability half.** `unit: "bits"` and the array notation are
+    // the two newest things a field type can say, and a project that uses
+    // neither teaches neither — the Camels silver image declares six types and
+    // every field in all of them is a scalar. So the hardware's own layouts are
+    // reported here: thirty of them, which is where a reader meets `bits(n)` in
+    // use rather than in a paragraph of schema prose.
+    const listed = (await callTool("list_types", {})).value as {
+      total: number;
+      machine: { at: string; name: string; unit: string; bits: string[] }[];
+    };
+    expect(listed.machine.length).toBeGreaterThan(20);
+
+    const scroly = listed.machine.find((m) => m.name === "SCROLY")!;
+    expect(scroly.at).toBe("$D011");
+    expect(scroly.unit).toBe("bits");
+    // High bit first, the order a byte is written in, with the width shown as
+    // the field type that would declare it.
+    expect(scroly.bits[0]).toBe("b7 rasterBit8: bits(1)");
+    expect(scroly.bits.at(-1)).toBe("b2..0 yScroll: bits(3)");
+
+    // The SID's three voices are the same registers three times, and the names
+    // say which — `SIDCTRL2.gate` must not be ambiguous about whose gate.
+    for (const voice of [1, 2, 3]) {
+      expect(listed.machine.some((m) => m.name === `SIDCTRL${voice}`)).toBe(true);
+    }
+  });
+
   it("says what a register's bits mean, and which ones a mask touches", async () => {
     // Write the whole byte and it is SCROLY; touch one bit and the answer says
     // which. The layouts are the machine's, not this project's, so they need no

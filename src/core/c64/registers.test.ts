@@ -61,6 +61,27 @@ describe("what the bits of a register mean", () => {
     }
   });
 
+  it("agrees with the SID renderer, which decodes these to play a tune", () => {
+    // `sid-audio.ts` is the oracle here for the same reason `vic.ts` is above:
+    // it reads these registers to render audio, so a layout that disagreed with
+    // it would be wrong about a chip this repository can already play.
+    //
+    // `case 4: (value & 1) === 1` is the gate.
+    expect(fieldsInMask(0xd404, 0x01)).toEqual(["SIDCTRL1.gate"]);
+    // `case 5: attack = (value >> 4) & 0x0f; decay = value & 0x0f`.
+    expect(fieldsInMask(0xd405, 0xf0)).toEqual(["SIDAD1.attack"]);
+    expect(fieldsInMask(0xd405, 0x0f)).toEqual(["SIDAD1.decay"]);
+    // `register === 24: volume = value & 0x0f`.
+    expect(fieldsInMask(0xd418, 0x0f)).toEqual(["SIDVOLFILT.volume"]);
+
+    // Three voices, seven registers apart, and the names say which — because
+    // `SIDCTRL2.gate` must not be ambiguous about whose gate it is.
+    for (const [voice, base] of [[1, 0xd404], [2, 0xd40b], [3, 0xd412]] as const) {
+      expect(registerAt(base)!.type.name).toBe(`SIDCTRL${voice}`);
+      expect(fieldsInMask(base, 0x80)).toEqual([`SIDCTRL${voice}.noise`]);
+    }
+  });
+
   it("keeps the platform's ids out of any project's namespace", () => {
     // These belong to the machine the way the symbol table does, so nothing an
     // operation can name may collide with one.

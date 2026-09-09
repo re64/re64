@@ -215,7 +215,7 @@ Every declared constant, with its value.
 
 #### `list_types`
 
-Every record layout this project declares, with its fields in memory order and where each type is meant. `unexplainedBytes` is how much of a record nobody has accounted for, which is a work queue rather than a fault: a reader who has proved nineteen fields of a 200-byte record has said something true.
+Every record layout this project declares, with its fields in memory order and where each type is meant. `unexplainedBytes` is how much of a record nobody has accounted for, which is a work queue rather than a fault: a reader who has proved nineteen fields of a 200-byte record has said something true. `machine` is the hardware's own layouts — what the bits of the VIC and SID registers mean — reported beside them as worked examples of what a field type can say, and because no operation can revise them.
 
 #### `list_decoders`
 

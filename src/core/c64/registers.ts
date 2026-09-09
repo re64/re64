@@ -23,6 +23,10 @@
  * Deliberately partial. These are the registers a program touches on every
  * frame, and the ones three runs of readers actually reached for; adding the
  * rest is data entry, and an empty entry is better than a guessed one.
+ *
+ * The SID's three voices are the same seven registers three times over, so they
+ * are generated from the voice number rather than typed out — and the names
+ * carry it, because `SIDCTRL2.gate` should not be ambiguous about which voice.
  */
 
 import { RecordType } from "../memory/type.js";
@@ -116,6 +120,55 @@ export const REGISTER_LAYOUTS: readonly RegisterLayout[] = [
     5: flag("serialDataOut"),
     6: flag("serialClockIn"),
     7: flag("serialDataIn"),
+  }),
+  // **The SID, and its three voices are the same seven registers three times.**
+  // `sid-audio.ts` is the oracle for these the way `vic.ts` is for the VIC: it
+  // decodes them to render a tune, so a layout that disagreed with it would be
+  // wrong about a chip this repository can already play.
+  //
+  // Voice *n* sits at `$D400 + 7n`, which is why these are generated rather than
+  // typed out three times — and why the names carry the voice number: a claim
+  // naming `SIDVOICE1.gate` should not be ambiguous about which voice.
+  ...[1, 2, 3].flatMap((voice) => {
+    const base = 0xd400 + (voice - 1) * 7;
+    return [
+      register(base + 4, `SIDCTRL${voice}`, {
+        0: flag("gate", "Starts the attack; clearing it starts the release"),
+        1: flag("sync", "Hard-sync this voice's oscillator to the previous one"),
+        2: flag("ringMod", "Ring-modulate the triangle with the previous voice"),
+        3: flag("test", "Silences and resets the oscillator"),
+        4: flag("triangle"),
+        5: flag("sawtooth"),
+        6: flag("pulse", "Width from the two registers at +2 and +3"),
+        7: flag("noise"),
+      }),
+      register(base + 5, `SIDAD${voice}`, {
+        0: run("decay", 4, "0-15, a table not a scale: $0 is 6ms and $F is 24s"),
+        4: run("attack", 4, "0-15, likewise: $0 is 2ms and $F is 8s"),
+      }),
+      register(base + 6, `SIDSR${voice}`, {
+        0: run("release", 4, "0-15, the same table as decay"),
+        4: run("sustain", 4, "0-15 as a *level*, not a time"),
+      }),
+      register(base + 3, `SIDPWHI${voice}`, {
+        0: run("pulseWidthHigh", 4, "The top four bits of a twelve-bit width"),
+      }),
+    ];
+  }),
+  register(0xd415, "SIDFCLO", { 0: run("cutoffLow", 3, "Only three bits; the rest read as 0") }),
+  register(0xd417, "SIDRESFILT", {
+    0: flag("filterVoice1"),
+    1: flag("filterVoice2"),
+    2: flag("filterVoice3"),
+    3: flag("filterExternal"),
+    4: run("resonance", 4),
+  }),
+  register(0xd418, "SIDVOLFILT", {
+    0: run("volume", 4, "0-15, master"),
+    4: flag("lowPass"),
+    5: flag("bandPass"),
+    6: flag("highPass"),
+    7: flag("voice3Off", "Silences voice 3 so it can drive something else"),
   }),
   register(0x0001, "R6510", {
     0: run("banking", 3, "LORAM, HIRAM, CHAREN"),
