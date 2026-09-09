@@ -162,3 +162,71 @@ describe("every project has a target, so there is one way to get a stack", () =>
     expect(load(noIds).map.readByte(0x1000)).toBe(0xaa);
   });
 });
+
+describe("a target frame names a target by id", () => {
+  /**
+   * **Two findings, one cause: a reference in the document that was not an id.**
+   *
+   * A target frame stored the target's *name*. So renaming a target orphaned
+   * every claim framed on it, silently — and nothing ever asked whether a
+   * target-framed claim belonged to the target being read, so a claim saying
+   * "in the runtime arrangement, `$02` is the border colour" appeared in every
+   * other arrangement of the same program too.
+   *
+   * The rule this project already had — "an address, a name, a span or a slot
+   * never identifies anything; only an id does" — was written about *write
+   * keying*. It is really about references, and the document was breaking it.
+   */
+  const twoTargets = (): Project => ({
+    name: "phases",
+    layers: [bytes("lay_a", "$1000", "aa"), bytes("lay_b", "$2000", "bb")],
+    targets: [
+      { id: "tgt_a", name: "loader", layers: ["lay_a"] },
+      { id: "tgt_b", name: "runtime", layers: ["lay_b"] },
+    ],
+    claims: [
+      { id: "clm_zp", at: "$0002", target: "tgt_a", name: "borderColour", origin: "user" },
+    ],
+  });
+
+  const inView = (p: Project, target: string) =>
+    buildMemoryMap(p, makeFileLoader(() => {
+      throw new Error("these layers hold inline bytes");
+    }), { platform: false, target });
+
+  it("shows a target-framed claim in its own target and in no other", () => {
+    expect(inView(twoTargets(), "loader").claims.map((c) => c.id)).toContain("clm_zp");
+    expect(inView(twoTargets(), "runtime").claims.map((c) => c.id)).not.toContain("clm_zp");
+  });
+
+  it("keeps the claim when the target is renamed, because the frame holds an id", () => {
+    const renamed = twoTargets();
+    renamed.targets![0] = { ...renamed.targets![0], name: "packed" };
+    // The reader names the new name; the claim is still framed on the same id.
+    expect(inView(renamed, "packed").claims.map((c) => c.id)).toContain("clm_zp");
+    // And by id, which is what the document itself holds.
+    expect(inView(renamed, "tgt_a").claims.map((c) => c.id)).toContain("clm_zp");
+  });
+
+  it("still loads a file that framed on a name, so nothing written earlier is lost", () => {
+    // Read as a legacy alias rather than dropped — the same latitude ids get
+    // everywhere here: files without them stay loadable and the next write
+    // persists a real one.
+    const legacy = twoTargets();
+    legacy.claims![0] = { ...legacy.claims![0], target: "loader" };
+    expect(inView(legacy, "loader").claims.map((c) => c.id)).toContain("clm_zp");
+    expect(inView(legacy, "runtime").claims.map((c) => c.id)).not.toContain("clm_zp");
+  });
+
+  it("takes an id or a unique name for the view itself, and refuses an ambiguous name", () => {
+    const p = twoTargets();
+    expect(inView(p, "tgt_b").map.readByte(0x2000)).toBe(0xbb);
+    expect(inView(p, "runtime").map.readByte(0x2000)).toBe(0xbb);
+
+    const twins = twoTargets();
+    twins.targets![1] = { ...twins.targets![1], name: "loader" };
+    expect(() => inView(twins, "loader")).toThrow(/Two targets/);
+    // The ids still say which, which is the point of having them.
+    expect(inView(twins, "tgt_b").map.readByte(0x2000)).toBe(0xbb);
+  });
+});

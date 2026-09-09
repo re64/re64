@@ -100,6 +100,35 @@ itself require choosing one. Such an edit reports no instruction delta, because
 there is no view for the count to be about and a zero would be a measurement
 nobody took.
 
+**A reference in the document is an id.** Not a name, not an address, not a
+slot. This was stated as a rule about *write keying* — "adding always adds;
+correcting is by id" — and read that way it looks satisfied. Read as a rule about
+**references** it was not: a target frame stored the target's name, so renaming a
+target orphaned every claim framed on it and two targets could share a name with
+nothing able to tell them apart. Names stay usable at the API, where a person
+types them, and are resolved at the boundary; what reaches the document is an id.
+
+The same question is open elsewhere and is worth naming rather than discovering:
+a field type refers to another type and to a count constant **by name**
+(`Creature[42]`, `u8[CreatureCount]`), and a capture refers to its bytes by
+**filename**. The first is argued — the text is the equate an assembler would
+write — and the second is a defect the Codex review reproduced.
+
+**Which arrangement a claim is about, and the default.** A claim on a byte no
+layer supplies — zero page, an I/O register, a KERNAL vector — is framed on the
+**address space**: a fact about the machine this program runs on, true in every
+arrangement of it. The target frame exists for a claim that really is about one
+arrangement, is honoured on the way in and filtered on the way out, and nothing
+emits one by default.
+
+That default was measured rather than chosen. Camels' 68 hand-named zero-page
+addresses were written while reading `runtime`. Framed there and honestly
+filtered, they disappear from the other four views — and `patched` is the same
+program with eleven byte patches over it, `machine` the same program with the
+ROMs banked in. `$02` is `printColumn` in all of them. **Which writes should be
+able to ask for a target frame is undecided**, and is the same question as scoped
+names.
+
 ---
 
 ## 4. Claims — statements about addresses

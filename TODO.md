@@ -51,8 +51,18 @@ today's work. `TRIAGE.md` is what happened and the order I would fix them in;
 - [x] Fix the stale reference docs it caught (`by` and `supersedes` in the
       developer guide; "`layer.set` does not exist" in the model reference, where
       the real gap is that no tool emits one).
-- [ ] **R5** — a target-framed claim is visible in every target. The loader asks
-      the question of layer frames and not of target frames. Cheapest P1 here.
+- [x] **R5** — a target-framed claim is visible in every target. Fixed, together
+      with the R6 residual: a target frame holds the target's **id**, names are
+      aliases resolved at the boundary, and the loader asks of a target frame the
+      question it always asked of a layer frame.
+- [ ] **Open: when is a claim about one arrangement rather than about the
+      program?** Fixing R5 honestly made the question real. Camels' 68 hand-named
+      zero-page addresses were written while reading `runtime`; framed there and
+      filtered, they vanish from the other four views — and `patched` is the same
+      program with eleven byte patches, `machine` the same program with ROMs.
+      So an unowned byte is now framed on the **address space** by default, true
+      in every arrangement, and nothing emits a target frame. Which writes should
+      be able to ask for one is undecided.
 - [ ] **R2** — `claim.set` writes every key back, so a partial edit reasserts
       fields a collaborator just changed. This is the review's thesis in one
       operation.
@@ -70,6 +80,6 @@ today's work. `TRIAGE.md` is what happened and the order I would fix them in;
       events, redo order.
 - [ ] **R13, R14, R15** — provenance clear semantics, canonical projection
       order, strict numeric parsing.
-- [ ] **R6 residual** — targets are referenced by name, not id. Renaming one
-      orphans every target-framed claim and every reader that named it.
-      Duplicate names are admitted.
+- [x] **R6 residual** — done with R5 above. Duplicate target names are now
+      refused when used to select, and named, rather than the first silently
+      winning.

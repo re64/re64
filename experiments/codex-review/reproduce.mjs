@@ -101,9 +101,16 @@ const alice = { userId: 'alice', label: 'Alice', sessionId: 'alice-session' };
 }
 {
   const project = { ...base, targets: [...base.targets, { id: 'tgt_b', name: 'B', layers: ['lay_a'] }], claims: [...base.claims, { id: 'clm_zp', at: '$0002', target: 'A', name: 'OnlyInA', origin: 'user' }] };
-  const loaded = buildMemoryMap(project, () => { throw Error('unexpected file'); }, { target: 'B', platform: false });
-  assert.ok(loaded.claims.some(c => c.id === 'clm_zp'));
-  output('target framed claim leaks into another target', { selected: 'B', leaked: loaded.claims.find(c => c.id === 'clm_zp') });
+  // RE-RUN NOTE (re64, 2026-09-10): fixed. The loader now asks of a target frame
+  // the question it always asked of a layer frame, and the frame holds the
+  // target's **id** rather than its name — so this asserts the invariant rather
+  // than the defect. The production test is
+  // `src/core/project/links.test.ts` → "a target frame names a target by id".
+  const inB = buildMemoryMap(project, () => { throw Error('unexpected file'); }, { target: 'B', platform: false });
+  const inA = buildMemoryMap(project, () => { throw Error('unexpected file'); }, { target: 'A', platform: false });
+  assert.ok(!inB.claims.some(c => c.id === 'clm_zp'));
+  assert.ok(inA.claims.some(c => c.id === 'clm_zp'));
+  output('FIXED: target framed claim stays in its own target', { inA: true, inB: false });
 }
 {
   const project = { ...base, layers: [...base.layers, { id: 'lay_b', type: 'bytes', address: '$8000', bytes: 'a90260' }], targets: [...base.targets, { id: 'tgt_b', name: 'B', layers: ['lay_b'] }] };
@@ -120,7 +127,10 @@ const alice = { userId: 'alice', label: 'Alice', sessionId: 'alice-session' };
     let after = 'refused';
     try { after = f.workspace.view('A').program().loaded.map.readByte(0x8001); }
     catch (error) { after = `refused: ${error.message.slice(0, 60)}`; }
-    output('renaming a target orphans a reader that named it', { before, after });
+    // The claims framed on it survive, because the frame holds the id. What
+    // is refused is a *reader* still holding the old name, which is a clean
+    // refusal rather than the silent whole-project fallback this found.
+    output('FIXED: renaming a target keeps its claims; a stale name is refused', { before, after });
   } finally { f.close(); }
 }
 {

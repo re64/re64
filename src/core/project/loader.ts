@@ -34,6 +34,7 @@ import {
   projectClaims,
   retiredClaimIds,
   ProjectType,
+  ProjectTarget,
   targetLinks,
 } from "./project.js";
 import { derivedId } from "./identity.js";
@@ -52,6 +53,19 @@ export interface FileLoader {
 export interface LoadedProject {
   project: Project;
   map: MemoryMap;
+  /**
+   * The view this was built for, when the project declares any.
+   *
+   * Absent for a project that declares none: the loader implies a single
+   * arrangement over the whole stack, and framing a claim on a target that is
+   * not in the file would dangle the moment somebody declared a real one.
+   *
+   * Carried rather than re-derived because two things need it and both used to
+   * guess. A claim framed on a target belongs to *that* target and must not
+   * appear in another; and a write has to record which view it was made in, by
+   * **id**, since a name is a field somebody can change.
+   */
+  selectedTarget?: { id: string; name: string };
   /** Load addresses of PRG layers that did not suppress their entry point. */
   prgEntries: number[];
   /** Every user label across all layers, for entry point collection. */
@@ -207,23 +221,43 @@ export function withSyntheticTarget(project: Project): Project {
 }
 
 /**
- * Narrow a project to one of its targets, by name.
+ * Which target a caller means, by id or by name.
  *
- * **Nothing is chosen for the caller here.** Where a project declares more than
- * one target and none is named, this refuses and says which there are, because
- * every alternative is a guess: picking the first by `order` is what the removed
+ * **An id wins, and a name is an alias.** Names are what a person types and
+ * what `list_targets` shows, so they stay usable — the same latitude
+ * `remove_constant` gives — but they are resolved *here*, at the boundary, and
+ * never stored. Two targets sharing a name is a hygiene finding rather than
+ * something a write prevents, so an ambiguous one is refused and both are named
+ * rather than the first silently winning.
+ *
+ * **Nothing is chosen for the caller.** Where a project declares more than one
+ * target and none is named, this refuses and says which there are, because every
+ * alternative is a guess: picking the first by `order` is what the removed
  * `defaultTarget` did, and the guess was wrong for the one project in this
  * repository that has several. A project with exactly one target has no choice
  * to make, so a caller that named none gets it.
  */
+export function selectTarget(project: Project, named?: string): ProjectTarget | undefined {
+  const targets = project.targets ?? [];
+  if (named === undefined) return targets.length === 1 ? targets[0] : undefined;
+
+  const byId = targets.find((t) => t.id === named);
+  if (byId) return byId;
+
+  const byName = targets.filter((t) => t.name === named);
+  if (byName.length > 1) {
+    throw new Error(
+      `Two targets are called "${named}" in this project, so the name says which ` +
+        `one only if you use its id: ${byName.map((t) => t.id ?? "(no id)").join(", ")}. ` +
+        `list_targets reports both.`
+    );
+  }
+  return byName[0];
+}
+
 export function projectForTarget(project: Project, name?: string): Project {
   const targets = project.targets ?? [];
-  const target =
-    name === undefined
-      ? targets.length === 1
-        ? targets[0]
-        : undefined
-      : targets.find((t) => t.name === name);
+  const target = selectTarget(project, name);
 
   if (!target) {
     if (name !== undefined) {
@@ -360,7 +394,17 @@ export function buildMemoryMap(
   // choice nobody made. Falling back would hand a caller a different stack than
   // the one it meant, with no way to tell — the confident wrong answer this
   // project refuses.
-  const project = projectForTarget(withSyntheticTarget(migrated), options.target);
+  // **Which view, resolved once.** A name is an alias for an id here and
+  // nowhere deeper: the loader knows which target it chose, and everything that
+  // needs to know asks it rather than matching a string again.
+  //
+  // Only when the project *declares* targets. A file that declares none gets one
+  // implied over its whole stack, and framing a claim on a target that is not in
+  // the document would dangle the moment somebody declared a real one.
+  const declaresTargets = (migrated.targets ?? []).length > 0;
+  const withTargets = withSyntheticTarget(migrated);
+  const chosen = declaresTargets ? selectTarget(withTargets, options.target) : undefined;
+  const project = projectForTarget(withTargets, options.target);
 
   const map = new MemoryMap();
   const prgEntries: number[] = [];
@@ -474,6 +518,19 @@ export function buildMemoryMap(
   const retired = retiredClaimIds(project.evidence);
   const claims = projectClaims(project.claims).flatMap((claim) => {
     if (retired.has(claim.id)) return [];
+    // **A target frame belongs to one target.** The loader asked this of layer
+    // frames from the day they existed and never asked it of target frames, so a
+    // claim saying "in the runtime arrangement, $02 is the border colour"
+    // appeared in every other arrangement too — contaminating names, roots and
+    // disagreements across phases of one program.
+    //
+    // A stored *name* is honoured as a legacy alias rather than dropped: files
+    // written before frames carried ids stay loadable, and the next write
+    // persists a real one. Same rule ids follow everywhere else here.
+    if (claim.frame?.space === "target") {
+      if (!chosen) return [];
+      if (claim.frame.target !== chosen.id && claim.frame.target !== chosen.name) return [];
+    }
     const at = resolveAt(claim.at, claim.frame, (id) => layerStart.get(id));
     return at === undefined ? [] : [at === claim.at ? claim : { ...claim, at }];
   });
@@ -509,6 +566,9 @@ export function buildMemoryMap(
   return {
     project,
     map,
+    ...(chosen === undefined
+      ? {}
+      : { selectedTarget: { id: chosen.id ?? chosen.name, name: chosen.name } }),
     prgEntries,
     userLabels,
     comments,

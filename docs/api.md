@@ -89,7 +89,7 @@ See `docs/algebra.md` for the full rules.
 |---|---|
 | `did` | one line per operation, in addresses |
 | `claims` | each id beside the address it was minted for |
-| `scope` | `layer:<id>`, `target:<name>` or `machine` — what the claim belongs to |
+| `scope` | `layer:<id>`, `target:<id>` or `machine` — what the claim belongs to |
 | `covers` | the span, spelled out, when an extent was given |
 | `nestedInside` | the enclosing claim, when this one landed inside another |
 | `instructions` | before, after, and the delta a decision unlocked |
@@ -128,7 +128,7 @@ Who is in this project: people in a browser and other agents, online first, with
 
 #### `list_targets`
 
-The named views this project has over its layer stack, which is selected, and every layer with the id a target is defined in terms of — including layers the current selection hides, since that is how you find the view that shows them.
+The named views this project has over its layer stack, each with the **id** that a claim frame and every other reference stores — a name is an alias you may pass instead, and is resolved here rather than kept. Reports every layer with the id a target is defined in terms of, including layers a view hides, since that is how you find the one that shows them.
 
 ---
 

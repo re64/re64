@@ -187,6 +187,16 @@ export interface Provenance {
 export type Frame =
   | { readonly space: "address" }
   | { readonly space: "layer"; readonly layer: string }
+  /**
+   * A fact about one arrangement of the stack — zero page, a hardware register.
+   *
+   * **`target` is a target *id*, never a name.** A name is a field somebody
+   * chose and may change; storing one here made renaming a target orphan every
+   * claim framed on it, silently, and admitted two targets that could not be
+   * told apart. Names are accepted at the API as aliases and resolved at the
+   * boundary; what reaches the document is an id, like every other reference in
+   * it.
+   */
   | { readonly space: "target"; readonly target: string };
 
 export interface Claim {
@@ -309,6 +319,7 @@ export function claimSpan(claim: Claim): { start: number; end: number } {
 export function scopeFor(
   address: number,
   owner: { id: string; start: number } | undefined,
+  /** The **id** of the target being read, where the project declares any. */
   target: string | undefined
 ): { frame: Frame; at: number } {
   if (owner) {

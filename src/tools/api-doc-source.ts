@@ -297,7 +297,7 @@ See \`docs/algebra.md\` for the full rules.
 |---|---|
 | \`did\` | one line per operation, in addresses |
 | \`claims\` | each id beside the address it was minted for |
-| \`scope\` | \`layer:<id>\`, \`target:<name>\` or \`machine\` — what the claim belongs to |
+| \`scope\` | \`layer:<id>\`, \`target:<id>\` or \`machine\` — what the claim belongs to |
 | \`covers\` | the span, spelled out, when an extent was given |
 | \`nestedInside\` | the enclosing claim, when this one landed inside another |
 | \`instructions\` | before, after, and the delta a decision unlocked |

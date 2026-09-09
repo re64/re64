@@ -180,9 +180,25 @@ export function placed(loaded: LoadedProject, address: number): { frame: Frame; 
     // A symbols layer supplies no bytes and has no address, so nothing can be
     // an offset into one — `layerAt` already returns only byte layers.
     owner ? { id: owner.id, start: owner.start } : undefined,
-    // The view this project was loaded through. `projectForTarget` narrows to
-    // exactly one target, so it is the only one left.
-    loaded.project.targets?.length === 1 ? loaded.project.targets[0].name : undefined
+    // **Deliberately not the selected target**, and this is the interesting
+    // half.
+    //
+    // A byte no layer supplies is zero page, or an I/O register, or a KERNAL
+    // vector. Scoping such a claim to the view it happened to be written in is
+    // measurably wrong on the one project that has several: Camels' 68
+    // hand-named zero-page addresses were written while reading `runtime`, and
+    // `patched` is the same program with eleven byte patches over it while
+    // `machine` is the same program with the ROMs banked in. `$02` is
+    // `printColumn` in all of them. Framed on `runtime` and honestly filtered,
+    // 68 names disappear from four views out of five.
+    //
+    // So the default scope for an unowned byte is **the address space** — a fact
+    // about the machine this program runs on, true in every arrangement of it.
+    // The target frame is for a claim that really is about one arrangement, it
+    // is honoured on the way in and filtered on the way out, and nothing emits
+    // one by default. Which writes should be able to ask for one is open; see
+    // `docs/model.md`.
+    undefined
   );
 }
 

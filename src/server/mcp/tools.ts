@@ -212,11 +212,12 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
                   .string()
                   .optional()
                   .describe(
-                    "Which view to answer for, from list_targets. **There is no " +
-                      "default**: a project with more than one view refuses a call " +
-                      "that names none and lists them, because the bytes at an " +
-                      "address differ between them. Where there is only one there " +
-                      "is nothing to say. The answer reports the view it used."
+                    "Which view to answer for, from list_targets — its id, or its " +
+                      "name if that is unique. **There is no default**: a project " +
+                      "with more than one view refuses a call that names none and " +
+                      "lists them, because the bytes at an address differ between " +
+                      "them. Where there is only one there is nothing to say. The " +
+                      "answer reports the view it used."
                   ),
               }),
         }),
@@ -2085,10 +2086,11 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
 
   tool(
     "list_targets",
-    "The named views this project has over its layer stack, which is selected, " +
-      "and every layer with the id a target is defined in terms of — including " +
-      "layers the current selection hides, since that is how you find the view " +
-      "that shows them.",
+    "The named views this project has over its layer stack, each with the **id** " +
+      "that a claim frame and every other reference stores — a name is an alias " +
+      "you may pass instead, and is resolved here rather than kept. Reports every " +
+      "layer with the id a target is defined in terms of, including layers a view " +
+      "hides, since that is how you find the one that shows them.",
     { project },
     ({ project: id }: { project?: string; }) => context().workspace(id).targets()
   );

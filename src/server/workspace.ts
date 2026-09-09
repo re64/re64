@@ -469,12 +469,14 @@ export class Workspace {
    * is no case here where this has to guess which stack was read.
    */
   targetName(): string | undefined {
-    if (this.room.target !== undefined) return this.room.target;
-    const declared = this.document().targets ?? [];
-    if (declared.length === 1) return declared[0].name;
-    // None declared: the loader implies one named after the project, and that
-    // is the view every answer here was computed for.
-    return declared.length === 0 ? (this.document().name ?? "project") : undefined;
+    // What the loader actually chose, resolved from whatever the caller wrote —
+    // an id or a name. Reported as the *name*, because this is for a reader, and
+    // reported at all so a caller learns which view answered.
+    const chosen = this.program().loaded.selectedTarget;
+    if (chosen) return chosen.name;
+    // None declared: the loader implies one over the whole stack, named after
+    // the project, and that is the view every answer here was computed for.
+    return this.document().name ?? "project";
   }
 
   /** The analysed program, rebuilt only when something it depends on moved. */
@@ -992,6 +994,8 @@ export class Workspace {
   targets(): {
     total: number;
     targets: {
+      /** The id, which is what a claim frame and every other reference stores. */
+      id?: string;
       name: string;
       /** The linked layers, bottom-up: the last one shadows the ones before. */
       layers: { id: string; layer: string; name?: string; at?: string }[];
@@ -1016,6 +1020,7 @@ export class Workspace {
             (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER)
         )
         .map((t) => ({
+          ...(t.id === undefined ? {} : { id: t.id }),
           name: t.name,
           // Links rather than a list of ids, in z-order, with `at` present only
           // where this target puts a layer somewhere other than its own
@@ -4400,7 +4405,7 @@ export class Workspace {
       view?: string;
       typeId?: string;
       root?: string;
-      /** `layer:<id>`, `target:<name>` or `machine` — what this claim belongs to. */
+      /** `layer:<id>`, `target:<id>` or `machine` — what this claim belongs to. */
       scope: string;
       /** Everyone who vouched for it, and how they know. */
       by?: { author: string; method?: string }[];
@@ -5922,7 +5927,7 @@ export interface LabelSummary {
   name: string;
   type: LabelType;
   source: string;
-  /** `layer:<id>`, `target:<name>` or `machine` — what this name belongs to. */
+  /** `layer:<id>`, `target:<id>` or `machine` — what this name belongs to. */
   scope: string;
   references: number;
   writable: boolean;
@@ -5966,7 +5971,7 @@ export interface EditResult {
    */
   claims?: { at: string; claim: string }[];
   /**
-   * What the claims this edit made belong to: `layer:<id>`, `target:<name>`, or
+   * What the claims this edit made belong to: `layer:<id>`, `target:<id>`, or
    * `machine`.
    *
    * Derived, never chosen — the topmost layer supplying the byte, else the
