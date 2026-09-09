@@ -1856,7 +1856,10 @@ export class Workspace {
     const found: { address: string; inRegion?: string; inRoutine?: string }[] = [];
     let total = 0;
 
-    for (const layer of map.getLayers().filter((l) => l.hasBytes)) {
+    // Not the ROMs: a byte pattern found inside Commodore's code is not a
+    // finding about this program, and a reader who searched for `A9 00` does
+    // not want the KERNAL's.
+    for (const layer of map.readableLayers()) {
       for (let at = layer.start; at + wanted.length <= layer.end + 1; at++) {
         let hit = true;
         for (let i = 0; i < wanted.length && hit; i++) {
@@ -3649,7 +3652,9 @@ export class Workspace {
     const spans: { start: string; end: string; bytes: number; inLayer: string }[] = [];
     let unexplainedBytes = 0;
 
-    for (const layer of loaded.map.getLayers().filter((l) => l.hasBytes)) {
+    // Reference layers are not this project's to explain. Linking the KERNAL
+    // must not make a finished project report sixteen kilobytes of gap.
+    for (const layer of loaded.map.readableLayers()) {
       let run: number | undefined;
 
       const close = (at: number): void => {

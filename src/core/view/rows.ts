@@ -292,7 +292,7 @@ export function analyze(
   // ROM answers questions about what a program reads out of it, and belongs in
   // nobody's listing. So the rendered range comes from the layers that supply
   // bytes somebody actually asked to read.
-  const byteLayers = map.getLayers().filter((l) => l.hasBytes && !l.reference);
+  const byteLayers = map.readableLayers();
   const rangeStart = byteLayers.length ? Math.min(...byteLayers.map((l) => l.start)) : 0;
   const rangeEnd = byteLayers.length ? Math.max(...byteLayers.map((l) => l.end)) : 0;
 

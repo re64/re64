@@ -36,6 +36,26 @@ export class MemoryMap {
     return this.layers;
   }
 
+  /**
+   * The layers whose bytes are the *subject*, rather than bytes to resolve
+   * through.
+   *
+   * A machine ROM is linked so that its names and its contents answer
+   * questions — what `$FFD2` is, what `JSR $E09B` returns — and its sixteen
+   * kilobytes are nobody's disassembly. `Layer.reference` has said so since ROM
+   * layers existed, and exactly one reader honoured it: the row builder. Every
+   * sweep over "all the bytes" filtered on `hasBytes` alone, so a project that
+   * linked the KERNAL and BASIC gained ~16KB of coverage it would never explain
+   * and `find_bytes` began matching inside Commodore's code.
+   *
+   * So the rule lives here and the two questions are spelled differently:
+   * `getLayers` is every layer, which is what a *map* is; this is every layer
+   * this project is about.
+   */
+  readableLayers(): readonly Layer[] {
+    return this.layers.filter((l) => l.hasBytes && !l.reference);
+  }
+
   getLayerCount(): number {
     return this.layers.length;
   }

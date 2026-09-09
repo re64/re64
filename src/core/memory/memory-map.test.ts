@@ -293,3 +293,35 @@ describe("MemoryMap", () => {
     });
   });
 });
+
+describe("bytes to read, and bytes to resolve through", () => {
+  /**
+   * **`reference` had one reader and needed four.**
+   *
+   * A machine ROM is linked so its names and contents answer questions, and its
+   * sixteen kilobytes are nobody's disassembly. `Layer.reference` said so from
+   * the day ROM layers existed, and only the row builder honoured it: every
+   * sweep over "all the bytes" filtered on `hasBytes` alone. So linking the
+   * KERNAL and BASIC added ~16KB of coverage a project would never explain, and
+   * `find_bytes` started matching inside Commodore's code — which is what made
+   * ROMs feel expensive to link and kept them opt-in by hand.
+   *
+   * The rule lives on the map now, and the two questions are spelled
+   * differently: `getLayers` is every layer, because that is what a map is;
+   * `readableLayers` is every layer this project is about.
+   */
+  it("leaves a reference layer out of what the project is about, and in the map", () => {
+    const map = new MemoryMap();
+    const program = new BytesLayer("program", 0x0801, new Uint8Array([0xa9, 0x00]));
+    const rom = new BytesLayer("kernal", 0xe000, new Uint8Array([0x78, 0x6c]), undefined, "lay_rom", true);
+    map.addLayer(program);
+    map.addLayer(rom);
+
+    expect(map.getLayers()).toHaveLength(2);
+    expect(map.readableLayers().map((l) => l.name)).toEqual(["program"]);
+
+    // And it still supplies its bytes: a reference layer is read *through*, not
+    // ignored. Resolving `JSR $E000` is the whole reason it is linked.
+    expect(map.readByte(0xe000)).toBe(0x78);
+  });
+});
