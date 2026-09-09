@@ -2111,7 +2111,7 @@ describe("evidence, and saying things about a claim", () => {
     };
     expect(about.evidence.some((e) => e.kind === "refutes" && e.other === old)).toBe(true);
 
-    // Both readings are still there to be read: withdrawing is not deleting.
+    // Both readings are still there to be read: refuting is not deleting.
     const still = (await callTool("claims_at", { address: "$8F10" })).value as {
       claims: { id?: string }[];
     };
@@ -2124,6 +2124,77 @@ describe("evidence, and saying things about a claim", () => {
       findings: { kind: string; what: string }[];
     };
     expect(open.findings.some((f) => f.kind === "declared")).toBe(true);
+  });
+
+  it("retires a settled reading out of the working set, and puts it back", async () => {
+    // **Refuting was not enough, and this is the test that says why.** The test
+    // above ends with both readings in `claims_at` and a declared disagreement
+    // standing — correct while the matter is open, and clutter once it is not.
+    // A reader arriving later meets the contradiction with nothing marking which
+    // half is live, and making refutation itself hide its target would be worse:
+    // `disagreements()` reports contradiction and never picks a winner.
+    const first = await callTool("add_claim", { address: "$8F40", name: "waveTable", method: "guessed" });
+    const second = await callTool("add_claim", { address: "$8F40", name: "zoneTable", method: "ran" });
+    const old = (first.value as { claims: { claim: string }[] }).claims[0].claim;
+    const now = (second.value as { claims: { claim: string }[] }).claims[0].claim;
+
+    const out = await callTool("retire_claim", {
+      id: old,
+      other: now,
+      note: "the trace shows this read as zones, never as waveforms",
+    });
+    expect(out.isError, out.text).toBe(false);
+
+    // Gone from everything that reads the document — one filter in the loader,
+    // so this holds for the listing and hygiene too rather than for the three
+    // surfaces somebody remembered.
+    const here = (await callTool("claims_at", { address: "$8F40" })).value as {
+      claims: { id?: string }[];
+    };
+    expect(here.claims.some((c) => c.id === old)).toBe(false);
+    expect(here.claims.some((c) => c.id === now)).toBe(true);
+
+    const listed = (await callTool("list_claims", { namePattern: "waveTable" })).value as {
+      labels: unknown[];
+    };
+    expect(listed.labels).toHaveLength(0);
+
+    // And kept, with what took it out — which is the whole difference from
+    // remove_claim, whose record lives only in the operations log.
+    const shelved = (await callTool("list_retired", {})).value as {
+      total: number;
+      claims: { id: string; name?: string; by: { note?: string; other?: string }[] }[];
+    };
+    const mine = shelved.claims.find((c) => c.id === old);
+    expect(mine?.name).toBe("waveTable");
+    expect(mine?.by[0].other).toBe(now);
+    expect(mine?.by[0].note).toContain("never as waveforms");
+
+    // Said out loud rather than left to be inferred from a document that looks
+    // tidier than it is.
+    const project = (await callTool("describe_project", {})).value as { retired?: number };
+    expect(project.retired).toBeGreaterThanOrEqual(1);
+
+    // Restoring is removing what retired it. Nothing about the claim changed,
+    // so there is nothing to restore *to* — which is why retirement is derived
+    // from the evidence rather than stored as a flag on the claim.
+    const back = await callTool("restore_claim", { id: old });
+    expect(back.isError, back.text).toBe(false);
+    const again = (await callTool("claims_at", { address: "$8F40" })).value as {
+      claims: { id?: string; name?: string }[];
+    };
+    expect(again.claims.find((c) => c.id === old)?.name).toBe("waveTable");
+  });
+
+  it("refuses to retire without a reason a later reader can follow", async () => {
+    // Same rule refutation follows, and it matters more here: this one takes
+    // the claim out of sight.
+    const made = await callTool("add_claim", { address: "$8F50", name: "Unexplained" });
+    const claim = (made.value as { claims: { claim: string }[] }).claims[0].claim;
+
+    const refused = await callTool("retire_claim", { id: claim });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/reason/);
   });
 
   it("says how a claim was reached, so agreement can be told from repetition", async () => {

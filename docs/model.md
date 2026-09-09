@@ -322,13 +322,63 @@ are `supports` or `refutes`, and the one facing exactly the case `supersedes`
 was designed for — an earlier framing of some bytes as cut music, replaced —
 wrote *"Refutes the earlier framing of this as new/cut music."*
 
-**Both remaining kinds are read.** `refutes` reports a declared disagreement;
-`supports` backs a claim, and two of them by different authors with different
-methods is an independent confirmation. The switch is exhaustive with a `never`
-default, because for a long time only `refutes` was read at all.
+**Every kind is read.** `refutes` reports a declared disagreement; `supports`
+backs a claim, and two of them by different authors with different methods is an
+independent confirmation. The switch is exhaustive with a `never` default,
+because for a long time only `refutes` was read at all.
 
 Strength lives in `method` and in whether a scenario is attached, never in the
 verb.
+
+### Retiring
+
+**Refuting did not solve the problem it looked like it solved.** A refuted claim
+still renders, still competes for the name at its address, still appears in
+`claims_at` — so a reader arriving later meets the contradiction with nothing
+marking which half is live. The document accumulates settled arguments in the
+working set, and the more careful the project the worse it gets.
+
+The fix is *not* to make refutation hide its target. `disagreements()` reports
+contradiction and never picks a winner, and one writer refuting another's
+reading is precisely the case where nobody has won yet. So retiring is a
+separate act, and `retires` is the third evidence kind.
+
+| | says | the claim |
+|---|---|---|
+| `refutes` | this is wrong, and here is what shows it | stands, and is reported |
+| `retires` | this is out | leaves the working set, stays in the document |
+
+**A claim is retired when a live `retires` record names it** — derived on every
+read, never stored, so there is no flag to keep in sync and restoring is
+removing the record. `retire_claim` and `restore_claim` are conveniences over
+`evidence.add` and `evidence.remove`; retirement needed no operation of its own,
+which is the test that the shape is right.
+
+**Filtered in one place**: `loader.ts`, where `ProjectClaim[]` becomes `Claim[]`
+for a target. Rendering, naming, hygiene and `disagreements` all read that list,
+so none of them needs to know retirement exists — the alternative is nine
+filters, eight of which are correct.
+
+**Anyone may retire anything.** It was nearly called `withdraws`, which is wrong
+for a reason worth keeping: only a claim's author can withdraw it, and the case
+this exists for is the second reader clearing up after the first.
+
+**Retiring is not deleting, and deleting is not destroying.** A retired claim is
+still in the file, with its evidence, so it exports and `list_retired` shows it
+with what took it out. A *removed* claim is out of the document and lives in the
+operations log, where `claim.remove`'s inverse carries the whole of it — the
+right answer for a claim entered by mistake, the wrong one for a reading
+somebody honestly held.
+
+**And it is counted.** `describe_project` reports how many claims are retired,
+because hiding something is itself a confident answer and a document that looks
+tidier than it is has told the reader something false.
+
+**This is not `supersedes` returning.** That one stored an *ordering* between two
+claims, which a merge cannot supply. `retires` is a unary predicate on one
+claim: two peers retiring the same claim while apart converge on two records that
+agree, and a retirement names no chain it has to stay consistent with. It may
+carry `other` to point at what replaced it, and nothing reads that as a rank.
 
 ### Evidence, field by field
 
@@ -339,17 +389,18 @@ id  claim  kind  author  method  when  scenario  capture  other  note
 | field | present | effect |
 |---|---|---|
 | `claim` | **always** | what it is about — a *claim*, never an address |
-| `kind` | **always** | `supports` \| `refutes` |
+| `kind` | **always** | `supports` \| `refutes` \| `retires` |
 | `author` | on anything a person or agent wrote | reported by `claims_at`; **the corroboration reading** |
 | `method` | optional | `guessed \| transcribed \| read \| derived \| ran` |
 | `when` | optional | informational |
 | `scenario` | optional | **the strongest form**: it re-runs |
 | `capture` | optional | so the check can be read without re-running |
-| `other` | optional | another claim, for a refutation that names one |
+| `other` | optional | another claim: what a refutation contradicts, or what replaced a retired one |
 | `note` | optional | prose |
 
-**One rule is enforced at the write**, and it is the only one: a `refutes` with
-neither `other` nor `note` is refused — an opinion with no handle on it.
+**Two rules are enforced at the write**, and they are the same rule: a `refutes`
+with neither `other` nor `note` is refused, and so is a retirement — an opinion
+with no handle on it, and the second one takes a claim out of sight.
 
 **Strongest to weakest**, which is worth stating because the model does not rank
 them and a reader has to:

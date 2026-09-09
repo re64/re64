@@ -32,6 +32,7 @@ import {
   projectLabelsToLabels,
   projectRegionsToRegions,
   projectClaims,
+  retiredClaimIds,
   ProjectType,
   targetLinks,
 } from "./project.js";
@@ -429,7 +430,17 @@ export function buildMemoryMap(
   // in this view at all, which is the same rule that makes annotations follow
   // linking, said once rather than in each consumer.
   const layerStart = new Map(layers.map((l) => [l.id, l.start] as const));
+  //
+  // **Retired claims are filtered here, and only here.** A claim somebody has
+  // taken out of the working set must not render, must not compete for the name
+  // at its address and must not be reported as a disagreement — and every one of
+  // those reads through this list. Filtering once at the one place stored form
+  // becomes domain form is what keeps it from being nine filters, eight of which
+  // are right. `loaded.project` still carries the claim and its evidence, which
+  // is where review reads them from.
+  const retired = retiredClaimIds(project.evidence);
   const claims = projectClaims(project.claims).flatMap((claim) => {
+    if (retired.has(claim.id)) return [];
     const at = resolveAt(claim.at, claim.frame, (id) => layerStart.get(id));
     return at === undefined ? [] : [at === claim.at ? claim : { ...claim, at }];
   });

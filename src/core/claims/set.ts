@@ -304,6 +304,14 @@ export function disagreements(
       case "supports":
         break;
 
+      // The claim is not in the set at all — the loader drops a retired claim
+      // before anything builds a `ClaimSet` from it — so `byId.get` above has
+      // already `continue`d past this. The case is here because the `never`
+      // below is what makes "every kind is decided" true, and "decided
+      // elsewhere" is a decision that has to be written down somewhere.
+      case "retires":
+        break;
+
       default: {
         const unhandled: never = kind;
         throw new Error(`unhandled evidence kind: ${String(unhandled)}`);

@@ -63,6 +63,7 @@ import {
   newId,
   makeFileLoader,
   claimById,
+  retiredClaimIds,
   placed,
   markFunctionOps,
   parseProject,
@@ -571,6 +572,15 @@ export class Workspace {
     };
     warnings: number;
     /**
+     * How many claims have been retired, when any have.
+     *
+     * Reported because hiding something is itself a confident answer, and this
+     * project's oldest rule is that a confident answer is worse than a gap. A
+     * reader who cannot see that thirty readings were taken out of the way has
+     * been told the document is tidier than it is; `list_retired` says which.
+     */
+    retired?: number;
+    /**
      * What is wrong with the annotations, as opposed to with the program.
      *
      * Present only when there is something: zero is the resting state, which is
@@ -651,6 +661,9 @@ export class Workspace {
         namedByPlatform: supplied.length,
       },
       warnings: program.warnings.length,
+      ...(retiredClaimIds(loaded.project.evidence).size
+        ? { retired: retiredClaimIds(loaded.project.evidence).size }
+        : {}),
       ...(program.hygiene.length ? { hygiene: [...program.hygiene] } : {}),
       // Said rather than left to be inferred from a layer that supplies nothing:
       // every answer that would have used those bytes is short by an unknown
@@ -2000,6 +2013,14 @@ export class Workspace {
   ): EditResult & { evidence: string } {
     const loaded = this.program().loaded;
     if (!claimById(loaded, claim)) {
+      // Retired rather than absent is a different fact and worth saying, or a
+      // caller reads "no such claim" about one they can see in list_claims.
+      if ((loaded.project.claims ?? []).some((c) => c.id === claim)) {
+        throw new Error(
+          `Claim ${claim} is retired, so nothing more is said about it. ` +
+            `restore_claim puts it back first.`
+        );
+      }
       throw new Error(`No claim ${claim}. claims_at reports what covers an address, with ids.`);
     }
     if (about.other !== undefined && !claimById(loaded, about.other)) {
@@ -3851,6 +3872,117 @@ export class Workspace {
         ...methodOps(merged as ClaimEdit & { method?: ClaimMethod | null }),
       ];
     });
+  }
+
+  /**
+   * The claims somebody took out of the working set, and what took each out.
+   *
+   * The review mode retirement is only honest with. Everything else reads the
+   * loaded claims, which no longer hold these — so without one place that reads
+   * past the filter, retiring would be indistinguishable from deleting, and the
+   * whole argument for keeping the claim in the document would be theoretical.
+   */
+  retired(): {
+    total: number;
+    claims: {
+      id: string;
+      at: string;
+      name?: string;
+      is?: string;
+      description?: string;
+      by: { evidence: string; author?: string; when?: number; other?: string; note?: string }[];
+    }[];
+  } {
+    const project = this.program().loaded.project;
+    const evidence = project.evidence ?? [];
+    const out = (project.claims ?? [])
+      .filter((c) => c.id !== undefined && evidence.some((e) => e.claim === c.id && e.kind === "retires"))
+      .map((c) => ({
+        id: c.id!,
+        at: hex4(parseProjectAddress(c.at)),
+        ...(c.name === undefined ? {} : { name: c.name }),
+        ...(c.is === undefined ? {} : { is: c.is }),
+        ...(c.description === undefined ? {} : { description: c.description }),
+        by: evidence
+          .filter((e) => e.claim === c.id && e.kind === "retires")
+          .map((e) => ({
+            evidence: e.id ?? "",
+            ...(e.author === undefined ? {} : { author: e.author }),
+            ...(e.when === undefined ? {} : { when: e.when }),
+            ...(e.other === undefined ? {} : { other: e.other }),
+            ...(e.note === undefined ? {} : { note: e.note }),
+          })),
+      }));
+    return { total: out.length, claims: out };
+  }
+
+  /**
+   * Take a claim out of the working set, keeping it and the reason in the document.
+   *
+   * **Not `remove`, and not `refute`.** Removing takes the claim out of the
+   * document — right for one entered by mistake, wrong for a reading somebody
+   * honestly held, because the document then says nothing about what was tried.
+   * Refuting leaves both standing and reported, which is right while the matter
+   * is open and wrong once it is settled: the contradiction stays in front of
+   * every later reader with nothing marking which half is live.
+   *
+   * Anyone may retire anything. It is deliberately not `withdraw`, which only
+   * the author of a claim could do — and the case this exists for is the second
+   * reader clearing up after the first.
+   *
+   * No new operation: a retirement is a piece of evidence, and restoring is
+   * removing it. That it needed no algebra member is the test that the shape is
+   * right, the same test `mergeClaims` had to pass.
+   */
+  retireClaim(
+    caller: Caller,
+    id: string,
+    about: { note?: string; other?: string; scenario?: string; capture?: string }
+  ): EditResult & { evidence: string } {
+    const project = this.program().loaded.project;
+    const stored = (project.claims ?? []).find((c) => c.id === id);
+    if (!stored) {
+      throw new Error(
+        `No claim ${id} in this project. claims_at reports what covers an address, with ids.`
+      );
+    }
+    const already = (project.evidence ?? []).find((e) => e.claim === id && e.kind === "retires");
+    if (already) {
+      throw new Error(
+        `Claim ${id} is already retired, by ${already.id ?? "an evidence record"}. ` +
+          `list_evidence shows what it says.`
+      );
+    }
+    // The same rule refutation follows: a retirement nobody can follow is an
+    // opinion with no handle on it, and this one takes something out of sight.
+    if (about.note === undefined && about.other === undefined) {
+      throw new Error(
+        `Retiring needs a reason a later reader can follow: a note saying why, ` +
+          `or \`other\` naming the claim that replaced it.`
+      );
+    }
+    return this.addEvidence(caller, id, "retires", about);
+  }
+
+  /** Put a retired claim back, by removing what retired it. */
+  restoreClaim(caller: Caller, id: string): EditResult & { removed: number } {
+    const project = this.program().loaded.project;
+    const retiring = (project.evidence ?? []).filter((e) => e.claim === id && e.kind === "retires");
+    if (retiring.length === 0) {
+      const stored = (project.claims ?? []).some((c) => c.id === id);
+      throw new Error(
+        stored
+          ? `Claim ${id} is not retired.`
+          : `No claim ${id} in this project. list_claims shows the ids.`
+      );
+    }
+    // All of them, in one changeset. Two people retiring the same claim while
+    // apart converge on two records that agree, and restoring has to clear the
+    // agreement rather than half of it.
+    const result = this.edit(caller, () =>
+      retiring.map((e) => ({ op: "evidence.remove" as const, id: e.id ?? "" }))
+    );
+    return { ...result, removed: retiring.length };
   }
 
   removeClaim(caller: Caller, id: string): EditResult {

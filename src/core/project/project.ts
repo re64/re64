@@ -621,36 +621,59 @@ export interface ProjectEvidence {
 /**
  * What a piece of evidence does to the claim it names.
  *
- * **Two, and a third was removed rather than fixed.** `supersedes` said "an
- * earlier reading, replaced" — neither support nor refutation — and it was
- * wrong in a way worth recording, because the shape recurs.
+ * **Three, and one of them is not a judgement about the claim but about the
+ * document.** `supports` and `refutes` say whether a reading is right;
+ * `retires` says it is no longer part of the working set.
  *
- * It stored an *ordering*, and an ordering is the one thing a conflict-free
- * merge cannot supply. Two peers offline can each supersede the same claim with
- * a different replacement and the document converges on two parallel
- * supersessions with nothing to break the tie; chains compound it. Every other
- * ordering question here is answered by a single-valued key for exactly this
- * reason.
+ * `retires` exists because refutation did not solve the problem it looked like
+ * it solved. A refuted claim still renders, still competes for the name at its
+ * address, still shows up in `claims_at` — so a reader arriving later meets the
+ * contradiction with no way to tell which half is live. And making refutation
+ * *itself* hide its target would be worse: `disagreements()` reports
+ * contradiction and never picks a winner, and one writer refuting another's
+ * reading is exactly the case where nobody has won yet.
  *
- * And that key already existed. **`primaryLabels` is "which reading is current"**
- * — one entry per address, last writer wins, and read by the renderer, which
- * `supersedes` never was. A second mechanism for one question is how the two
- * drift apart.
+ * So the two acts are separate. Refuting is "this is wrong, and here is why",
+ * and both claims stand and are reported. Retiring is "this is out", and it is
+ * an editorial act somebody takes and signs.
  *
- * The evidence is that nobody wanted it. Of every `add_evidence` call any run
- * has made, all are `supports` or `refutes`, and the one facing the case
- * `supersedes` was designed for — an earlier framing of some bytes as cut music,
- * replaced — wrote *"Refutes the earlier framing of this as new/cut music."*
+ * **Anyone may retire anything.** This was nearly called `withdraws`, and that
+ * is wrong for a reason worth keeping: only the author of a claim can withdraw
+ * it, and the whole point is that a second reader who finds a claim wrong can
+ * take it out of the way without the first one being present.
  *
- * Withdrawing is still not deleting: a reading that was wrong is refuted and
- * both stand, and one that was merely worse is an edit whose history the
- * operations log keeps.
+ * **Retiring is not deleting, and deleting is not destroying.** A retired claim
+ * stays in the document with its evidence and its history, so it exports, and
+ * review can show it and what took it out. A *removed* claim is gone from the
+ * document and lives on in the operations log, where `claim.remove`'s inverse
+ * carries the whole of it — which is the right answer for a claim entered by
+ * mistake, and the wrong one for a reading somebody honestly held.
+ *
+ * **This is not `supersedes` coming back.** That one was removed rather than
+ * fixed: it stored an *ordering* between two claims, and an ordering is the one
+ * thing a conflict-free merge cannot supply — two peers offline could each
+ * supersede the same claim with a different replacement and the document
+ * converged on two parallel supersessions with nothing to break the tie. And
+ * that key already existed: **`primaryLabels` is "which reading is current"**,
+ * one entry per address, last writer wins, and read by the renderer, which
+ * `supersedes` never was. `retires` is a *unary* predicate on one claim. Two
+ * peers retiring the same claim converge on two records that agree, and a
+ * retirement names no order, no chain and no replacement it has to be
+ * consistent with. It may carry `other` to point at what replaced it, but
+ * nothing reads that as a ranking.
+ *
+ * Retirement is **derived, never stored**: a claim is retired when a live
+ * `retires` record names it, and restoring it is removing that record. There is
+ * no flag to keep in sync with the evidence, which is the same rule the rest of
+ * the model follows — nothing resolves at rest.
  */
 export type EvidenceKind =
   /** Backs it up. */
   | "supports"
   /** Says it is wrong, and by what. */
-  | "refutes";
+  | "refutes"
+  /** Takes it out of the working set, keeping it and the reason in the document. */
+  | "retires";
 
 export interface ProjectField {
   /**
@@ -747,6 +770,22 @@ export interface ProjectClaim {
   origin?: ClaimOrigin;
   /** The layer `at` is an offset into, for a claim that follows its bytes. */
   layer?: string;
+}
+
+/**
+ * The claims a live `retires` record names.
+ *
+ * Derived on every read rather than cached, which is affordable because the
+ * evidence root is small and correct because there is then nothing to
+ * invalidate. Restoring a claim is removing the record, and this sees that
+ * immediately with no second place to update.
+ */
+export function retiredClaimIds(
+  evidence: readonly Pick<ProjectEvidence, "claim" | "kind">[] = []
+): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const item of evidence) if (item.kind === "retires") out.add(item.claim);
+  return out;
 }
 
 /**

@@ -1264,3 +1264,75 @@ site by site, writing a mask's meaning into a comment, re-deriving the same
 graph in a throwaway script on each question. Those are what "finished analysis,
 discarded for want of a shape" looks like from the outside, and they are what
 justified `add_type`. A wish is not required and, here, is not to be expected.
+
+---
+
+## Retiring, and why refutation was not enough
+
+**September 2026.** The claims model has one rule about disagreement that
+everything else follows: `disagreements()` reports contradiction and never picks
+a winner. Two readers reading one span differently both stand, and the document
+says so. That rule is right and is not what changed.
+
+What changed is that it left no way to *finish* an argument. A refuted claim
+still renders, still competes for the name at its address, still comes back from
+`claims_at`. So a reader arriving on day thirty meets forty settled arguments
+with nothing marking which half is live, and the more carefully the project has
+been worked the worse the effect — every resolved question is still sitting in
+the working set with its loser attached.
+
+The tempting fix is to make `refutes` hide what it refutes. It is wrong, and
+obviously so once written down: refuting is what one writer does to another
+writer's reading, and hiding on refutation would let either of them unilaterally
+win a live dispute. That is the exact thing the model refuses to do.
+
+So the acts are separated. `refutes` says *this is wrong* and both claims stand.
+`retires` says *this is out*, and is an editorial decision somebody takes and
+signs.
+
+### Three things about the name
+
+**Not `withdraw`.** That was the first name, and it is wrong because only the
+author of a claim can withdraw it — while the case this exists for is the second
+reader clearing up after the first. Anyone may retire anything.
+
+**Not `delete`, and the reason is not that deletion is destructive.** It is not:
+`claim.remove`'s inverse carries the whole claim, the operations log is durable,
+and undo reaches it. Both verbs are kept because they answer different
+questions. Removing is for a claim entered by mistake, which the *document* has
+no reason to remember. Retiring is for a reading somebody honestly held and has
+now settled — the document should remember that, and it does, because the claim
+and the reason stay in the file and export with it.
+
+**Not `supersedes` coming back.** That kind was removed a week earlier for
+storing an *ordering* between two claims, which a conflict-free merge cannot
+supply: two peers offline could each supersede one claim with a different
+replacement and the document converged on two parallel supersessions with
+nothing to break the tie. `retires` is a **unary predicate on one claim**. Two
+peers retiring the same claim converge on two records that agree; a retirement
+names no chain and no replacement it must stay consistent with. It may carry
+`other` to point at what took over, and nothing reads that as a rank.
+
+### The shape
+
+Retirement is **derived**, like everything else here: a claim is retired when a
+live `retires` record names it. No flag on the claim, nothing to keep in sync,
+and restoring is removing the record. `retire_claim` and `restore_claim` are
+conveniences over `evidence.add` and `evidence.remove` — **no new operation**,
+which is the same test `mergeClaims` had to pass and the reason to believe the
+noun was already there.
+
+It is filtered in **one** place, `loader.ts`, where stored claims become domain
+claims for a target. Rendering, naming, hygiene and `disagreements` all read
+that list. The alternative — teaching each surface about retirement — is this
+project's most repeated defect written down in advance.
+
+Two things are refused, both facts about the request rather than judgements
+about the result: retiring with neither a note nor an `other` (an opinion with
+no handle on it, and this one takes a claim out of sight), and retiring a claim
+that is already retired.
+
+And it is **counted**. `describe_project` reports how many claims are retired,
+because hiding is itself a confident answer, and a document that looks tidier
+than it is has told the reader something false. `list_retired` says which, and
+what took each out.

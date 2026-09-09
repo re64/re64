@@ -2293,7 +2293,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   tool(
     "list_evidence",
     "What has been said about a claim: evidence for it, against it, or " +
-      "replacing it. Give a claim id to see just that one. This is where a " +
+      "retiring it. Give a claim id to see just that one. This is where a " +
       "refutation lives that shares no bytes with what it refutes — `$8DF9` " +
       "holding `$3B` refutes a claim about the *glyph* `$3B`, somewhere else " +
       "entirely, which `disagreements` could never find by sweeping addresses.",
@@ -2305,15 +2305,16 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   tool(
     "add_evidence",
     "Say something about a **claim** rather than about an address. " +
-      "`supports` backs it up; `refutes` says it is wrong and by what. " +
-      "it, which is how an earlier reading that led somewhere is kept rather " +
-      "than deleted — the wrong model that led to the right place is worth " +
-      "keeping. Point at a `scenario` and the evidence re-verifies: running it " +
-      "says pass or fail rather than leaving a sentence nobody can check.",
+      "`supports` backs it up; `refutes` says it is wrong and by what, and both " +
+      "claims go on standing so `disagreements` can report the conflict rather " +
+      "than anybody quietly winning it; `retires` takes it out of the working " +
+      "set, for which retire_claim is the tool to reach for. Point at a " +
+      "`scenario` and the evidence re-verifies: running it says pass or fail " +
+      "rather than leaving a sentence nobody can check.",
     {
       project,
       claim: z.string().describe("The claim this is about, from claims_at"),
-      kind: z.enum(["supports", "refutes"]),
+      kind: z.enum(["supports", "refutes", "retires"]),
       scenario: z
         .string()
         .optional()
@@ -2327,7 +2328,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       project?: string;
       target?: string;
       claim: string;
-      kind: "supports" | "refutes";
+      kind: "supports" | "refutes" | "retires";
       scenario?: string;
       capture?: string;
       other?: string;
@@ -2353,7 +2354,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     {
       project,
       id: z.string(),
-      kind: z.enum(["supports", "refutes"]).optional(),
+      kind: z.enum(["supports", "refutes", "retires"]).optional(),
       scenario: z.string().nullable().optional(),
       capture: z.string().nullable().optional(),
       other: z.string().nullable().optional(),
@@ -2364,7 +2365,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       project?: string;
       target?: string;
       id: string;
-      kind?: "supports" | "refutes";
+      kind?: "supports" | "refutes" | "retires";
       scenario?: string | null;
       capture?: string | null;
       other?: string | null;
@@ -2386,7 +2387,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
 
   tool(
     "remove_evidence",
-    "Withdraw a piece of evidence, by id. The claim it was about is untouched.",
+    "Take back a piece of evidence, by id. The claim it was about is untouched " +
+      "— unless it was what retired the claim, in which case restore_claim is the " +
+      "call that says so.",
     { project, id: z.string(), expectVersion: z.string().optional() },
     (args: { project?: string; target?: string; id: string; expectVersion?: string }) => {
       const { workspace, caller } = context();
@@ -2843,12 +2846,83 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
 
 
   tool(
+    "retire_claim",
+    "Take a claim out of the working set, keeping it and the reason in the " +
+      "document. For a reading that is settled: a refutation leaves both claims " +
+      "standing and in front of every later reader, which is right while the " +
+      "matter is open and clutter once it is not. Anyone may retire anything — " +
+      "it is not withdrawing, which only the author could do, and the case this " +
+      "is for is the second reader clearing up after the first. Nothing is lost: " +
+      "the claim, this record and the history stay in the document, list_retired " +
+      "shows them, and restore_claim puts one back. Use remove_claim instead for " +
+      "a claim entered by mistake, which the document has no reason to remember.",
+    {
+      project,
+      id: z.string().min(1).describe("The claim, from claims_at or list_claims"),
+      note: z.string().optional().describe("Why, so a later reader can follow it"),
+      other: z.string().optional().describe("The claim that replaced it, if one did"),
+      scenario: z.string().optional().describe("A scenario that settled it"),
+      capture: z.string().optional().describe("What that run produced, from list_scenarios"),
+      expectVersion: z.string().optional(),
+    },
+    (args: {
+      project?: string;
+      target?: string;
+      id: string;
+      note?: string;
+      other?: string;
+      scenario?: string;
+      capture?: string;
+      expectVersion?: string;
+    }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project, args.target);
+      space.expect(args.expectVersion);
+      return space.retireClaim(caller, args.id, {
+        ...(args.note === undefined ? {} : { note: args.note }),
+        ...(args.other === undefined ? {} : { other: args.other }),
+        ...(args.scenario === undefined ? {} : { scenario: args.scenario }),
+        ...(args.capture === undefined ? {} : { capture: args.capture }),
+      });
+    }
+  );
+
+  tool(
+    "restore_claim",
+    "Put a retired claim back into the working set, by removing what retired " +
+      "it. Everything it said is exactly as it was — retiring changed nothing " +
+      "about the claim itself.",
+    { project, id: z.string().min(1), expectVersion: z.string().optional() },
+    (args: { project?: string; target?: string; id: string; expectVersion?: string }) => {
+      const { workspace, caller } = context();
+      const space = workspace(args.project, args.target);
+      space.expect(args.expectVersion);
+      return space.restoreClaim(caller, args.id);
+    }
+  );
+
+  tool(
+    "list_retired",
+    "The claims somebody took out of the working set, and what took each out. " +
+      "Nothing else shows these — that is what retiring means — so this is the " +
+      "review pass: what was tried, who set it aside, and why. Worth reading " +
+      "before re-deriving something, since a question already answered and " +
+      "retired looks exactly like an open one from the listing.",
+    { project },
+    (args: { project?: string; target?: string }) =>
+      context().workspace(args.project, args.target).retired()
+  );
+
+  tool(
     "remove_claim",
     "Take back a claim, by its id. " +
       "By id and only by id: an address cannot identify a claim, since several " +
       "cover any interesting one — which is what claims_at is for. Removing a " +
       "claim leaves its bytes explained by whatever else covers them, or by " +
-      "nothing, which is an honest answer rather than a gap to be avoided.",
+      "nothing, which is an honest answer rather than a gap to be avoided. " +
+      "This takes the claim out of the *document*; the operations log keeps it " +
+      "and undo brings it back. For a reading somebody honestly held and has " +
+      "now settled, retire_claim keeps it where it can be read.",
     { project, id: z.string().min(1), expectVersion: z.string().optional() },
     (args: { project?: string; target?: string; id: string; expectVersion?: string }) => {
       const { workspace, caller } = context();

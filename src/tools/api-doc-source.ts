@@ -152,11 +152,25 @@ export const SECTIONS: { title: string; blurb: string; tools: string[] }[] = [
     title: "Evidence",
     blurb:
       "Something said about a **claim** rather than about an address. It is where " +
-      "a refutation lives that shares no bytes with what it refutes, where an " +
-      "earlier reading is kept rather than deleted, and where a claim points at " +
-      "a scenario that re-verifies it. Both experiment-0 agents asked for this " +
-      "shape and neither toolchain had it.",
-    tools: ["list_evidence", "add_evidence", "edit_evidence", "remove_evidence"],
+      "a refutation lives that shares no bytes with what it refutes, where a " +
+      "claim points at a scenario that re-verifies it, and where a retirement " +
+      "records who set a reading aside and why. Both experiment-0 agents asked " +
+      "for this shape and neither toolchain had it.\n\n" +
+      "**Refuting and retiring are different acts.** A refutation says a claim " +
+      "is wrong and leaves both standing, because `disagreements` reports " +
+      "contradiction and never picks a winner — which is what you want while the " +
+      "matter is open. Retiring says it is out, and takes it out of everything " +
+      "that reads the document, keeping the claim and the reason where review can " +
+      "find them.",
+    tools: [
+      "list_evidence",
+      "add_evidence",
+      "edit_evidence",
+      "remove_evidence",
+      "retire_claim",
+      "restore_claim",
+      "list_retired",
+    ],
   },
   {
     title: "Building a project",

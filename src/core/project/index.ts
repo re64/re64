@@ -10,6 +10,7 @@ export {
   projectLabelsToLabels,
   projectRegionsToRegions,
   parseProject,
+  retiredClaimIds,
 } from "./project.js";
 export { FileLoader, LoadedProject, buildMemoryMap, projectForTarget } from "./loader.js";
 export { FileBytes, splitD64Path, blobPaths, makeFileLoader } from "./file-source.js";

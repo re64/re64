@@ -90,7 +90,7 @@ what was declined in `rejected`, and fail only when nothing was applicable.
 
 ## The tools
 
-91 tools.
+94 tools.
 
 ### Orienting
 
@@ -391,7 +391,7 @@ Correct a claim, by its id. The way to change what you said rather than say some
 
 #### `remove_claim`
 
-Take back a claim, by its id. By id and only by id: an address cannot identify a claim, since several cover any interesting one — which is what claims_at is for. Removing a claim leaves its bytes explained by whatever else covers them, or by nothing, which is an honest answer rather than a gap to be avoided.
+Take back a claim, by its id. By id and only by id: an address cannot identify a claim, since several cover any interesting one — which is what claims_at is for. Removing a claim leaves its bytes explained by whatever else covers them, or by nothing, which is an honest answer rather than a gap to be avoided. This takes the claim out of the *document*; the operations log keeps it and undo brings it back. For a reading somebody honestly held and has now settled, retire_claim keeps it where it can be read.
 
 | argument | type | | |
 |---|---|---|---|
@@ -780,11 +780,13 @@ Execute the block at an address with values you choose, and see what comes out. 
 
 ### Evidence
 
-Something said about a **claim** rather than about an address. It is where a refutation lives that shares no bytes with what it refutes, where an earlier reading is kept rather than deleted, and where a claim points at a scenario that re-verifies it. Both experiment-0 agents asked for this shape and neither toolchain had it.
+Something said about a **claim** rather than about an address. It is where a refutation lives that shares no bytes with what it refutes, where a claim points at a scenario that re-verifies it, and where a retirement records who set a reading aside and why. Both experiment-0 agents asked for this shape and neither toolchain had it.
+
+**Refuting and retiring are different acts.** A refutation says a claim is wrong and leaves both standing, because `disagreements` reports contradiction and never picks a winner — which is what you want while the matter is open. Retiring says it is out, and takes it out of everything that reads the document, keeping the claim and the reason where review can find them.
 
 #### `list_evidence`
 
-What has been said about a claim: evidence for it, against it, or replacing it. Give a claim id to see just that one. This is where a refutation lives that shares no bytes with what it refutes — `$8DF9` holding `$3B` refutes a claim about the *glyph* `$3B`, somewhere else entirely, which `disagreements` could never find by sweeping addresses.
+What has been said about a claim: evidence for it, against it, or retiring it. Give a claim id to see just that one. This is where a refutation lives that shares no bytes with what it refutes — `$8DF9` holding `$3B` refutes a claim about the *glyph* `$3B`, somewhere else entirely, which `disagreements` could never find by sweeping addresses.
 
 | argument | type | | |
 |---|---|---|---|
@@ -792,12 +794,12 @@ What has been said about a claim: evidence for it, against it, or replacing it. 
 
 #### `add_evidence`
 
-Say something about a **claim** rather than about an address. `supports` backs it up; `refutes` says it is wrong and by what. it, which is how an earlier reading that led somewhere is kept rather than deleted — the wrong model that led to the right place is worth keeping. Point at a `scenario` and the evidence re-verifies: running it says pass or fail rather than leaving a sentence nobody can check.
+Say something about a **claim** rather than about an address. `supports` backs it up; `refutes` says it is wrong and by what, and both claims go on standing so `disagreements` can report the conflict rather than anybody quietly winning it; `retires` takes it out of the working set, for which retire_claim is the tool to reach for. Point at a `scenario` and the evidence re-verifies: running it says pass or fail rather than leaving a sentence nobody can check.
 
 | argument | type | | |
 |---|---|---|---|
 | `claim` | `string` | **required** | The claim this is about, from claims_at |
-| `kind` | `supports` \| `refutes` | **required** |  |
+| `kind` | `supports` \| `refutes` \| `retires` | **required** |  |
 | `scenario` | `string` | optional | A scenario that checks it — the strongest form, because it re-runs |
 | `capture` | `string` | optional | Something a run produced, from list_scenarios |
 | `other` | `string` | optional | Another claim, for a refutation that names it |
@@ -811,7 +813,7 @@ Revise a piece of evidence by id. Omitted fields are left alone; `null` clears o
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** |  |
-| `kind` | `supports` \| `refutes` | optional |  |
+| `kind` | `supports` \| `refutes` \| `retires` | optional |  |
 | `scenario` | `string,null` | optional |  |
 | `capture` | `string,null` | optional |  |
 | `other` | `string,null` | optional |  |
@@ -820,12 +822,38 @@ Revise a piece of evidence by id. Omitted fields are left alone; `null` clears o
 
 #### `remove_evidence`
 
-Withdraw a piece of evidence, by id. The claim it was about is untouched.
+Take back a piece of evidence, by id. The claim it was about is untouched — unless it was what retired the claim, in which case restore_claim is the call that says so.
 
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** |  |
 | `expectVersion` | `string` | optional |  |
+
+#### `retire_claim`
+
+Take a claim out of the working set, keeping it and the reason in the document. For a reading that is settled: a refutation leaves both claims standing and in front of every later reader, which is right while the matter is open and clutter once it is not. Anyone may retire anything — it is not withdrawing, which only the author could do, and the case this is for is the second reader clearing up after the first. Nothing is lost: the claim, this record and the history stay in the document, list_retired shows them, and restore_claim puts one back. Use remove_claim instead for a claim entered by mistake, which the document has no reason to remember.
+
+| argument | type | | |
+|---|---|---|---|
+| `id` | `string` | **required** | The claim, from claims_at or list_claims |
+| `note` | `string` | optional | Why, so a later reader can follow it |
+| `other` | `string` | optional | The claim that replaced it, if one did |
+| `scenario` | `string` | optional | A scenario that settled it |
+| `capture` | `string` | optional | What that run produced, from list_scenarios |
+| `expectVersion` | `string` | optional |  |
+
+#### `restore_claim`
+
+Put a retired claim back into the working set, by removing what retired it. Everything it said is exactly as it was — retiring changed nothing about the claim itself.
+
+| argument | type | | |
+|---|---|---|---|
+| `id` | `string` | **required** |  |
+| `expectVersion` | `string` | optional |  |
+
+#### `list_retired`
+
+The claims somebody took out of the working set, and what took each out. Nothing else shows these — that is what retiring means — so this is the review pass: what was tried, who set it aside, and why. Worth reading before re-deriving something, since a question already answered and retired looks exactly like an open one from the listing.
 
 ---
 

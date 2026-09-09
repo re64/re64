@@ -89,8 +89,13 @@ const INSTRUCTIONS = [
   "**Evidence is said about a claim, not about an address**, and it is how a " +
     "finding stops being a sentence somebody has to trust. add_evidence with " +
     "`supports` backs a claim; with `refutes` says it is wrong and by what — " +
-    "and both claims stay, because the reading that led somewhere is worth " +
-    "keeping. **Point at a `scenario` and the evidence re-verifies**: running " +
+    "and both claims stay, because a contradiction is reported here, never " +
+    "resolved for you. **When it is settled, retire_claim** takes the losing " +
+    "reading out of the working set: it stops rendering, stops competing for " +
+    "the name and stops being reported, while the claim, your reason and the " +
+    "history stay in the document for list_retired to show and restore_claim " +
+    "to undo. Anyone may retire anything — it is not withdrawing, and it is not " +
+    "deleting. **Point at a `scenario` and the evidence re-verifies**: running " +
     "it says pass or fail, where a note only says what you believed. That is " +
     "the strongest thing you can leave, and it is almost never done — three " +
     "such calls exist in this project's whole history. " +
@@ -113,7 +118,8 @@ const INSTRUCTIONS = [
     "themselves, and zero is the resting state. " +
     "To settle one: bind_primary_name chooses which of several claims at an " +
     "address gives the name that renders; add_evidence refutes says one is " +
-    "wrong and why; edit_claim revises your own. **Prefer deciding in the open " +
+    "wrong and why; retire_claim takes a settled-and-wrong one out of the way; " +
+    "edit_claim revises your own. **Prefer deciding in the open " +
     "to overwriting quietly** — a reader who meets a correction learns more " +
     "than one who meets a tidy page.",
 
