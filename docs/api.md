@@ -755,15 +755,15 @@ What has been said about a claim: evidence for it, against it, or replacing it. 
 
 #### `add_evidence`
 
-Say something about a **claim** rather than about an address. `supports` backs it up; `refutes` says it is wrong; `supersedes` replaces it, which is how an earlier reading that led somewhere is kept rather than deleted — the wrong model that led to the right place is worth keeping. Point at a `scenario` and the evidence re-verifies: running it says pass or fail rather than leaving a sentence nobody can check.
+Say something about a **claim** rather than about an address. `supports` backs it up; `refutes` says it is wrong and by what. it, which is how an earlier reading that led somewhere is kept rather than deleted — the wrong model that led to the right place is worth keeping. Point at a `scenario` and the evidence re-verifies: running it says pass or fail rather than leaving a sentence nobody can check.
 
 | argument | type | | |
 |---|---|---|---|
 | `claim` | `string` | **required** | The claim this is about, from claims_at |
-| `kind` | `supports` \| `refutes` \| `supersedes` | **required** |  |
+| `kind` | `supports` \| `refutes` | **required** |  |
 | `scenario` | `string` | optional | A scenario that checks it — the strongest form, because it re-runs |
 | `capture` | `string` | optional | Something a run produced, from list_scenarios |
-| `other` | `string` | optional | Another claim, for refutes and supersedes |
+| `other` | `string` | optional | Another claim, for a refutation that names it |
 | `note` | `string` | optional | Why, for the part no reference carries |
 | `expectVersion` | `string` | optional |  |
 
@@ -774,7 +774,7 @@ Revise a piece of evidence by id. Omitted fields are left alone; `null` clears o
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** |  |
-| `kind` | `supports` \| `refutes` \| `supersedes` | optional |  |
+| `kind` | `supports` \| `refutes` | optional |  |
 | `scenario` | `string,null` | optional |  |
 | `capture` | `string,null` | optional |  |
 | `other` | `string,null` | optional |  |

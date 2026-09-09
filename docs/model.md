@@ -241,18 +241,35 @@ four supporting records**, each keeping its author and method, and "do these
 accounts differ" is finally computable rather than a thing `method` could only
 hint at.
 
-There is no fourth verb for "created it". An `asserts` kind was considered and
-rejected: it would distinguish only *arrival order*, which the log already
-records, and it breaks under parallel collaboration — two agents independently
-creating the same claim both assert it, and merging would mean rewriting one
-into a support to preserve a fact that carries no information. Strength lives in
-`method` and in whether a scenario is attached, never in the verb.
+**Two verbs, and two more were rejected.** An `asserts` kind for "created it"
+would distinguish only *arrival order*, which the log already records, and it
+breaks under parallel collaboration — two agents independently creating one
+claim both assert it, and merging would mean rewriting one into a support to
+preserve a fact that carries no information.
 
-**All three kinds are read.** `refutes` reports a declared disagreement;
-`supersedes` *settles* the pair it names, so keeping an earlier reading is no
-longer punished with a contradiction that can never be closed; `supports` backs
-a claim. The switch is exhaustive with a `never` default, because for a long
-time only `refutes` was read and the other two reached no consumer at all.
+`supersedes` existed and was removed. It said "an earlier reading, replaced" —
+neither support nor refutation — and it stored an **ordering**, which is the one
+thing a conflict-free merge cannot supply: two peers offline can each supersede
+the same claim with a different replacement, and the document converges on two
+parallel supersessions with nothing to break the tie. Chains compound it. Every
+other ordering question here is answered by a single-valued key, and the key for
+this one already existed: **`primaryLabels` is "which reading is current"**, one
+entry per address, last writer wins, and read by the renderer — which
+`supersedes` never was. A second mechanism for one question is how the two drift
+apart.
+
+Nobody wanted it, either. Of every `add_evidence` call the runs have made, all
+are `supports` or `refutes`, and the one facing exactly the case `supersedes`
+was designed for — an earlier framing of some bytes as cut music, replaced —
+wrote *"Refutes the earlier framing of this as new/cut music."*
+
+**Both remaining kinds are read.** `refutes` reports a declared disagreement;
+`supports` backs a claim, and two of them by different authors with different
+methods is an independent confirmation. The switch is exhaustive with a `never`
+default, because for a long time only `refutes` was read at all.
+
+Strength lives in `method` and in whether a scenario is attached, never in the
+verb.
 
 ---
 

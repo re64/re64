@@ -55,6 +55,6 @@ Two or three agents enrich *and correct* it, and a person reviews. That run is
 the first that can be measured as a **delta** rather than as a fresh start,
 because for the first time there is something to be a delta from — and it is the
 first where agents meet a body of work they are invited to contradict, with
-`refutes` and `supersedes` to say so.
+`refutes` to say so and `primaryLabels` to say which reading should render.
 
 `sources/` holds what was imported and where the authorship came from.

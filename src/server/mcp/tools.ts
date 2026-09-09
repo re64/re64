@@ -2175,7 +2175,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   tool(
     "add_evidence",
     "Say something about a **claim** rather than about an address. " +
-      "`supports` backs it up; `refutes` says it is wrong; `supersedes` replaces " +
+      "`supports` backs it up; `refutes` says it is wrong and by what. " +
       "it, which is how an earlier reading that led somewhere is kept rather " +
       "than deleted — the wrong model that led to the right place is worth " +
       "keeping. Point at a `scenario` and the evidence re-verifies: running it " +
@@ -2183,13 +2183,13 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     {
       project,
       claim: z.string().describe("The claim this is about, from claims_at"),
-      kind: z.enum(["supports", "refutes", "supersedes"]),
+      kind: z.enum(["supports", "refutes"]),
       scenario: z
         .string()
         .optional()
         .describe("A scenario that checks it — the strongest form, because it re-runs"),
       capture: z.string().optional().describe("Something a run produced, from list_scenarios"),
-      other: z.string().optional().describe("Another claim, for refutes and supersedes"),
+      other: z.string().optional().describe("Another claim, for a refutation that names it"),
       note: z.string().optional().describe("Why, for the part no reference carries"),
       expectVersion: z.string().optional(),
     },
@@ -2197,7 +2197,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       project?: string;
       target?: string;
       claim: string;
-      kind: "supports" | "refutes" | "supersedes";
+      kind: "supports" | "refutes";
       scenario?: string;
       capture?: string;
       other?: string;
@@ -2223,7 +2223,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     {
       project,
       id: z.string(),
-      kind: z.enum(["supports", "refutes", "supersedes"]).optional(),
+      kind: z.enum(["supports", "refutes"]).optional(),
       scenario: z.string().nullable().optional(),
       capture: z.string().nullable().optional(),
       other: z.string().nullable().optional(),
@@ -2234,7 +2234,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       project?: string;
       target?: string;
       id: string;
-      kind?: "supports" | "refutes" | "supersedes";
+      kind?: "supports" | "refutes";
       scenario?: string | null;
       capture?: string | null;
       other?: string | null;

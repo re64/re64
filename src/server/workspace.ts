@@ -2011,13 +2011,9 @@ export class Workspace {
     ) {
       throw new Error(`No scenario ${about.scenario}. list_scenarios shows what there is.`);
     }
-    // A refutation or a supersession that names nothing is an opinion with no
-    // handle on it: the whole point is that a reader can follow it.
-    if (
-      (kind === "refutes" || kind === "supersedes") &&
-      about.other === undefined &&
-      about.note === undefined
-    ) {
+    // A refutation that names nothing is an opinion with no handle on it: the
+    // whole point is that a reader can follow it.
+    if (kind === "refutes" && about.other === undefined && about.note === undefined) {
       throw new Error(
         `A ${kind} needs something to point at: another claim (\`other\`), or a note ` +
           `saying why. Otherwise nobody reading it can tell what was wrong.`

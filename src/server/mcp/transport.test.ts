@@ -2023,40 +2023,52 @@ describe("evidence, and saying things about a claim", () => {
     expect(refused.text).toMatch(/point at/);
   });
 
-  it("keeps a superseded reading rather than deleting it", async () => {
+  it("keeps a reading somebody moved on from, rather than deleting it", async () => {
     // "The wrong model that led to the right place is worth keeping, and prose
     // deliverables silently discard it."
+    //
+    // **This used to declare a `supersedes`, and that kind is gone.** It said
+    // "an earlier reading, replaced" — neither support nor refutation — and it
+    // stored an *ordering*, which is the one thing a conflict-free merge cannot
+    // supply: two peers offline can each supersede one claim with a different
+    // replacement and nothing breaks the tie. The single-valued key for "which
+    // reading is current" already existed and is read by the renderer, which
+    // `supersedes` never was.
+    //
+    // The evidence that nobody wanted it: of every add_evidence call the runs
+    // have made, all are supports or refutes — and the one facing exactly this
+    // case wrote "Refutes the earlier framing of this as new/cut music."
     const first = await callTool("add_claim", { at: "$8F10", name: "cipherTable", method: "guessed" });
     const second = await callTool("add_claim", { at: "$8F10", name: "characterSet", method: "ran" });
     const old = (first.value as { claims: { claim: string }[] }).claims[0].claim;
     const now = (second.value as { claims: { claim: string }[] }).claims[0].claim;
 
-    await callTool("add_evidence", {
+    const said = await callTool("add_evidence", {
       claim: now,
-      kind: "supersedes",
+      kind: "refutes",
       other: old,
       note: "the substitution-cipher attack is what led here, and it was wrong",
     });
+    expect(said.isError, said.text).toBe(false);
 
     const about = (await callTool("list_evidence", { claim: now })).value as {
       evidence: { kind: string; other?: string }[];
     };
-    expect(about.evidence.some((e) => e.kind === "supersedes" && e.other === old)).toBe(true);
-    // And the superseded claim is still there to be read.
+    expect(about.evidence.some((e) => e.kind === "refutes" && e.other === old)).toBe(true);
+
+    // Both readings are still there to be read: withdrawing is not deleting.
     const still = (await callTool("claims_at", { at: "$8F10" })).value as {
       claims: { id?: string }[];
     };
     expect(still.claims.some((c) => c.id === old)).toBe(true);
+    expect(still.claims.some((c) => c.id === now)).toBe(true);
 
-    // **And the pair stops being reported as an open contradiction.** Both
-    // claims cover the same bytes and say different things, so the geometric
-    // sweep finds them — until somebody says one replaced the other, which is
-    // what a supersession is. Reading only `refutes` meant keeping the earlier
-    // reading was punished with a disagreement that could never be settled.
+    // And the contradiction is reported rather than resolved, which is the
+    // whole difference between a refutation and a deletion.
     const open = (await callTool("disagreements", {})).value as {
       findings: { kind: string; what: string }[];
     };
-    expect(open.findings.filter((f) => f.what.includes("$8F10"))).toEqual([]);
+    expect(open.findings.some((f) => f.kind === "declared")).toBe(true);
   });
 
   it("says how a claim was reached, so agreement can be told from repetition", async () => {

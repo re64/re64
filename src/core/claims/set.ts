@@ -229,9 +229,6 @@ export const OPERAND_TOLERANCE = 1;
  * 44 interpretation findings down to one, and the one is real: a sprite set and
  * a tune stream disagreeing about six bytes.
  */
-/** Order-independent, so a supersession settles the pair whichever way it is swept. */
-const pairKey = (a: string, b: string) => (a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`);
-
 function refines(a: PlacedClaim, b: PlacedClaim): boolean {
   const aEnd = claimEnd(a);
   const bEnd = claimEnd(b);
@@ -277,15 +274,11 @@ export function disagreements(
   // anything inferred from where the bytes happen to sit.
   //
   // **Every kind is decided here, and the `never` is what makes that true.**
-  // This read `if (item.kind !== "refutes") continue;` — so `supports` and
-  // `supersedes` could be written, validated, stored and round-tripped, and
-  // reached no reader at all. Worse than doing nothing: a superseded claim and
-  // its replacement still overlap and still differ, so the inferred sweep below
-  // reported them as a live contradiction for ever, with the record that
-  // resolves it sitting right here being skipped. Ninth instance of the shape
-  // this repository keeps catching, and the last one that can be added silently.
+  // This read `if (item.kind !== "refutes") continue;`, so `supports` reached no
+  // reader at all — and `supersedes`, which used to be a third member, reached
+  // none either. That one was removed rather than wired up: it stored an
+  // ordering, and an ordering is what a conflict-free merge cannot supply.
   const byId = new Map(set.all().map((c) => [c.id, c]));
-  const resolved = new Set<string>();
   for (const item of declared) {
     const claim = byId.get(item.claim);
     if (!claim) continue;
@@ -304,19 +297,10 @@ export function disagreements(
         });
         break;
 
-      // **Settles the pair rather than reporting it.** A supersession is
-      // somebody saying "this reading replaced that one" — the earlier claim is
-      // kept on purpose, because the wrong model that led to the right place is
-      // worth keeping, and reporting the pair as an open contradiction for ever
-      // would make keeping it a punishment.
-      case "supersedes":
-        if (other) resolved.add(pairKey(claim.id, other.id));
-        break;
-
       // Backing, not conflict. Two of these by different authors reaching a
       // claim different ways is an independent confirmation, which is the fact
-      // this whole shape exists to make sayable — but it is not a disagreement,
-      // and nothing here reports it.
+      // the provenance shape exists to make sayable — but it is not a
+      // disagreement, and nothing here reports it.
       case "supports":
         break;
 
@@ -351,8 +335,7 @@ export function disagreements(
         claim.says &&
         other.says &&
         claim.says.is !== other.says.is &&
-        !refines(claim, other) &&
-        !resolved.has(pairKey(claim.id, other.id))
+        !refines(claim, other)
       ) {
         found.push({ kind: "interpretation", address: from, end: to, claims: [other, claim] });
       }

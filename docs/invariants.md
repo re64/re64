@@ -396,11 +396,13 @@ Nothing failed: a bit record simply became a byte record on the next load, and
 every offset in it silently meant something else.
 The tenth is `EvidenceKind`: `refutes` was read by `disagreements()` and
 `supports` and `supersedes` were read by **nothing**, having been written,
-validated, stored, round-tripped and exposed by two tools. Worse than inert — a
-superseded claim and its replacement still overlap and still differ, so the
-inferred sweep reported them as a live contradiction for ever, with the record
-that resolves it being skipped three lines above. Now a `switch` with a `never`
-default, so the next member cannot be added without deciding what reads it.
+validated, stored, round-tripped and exposed by two tools. Now a `switch` with a
+`never` default, so the next member cannot be added without deciding what reads
+it — and the audit that forced the decision **removed** one rather than wiring
+it up. `supersedes` stored an ordering, which a conflict-free merge cannot
+supply, and duplicated `primaryLabels`, which answers the same question with a
+single-valued key. *The lesson worth keeping: "what reads this" is a question
+whose answer is sometimes "nothing should, and the member is wrong."*
 *Note:* those are the instances that prove the shape is about *hand-written
 lists*, not about new features. The fix is the one that could not go stale: the
 diff now assigns `layer.type` to `LayerAddOp["layerType"]`, so the two

@@ -583,10 +583,11 @@ export interface ProjectCapture {
  * interpretation."* A comment at `$19` cannot say "I already tried `SC` and it
  * is wrong", because the thing being refuted is a reading, not a location.
  *
- * **Withdrawing is not deleting.** `remove_claim` destroys; a claim that was
- * superseded is worth keeping with the reason, because *"the wrong model that
+ * **Withdrawing is not deleting.** `remove_claim` destroys; a claim somebody has
+ * moved on from is worth keeping with the reason, because *"the wrong model that
  * led to the right place is worth keeping, and prose deliverables silently
- * discard it."*
+ * discard it."* A refutation is how that is said — both claims stand, and the
+ * correction is the part with the value.
  */
 export interface ProjectEvidence {
   id?: string;
@@ -611,20 +612,45 @@ export interface ProjectEvidence {
   scenario?: string;
   /** A capture it produced, so the check does not have to be re-run to be read. */
   capture?: string;
-  /** Another claim, for `refutes` and `supersedes`. */
+  /** Another claim, for a refutation that names what it contradicts. */
   other?: string;
   /** Why, in prose, for the part no reference carries. */
   note?: string;
 }
 
-/** What a piece of evidence does to the claim it names. */
+/**
+ * What a piece of evidence does to the claim it names.
+ *
+ * **Two, and a third was removed rather than fixed.** `supersedes` said "an
+ * earlier reading, replaced" — neither support nor refutation — and it was
+ * wrong in a way worth recording, because the shape recurs.
+ *
+ * It stored an *ordering*, and an ordering is the one thing a conflict-free
+ * merge cannot supply. Two peers offline can each supersede the same claim with
+ * a different replacement and the document converges on two parallel
+ * supersessions with nothing to break the tie; chains compound it. Every other
+ * ordering question here is answered by a single-valued key for exactly this
+ * reason.
+ *
+ * And that key already existed. **`primaryLabels` is "which reading is current"**
+ * — one entry per address, last writer wins, and read by the renderer, which
+ * `supersedes` never was. A second mechanism for one question is how the two
+ * drift apart.
+ *
+ * The evidence is that nobody wanted it. Of every `add_evidence` call any run
+ * has made, all are `supports` or `refutes`, and the one facing the case
+ * `supersedes` was designed for — an earlier framing of some bytes as cut music,
+ * replaced — wrote *"Refutes the earlier framing of this as new/cut music."*
+ *
+ * Withdrawing is still not deleting: a reading that was wrong is refuted and
+ * both stand, and one that was merely worse is an edit whose history the
+ * operations log keeps.
+ */
 export type EvidenceKind =
   /** Backs it up. */
   | "supports"
   /** Says it is wrong, and by what. */
-  | "refutes"
-  /** Replaces it: an earlier reading that led somewhere, kept rather than deleted. */
-  | "supersedes";
+  | "refutes";
 
 export interface ProjectField {
   /**
