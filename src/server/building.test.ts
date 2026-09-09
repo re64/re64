@@ -213,6 +213,55 @@ describe("building a project from a disk image", () => {
     expect(() => camels.describe()).toThrow(/named none/);
   });
 
+  it("declares a machine's ROMs without linking whatever this host has", () => {
+    // **The point of declaring rather than loading.** A ROM that arrived because
+    // the developer happened to have gitignored files on disk would make the
+    // same document analyse differently in two places, which is the shape this
+    // project refuses everywhere else. So the *request* goes in the file and the
+    // bytes are whoever-opens-it's problem: `romsMissing` reports the shortfall
+    // and the project still opens, which is what keeps it openable by somebody
+    // who cannot legally be handed a ROM.
+    const made = ws.createProject("withrom", "c64");
+    expect(made.project).toBe("withrom");
+
+    const project = workspaceFor("withrom").space;
+    const declared = project.targets().layers;
+    expect(declared.map((l) => l.type)).toEqual(["rom", "rom", "rom"]);
+    expect(declared.map((l) => l.name)).toEqual(["kernal ROM", "basic ROM", "characters ROM"]);
+
+    // And no target: a project declaring none gets one over its whole stack, so
+    // the ROMs are in it and so is the program layer added next. Declaring a
+    // view is the author's decision, not the constructor's.
+    expect(project.targets().total).toBe(0);
+
+    // The ROMs cost no coverage even when the host has them, which is what makes
+    // declaring them free: `readableLayers` leaves a reference layer out of what
+    // the project is about, so `find_undecoded` reports no gap for them.
+    expect(project.undecoded().unexplainedBytes ?? 0).toBe(0);
+  });
+
+  it("says the ROMs are missing when a run falls into one, not just the address", () => {
+    // The stop rule is "the program counter reached an address no layer
+    // supplies", which on a host without ROM bytes is true of `JSR $FFD2` and
+    // says only `$FFD2`. The project knows what it asked for and did not get.
+    ws.createProject("romless", "c64");
+    const space = upload("romless", "call.prg", new Uint8Array([0x00, 0x08, 0x20, 0xd2, 0xff]));
+    space.addByteLayer(builder, { type: "prg", path: "call.prg", name: "program" });
+
+    const ran = space.runProgram(builder, 0x0801, {}) as { notes?: string[] };
+    const missing = space.describe().romsMissing;
+    if (!missing?.length) return; // this host has the ROMs; the note is not the point
+    expect(ran.notes?.join(" ")).toContain("ROM");
+    expect(ran.notes?.join(" ")).toContain("3party/roms");
+  });
+
+  it("makes an empty project when no platform is named", () => {
+    const made = ws.createProject("bare");
+    expect(made.project).toBe("bare");
+    expect(workspaceFor("bare").space.targets().layers).toEqual([]);
+    expect(made.note).toContain("Empty");
+  });
+
   it("reports what a run wrote, including over bytes the project already had", () => {
     // The report was "ranges no layer supplied", described as usually the
     // output — and for a decruncher, which expands over the packed data in

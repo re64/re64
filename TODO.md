@@ -12,14 +12,14 @@ month was not a todo.
       match inside ROM. `layer.ts` says a reference layer is "left out of the
       rendered range and out of nothing else" — coverage is where *nothing else*
       is wrong. A bug today, and what makes a linked ROM harmless.
-- [ ] **`create_project(name, platform?)`.** `platform: "c64"` declares the three
+- [x] **`create_project(name, platform?)`.** `platform: "c64"` declares the three
       rom layers and a target linking them. A closed set, not a `template`
       string: the noun already exists (`origin: "platform"`,
       `createC64PlatformLayer`, `buildMemoryMap`'s `platform` option) and a
       template parameter has no vocabulary anything can check.
       **Declared, never auto-linked** — the project says the same thing on every
       host and one without the bytes reports `romsMissing`.
-- [ ] **A diagnostic for running without ROMs.** With the ROM linked the emulator
+- [x] **A diagnostic for running without ROMs.** With the ROM linked the emulator
       runs a KERNAL call; without it, it falls into unmapped memory and says so
       in terms of the address rather than of the missing ROM.
 

@@ -875,11 +875,12 @@ From a binary to something disassemblable. Bytes go over HTTP rather than throug
 
 #### `create_project`
 
-Start a project with nothing in it: no layers, no bytes. The first step when you have been handed a binary and no project. Follow it with prepare_upload to put the file in, list_disk_files if it is a .d64, and add_layer to make something disassemblable.
+Start a project. The first step when you have been handed a binary and no project. Follow it with prepare_upload to put the file in, list_disk_files if it is a .d64, and add_layer to make something disassemblable. `platform: "c64"` declares the KERNAL, BASIC and character ROMs so the machine is there to resolve through — what $FFD2 is, what a JSR into $E000 returns, and an emulator that can run a KERNAL call instead of falling into unmapped memory. They are *declared*, not linked from whatever this host happens to have on disk, so the project says the same thing everywhere and one without the bytes reports romsMissing and opens anyway. A ROM is read through rather than read: it costs no listing and no coverage. Omit it for a project that is not a C64 program at all.
 
 | argument | type | | |
 |---|---|---|---|
 | `name` | `string` | **required** |  |
+| `platform` | `c64` | optional | Declare this machine's ROMs. Omitted: nothing but the name. |
 
 #### `prepare_upload`
 

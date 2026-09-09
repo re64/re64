@@ -860,7 +860,7 @@ export class Workspace {
    * the same database rather than going through the room, because the room it
    * would need does not exist yet.
    */
-  createProject(name: string): { project: string; note: string } {
+  createProject(name: string, platform?: "c64"): { project: string; note: string } {
     if (!(this.room.storage instanceof SqliteStorage)) {
       throw new Error("Projects can only be created in a database; this server holds one file.");
     }
@@ -872,15 +872,44 @@ export class Workspace {
       storage.close();
       throw new Error(`A project called "${id}" is already here. list_projects shows them.`);
     }
-    storage.initialize(JSON.stringify({ name, layers: [] }, null, 2), Date.now(), name);
+    // **Declared, never auto-linked.** The machine's ROMs go into the file as a
+    // *request*, exactly as `add_rom_layer` writes one, and the bytes are
+    // fetched by whoever opens it. A host that has none gets `romsMissing` and a
+    // project that still opens; a host that has them gets the same project with
+    // the bytes in it. What must never happen is the reverse — a project that
+    // links ROMs *because this machine happens to have the files*, so the same
+    // document analyses differently in two places with nothing saying so.
+    //
+    // No target, deliberately. A project declaring none gets one over its whole
+    // stack, so the ROMs are linked and so is the program layer added next; the
+    // moment somebody declares a view of their own they are choosing what it
+    // holds, and that is not a decision to make for them at creation.
+    const layers =
+      platform === "c64"
+        ? (["kernal", "basic", "characters"] as const).map((rom) => ({
+            id: newId("lay"),
+            type: "rom" as const,
+            rom,
+            name: `${rom} ROM`,
+          }))
+        : [];
+    storage.initialize(JSON.stringify({ name, layers }, null, 2), Date.now(), name);
     storage.close();
 
     return {
       project: id,
       note:
-        "Empty: no layers and no bytes. prepare_upload puts a binary in, " +
-        "list_disk_files reads a .d64's directory, and add_layer makes a layer " +
-        "over one of them.",
+        platform === "c64"
+          ? "The KERNAL, BASIC and character ROMs are declared, and the C64 " +
+            "symbols and the KERNAL and BASIC effect tables come with every " +
+            "project whether or not the ROM bytes are on this host — a host " +
+            "without them reports romsMissing and the project still opens. " +
+            "Add your own bytes with prepare_upload and add_layer; the ROMs " +
+            "resolve through rather than disassemble, so they cost you no " +
+            "listing and no coverage."
+          : "Empty: no layers and no bytes. prepare_upload puts a binary in, " +
+            "list_disk_files reads a .d64's directory, and add_layer makes a layer " +
+            "over one of them.",
     };
   }
 
@@ -1221,6 +1250,23 @@ export class Workspace {
       notes.push(
         "Ran out of budget rather than finishing, so this is the program " +
           "mid-flight and anything captured from it is a partial result."
+      );
+    }
+    // **A run that fell off into a ROM this host does not have.** The stop rule
+    // is "the program counter reached an address no layer supplies", and a
+    // project that *declared* the KERNAL on a machine without the bytes supplies
+    // exactly nothing at $E000 — so `JSR $FFD2` ends the run and the reason
+    // names the address, which is true and useless. The project already knows
+    // which ROMs it asked for and did not get; say so at the point it costs
+    // something, rather than leaving it in `describe_project` for somebody to
+    // connect afterwards.
+    if (run.reason !== "budget" && program.loaded.romsMissing.length > 0) {
+      const missing = program.loaded.romsMissing;
+      notes.push(
+        `This project declares the ${missing.join(" and ")} ROM(s) and this host ` +
+          `has none of their bytes, so those addresses supply nothing and a call ` +
+          `into one ends the run. 3party/roms/README.md says which files to put ` +
+          `where, with their hashes.`
       );
     }
     if (run.ioTouched.length) {
