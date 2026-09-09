@@ -66,3 +66,12 @@ the log can answer.
 
 `run1/`: the reviewer's `findings.md`, the before and after documents, the
 transcript, and the measurement.
+
+## The scoring key
+
+`scoring-key.md` is computed from the before-state, before the run started. It
+is what the reviewer had to find, so whether each was addressed is checkable in
+the after-state rather than a matter of impression — the first experiment here
+with a partial answer key, which is only possible because there is a baseline.
+
+It is not shown to the reviewer, and nothing in the brief names any of it.
