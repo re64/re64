@@ -542,6 +542,8 @@ regions, undo/redo, import/export. The browser's whole write surface is
 comments, constants, decoders, types, targets, roots, or anything claims-native,
 though all of them are modelled and reachable by an agent.
 
-**`layer.set` does not exist.** A layer cannot be renamed. Reordering is now a
-target edit, so the gap is narrower than it was, but a layer's own fields are
-still immutable after creation.
+**`layer.set` exists in the vocabulary and reaches no tool.** The operation is
+declared, applied and inverted; nothing on the MCP or HTTP surface emits one, so
+a layer still cannot be renamed by anybody using this. That is F1 in its usual
+form and it is the gap, stated the right way round — this file said the
+*operation* did not exist, which was wrong and hid which half was missing.

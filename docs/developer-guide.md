@@ -73,7 +73,10 @@ of moments. Layers cannot express it and stacking two does not help.
 - `says` — what the bytes are: `data`, `text`, `bitmap`, `jumptable`, `record`
 - `extent` — how many bytes it covers; absent means a point
 - `root` — decode from here regardless of what reaches it
-- `by` — who said it, and how it arose
+- `origin` — what kind of thing said it: `user`, `layer`, `platform`, `auto`,
+  `analysis`. **Who** said it, and how they know, lives on the evidence — one
+  finding two readers reached separately is one claim with two accounts, which
+  is what a field on the claim could not hold
 
 Three things about this shape decide almost everything else.
 
@@ -139,7 +142,7 @@ content-addressed blob store; the document holds a reference, so a capture
 travels wherever the project travels.
 
 **Evidence.** Something said about a *claim* rather than about an address:
-`supports`, `refutes` or `supersedes`. See §4b.
+`supports`, `refutes` or `retires`. See §4b.
 
 ---
 
@@ -207,7 +210,7 @@ Beyond the claim, `add_evidence` says something **about** a claim:
 |---|---|
 | `supports` | what backs it — ideally a `scenario`, which re-runs |
 | `refutes` | it is wrong, and by what |
-| `supersedes` | an earlier reading, kept rather than deleted |
+| `retires` | it is out of the working set, and stays in the document with the reason |
 
 Three things this makes expressible that nothing did:
 
