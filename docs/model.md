@@ -92,19 +92,24 @@ claim with an `extent` and an interpretation.
 
 ```ts
 interface Claim {
-  id: string
+  id: string            // the only identity
   at: number            // absolute, always, in the domain
+  origin: ClaimOrigin   // machinery or judgement
   frame?: Frame         // what it belongs to
   extent?: number       // how far it reaches; absent means a point
   name?: string
   says?: Interpretation // what the bytes are
   root?: RootKind       // decode from here
   description?: string  // what a name means on this machine
-  by: Provenance
 }
 ```
 
-At least one of `name`, `says`, `root` must be present.
+**`id`, `at` and `origin` are always present. Everything else is optional**, and
+a write refuses a claim with none of `name`, `is` or `root` — a claim saying
+nothing about an address is not a claim.
+
+Who made it and how they know are **not here**: they belong to an act of
+vouching, so they live on the evidence that names this claim. See §5.
 
 ### The four value types
 
@@ -119,33 +124,53 @@ Interpretation = { is: "data" }
                | { is: "jumptable" }
                | { is: "record"; typeId: string }
 
-RootKind = "entry" | "routine" | "location" | "data"
-
-Provenance = { author: string
-               source: "user" | "layer" | "platform" | "auto" | "analysis"
-               when?: number
-               confidence?: "asserted" | "inferred" | "guess" }
+RootKind    = "entry" | "routine" | "location" | "data"
+ClaimOrigin = "user" | "layer" | "platform" | "auto" | "analysis"
 ```
 
 ### In the file and the API
 
-`says` and `by` are flattened, so what a reader meets is sixteen flat keys:
+`says` is flattened, so what a reader meets is thirteen flat keys:
 
 ```
-id  at  extent  name  is  encoding  view  typeId  root  description
-target  layer  author  source  when  confidence
+id  at  extent  layer  target  name  is  encoding  view  typeId  root
+description  origin
 ```
 
-**Six are conditional on another field's value:**
+**Five are conditional on another field's value:**
 
 | field | meaningful only when |
 |---|---|
 | `encoding` | `is: "text"` |
 | `view` | `is: "text"` or `is: "bitmap"` |
-| `typeId` | `is: "record"` |
+| `typeId` | `is: "record"` — and required there |
 | `layer` | layer-framed |
 | `target` | target-framed |
-| `extent` | means a span with `is`, an array's reach with `name`, a record count with `is: "record"` |
+
+`extent` is not conditional but means three different things: a span with `is`,
+an array's reach with `name`, and a record count with `is: "record"`.
+
+### What actually does something
+
+Worth stating, because the answer is not obvious from the shape and because a
+field nothing reads is this project's most repeated defect:
+
+| field | effect |
+|---|---|
+| `says.is` | picks the row strategy, and drives the `interpretation` disagreement |
+| `says.encoding` / `.view` / `.typeId` | how the bytes render |
+| `extent` + `says` | whether operands render as an offset into it |
+| `root` | seeds the decode; drives the `rootInData` disagreement |
+| `frame` | whether the claim moves when a layer is relinked |
+| `name` | renders; drives the `nameShared` disagreement |
+| `origin` | **name ranking, platform-name hiding, and the hygiene gate** |
+| `description` | informational |
+
+`origin` is the load-bearing one and the reason it stayed on the claim when the
+rest of provenance left: `CLAIM_RANK` in `claims/names.ts` orders names by it,
+`view/rows.ts` hides platform names with it, and hygiene skips generated names
+with it. A seeded Camels project has 383 `platform` names and 472 `auto` ones
+against none by hand, which is the scale that makes the gate matter.
 
 ### Scope
 
@@ -270,6 +295,90 @@ default, because for a long time only `refutes` was read at all.
 
 Strength lives in `method` and in whether a scenario is attached, never in the
 verb.
+
+### Evidence, field by field
+
+```
+id  claim  kind  author  method  when  scenario  capture  other  note
+```
+
+| field | present | effect |
+|---|---|---|
+| `claim` | **always** | what it is about — a *claim*, never an address |
+| `kind` | **always** | `supports` \| `refutes` |
+| `author` | on anything a person or agent wrote | reported by `claims_at`; **the corroboration reading** |
+| `method` | optional | `guessed \| transcribed \| read \| derived \| ran` |
+| `when` | optional | informational |
+| `scenario` | optional | **the strongest form**: it re-runs |
+| `capture` | optional | so the check can be read without re-running |
+| `other` | optional | another claim, for a refutation that names one |
+| `note` | optional | prose |
+
+**One rule is enforced at the write**, and it is the only one: a `refutes` with
+neither `other` nor `note` is refused — an opinion with no handle on it.
+
+**Strongest to weakest**, which is worth stating because the model does not rank
+them and a reader has to:
+
+1. A claim with a `supports` naming a **scenario** — it re-runs, and trusts nobody
+2. Two of those, by different authors, exercising different paths — *not
+   currently expressible; there is nothing that says two checks are independent*
+3. Two accounts agreeing with **different** methods — an agreement you have
+   reason to believe is not correlated
+4. Two agreeing with the **same** method — one account, not two
+5. `method` alone
+
+`method` is a *negative* discriminator and not a strength: its job, from
+experiment 0, is to catch an agreement that is really one account arriving
+twice. Both agents there concluded glyphs `$03`/`$04` were never drawn, both
+were wrong, and they agreed because they shared a blind spot. A confidence
+number cannot see that; a method can.
+
+### What reads a disagreement, and what reads hygiene
+
+Two different questions, and they are answered by different code with different
+rules — which matters, because they overlap on one case and disagree about it.
+
+**`disagreements()`** — `core/claims/set.ts`, knows nothing about any analysis.
+Reported per *overlap*, never per byte: a first version turned one disputed span
+in experiment 7 into 1,832 findings.
+
+| kind | when |
+|---|---|
+| `declared` | somebody wrote a `refutes`. **Need not overlap** — `$8DF9` holding `$3B` refutes a claim about the glyph `$3B`, at a different address entirely |
+| `nameShared` | one name reaching two addresses |
+| `interpretation` | two claims overlap, `says.is` differs, **and neither contains the other** |
+| `rootInData` | a decode root inside somebody's "these are not instructions" |
+
+**`checkHygiene()`** — `core/analysis/hygiene.ts`. About *your annotations*, and
+zero is the resting state. It reads evidence in exactly one place: the
+`label.duplicated` message gathers the **methods across everyone who vouched**
+for each twin, so it can say whether two labels with one name corroborate each
+other or are one account written down twice.
+
+`label.duplicated` · `label.nameShared` · `constant.nameShared` ·
+`annotation.insideInstruction` · `claim.noBytes` · `claim.missingDecoder` ·
+`type.missing` · `type.extentMismatch` · `type.redundantClaim` ·
+`comment.inlineDuplicated` · `claim.interpretationsDiffer`
+
+**`findings()`** — `core/claims/review.ts`, where the claims and the decode graph
+disagree: `codeInClaim`, `unreached`, `unexplained`. Needs both halves, so it is
+kept apart from both of the above.
+
+### The one rule that is stated twice, in opposite senses
+
+`disagreements()` suppresses an `interpretation` finding when one claim contains
+the other — *containment is refinement*. `checkHygiene()` fires
+`claim.interpretationsDiffer` on exactly that case.
+
+Both are defensible and they were written for different questions. Hygiene draws
+the line in its own comment: **an inner claim saying nothing is naming a place
+inside a structure; an inner claim saying something *else* is a disagreement.**
+The forty-two zone names claimed as `text` inside the zone table's `data` span
+are the case it was written for, and the silver image still has them.
+
+It is recorded here rather than resolved, because a curated project will meet
+the seam and should meet it knowing.
 
 ---
 
