@@ -368,6 +368,52 @@ export function applyOp(raw: string, op: Op): string {
     case "type.remove":
       return deleteType(raw, op.id);
 
+    // **A field, by its own id.** Stored inside its record keyed by offset, so
+    // finding it is a search — which is the price of the storage shape and not
+    // of the identity. Moving one rewrites the key, which is the change that
+    // was inexpressible while an offset *was* the identity.
+    case "field.add": {
+      const held = held0(project.types, op.typeId, "type", op.typeId);
+      return upsertType(raw, {
+        ...held,
+        fields: {
+          ...held.fields,
+          [String(op.offset)]: {
+            id: op.id,
+            name: op.name,
+            type: op.type,
+            ...(op.description === undefined ? {} : { description: op.description }),
+          },
+        },
+      });
+    }
+
+    case "field.set": {
+      const held = held0(project.types, op.typeId, "type", op.typeId);
+      const at = Object.keys(held.fields).find((k) => held.fields[k].id === op.id);
+      if (at === undefined) throw new Error(`No field ${op.id} in ${op.typeId}.`);
+      const was = held.fields[at];
+      const next = { ...was };
+      if (op.fields.name !== undefined) next.name = op.fields.name;
+      if (op.fields.type !== undefined) next.type = op.fields.type;
+      if (op.fields.description === null) delete next.description;
+      else if (op.fields.description !== undefined) next.description = op.fields.description;
+
+      const fields = { ...held.fields };
+      delete fields[at];
+      fields[String(op.fields.offset ?? Number(at))] = next;
+      return upsertType(raw, { ...held, fields });
+    }
+
+    case "field.remove": {
+      const held = held0(project.types, op.typeId, "type", op.typeId);
+      const at = Object.keys(held.fields).find((k) => held.fields[k].id === op.id);
+      if (at === undefined) return raw;
+      const fields = { ...held.fields };
+      delete fields[at];
+      return upsertType(raw, { ...held, fields });
+    }
+
     case "scenario.add":
       return upsertScenario(raw, {
         id: op.id,
@@ -752,6 +798,45 @@ export function invertOp(raw: string, op: Op): Op {
             : { size: parseProjectAddress(found.size) }),
           ...(op.fields.fields === undefined ? {} : { fields }),
         },
+      };
+    }
+
+    case "field.add":
+      return { op: "field.remove", id: op.id, typeId: op.typeId };
+
+    case "field.set": {
+      const held = project.types?.find((t) => t.id === op.typeId);
+      const at = held && Object.keys(held.fields).find((k) => held.fields[k].id === op.id);
+      if (!held || at === undefined) return op;
+      const was = held.fields[at];
+      return {
+        op: "field.set",
+        id: op.id,
+        typeId: op.typeId,
+        fields: {
+          ...(op.fields.name === undefined ? {} : { name: was.name }),
+          ...(op.fields.type === undefined ? {} : { type: was.type }),
+          ...(op.fields.description === undefined
+            ? {}
+            : { description: was.description ?? null }),
+          ...(op.fields.offset === undefined ? {} : { offset: Number(at) }),
+        },
+      };
+    }
+
+    case "field.remove": {
+      const held = project.types?.find((t) => t.id === op.typeId);
+      const at = held && Object.keys(held.fields).find((k) => held.fields[k].id === op.id);
+      if (!held || at === undefined) return op;
+      const was = held.fields[at];
+      return {
+        op: "field.add",
+        id: op.id,
+        typeId: op.typeId,
+        offset: Number(at),
+        name: was.name,
+        type: was.type,
+        ...(was.description === undefined ? {} : { description: was.description }),
       };
     }
 

@@ -2431,6 +2431,95 @@ export class Workspace {
     return { ...result, type: id, ...(rejected.length ? { rejected } : {}) };
   }
 
+  /**
+   * One field of a record, by its own id.
+   *
+   * `edit_type` sends a whole layout, which is what declaring a nineteen-field
+   * record wants and is wrong for changing one: it merges per offset, so a
+   * field left out is *kept*, and nothing could remove one at all. Experiment
+   * 11's reviewer met that replacing four per-index columns with arrays — it
+   * got the arrays and the twenty-eight originals, each rendering twice.
+   */
+  addField(
+    caller: Caller,
+    typeId: string,
+    offset: number,
+    field: { name: string; type: string; description?: string }
+  ): EditResult & { field: string } {
+    const loaded = this.program().loaded;
+    const held = (loaded.project.types ?? []).find((t) => t.id === typeId);
+    if (!held) throw new Error(`No type ${typeId}. list_types shows what this project has.`);
+
+    const bound = held.unit === "bits" ? Number(held.size) * 8 : Number(held.size);
+    if (offset < 0 || offset >= bound) {
+      throw new Error(
+        `+${offset} is outside a ${held.size}-byte record` +
+          (held.unit === "bits" ? `, which is ${bound} bits.` : ".")
+      );
+    }
+    const taken = Object.entries(held.fields).find(([at]) => Number(at) === offset);
+    if (taken) {
+      throw new Error(
+        `+${offset} of ${held.name} is already ${taken[1].name}. Two fields cannot ` +
+          `share an offset; edit_field moves one, remove_field takes it back.`
+      );
+    }
+    const parsed = parseFieldType(field.type, this.typeIdForName(), this.countForName());
+    if ("error" in parsed) throw new Error(parsed.error);
+
+    const id = newId("fld");
+    const result = this.edit(caller, () => [
+      { op: "field.add", id, typeId, offset, ...field } as Op,
+    ]);
+    return { ...result, field: id };
+  }
+
+  editField(
+    caller: Caller,
+    typeId: string,
+    id: string,
+    fields: { name?: string; type?: string; description?: string | null; offset?: number }
+  ): EditResult {
+    const loaded = this.program().loaded;
+    const held = (loaded.project.types ?? []).find((t) => t.id === typeId);
+    if (!held) throw new Error(`No type ${typeId}. list_types shows what this project has.`);
+    if (!Object.values(held.fields).some((f) => f.id === id)) {
+      throw new Error(`No field ${id} in ${held.name}. list_types shows its fields with ids.`);
+    }
+    if (fields.type !== undefined) {
+      const parsed = parseFieldType(fields.type, this.typeIdForName(), this.countForName());
+      if ("error" in parsed) throw new Error(parsed.error);
+    }
+    if (fields.offset !== undefined) {
+      const taken = Object.entries(held.fields).find(
+        ([at, f]) => Number(at) === fields.offset && f.id !== id
+      );
+      if (taken) throw new Error(`+${fields.offset} of ${held.name} is already ${taken[1].name}.`);
+    }
+    return this.edit(caller, () => [{ op: "field.set", id, typeId, fields } as Op]);
+  }
+
+  removeField(caller: Caller, typeId: string, id: string): EditResult {
+    const held = (this.program().loaded.project.types ?? []).find((t) => t.id === typeId);
+    if (!held) throw new Error(`No type ${typeId}. list_types shows what this project has.`);
+    if (!Object.values(held.fields).some((f) => f.id === id)) {
+      throw new Error(`No field ${id} in ${held.name}. list_types shows its fields with ids.`);
+    }
+    return this.edit(caller, () => [{ op: "field.remove", id, typeId } as Op]);
+  }
+
+  /** The two resolvers a field type needs, so the three writers agree. */
+  private typeIdForName() {
+    const declared = this.program().loaded.project.types ?? [];
+    return (name: string) => declared.find((t) => t.name === name)?.id;
+  }
+  private countForName() {
+    return (name: string) => {
+      const found = this.program().loaded.constants.byName(name);
+      return found === undefined ? undefined : { id: found.id, value: found.value };
+    };
+  }
+
   removeType(caller: Caller, id: string): EditResult {
     const found = (this.program().loaded.project.types ?? []).find((t) => t.id === id);
     if (!found) throw new Error(`No type ${id}. list_types shows what this project has.`);

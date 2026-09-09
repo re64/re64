@@ -219,6 +219,32 @@ const CASES: { [K in Op["op"]]: Case } = {
     },
   },
   "type.remove": { op: { op: "type.remove", id: "typ_1" } },
+
+  // **A field, by its own id.** It has carried one since offsets stopped being
+  // its identity, and had no verbs of its own until experiment 11 found the
+  // consequence: nothing could remove a field, by anybody, ever.
+  "field.add": {
+    op: {
+      op: "field.add",
+      id: "fld_new",
+      typeId: "typ_1",
+      offset: 4,
+      name: "speed",
+      type: "u8",
+      description: "pixels per frame",
+    },
+  },
+  // A rename *and* a move together, because moving one is the change that
+  // offset-as-identity could not express without losing everything else on it.
+  "field.set": {
+    op: {
+      op: "field.set",
+      id: "fld_f",
+      typeId: "typ_1",
+      fields: { name: "renamedField", offset: 3 },
+    },
+  },
+  "field.remove": { op: { op: "field.remove", id: "fld_f", typeId: "typ_1" } },
   // The widest variant, because it is the one that carries fields: `bytes` and
   // `length` reach the document, the file and back only if every path knows
   // about them. The narrow variants are covered below, one per layer kind.
@@ -389,7 +415,7 @@ describe("every operation reaches every path", () => {
   it("covers the whole vocabulary", () => {
     // The table is exhaustive by type; this only reports the count, so a
     // vocabulary that grows is visible in the output rather than only in a diff.
-    expect(kinds.length).toBe(39);
+    expect(kinds.length).toBe(42);
   });
 
   for (const kind of kinds) {
@@ -554,6 +580,11 @@ describe("the operation algebra", () => {
     "constant",
     "decoder",
     "type",
+    // Nested inside a record, and an entity all the same: it has an id, and an
+    // offset is a property of it rather than its name. It had no verbs of its
+    // own until experiment 11 found what that cost — nothing could remove a
+    // field, by anybody, ever, and the tool description claimed otherwise.
+    "field",
     "layer",
     "target",
     "scenario",

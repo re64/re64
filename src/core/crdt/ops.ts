@@ -338,6 +338,57 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         doc.getMap<Y.Map<unknown>>("types").delete(op.id);
         break;
 
+      // **A field is written into its record's own map, keyed by offset.** That
+      // key is the merge property — two readers adding different fields to one
+      // record touch different keys and both survive — so these operate on it
+      // directly rather than replacing the map, exactly as `type.set` does.
+      case "field.add": {
+        const entry = entryFor(doc.getMap<Y.Map<unknown>>("types"), op.typeId);
+        if (entry) {
+          fieldsOf(entry).set(String(op.offset), {
+            id: op.id,
+            name: op.name,
+            type: op.type,
+            ...(op.description === undefined ? {} : { description: op.description }),
+          });
+        }
+        break;
+      }
+
+      case "field.set": {
+        const entry = entryFor(doc.getMap<Y.Map<unknown>>("types"), op.typeId);
+        if (!entry) break;
+        const fields = fieldsOf(entry);
+        const at = [...fields.keys()].find(
+          (k) => (fields.get(k) as { id?: string } | undefined)?.id === op.id
+        );
+        if (at === undefined) break;
+        const was = fields.get(at) as Record<string, unknown>;
+        const next: Record<string, unknown> = { ...was };
+        if (op.fields.name !== undefined) next.name = op.fields.name;
+        if (op.fields.type !== undefined) next.type = op.fields.type;
+        if (op.fields.description === null) delete next.description;
+        else if (op.fields.description !== undefined) next.description = op.fields.description;
+
+        // A move is a delete and a set on the *key*, which is the one thing
+        // offset-as-identity could not express without losing the field.
+        const to = String(op.fields.offset ?? at);
+        if (to !== at) fields.delete(at);
+        fields.set(to, next);
+        break;
+      }
+
+      case "field.remove": {
+        const entry = entryFor(doc.getMap<Y.Map<unknown>>("types"), op.typeId);
+        if (!entry) break;
+        const fields = fieldsOf(entry);
+        const at = [...fields.keys()].find(
+          (k) => (fields.get(k) as { id?: string } | undefined)?.id === op.id
+        );
+        if (at !== undefined) fields.delete(at);
+        break;
+      }
+
       case "scenario.add": {
         const scenarios = doc.getMap<Y.Map<unknown>>("scenarios");
         let entry = scenarios.get(op.id);

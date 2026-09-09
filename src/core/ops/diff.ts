@@ -340,6 +340,12 @@ export function diffProjects(from: Project, to: Project): Op[] {
     // Per offset: an offset present in neither is untouched, one that went is
     // `null`. A whole-map write here is what would lose a field a concurrent
     // reader added.
+    //
+    // Still `type.set` rather than the three `field.*` operations, and
+    // deliberately: this reconciles a *file* against a document, where a field
+    // has no id until it is read back and the honest unit of change is the
+    // offset that moved. `field.add`/`set`/`remove` are what a caller who holds
+    // an id uses; both land in the same place.
     const fields: Record<number, TypeField | null> = {};
     for (const offset of new Set([
       ...Object.keys(before.fields),

@@ -316,6 +316,59 @@ export interface TypeRemoveOp {
   id: string;
 }
 
+/**
+ * A field of a record, as its own entity.
+ *
+ * **It was one already, and only the verbs were missing.** A field has carried
+ * an id since offsets stopped being its identity — because an offset is a
+ * *property* of a field, and moving one under offset-keying was a delete plus a
+ * create that lost everything else somebody had written. What it did not have
+ * was `add`/`set`/`remove` of its own: every change went through `type.set`'s
+ * whole `fields` map, which merges per offset, and no tool ever emitted the
+ * `null` that removes one. So a field could be declared and never taken back,
+ * by anybody, including whoever declared it.
+ *
+ * Experiment 11 found the consequence from the outside: a reviewer replacing
+ * four per-index columns with arrays got the arrays *and* the twenty-eight
+ * originals, each rendering twice, and had to revert. It read that as fields
+ * merging across authors. It is simpler and worse — nothing could remove a
+ * field at all.
+ *
+ * `type.set` keeps its bulk form, which is what declaring a nineteen-field
+ * record wants. These are for changing one.
+ */
+export interface FieldAddOp {
+  op: "field.add";
+  id: string;
+  /** The record it belongs to. A field is never free-standing. */
+  typeId: string;
+  /** Where in the record, in that record's own unit. */
+  offset: number;
+  name: string;
+  type: string;
+  description?: string;
+}
+
+/** Revise a field by id. Omitted leaves alone; `null` clears. */
+export interface FieldSetOp {
+  op: "field.set";
+  id: string;
+  typeId: string;
+  fields: {
+    name?: string;
+    type?: string;
+    description?: string | null;
+    /** Move it. The one change offset-keying made impossible to express. */
+    offset?: number;
+  };
+}
+
+export interface FieldRemoveOp {
+  op: "field.remove";
+  id: string;
+  typeId: string;
+}
+
 export interface ConstantRemoveOp {
   op: "constant.remove";
   id: string;
@@ -515,6 +568,7 @@ export type Op =
   | ConstantAddOp | ConstantSetOp | ConstantRemoveOp
   | DecoderAddOp | DecoderSetOp | DecoderRemoveOp
   | TypeAddOp | TypeSetOp | TypeRemoveOp
+  | FieldAddOp | FieldSetOp | FieldRemoveOp
   | LayerAddOp | LayerSetOp | LayerRemoveOp
   | TargetAddOp | TargetSetOp | TargetRemoveOp
   | ScenarioAddOp | ScenarioSetOp | ScenarioRemoveOp
@@ -680,6 +734,17 @@ export function describeOp(op: Op, resolve?: AddressResolver): string {
       return `remove decoder ${op.id}`;
     case "type.add":
       return `define type ${op.name}`;
+    case "field.add":
+      return `add the field ${op.name} at +${op.offset} of ${op.typeId}`;
+    case "field.set": {
+      const moved = op.fields.offset !== undefined ? ` to +${op.fields.offset}` : "";
+      return op.fields.name !== undefined
+        ? `rename the field ${op.id} to ${op.fields.name}${moved}`
+        : `revise the field ${op.id}${moved}`;
+    }
+    case "field.remove":
+      return `remove the field ${op.id} from ${op.typeId}`;
+
     case "type.set": {
       // Names the fields, because a merge that touches one offset and a rename
       // are the two different things this op does and they read alike otherwise.

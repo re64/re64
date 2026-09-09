@@ -90,7 +90,7 @@ what was declined in `rejected`, and fail only when nothing was applicable.
 
 ## The tools
 
-88 tools.
+91 tools.
 
 ### Orienting
 
@@ -607,7 +607,7 @@ Declare a record layout: what the bytes of one array element mean. The thing a c
 
 #### `edit_type`
 
-Correct a record layout, by its id. The fields are given whole: send the layout you mean, and a field you leave out is one you removed. Two readers adding *different* fields to one record still both survive — that merges per offset underneath, which is why fields carry no ids of their own.
+Correct a record layout, by its id. **Fields merge per offset: one you leave out is kept, not removed.** That is what lets two readers add different fields to one record and both survive, and it is why this is the wrong call for changing a single field — use add_field, edit_field and remove_field, which work by the field's own id. This one is for declaring a layout.
 
 | argument | type | | |
 |---|---|---|---|
@@ -625,6 +625,43 @@ Take back a record layout, by its id. A claim still referencing it renders its b
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** |  |
+| `expectVersion` | `string` | optional |  |
+
+#### `add_field`
+
+Add one field to a record layout, without restating the others. `edit_type` sends a whole layout, which is right for declaring a nineteen-field record and wrong for changing one: it merges per offset, so a field you leave out is **kept**. Returns the field's id. Two fields cannot share an offset.
+
+| argument | type | | |
+|---|---|---|---|
+| `typeId` | `string` | **required** | Type id, from list_types or add_type |
+| `offset` | `integer` | **required** | Into the record, in its own unit: bytes, or bits when unit is "bits" |
+| `name` | `string` | **required** |  |
+| `type` | `string` | **required** | As add_type's field type: u8, char(40), u8[8], bits(3), … |
+| `description` | `string` | optional |  |
+| `expectVersion` | `string` | optional |  |
+
+#### `edit_field`
+
+Revise one field by its id: rename it, retype it, or **move it**. A field carries an id precisely so an offset can be a property of it rather than its name — moving one was otherwise a delete and a create, which lost its description and everything else written about it. Omitted leaves alone; `description: null` clears it.
+
+| argument | type | | |
+|---|---|---|---|
+| `typeId` | `string` | **required** |  |
+| `id` | `string` | **required** | Field id, from list_types |
+| `name` | `string` | optional |  |
+| `type` | `string` | optional |  |
+| `description` | `string,null` | optional |  |
+| `offset` | `integer` | optional | Move it here |
+| `expectVersion` | `string` | optional |  |
+
+#### `remove_field`
+
+Take one field back out of a record layout. **There was no way to do this**, by anybody, including whoever declared it: every change went through `edit_type`'s whole map, which merges, and nothing emitted the removal the operation had always supported. A reviewer replacing four columns with arrays got the arrays *and* the twenty-eight originals, each rendering twice.
+
+| argument | type | | |
+|---|---|---|---|
+| `typeId` | `string` | **required** |  |
+| `id` | `string` | **required** | Field id, from list_types |
 | `expectVersion` | `string` | optional |  |
 
 #### `add_decoder`

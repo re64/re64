@@ -18,7 +18,16 @@ Has an **id**, minted by the writer. Lives in a collection.
 | `<n>.set` | by id. **Partial**: named fields change, omitted fields are left alone, `null` clears. |
 | `<n>.remove` | by id. |
 
-Members: **claim, comment, constant, decoder, type, layer, target.**
+Members: **capture, claim, comment, constant, decoder, evidence, field, layer,
+scenario, target, type.**
+
+**Being nested does not make something a lesser entity.** A field lives inside a
+type and a capture inside a scenario, but each has its own id and its own three
+verbs, because the alternative is what `edit_type` used to do: carry the whole
+field list, so two writers editing different fields of the same record lose one
+of the edits, and a caller who omits a field cannot be distinguished from one
+who meant to remove it. The containing entity's `set` therefore never carries
+its children — it names the parent's own fields and nothing else.
 
 **Every meaningful entity has an id, and the id is the only handle.** No
 exceptions, including targets. A name is a field somebody chose and may change;
@@ -131,16 +140,20 @@ it loudly rather than misapply it. `.re64db` files are gitignored working
 databases, so this costs stored undo history in local experiment projects and
 nothing that is committed.
 
-## The thirty operations
+## The forty-two operations
 
 ```
+capture.add      capture.set      capture.remove
 claim.add        claim.set        claim.remove
 comment.add      comment.set      comment.remove
 constant.add     constant.set     constant.remove
 decoder.add      decoder.set      decoder.remove
-type.add         type.set         type.remove
+evidence.add     evidence.set     evidence.remove
+field.add        field.set        field.remove
 layer.add        layer.set        layer.remove
+scenario.add     scenario.set     scenario.remove
 target.add       target.set       target.remove
+type.add         type.set         type.remove
 
 labelUse.bind    labelUse.unbind
 constantUse.bind constantUse.unbind
@@ -150,7 +163,7 @@ file.add         file.remove
 meta.set
 ```
 
-Seven entities × three verbs, three bindings × two, one attachment × two, one
+Eleven entities × three verbs, three bindings × two, one attachment × two, one
 singleton. There is nothing else, and `src/core/crdt/roundtrip.test.ts` asserts
 it: the shapes, the verbs, that no operation spells removal as `delete`, that
 every `set` carries its changes under `fields`, that every `add` mints an

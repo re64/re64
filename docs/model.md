@@ -228,6 +228,15 @@ one record both survive. Field types: `u8`, `i8`, `u16`, `u16be`,
 `ptr`, `ptrbe`, `char(n)`, `char(n,encoding)`, `bytes(n)`, or another type's
 name. How many records a claim holds is `extent / size`, derived.
 
+**A field is an entity, not an attribute of one.** It has an id, and
+`field.add` / `field.set` / `field.remove` address it by that id the way every
+other entity is addressed — including a move, which rewrites the offset key and
+keeps the id, so the description survives. `type.set` therefore never carries
+`fields`: it names the type's own name, size and unit and leaves the children
+alone. Editing a record by resending its whole field list is how one writer's
+new field disappears when another writer resends a list minted before it, and
+being nested inside a type is no reason for a field to be exposed to that.
+
 Any of them takes `[n]` for an array — `u8[8]`, `Creature[42]`, `char(40)[3]` —
 or `[first..last]` where the first index is not zero, which some tables are.
 `u8[4][8]` nests the way C reads it, outer dimension first. An array is a
