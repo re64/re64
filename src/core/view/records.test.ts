@@ -67,7 +67,7 @@ function withZones(): LoadedProject {
   };
   writeFileSync(SCRATCH, JSON.stringify(project, null, 1), "utf-8");
   try {
-    return loadProjectFile(SCRATCH);
+    return loadProjectFile(SCRATCH, "runtime");
   } finally {
     rmSync(SCRATCH, { force: true });
   }

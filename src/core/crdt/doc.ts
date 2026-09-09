@@ -91,7 +91,7 @@ const ROOT_TARGETS = "targets";
 const ROOT_CLAIMS = "claims";
 
 /** Scalars a project carries outside its layers. */
-const META_KEYS = ["name", "description", "entryPoints", "defaultTarget"] as const;
+const META_KEYS = ["name", "description", "entryPoints"] as const;
 
 function mapFrom(record: Record<string, unknown>): Y.Map<unknown> {
   const map = new Y.Map<unknown>();

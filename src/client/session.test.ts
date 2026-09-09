@@ -150,15 +150,20 @@ describe("choosing which target to read", () => {
 
   it("writes nothing, because which view I am reading is a cursor", async () => {
     // The property that makes a split view possible and a shared selection
-    // wrong: two panes over one document, neither moving the other. It is also
-    // why `defaultTarget` in the export still says what the *project* opens
-    // with, not what anybody happens to be looking at.
+    // wrong: two panes over one document, neither moving the other.
+    //
+    // **`defaultTarget` used to be in the export**, described as what the
+    // project opens with rather than what anybody is looking at. It is gone: the
+    // field was read as a cursor by every call that named no view, so a document
+    // property answered a question about the reader — and on a project declaring
+    // five targets and no default, every such call was answered through
+    // whichever one sorted first.
     const session = await openTwo();
     const before = session.exportedText();
 
     session.selectTarget("empty");
     expect(session.exportedText()).toBe(before);
-    expect(JSON.parse(before).defaultTarget).toBe("program");
+    expect(JSON.parse(before).defaultTarget).toBeUndefined();
     session.close();
   });
 

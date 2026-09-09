@@ -179,7 +179,7 @@ describe("editing", () => {
     // so the delta is how a caller tells a good guess from a wasted one.
     // $801B is in a code region, undecoded, and reached by nothing.
     const result = workspace.markFunction(agent, 0x801b);
-    expect(result.instructions.delta).toBeGreaterThan(0);
+    expect(result.instructions!.delta).toBeGreaterThan(0);
   });
 
   it("tells a writer when a region they declared swallows code something jumps to", () => {
@@ -211,7 +211,7 @@ describe("editing", () => {
   it("reports no gain where the guess was wasted", () => {
     // $8F00 is inside a data region, so marking it decodes nothing — which is
     // exactly what a caller needs to be told rather than left to infer.
-    expect(workspace.markFunction(agent, 0x8f00).instructions.delta).toBe(0);
+    expect(workspace.markFunction(agent, 0x8f00).instructions!.delta).toBe(0);
   });
 
   it("records the edit durably, attributed", () => {
@@ -353,7 +353,7 @@ describe("a project written by hand", () => {
 
     const marked = blank.markFunction(agent, 0x8011);
 
-    expect(marked.instructions.delta).toBeGreaterThan(100);
+    expect(marked.instructions!.delta).toBeGreaterThan(100);
     expect(blank.describe().counts.instructions).toBeGreaterThan(before);
   });
 });
@@ -370,7 +370,7 @@ describe("saying what a span holds", () => {
 
     const result = blank.addClaim(agent, { at: 0x8011, root: "entry" });
 
-    expect(result.instructions.delta).toBeGreaterThan(1000);
+    expect(result.instructions!.delta).toBeGreaterThan(1000);
     // And nothing appeared in the listing that nobody put there.
     expect(blank.labels({ namePattern: "rgn_" }).total).toBe(0);
   });
@@ -403,7 +403,7 @@ describe("saying what a span holds", () => {
         is: "jumptable",
         name: "initVector",
       });
-    expect(result.instructions.delta).toBeGreaterThan(1000);
+    expect(result.instructions!.delta).toBeGreaterThan(1000);
   });
 });
 
@@ -1424,7 +1424,7 @@ describe("an edit that cuts code off", () => {
 
     const result = blank.addClaim(agent, { at: 0x8361, extent: 0x8370 - 0x8361, is: "data", name: "filler" });
 
-    expect(result.instructions.delta).toBeLessThan(-500);
+    expect(result.instructions!.delta).toBeLessThan(-500);
     expect(result.orphaned).toBeDefined();
     expect(result.orphaned!.firstAt).toBe("$8370");
   });
@@ -1446,7 +1446,7 @@ describe("an edit that cuts code off", () => {
 
     const result = blank.addClaim(agent, { at: 0x8011, extent: 0x8014 - 0x8011, is: "data" });
 
-    expect(result.instructions.delta).toBeLessThan(-1000);
+    expect(result.instructions!.delta).toBeLessThan(-1000);
     expect(result.orphaned).toBeDefined();
     expect(result.orphaned!.instructions).toBeGreaterThan(1000);
     expect(result.orphaned!.hint).toContain("add_claim");

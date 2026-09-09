@@ -378,13 +378,19 @@ describe("a layer nobody links supplies nothing", () => {
    * `ok: true` on a write nothing can see is the confident wrong answer in
    * miniature, so both halves of the mistake are now reported.
    */
-  it("says a new layer is linked into nothing, and how to link it", async () => {
+  it("says nothing about linking where there is only one view to be in", async () => {
+    // **The advice used to fire here, and it was wrong.** It read the project
+    // *after* the loader had synthesised a view for a file declaring none — a
+    // view that links every layer, this one included — and then reported the
+    // layer as linked into nothing. Read from the document, the condition is
+    // what it always meant: a project that declares targets, and a layer no
+    // declared target links. That case is the test below, which builds one.
     const made = await callTool("add_rom_layer", { rom: "characters" });
     // The ROM may be absent on this machine; the advice must not depend on it.
     if (made.isError) return;
     const value = made.value as { note?: string; linkedInto?: string[] };
-    expect(value.linkedInto).toEqual([]);
-    expect(value.note).toContain("set_target");
+    expect(value.linkedInto).toBeUndefined();
+    expect(value.note).toBeUndefined();
   });
 
   it("names the ROMs a new view leaves out, since it will boot into zeros", async () => {
@@ -1348,7 +1354,10 @@ describe("editing as an agent", () => {
       name: "collision patch",
     });
     expect(made.isError).toBe(false);
-    expect((made.value as { note?: string }).note).toMatch(/linked into no target/i);
+    // No advice about linking: this project declares no targets, so the loader
+    // implies one over the whole stack and the new layer is in it. The note is
+    // for a project that declares views and a layer none of them links.
+    expect((made.value as { note?: string }).note).toBeUndefined();
 
     const listed = (await callTool("list_targets", {})).value as {
       layers: { id: string; name: string }[];

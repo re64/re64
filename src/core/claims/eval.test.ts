@@ -15,8 +15,8 @@ import { loadProjectFile } from "../../node-files.js";
  * only demonstrate the new shape holding what it was built to hold.
  */
 
-const build = (path: string) => {
-  const loaded = loadProjectFile(path);
+const build = (path: string, target?: string) => {
+  const loaded = loadProjectFile(path, target);
   const program = analyzeProgram(loaded);
   const graph = DecodeGraph.build(loaded.map);
   const claims = loaded.claims;
@@ -66,11 +66,11 @@ describe("what the claim model recovers", () => {
     // claim never says `code`, because code is what bytes are when nobody has
     // said otherwise, and it never says `unknown`, because that was the absence
     // of a claim wearing the name of a kind.
-    for (const path of [
-      "assets/gridrunner/gridrunner.re64",
-      "experiments/07-scale/run/final.re64",
-    ]) {
-      const { claims } = build(path);
+    for (const [path, target] of [
+      ["assets/gridrunner/gridrunner.re64", undefined],
+      ["experiments/07-scale/run/final.re64", "runtime"],
+    ] as const) {
+      const { claims } = build(path, target);
       const said = new Set(claims.map((c) => c.says?.is).filter(Boolean));
       expect([...said].sort()).not.toContain("code");
       expect([...said].sort()).not.toContain("unknown");
@@ -84,11 +84,11 @@ describe("what the claim model recovers", () => {
   });
 
   it("reports the disagreements the old model resolved silently", () => {
-    for (const path of [
-      "assets/gridrunner/gridrunner.re64",
-      "experiments/07-scale/run/final.re64",
-    ]) {
-      const { set, graph, reach } = build(path);
+    for (const [path, target] of [
+      ["assets/gridrunner/gridrunner.re64", undefined],
+      ["experiments/07-scale/run/final.re64", "runtime"],
+    ] as const) {
+      const { set, graph, reach } = build(path, target);
       const ds = disagreements(set);
       const unreached = unreachedClaims(reach, set);
       // eslint-disable-next-line no-console

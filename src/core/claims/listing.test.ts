@@ -7,8 +7,8 @@ import { Claim, arrayExtent } from "./model.js";
 import { analyzeProgram } from "../analysis/program.js";
 import { loadProjectFile } from "../../node-files.js";
 
-function build(path: string) {
-  const loaded = loadProjectFile(path);
+function build(path: string, target?: string) {
+  const loaded = loadProjectFile(path, target);
   const program = analyzeProgram(loaded);
   const graph = DecodeGraph.build(loaded.map);
   const claims = loaded.claims;
@@ -77,7 +77,7 @@ describe("one address-sorted listing", () => {
     // this project it is the visible symptom of a placeholder: `zoneDataTable`
     // spans 8,400 bytes and explains 1,680 of them, so forty strings sit inside
     // a claim that does not account for the runs between them.
-    const { graph, set, roots, reach } = build("experiments/07-scale/run/final.re64");
+    const { graph, set, roots, reach } = build("experiments/07-scale/run/final.re64", "runtime");
     const items = collectListing(graph, reach, set, roots, { from: 0x6700, to: 0x6900 });
 
     expect(items.map(describeItem)).toEqual([
@@ -98,7 +98,7 @@ describe("one address-sorted listing", () => {
     // is now read as the program runs rather than as every layer at once — the
     // packed file is shadowed out, which is what a target is for and what the
     // file was already asking for.
-    const { graph, set, roots, reach } = build("experiments/07-scale/run/final.re64");
+    const { graph, set, roots, reach } = build("experiments/07-scale/run/final.re64", "runtime");
     const range = { from: 0x0800, to: 0xd000 };
 
     const gaps = (s: ClaimSet) => {

@@ -164,19 +164,25 @@ function layerIdOf(decl: ProjectLayer, index: number): string {
   return decl.id ?? derivedId("lay", index, decl.type, decl.path ?? decl.name ?? "");
 }
 
-export function withDefaultTarget(project: Project): Project {
-  if (project.targets?.length) {
-    // A project may declare which view to open with — that is a fact about the
-    // project, and the reason it survives an export: somebody handed this file
-    // should see what it is *for*. It is emphatically not a cursor. Nothing
-    // writes it while reading, no tool sets it as a side effect of looking, and
-    // it moves no version.
-    if (project.defaultTarget !== undefined) return project;
-    const first = [...project.targets].sort(
-      (a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER)
-    )[0];
-    return { ...project, defaultTarget: first.name };
-  }
+/**
+ * The one target a project with none implies.
+ *
+ * A file that declares no targets still has a stack, so it gets exactly one
+ * view over it, named after the project — "gridrunner" reads as a fact where
+ * "default" reads as machinery. **One, not a default among several**: a project
+ * that declares its own targets is left alone, because choosing between them is
+ * the reader's business and not the file's.
+ *
+ * This used to also set `project.defaultTarget`, and that field is gone. It was
+ * a document property doing a request's job: every call that named no target
+ * silently got whichever target sorted first, and the Camels silver image —
+ * which declares five and no default — answered every such call through
+ * `loader`, a view linking one layer, where every claim framed on the runtime
+ * layer simply does not exist. Which view you are looking through is a property
+ * of the looker, not of the program.
+ */
+export function withSyntheticTarget(project: Project): Project {
+  if (project.targets?.length) return project;
 
   const name = project.name ?? "project";
   return {
@@ -193,20 +199,45 @@ export function withDefaultTarget(project: Project): Project {
           .map(({ id }) => id),
         // Moved, not copied: `projectForTarget` lets a target's list *replace*
         // the project's, so leaving them behind would silently drop every entry
-        // point the moment a default target existed.
+        // point the moment a target existed.
         ...(project.entryPoints === undefined ? {} : { entryPoints: project.entryPoints }),
       },
     ],
-    defaultTarget: name,
   };
 }
 
-export function projectForTarget(project: Project): Project {
-  const target = project.targets?.find((t) => t.name === project.defaultTarget);
-  // Unreachable through `buildMemoryMap`, which derives one first. Kept as a
-  // guard rather than an assertion because this is exported and a caller may
-  // hand it anything.
-  if (!target) return project;
+/**
+ * Narrow a project to one of its targets, by name.
+ *
+ * **Nothing is chosen for the caller here.** Where a project declares more than
+ * one target and none is named, this refuses and says which there are, because
+ * every alternative is a guess: picking the first by `order` is what the removed
+ * `defaultTarget` did, and the guess was wrong for the one project in this
+ * repository that has several. A project with exactly one target has no choice
+ * to make, so a caller that named none gets it.
+ */
+export function projectForTarget(project: Project, name?: string): Project {
+  const targets = project.targets ?? [];
+  const target =
+    name === undefined
+      ? targets.length === 1
+        ? targets[0]
+        : undefined
+      : targets.find((t) => t.name === name);
+
+  if (!target) {
+    if (name !== undefined) {
+      throw new Error(
+        `No target called "${name}" in this project. list_targets shows what there is.`
+      );
+    }
+    if (targets.length === 0) return project;
+    throw new Error(
+      `This project has ${targets.length} views over its layers and you named none: ` +
+        `${targets.map((t) => t.name).join(", ")}. Say which — the bytes at an address ` +
+        `differ between them, so there is no answer that is right for all of them.`
+    );
+  }
 
   const links = targetLinks(target);
   // By the *derived* id, so a file whose layers have none is still linkable —
@@ -268,50 +299,16 @@ function nameClaim(claim: Claim): Claim {
   return extent === undefined ? rest : { ...rest, extent };
 }
 
-export function buildMemoryMap(
-  declared: Project,
-  loadFile: FileLoader,
-  options: { platform?: boolean; loadRom?: RomLoader; target?: string } = {}
-): LoadedProject {
-  // One form below, whatever the file holds. A project still written with labels
-  // and regions is converted here, exactly as `re64 migrate` converts it on disk
-  // — the precedent `identity.ts` already records for ids: "files without ids
-  // stay loadable; the next write persists real ones."
-  //
-  // This is what makes the write path's cutover visible. While the projection
-  // was additive, an edit to a legacy label produced a `claim.set` naming an id
-  // no claim had, and did nothing at all.
-  const migrated = needsMigration(declared) ? migrateToClaims(declared).project : declared;
-
-  // Narrowed here rather than by each caller, which is the second half of "one
-  // path to a stack". Only the server did it, so `loadProjectFile` — the CLI,
-  // the golden test, every core test — ignored targets entirely and read every
-  // layer whatever the project said. Two consumers of one project disagreeing
-  // about which bytes are in it is the kind of thing nobody notices until a
-  // listing and a tool answer differently.
-  // A view nothing declares is refused rather than answered for. Falling back
-  // to the default would hand a caller a different stack than the one it named,
-  // with no way to tell — the confident wrong answer this project refuses.
-  if (
-    options.target !== undefined &&
-    !(migrated.targets ?? []).some((t) => t.name === options.target)
-  ) {
-    throw new Error(
-      `No target called "${options.target}" in this project. ` +
-        `list_targets shows what there is.`
-    );
-  }
-  const project = projectForTarget(
-    withDefaultTarget(
-      options.target === undefined ? migrated : { ...migrated, defaultTarget: options.target }
-    )
-  );
-
-  const map = new MemoryMap();
-  const prgEntries: number[] = [];
-  const userLabels = new NameIndex();
-  const comments = new CommentIndex();
-  const constants = new ConstantIndex();
+/**
+ * The record layouts a project declares, indexed.
+ *
+ * Lifted out of `buildMemoryMap` because it needs no memory map: a layout
+ * describes no bytes of its own, so which layers are linked cannot change what
+ * one is. `list_types` reached it through a loaded project and therefore
+ * through a view, which made asking what layouts exist require a choice of
+ * stack that has nothing to do with the answer.
+ */
+export function projectTypes(project: Project): TypeIndex {
   const types = new TypeIndex();
   for (const declared of project.types ?? []) {
     if (!declared.id) continue;
@@ -335,6 +332,42 @@ export function buildMemoryMap(
       ),
     });
   }
+  return types;
+}
+
+export function buildMemoryMap(
+  declared: Project,
+  loadFile: FileLoader,
+  options: { platform?: boolean; loadRom?: RomLoader; target?: string } = {}
+): LoadedProject {
+  // One form below, whatever the file holds. A project still written with labels
+  // and regions is converted here, exactly as `re64 migrate` converts it on disk
+  // — the precedent `identity.ts` already records for ids: "files without ids
+  // stay loadable; the next write persists real ones."
+  //
+  // This is what makes the write path's cutover visible. While the projection
+  // was additive, an edit to a legacy label produced a `claim.set` naming an id
+  // no claim had, and did nothing at all.
+  const migrated = needsMigration(declared) ? migrateToClaims(declared).project : declared;
+
+  // Narrowed here rather than by each caller, which is the second half of "one
+  // path to a stack". Only the server did it, so `loadProjectFile` — the CLI,
+  // the golden test, every core test — ignored targets entirely and read every
+  // layer whatever the project said. Two consumers of one project disagreeing
+  // about which bytes are in it is the kind of thing nobody notices until a
+  // listing and a tool answer differently.
+  // A view nothing declares is refused rather than answered for, and so is a
+  // choice nobody made. Falling back would hand a caller a different stack than
+  // the one it meant, with no way to tell — the confident wrong answer this
+  // project refuses.
+  const project = projectForTarget(withSyntheticTarget(migrated), options.target);
+
+  const map = new MemoryMap();
+  const prgEntries: number[] = [];
+  const userLabels = new NameIndex();
+  const comments = new CommentIndex();
+  const constants = new ConstantIndex();
+  const types = projectTypes(project);
   // Held until the merged index exists: a site can name a label in any layer.
   const labelUses: LabelUse[] = [];
   constants.declareAll(projectConstants(project.constants));

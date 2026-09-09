@@ -97,7 +97,7 @@ describe("building a project from a disk image", () => {
     expect(before.counts.instructions).toBeLessThan(10);
 
     const marked = camels.markFunction(builder, 0x080d, "Decrunch");
-    expect(marked.instructions.delta).toBeGreaterThan(30);
+    expect(marked.instructions!.delta).toBeGreaterThan(30);
   });
 
   it("puts the file and the byte layer in the export", () => {
@@ -197,7 +197,6 @@ describe("building a project from a disk image", () => {
 
     // Everything, as before: the unpacked layer is on top and shadows the other.
     expect(camels.targets().total).toBe(2);
-    expect(camels.targets().active).toBeUndefined();
 
     const loader = camels.view("loader").describe();
     expect(loader.layers).toHaveLength(1);
@@ -205,15 +204,13 @@ describe("building a project from a disk image", () => {
 
     expect(camels.view("runtime").describe().layers[0].name).toBe("unpacked");
 
-    // Clearing the selection falls back to the first phase, not to "everything".
-    // There is no everything: a stack is always a target's link list, and the
-    // union of every layer was a stack the project never declared — packed and
-    // unpacked shadowing each other in declaration order, which is exactly what
-    // targets exist to replace.
-    // Naming no view falls back to the project's declared default, and with
-    // none declared that is the first phase. There is no "everything" stack.
-    expect(camels.describe().layers).toHaveLength(1);
-    expect(camels.describe().layers[0].name).toBe("packed");
+    // **Naming no view is refused, and is not "everything".** There is no
+    // everything: a stack is always a target's link list, and the union of every
+    // layer was a stack the project never declared — packed and unpacked
+    // shadowing each other in declaration order, which is what targets exist to
+    // replace. Nor is it the first phase: falling back was `defaultTarget`, and
+    // a document field cannot answer a question about which reader is asking.
+    expect(() => camels.describe()).toThrow(/named none/);
   });
 
   it("reports what a run wrote, including over bytes the project already had", () => {
@@ -553,7 +550,7 @@ describe("building a project from a disk image", () => {
     // And the capture is an ordinary file, so the rest of the flow is unchanged.
     camels.addByteLayer(builder, { type: "prg", path: "decrunched.prg", name: "runtime" });
     const marked = camels.markFunction(builder, 0xc065, "Start");
-    expect(marked.instructions.after).toBeGreaterThan(2000);
+    expect(marked.instructions!.after).toBeGreaterThan(2000);
   });
 
   it("reports the address the caller passed, not the offset it was stored at", () => {

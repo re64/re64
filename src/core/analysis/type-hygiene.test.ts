@@ -19,7 +19,7 @@ function withProject(mutate: (p: ReturnType<typeof parseProject>) => void) {
   mutate(project);
   writeFileSync(SCRATCH, JSON.stringify(project, null, 1), "utf-8");
   try {
-    return analyzeProgram(loadProjectFile(SCRATCH)).hygiene;
+    return analyzeProgram(loadProjectFile(SCRATCH, "runtime")).hygiene;
   } finally {
     rmSync(SCRATCH, { force: true });
   }

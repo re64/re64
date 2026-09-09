@@ -696,3 +696,64 @@ answers it without setting anything up. Do not guess it in the meantime.
 
 Note this also means "should agents have sessions" and "should MCP be stateful"
 are less independent than the stateless decision above assumed.
+
+---
+
+## `defaultTarget`, and a document field answering the reader's question
+
+**September 2026.** A target is a view over the layer stack, and the rule was
+already right: there is no current target on the server, a view is a parameter
+of the request, and two browser panes showing two targets are two calls rather
+than a setting they fight over.
+
+The document nonetheless carried `defaultTarget`, justified as *"a fact about
+the project — somebody handed this file should see what it is for. It is
+emphatically not a cursor."* Every call that named no view was then answered
+through it. That is a cursor.
+
+Worse, where a project declared none the loader **invented** one, taking the
+target with the lowest `order`. The Camels silver image declares five and no
+default, so every target-less call was answered through `loader` — a view
+linking one layer, in which every claim framed on the runtime layer does not
+exist. That is how `add_evidence` came to refuse three writes during the build
+with the message that the claims were *retired*: they were not, they were simply
+outside a view nobody had chosen.
+
+Two mistakes, and they compound. A document field cannot answer a question about
+which reader is asking. And no surface could set it anyway — `meta.set` carried
+the key, `doc.ts` carried it in `META_KEYS`, the serializer wrote it, five
+readers read it, and no tool, route or UI action wrote it. F1's eleventh
+instance, and the reason the silver image could not declare what it was for even
+if the field had been the right shape.
+
+### What replaces it
+
+**Nothing, at the document level.** The field is gone from `Project`, from
+`META_KEYS`, from `MetaSetOp["key"]`, from the serializer and from the diff.
+Which view a session is reading lives in the session: the browser keeps
+`viewTarget` and opens on the first target the program lives through, seen by
+nobody else and written nowhere.
+
+**Naming no view is refused where there is a choice**, and the refusal lists the
+targets. Where there is no choice — one declared, or none, which implies one over
+the whole stack — a caller need say nothing.
+
+**And a write that touches no address needs no view at all.** This is the half
+that makes the refusal liveable, and it was always the right shape: a type, a
+field, a constant, a decoder, a piece of evidence, a layer, a target are edits to
+the *document*. They now go through `editDocument`, which never builds a memory
+map, and they report no instruction delta — there is no view for the count to be
+about, and reporting zero would be a measurement nobody took. `list_types` reads
+the document's layouts and omits the addresses they are used at when no view was
+named, rather than refusing an answer that mostly did not need one.
+
+The test that this is the right line: the Camels silver image builds end to end
+over MCP against a five-target project with no default anywhere — 981 objects,
+zero refusals — every view-dependent call naming its target and every
+document-level call needing none.
+
+**Still open, and deliberately not done here.** `target` is still declared on all
+94 tools, including the ones that now ignore it. A parameter a tool advertises
+and does not use is a lie in the one place agents read, so the schemas want
+splitting; that is a per-tool judgement over the whole surface and wants its own
+pass.

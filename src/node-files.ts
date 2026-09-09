@@ -34,11 +34,19 @@ export function nodeFileBytes(baseDir?: string): FileBytes {
     new Uint8Array(readFileSync(baseDir === undefined ? path : resolve(baseDir, path)));
 }
 
-/** Load a project file and build its memory map. */
-export function loadProjectFile(projectPath: string): LoadedProject {
+/**
+ * Load a project file and build its memory map, through one of its views.
+ *
+ * `target` is required in practice for any project declaring more than one:
+ * there is no default view any more, because which one you are reading is a
+ * property of the reader and not of the file. A project with a single target —
+ * or none, which implies one — needs no name.
+ */
+export function loadProjectFile(projectPath: string, target?: string): LoadedProject {
   const project = parseProject(readFileSync(projectPath, "utf-8"));
   return buildMemoryMap(project, makeFileLoader(nodeFileBytes(dirname(projectPath))), {
     loadRom: nodeRomBytes(),
+    ...(target === undefined ? {} : { target }),
   });
 }
 

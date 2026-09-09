@@ -207,9 +207,11 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
             .string()
             .optional()
             .describe(
-              "Which view to answer for, from list_targets. Omitting it uses the " +
-                "project's declared default — say which you mean; the answer " +
-                "reports the one it used."
+              "Which view to answer for, from list_targets. **There is no " +
+                "default**: a project with more than one view refuses a call that " +
+                "names none and lists them, because the bytes at an address differ " +
+                "between them. Where there is only one there is nothing to say. " +
+                "The answer reports the view it used."
             ),
         }),
       },

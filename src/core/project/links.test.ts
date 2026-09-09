@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildMemoryMap, projectForTarget, withDefaultTarget } from "./loader.js";
+import { buildMemoryMap, projectForTarget, withSyntheticTarget } from "./loader.js";
 import { Project } from "./project.js";
 import { makeFileLoader } from "./file-source.js";
 
@@ -24,16 +24,19 @@ const bytes = (id: string, address: string, hex: string) => ({
   bytes: hex,
 });
 
-const project = (targets: Project["targets"], active: string): Project => ({
+const project = (targets: Project["targets"], active: string): Project & { active: string } => ({
   layers: [bytes("lay_low", "$1000", "aa aa aa aa"), bytes("lay_high", "$1000", "bb bb bb bb")],
   targets,
-  defaultTarget: active,
+  active,
 });
 
-const load = (p: Project) =>
-  buildMemoryMap(projectForTarget(p), makeFileLoader(() => {
+// Narrowed by `buildMemoryMap` itself, which is the one path to a stack — the
+// test used to pre-narrow and hand the result back in, which worked only
+// because the selected view rode along on the project as `defaultTarget`.
+const load = (p: Project & { active?: string }) =>
+  buildMemoryMap(p, makeFileLoader(() => {
       throw new Error('these layers hold inline bytes, so nothing loads a file');
-    }), { platform: false });
+    }), { platform: false, ...(p.active === undefined ? {} : { target: p.active }) });
 
 describe("the order of a target's links is the z-order", () => {
   it("gives the last-linked layer the address, not the first", () => {
@@ -65,7 +68,7 @@ describe("where a layer lands is a property of the link", () => {
     expect(load(p).map.readByte(0x1000)).toBe(0xaa);
     expect(load(p).map.readByte(0x0100)).toBeUndefined();
 
-    const running = load({ ...p, defaultTarget: "asRun" });
+    const running = load({ ...p, active: "asRun" });
     expect(running.map.readByte(0x0100)).toBe(0xaa);
     // And it is no longer where it was: a link says where, not also where not.
     expect(running.map.readByte(0x1000)).toBeUndefined();
@@ -99,9 +102,9 @@ describe("every project has a target, so there is one way to get a stack", () =>
     // Deriving it on every load and never persisting would be worse than the
     // seam it replaces — the thing deciding z-order would be invisible in the
     // file, absent from list_targets and unreachable by set_target.
-    const withOne = withDefaultTarget(bare());
-    expect(withOne.defaultTarget).toBe("gridrunner");
+    const withOne = withSyntheticTarget(bare());
     expect(withOne.targets).toHaveLength(1);
+    expect(withOne.targets![0].name).toBe("gridrunner");
     expect(withOne.targets![0].layers).toEqual(["lay_a", "lay_b"]);
   });
 
@@ -109,7 +112,7 @@ describe("every project has a target, so there is one way to get a stack", () =>
     // A target's list *replaces* the project's, so leaving them behind would
     // silently lose every entry point the moment a default target existed —
     // which on the reference project is the one address the walk starts from.
-    expect(withDefaultTarget(bare()).targets![0].entryPoints).toEqual(["$1000"]);
+    expect(withSyntheticTarget(bare()).targets![0].entryPoints).toEqual(["$1000"]);
   });
 
   it("changes nothing about what the stack is", () => {
@@ -122,18 +125,31 @@ describe("every project has a target, so there is one way to get a stack", () =>
     expect(before.prgEntries).toEqual([]);
   });
 
-  it("selects the first phase when a file has targets but names none", () => {
+  it("refuses to choose when a file has several targets and names none", () => {
+    // **It used to choose, and choosing was the bug.** `defaultTarget` picked the
+    // first by `order`, so every call that named no view was answered through
+    // `loader` — one layer — and the Camels silver image, which declares five,
+    // reported that claims framed on the runtime layer did not exist. Which view
+    // you look through is a property of the looker.
     const p: Project = {
       ...bare(),
       targets: [
         { name: "runtime", layers: ["lay_b"], order: 2 },
         { name: "loader", layers: ["lay_a"], order: 1 },
       ],
-      defaultTarget: undefined,
     };
-    // Ordered the way `list_targets` orders them, so a reader gets the one they
-    // were shown first — a program starts at its loader.
-    expect(withDefaultTarget(p).defaultTarget).toBe("loader");
+    expect(() => projectForTarget(withSyntheticTarget(p))).toThrow(/named none/);
+    // Named, it answers; and a name nothing declares is refused rather than
+    // quietly replaced by one that is.
+    expect(projectForTarget(p, "runtime").layers.map((l) => l.id)).toEqual(["lay_b"]);
+    expect(() => projectForTarget(p, "nope")).toThrow(/No target/);
+  });
+
+  it("does not make a project with one target say which", () => {
+    // There is no choice to make, so making the caller state one would be
+    // ceremony. The refusal above is about ambiguity, not about targets.
+    const one = withSyntheticTarget(bare());
+    expect(projectForTarget(one).layers).toHaveLength(2);
   });
 
   it("links a layer that has no id yet, by the id the loader will derive", () => {

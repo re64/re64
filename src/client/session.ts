@@ -253,14 +253,30 @@ export class ProjectSession {
         name: target.name,
         ...(target.description === undefined ? {} : { description: target.description }),
         ...(target.order === undefined ? {} : { order: target.order }),
-        isDefault: target.name === project.defaultTarget,
+        // Which one this session opened on, not which one the file prefers —
+        // the file no longer has a preference, because which view somebody is
+        // reading is a property of the reader.
+        isDefault: target.name === this.target,
       }))
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name));
   }
 
-  /** The target being read, which is the project's default until one is chosen. */
+  /**
+   * The target being read.
+   *
+   * **A property of this session and of nothing else.** It used to fall back to
+   * the project's `defaultTarget`, which is gone: that was a document field
+   * answering a request's question, and every caller that named no view got
+   * whichever target sorted first. A session with no choice yet opens on the
+   * first the program lives through — a program starts at its loader — and that
+   * is a local default, seen by nobody else and written nowhere.
+   */
   get target(): string | undefined {
-    return this.viewTarget ?? projectFromDoc(this.client.doc).defaultTarget;
+    if (this.viewTarget !== undefined) return this.viewTarget;
+    const declared = [...(projectFromDoc(this.client.doc).targets ?? [])].sort(
+      (a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER)
+    );
+    return declared[0]?.name;
   }
 
   /**
@@ -291,8 +307,10 @@ export class ProjectSession {
         }),
         // The supported seam, and the same one every tool uses — so the browser
         // narrows a view exactly as an agent does, including refusing a name
-        // that reaches nothing.
-        this.viewTarget === undefined ? {} : { target: this.viewTarget }
+        // that reaches nothing. `this.target`, not `this.viewTarget`: a session
+        // that has chosen nothing still has to name one, because the loader no
+        // longer chooses for anybody.
+        this.target === undefined ? {} : { target: this.target }
       );
     } finally {
       this.lastBuildMs = performance.now() - started;

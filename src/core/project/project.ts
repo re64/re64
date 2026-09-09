@@ -336,7 +336,6 @@ export interface Project {
   /** Named views over the layer stack. */
   targets?: ProjectTarget[];
   /** Which target is selected; every layer when unset. */
-  defaultTarget?: string;
   /**
    * Which label to show where several share an address, by label id.
    *

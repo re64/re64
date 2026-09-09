@@ -239,11 +239,11 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
       }
 
       case "target.remove": {
+        // Nothing to clean up beside it: the document used to hold a selected
+        // target, and a selection pointing at a removed one read as a filter
+        // that silently did nothing. A view is now a property of whoever is
+        // reading, so there is nothing here for a delete to dangle.
         doc.getMap<Y.Map<unknown>>("targets").delete(op.id);
-        // A selection pointing at nothing reads as a filter that silently does
-        // nothing, which is worse than no selection at all.
-        const meta = doc.getMap<unknown>("meta");
-        if (meta.get("defaultTarget") === op.id) meta.delete("defaultTarget");
         break;
       }
 

@@ -67,6 +67,8 @@ import {
   placed,
   markFunctionOps,
   parseProject,
+  Project,
+  projectTypes,
   parseProjectAddress,
   targetLinks,
   regionDeleteOp,
@@ -457,14 +459,22 @@ export class Workspace {
   /**
    * Which view this workspace answers for, resolved.
    *
-   * Reported on answers rather than left implicit: a caller that named no
-   * target got the project's declared default, and seeing which one it was is
-   * the difference between learning the habit and silently reading the wrong
-   * stack. The same move as `scope` on a claim write — derived, not chosen, and
-   * never invisible.
+   * Reported on answers rather than left implicit: the same move as `scope` on
+   * a claim write — derived, not chosen, and never invisible.
+   *
+   * A caller that named none is answered only where there was no choice to
+   * make: one declared target, or none, in which case the loader implies a
+   * single view over the whole stack. Where a project declares several, a
+   * target-less call does not get an answer at all — it is refused — so there
+   * is no case here where this has to guess which stack was read.
    */
   targetName(): string | undefined {
-    return this.program().loaded.project.defaultTarget;
+    if (this.room.target !== undefined) return this.room.target;
+    const declared = this.document().targets ?? [];
+    if (declared.length === 1) return declared[0].name;
+    // None declared: the loader implies one named after the project, and that
+    // is the view every answer here was computed for.
+    return declared.length === 0 ? (this.document().name ?? "project") : undefined;
   }
 
   /** The analysed program, rebuilt only when something it depends on moved. */
@@ -904,7 +914,7 @@ export class Workspace {
 
   /** Record an uploaded binary in the document, so it is attributed and exported. */
   noteUploadedFile(caller: Caller, name: string, hash: string, size: number): EditResult {
-    return this.edit(caller, () => [{ op: "file.add", name, hash, size } as Op]);
+    return this.editDocument(caller, () => [{ op: "file.add", name, hash, size } as Op]);
   }
 
   /**
@@ -951,7 +961,6 @@ export class Workspace {
    * the current target hides in order to choose one that shows them.
    */
   targets(): {
-    active?: string;
     total: number;
     targets: {
       name: string;
@@ -960,7 +969,6 @@ export class Workspace {
       entryPoints?: string[];
       order?: number;
       description?: string;
-      active: boolean;
     }[];
     layers: { id: string; name: string; type: string }[];
   } {
@@ -969,7 +977,6 @@ export class Workspace {
       project.layers.filter((l) => l.id).map((l) => [l.id!, l] as const)
     );
     return {
-      ...(project.defaultTarget ? { active: project.defaultTarget } : {}),
       total: (project.targets ?? []).length,
       // In the order the program lives them, where anybody has said: a loader
       // precedes the image it expands, which precedes the levels. Unordered
@@ -999,7 +1006,6 @@ export class Workspace {
             : {}),
           ...(t.order === undefined ? {} : { order: t.order }),
           ...(t.description === undefined ? {} : { description: t.description }),
-          active: t.name === project.defaultTarget,
         })),
       // Every layer, including ones the selection hides, with the ids a target
       // is defined in terms of.
@@ -1060,7 +1066,7 @@ export class Workspace {
   ): EditResult & { target: string } {
     const links = this.checkedLinks(layers);
     const id = newId("tgt");
-    const result = this.edit(caller, () => [
+    const result = this.editDocument(caller, () => [
       {
         op: "target.add",
         id,
@@ -1132,7 +1138,7 @@ export class Workspace {
     // description must not have to restate its layers, or two people editing
     // one target would revert each other.
     const links = fields.layers === undefined ? undefined : this.checkedLinks(fields.layers);
-    const result = this.edit(caller, () => [
+    const result = this.editDocument(caller, () => [
       {
         op: "target.set",
         id,
@@ -1152,7 +1158,7 @@ export class Workspace {
 
   removeTarget(caller: Caller, id: string): EditResult {
     this.mustHold(projectFromDoc(this.room.store.document()).targets ?? [], id, "target", "list_targets");
-    return this.edit(caller, () => [{ op: "target.remove", id }]);
+    return this.editDocument(caller, () => [{ op: "target.remove", id }]);
   }
 
 
@@ -1200,7 +1206,7 @@ export class Workspace {
     // then true immediately. It came back `instructions: 0`, `reason: "left the
     // program"` and a cheerful capture hash, which reads as a completed run.
     if (run.instructions === 0 && program.loaded.map.readByte(from) === undefined) {
-      const target = program.loaded.project.defaultTarget;
+      const target = this.room.target;
       throw new Error(
         `Nothing supplies ${hex4(from)}, so there is no instruction to start at` +
           (target
@@ -2032,7 +2038,9 @@ export class Workspace {
       method?: ClaimMethod;
     }
   ): EditResult & { evidence: string } {
-    const loaded = this.program().loaded;
+    // The document, not a view: a record layout and a piece of evidence are
+    // both project-level, so neither can need a stack chosen to be written.
+    const loaded = { project: this.document() };
     // **Checked against the project, not against this view.** Evidence is said
     // about a claim rather than about an address, so a claim framed on a layer
     // the current target does not link is still a claim and still has things
@@ -2074,7 +2082,7 @@ export class Workspace {
     }
 
     const id = newId("evd");
-    const result = this.edit(caller, () => [
+    const result = this.editDocument(caller, () => [
       {
         op: "evidence.add",
         id,
@@ -2130,7 +2138,7 @@ export class Workspace {
     // worth adding in the first place.
     const { method, ...rest } = fields;
     const previous = held as { author?: string; when?: number };
-    const result = this.edit(caller, () => [
+    const result = this.editDocument(caller, () => [
       {
         op: "evidence.set",
         id,
@@ -2156,7 +2164,7 @@ export class Workspace {
 
   removeEvidence(caller: Caller, id: string): EditResult {
     this.mustHold(this.program().loaded.project.evidence ?? [], id, "evidence", "list_evidence");
-    return this.edit(caller, () => [{ op: "evidence.remove", id }]);
+    return this.editDocument(caller, () => [{ op: "evidence.remove", id }]);
   }
 
   /** Every workflow this project carries, and what each produced. */
@@ -2364,7 +2372,7 @@ export class Workspace {
     // already knew — and two agents in one run made the same decoder twice
     // looking for it.
     const decoder = newId("dec");
-    const result = this.edit(caller, () => [
+    const result = this.editDocument(caller, () => [
       { op: "decoder.add", id: decoder, name, source },
     ]);
     return { ...result, decoder };
@@ -2380,7 +2388,7 @@ export class Workspace {
     if (fields.name === undefined && fields.source === undefined) {
       throw new Error("Give at least one field to change: name, source.");
     }
-    const result = this.edit(caller, () => [{ op: "decoder.set", id, fields }]);
+    const result = this.editDocument(caller, () => [{ op: "decoder.set", id, fields }]);
     return { ...result, decoder: id };
   }
 
@@ -2410,7 +2418,7 @@ export class Workspace {
       id?: string;
     }
   ): EditResult & { type: string } {
-    const declared = this.program().loaded.project.types ?? [];
+    const declared = this.document().types ?? [];
     const existing =
       type.id === undefined ? undefined : declared.find((t) => t.id === type.id);
     if (type.id !== undefined && !existing) {
@@ -2427,8 +2435,14 @@ export class Workspace {
     // which `byName` already decides: declaring is additive, so a name is not
     // an identity, and a layout is not the place to guess which was meant.
     const countForName = (name: string) => {
-      const found = this.program().loaded.constants.byName(name);
-      return found === undefined ? undefined : { id: found.id, value: found.value };
+      // From the document: a constant names a value, and no view can change
+      // which. Read through a loaded project this made declaring a *layout*
+      // require a choice of stack.
+      const named = (this.document().constants ?? []).filter((c) => c.name === name);
+      if (named.length !== 1 || named[0].id === undefined) return undefined;
+      const raw = named[0].value;
+      const value = typeof raw === "number" ? raw : parseProjectAddress(raw);
+      return { id: named[0].id, value };
     };
     // `address`, not `offset`, because every batch tool here reports what it
     // declined in one shape and the shape is the contract. The value is spelled
@@ -2502,7 +2516,7 @@ export class Workspace {
     // creates one. Fields merge by offset, so revising a layout does not
     // silently drop a field a collaborator added at another offset.
     const id = existing?.id ?? newId("typ");
-    const result = this.edit(caller, () =>
+    const result = this.editDocument(caller, () =>
       existing
         ? [
             {
@@ -2545,7 +2559,9 @@ export class Workspace {
     offset: number,
     field: { name: string; type: string; description?: string }
   ): EditResult & { field: string } {
-    const loaded = this.program().loaded;
+    // The document, not a view: a record layout and a piece of evidence are
+    // both project-level, so neither can need a stack chosen to be written.
+    const loaded = { project: this.document() };
     const held = (loaded.project.types ?? []).find((t) => t.id === typeId);
     if (!held) throw new Error(`No type ${typeId}. list_types shows what this project has.`);
 
@@ -2567,7 +2583,7 @@ export class Workspace {
     if ("error" in parsed) throw new Error(parsed.error);
 
     const id = newId("fld");
-    const result = this.edit(caller, () => [
+    const result = this.editDocument(caller, () => [
       { op: "field.add", id, typeId, offset, ...field } as Op,
     ]);
     return { ...result, field: id };
@@ -2579,7 +2595,9 @@ export class Workspace {
     id: string,
     fields: { name?: string; type?: string; description?: string | null; offset?: number }
   ): EditResult {
-    const loaded = this.program().loaded;
+    // The document, not a view: a record layout and a piece of evidence are
+    // both project-level, so neither can need a stack chosen to be written.
+    const loaded = { project: this.document() };
     const held = (loaded.project.types ?? []).find((t) => t.id === typeId);
     if (!held) throw new Error(`No type ${typeId}. list_types shows what this project has.`);
     if (!Object.values(held.fields).some((f) => f.id === id)) {
@@ -2595,37 +2613,42 @@ export class Workspace {
       );
       if (taken) throw new Error(`+${fields.offset} of ${held.name} is already ${taken[1].name}.`);
     }
-    return this.edit(caller, () => [{ op: "field.set", id, typeId, fields } as Op]);
+    return this.editDocument(caller, () => [{ op: "field.set", id, typeId, fields } as Op]);
   }
 
   removeField(caller: Caller, typeId: string, id: string): EditResult {
-    const held = (this.program().loaded.project.types ?? []).find((t) => t.id === typeId);
+    const held = (this.document().types ?? []).find((t) => t.id === typeId);
     if (!held) throw new Error(`No type ${typeId}. list_types shows what this project has.`);
     if (!Object.values(held.fields).some((f) => f.id === id)) {
       throw new Error(`No field ${id} in ${held.name}. list_types shows its fields with ids.`);
     }
-    return this.edit(caller, () => [{ op: "field.remove", id, typeId } as Op]);
+    return this.editDocument(caller, () => [{ op: "field.remove", id, typeId } as Op]);
   }
 
   /** The two resolvers a field type needs, so the three writers agree. */
   private typeIdForName() {
-    const declared = this.program().loaded.project.types ?? [];
+    const declared = this.document().types ?? [];
     return (name: string) => declared.find((t) => t.name === name)?.id;
   }
   private countForName() {
+    // The document's constants, for the same reason as the one in `setType`:
+    // a field type naming a count is a fact about a layout, not about a stack.
+    const named = this.document().constants ?? [];
     return (name: string) => {
-      const found = this.program().loaded.constants.byName(name);
-      return found === undefined ? undefined : { id: found.id, value: found.value };
+      const found = named.filter((c) => c.name === name);
+      if (found.length !== 1 || found[0].id === undefined) return undefined;
+      const raw = found[0].value;
+      return { id: found[0].id, value: typeof raw === "number" ? raw : parseProjectAddress(raw) };
     };
   }
 
   removeType(caller: Caller, id: string): EditResult {
-    const found = (this.program().loaded.project.types ?? []).find((t) => t.id === id);
+    const found = (this.document().types ?? []).find((t) => t.id === id);
     if (!found) throw new Error(`No type ${id}. list_types shows what this project has.`);
     // A claim referencing a type that has gone renders its bytes, exactly as a
     // dangling constant renders the literal — so there is no sweep to do, and a
     // delete racing a reference heals itself.
-    return this.edit(caller, () => [{ op: "type.remove", id }]);
+    return this.editDocument(caller, () => [{ op: "type.remove", id }]);
   }
 
   /**
@@ -2661,11 +2684,22 @@ export class Workspace {
       usedAt: string[];
     }[];
   } {
-    const loaded = this.program().loaded;
-    const index = loaded.types;
+    // The document's layouts, not a view's: a record layout describes no bytes
+    // of its own, so asking what this project declares cannot need a choice of
+    // stack. Reading it through a loaded project made `list_types` refuse on a
+    // project with several targets and no view named.
+    const project = this.document();
+    const index = projectTypes(project);
+    const constantName = new Map((project.constants ?? []).map((c) => [c.id, c.name]));
+    // Where a claim uses a layout is an *address*, so it exists only inside a
+    // view. A caller that named none on a project with several gets the layouts
+    // and is told the addresses are missing, rather than being refused an answer
+    // that mostly did not need one.
+    const inView = this.hasView();
 
     return {
       total: index.size,
+      ...(inView ? {} : { usedAtOmitted: "no view named, so no addresses" }),
       machine: REGISTER_LAYOUTS.map((r) => ({
         at: hex4(r.address),
         name: r.type.name,
@@ -2698,7 +2732,7 @@ export class Workspace {
             type: formatFieldType(
               field.type,
               (id) => index.get(id)?.name,
-              (id) => loaded.constants.get(id)?.name
+              (id) => constantName.get(id)
             ),
             ...(field.description === undefined ? {} : { description: field.description }),
           })),
@@ -2706,9 +2740,11 @@ export class Workspace {
           // fields of a 200-byte record has said something true, and this says
           // how much is left rather than pretending the record is finished.
           unexplainedBytes: Math.max(0, type.size - covered),
-          usedAt: loaded.claims
-            .filter((c) => c.says?.is === "record" && c.says.typeId === type.id)
-            .map((c) => hex4(c.at)),
+          usedAt: inView
+            ? this.program()
+                .loaded.claims.filter((c) => c.says?.is === "record" && c.says.typeId === type.id)
+                .map((c) => hex4(c.at))
+            : [],
         };
       }),
     };
@@ -2717,7 +2753,7 @@ export class Workspace {
   removeDecoder(caller: Caller, id: string): EditResult {
     const found = (this.program().loaded.project.decoders ?? []).find((d) => d.id === id);
     if (!found) throw new Error(`No decoder ${id}. list_decoders shows what this project has.`);
-    return this.edit(caller, () => [{ op: "decoder.remove", id }]);
+    return this.editDocument(caller, () => [{ op: "decoder.remove", id }]);
   }
 
   /**
@@ -4051,7 +4087,7 @@ export class Workspace {
       method?: ClaimMethod;
     }
   ): EditResult & { evidence: string } {
-    const project = this.program().loaded.project;
+    const project = this.document();
     const stored = (project.claims ?? []).find((c) => c.id === id);
     if (!stored) {
       throw new Error(
@@ -4078,7 +4114,7 @@ export class Workspace {
 
   /** Put a retired claim back, by removing what retired it. */
   restoreClaim(caller: Caller, id: string): EditResult & { removed: number } {
-    const project = this.program().loaded.project;
+    const project = this.document();
     const retiring = (project.evidence ?? []).filter((e) => e.claim === id && e.kind === "retires");
     if (retiring.length === 0) {
       const stored = (project.claims ?? []).some((c) => c.id === id);
@@ -4091,7 +4127,7 @@ export class Workspace {
     // All of them, in one changeset. Two people retiring the same claim while
     // apart converge on two records that agree, and restoring has to clear the
     // agreement rather than half of it.
-    const result = this.edit(caller, () =>
+    const result = this.editDocument(caller, () =>
       retiring.map((e) => ({ op: "evidence.remove" as const, id: e.id ?? "" }))
     );
     return { ...result, removed: retiring.length };
@@ -4659,7 +4695,7 @@ export class Workspace {
     // agents collided over it in experiment 3; a write whose result cannot be
     // named again is a write the caller has to go looking for.
     const id = newId("cst");
-    const result = this.edit(caller, () => [{ op: "constant.add", id, name, value }]);
+    const result = this.editDocument(caller, () => [{ op: "constant.add", id, name, value }]);
     return { ...result, constant: id };
   }
 
@@ -4671,9 +4707,11 @@ export class Workspace {
     if (name === undefined && value === undefined) {
       throw new Error("Give at least one field to change: name, value.");
     }
-    return this.edit(caller, (loaded) => {
-      // Not found, never created — see `mustHold`.
-      if (!loaded.constants.byId(id)) {
+    return this.editDocument(caller, (project) => {
+      // Not found, never created — see `mustHold`. Read from the document
+      // rather than from a built index: a constant names a value, and which
+      // layers are linked cannot change what it is.
+      if (!(project.constants ?? []).some((c) => c.id === id)) {
         throw new Error(`No constant ${id}. list_constants shows what this project has.`);
       }
       // Only what was named. Resending the other field is how an edit reasserts
@@ -4725,8 +4763,8 @@ export class Workspace {
    * resolve a name; writes name the thing they change.
    */
   removeConstant(caller: Caller, id: string): EditResult {
-    return this.edit(caller, (loaded) => {
-      if (!loaded.constants.byId(id)) {
+    return this.editDocument(caller, (project) => {
+      if (!(project.constants ?? []).some((c) => c.id === id)) {
         throw new Error(`No constant ${id}. list_constants shows what this project has.`);
       }
       const existing = { id };
@@ -4864,7 +4902,7 @@ export class Workspace {
    * and could only arrive by importing a file that already carried one.
    */
   setDescription(caller: Caller, description: string): EditResult {
-    return this.edit(caller, () => [
+    return this.editDocument(caller, () => [
       { op: "meta.set", key: "description", value: description } as Op,
     ]);
   }
@@ -4992,7 +5030,7 @@ export class Workspace {
    * for choosing the name, or for keeping a second set of names separate.
    */
   addSymbolsLayer(caller: Caller, name: string): EditResult {
-    return this.edit(caller, () => [
+    return this.editDocument(caller, () => [
       { op: "layer.add", id: newId("lay"), layerType: "symbols", name, index: 0 } as Op,
     ]);
   }
@@ -5012,8 +5050,11 @@ export class Workspace {
    * full is a dead end.
    */
   removeLayer(caller: Caller, id: string): EditResult {
-    return this.edit(caller, (loaded) => {
-      const layer = loaded.project.layers.find((l) => l.id === id);
+    return this.editDocument(caller, (project) => {
+      // The document's layers, not a view's: a target that hides a layer must
+      // not make removing it impossible, and a workspace that named no target
+      // has no view to ask.
+      const layer = project.layers.find((l) => l.id === id);
       if (!layer) {
         throw new Error(
           `No layer has id ${id}. list_targets reports every layer, including ` +
@@ -5070,7 +5111,7 @@ export class Workspace {
    * instead of using the ROMs sitting on the disk.
    */
   private linkAdvice(): { linkedInto?: string[]; note?: string } {
-    const project = this.program().loaded.project;
+    const project = this.document();
     const targets = project.targets ?? [];
     if (targets.length === 0) return {};
     return {
@@ -5083,13 +5124,13 @@ export class Workspace {
   }
 
   addRomLayer(caller: Caller, rom: "basic" | "kernal" | "characters"): EditResult {
-    const held = this.program().loaded.project.layers;
+    const held = this.document().layers;
     const already = held.find((l) => l.type === "rom" && l.rom === rom);
     if (already) {
       throw new Error(`This project already links the ${rom} ROM as "${already.name}".`);
     }
     const advice = this.linkAdvice();
-    const result = this.edit(caller, () => [
+    const result = this.editDocument(caller, () => [
       {
         op: "layer.add",
         id: newId("lay"),
@@ -5174,9 +5215,9 @@ export class Workspace {
 
     // The stack is declared bottom-up and a byte layer is the foundation, so a
     // new one goes on top of what is already there rather than under it.
-    const index = this.program().loaded.project.layers.length;
+    const index = this.document().layers.length;
     const advice = this.linkAdvice();
-    const result = this.edit(caller, () => [
+    const result = this.editDocument(caller, () => [
       {
         op: "layer.add",
         id: newId("lay"),
@@ -5482,7 +5523,7 @@ export class Workspace {
 
     // Additive, like the single call: a batch that quietly revised whatever it
     // matched would be the obvious way to get back the behaviour just removed.
-    return this.edit(caller, () =>
+    return this.editDocument(caller, () =>
       constants.map((entry) => ({
         op: "constant.add" as const,
         id: newId("cst"),
@@ -5644,6 +5685,51 @@ export class Workspace {
    * reachable only through a jump table gets decoded at all, so the count is
    * how a caller tells a productive guess from a wasted one.
    */
+  /**
+   * The project as stored, with no view applied.
+   *
+   * The other half of `program()`. A type, a constant, a decoder, a piece of
+   * evidence and a target all belong to the *document*: which layers happen to
+   * be linked cannot change what they are, and requiring a view to touch one is
+   * how `add_evidence` came to refuse writes on the ground that a claim framed
+   * on an unlinked layer "did not exist". `list_targets` is the case that makes
+   * it unarguable — asking which views there are cannot itself need one.
+   */
+  document(): Project {
+    return projectFromDoc(this.room.store.document());
+  }
+
+  /**
+   * Whether this workspace can resolve a view without guessing.
+   *
+   * True when one was named, and when the project leaves no choice — one target
+   * declared, or none, which implies a single view over the whole stack. An
+   * answer that is *mostly* view-free, like `list_types`, uses this to leave out
+   * the part that is not rather than refuse the whole.
+   */
+  private hasView(): boolean {
+    return this.room.target !== undefined || (this.document().targets ?? []).length <= 1;
+  }
+
+  /**
+   * Apply an edit that no view is involved in.
+   *
+   * Deliberately not `edit()` with the analysis skipped: `edit()` measures the
+   * decode before and after, and there is no decode here to measure. A write
+   * that named no target has not chosen a view, so there is no listing for the
+   * count to be about, and inventing one is what this whole change removes.
+   */
+  private editDocument(caller: Caller, build: (project: Project) => Op[]): EditResult {
+    const ops = build(this.document());
+    const { descriptions } = this.room.store.runOps(
+      ops,
+      caller.userId,
+      Date.now(),
+      caller.sessionId
+    );
+    return { ok: true, version: this.version(), did: descriptions };
+  }
+
   private edit(
     caller: Caller,
     build: (loaded: LoadedProject) => Op[],
@@ -5805,7 +5891,16 @@ export interface EditResult {
   ok: true;
   version: string;
   did: string[];
-  instructions: { before: number; after: number; delta: number };
+  /**
+   * What this edit did to the decode, where that question has an answer.
+   *
+   * Absent for a write that changes no view — a type, a constant, a piece of
+   * evidence, a target, a layer. Those are edits to the *document*, and asking
+   * what they did to the disassembly means asking "through which view", which
+   * such a call does not name and must not have to. Reporting a delta of zero
+   * would be a measurement nobody took.
+   */
+  instructions?: { before: number; after: number; delta: number };
   /**
    * The claims this edit made or revised, each beside the address it was made
    * for.

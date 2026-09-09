@@ -14,8 +14,8 @@ import { loadProjectFile } from "../../node-files.js";
  * explainable rather than merely small.
  */
 
-const load = (path: string) => {
-  const loaded = loadProjectFile(path);
+const load = (path: string, target?: string) => {
+  const loaded = loadProjectFile(path, target);
   return { loaded, program: analyzeProgram(loaded) };
 };
 

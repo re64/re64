@@ -105,11 +105,13 @@ export interface CommentRemoveOp {
 export interface MetaSetOp {
   op: "meta.set";
   /**
-   * `defaultTarget` rides here rather than getting an operation of its own:
-   * selecting a view is setting one project-level scalar, which is exactly what
-   * this op is for.
+   * **`defaultTarget` used to ride here and is gone.** Selecting a view looked
+   * like setting one project-level scalar, and that was the mistake: which view
+   * somebody is reading is a property of the reader, so writing it into the
+   * shared document made one reader's choice everybody's — and made every call
+   * that named no view get whichever target sorted first.
    */
-  key: "name" | "description" | "defaultTarget";
+  key: "name" | "description";
   value?: string;
 }
 

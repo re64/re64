@@ -25,7 +25,7 @@ an import source or an export target and is never synced to.
 | `types` | `{id, name, size, fields}` | map by id, fields nested by offset |
 | `files` | the binaries, content-addressed | map by name |
 | `primaryLabels` | address → claim id | map |
-| `meta` | `name`, `description`, `defaultTarget` | map |
+| `meta` | `name`, `description` | map |
 
 Two further roots live in their own modules — `crdt/chat.ts` and
 `crdt/participants.ts` — and are deliberately outside `projectFromDoc`'s
@@ -76,10 +76,29 @@ A target is a memory map: which layers, in what order, at what address.
 - A symbols layer is never linked and never filtered.
 - A link naming a layer that has gone is skipped, not refused.
 
-**There is no current target on the server.** A view is a parameter of the
-request: every tool takes `target`, every answer reports the one it used, and a
-project may declare `defaultTarget` for callers that name none. A project
-without targets gets one derived from its layers in declaration order.
+**There is no current target, and no default one either.** A view is a parameter
+of the request: every tool takes `target` and every answer reports the one it
+used. A project declaring more than one **refuses** a call that names none and
+lists them, because the bytes at an address differ between views and there is no
+answer right for all of them. Where there is no choice — one target, or none,
+which implies a single view over the whole stack — naming it is not required.
+
+The document used to carry `defaultTarget`, and it is gone. It read as "what
+this project is *for*", which is a reasonable thing for a file to say, but every
+call that named no view was answered through it — so a document field was
+answering a question about the reader. On the Camels silver image, which
+declares five targets and no default, the invented answer was `loader`: one
+layer, in which every claim framed on the runtime layer does not exist. Which
+view somebody is reading is a property of the looker, and lives in their
+session.
+
+**So a write that touches no address needs no view.** A type, a field, a
+constant, a decoder, a piece of evidence, a layer, a target: those are edits to
+the *document*, and they go through a path that never builds a memory map.
+`list_targets` is the case that settles it — asking which views exist cannot
+itself require choosing one. Such an edit reports no instruction delta, because
+there is no view for the count to be about and a zero would be a measurement
+nobody took.
 
 ---
 

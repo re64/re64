@@ -37,8 +37,17 @@ which. Sessions come from `Mcp-Session-Id` where the host issues one, or
 
 **Every tool takes `project` and `target`.** `project` selects the project;
 `target` selects the view to answer for, and every answer reports the one it
-used. Omitting `target` uses the project's `defaultTarget`. Naming a target that
-does not exist is refused rather than answered for with a different stack.
+used.
+
+**Say which view, and there is no default.** A project declaring more than one
+target refuses a call that names none, and lists them. There used to be a
+`defaultTarget` in the document and it is gone: which view somebody is reading
+is a property of the reader, so a field in the shared file could not answer it —
+and on a project declaring five targets and no default, every call that named
+none was answered through whichever one sorted first. Where there is no choice
+to make — one target, or none, which implies one over the whole stack — naming
+it is not required. Naming a target that does not exist is refused rather than
+answered for with a different stack.
 
 **Addresses** are `"$8000"`, `"0x8000"` or `32768`, anywhere an address is
 taken. Ranges are inclusive at both ends. `extent` is a byte count.

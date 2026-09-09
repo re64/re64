@@ -180,7 +180,9 @@ export function placed(loaded: LoadedProject, address: number): { frame: Frame; 
     // A symbols layer supplies no bytes and has no address, so nothing can be
     // an offset into one — `layerAt` already returns only byte layers.
     owner ? { id: owner.id, start: owner.start } : undefined,
-    loaded.project.defaultTarget
+    // The view this project was loaded through. `projectForTarget` narrows to
+    // exactly one target, so it is the only one left.
+    loaded.project.targets?.length === 1 ? loaded.project.targets[0].name : undefined
   );
 }
 
