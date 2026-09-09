@@ -7,6 +7,7 @@ rather than gold: it is a baseline, not an answer.
 | | |
 |---|---|
 | claims | 630, each with one supporting record naming who vouched |
+| hygiene | **206 findings**, and 43 disagreements — none of it reviewed |
 | record types | 6 — `ZoneRecord` with 33 fields, and five smaller |
 | comments | 363 |
 | constants | 18, with 21 sites bound |
@@ -39,10 +40,13 @@ A baseline that hid its problems would measure nothing. These are left standing:
   differently — `TickObjectLifetime` and `AgeCreature` at `$9A39`. Two names at
   one address is a state this model tolerates; choosing between them is a
   judgement nobody has made.
-- **42 zone names are claimed as `text` inside the `data` span of the zone
-  table**, which is 42 of hygiene's 44 findings and exactly the case
-  `claim.interpretationsDiffer` was written for. `ZoneRecord` is now declared,
-  so the fix exists and has not been applied.
+- **The zone table is claimed twice** — 8,400 bytes of `data` by run 7 and an
+  array of `ZoneRecord` by run 9 — and forty-two zone names sit inside both as
+  `text`. That is most of hygiene's 136 `claim.interpretationsDiffer` findings
+  and exactly the case it was written for.
+- **Twelve claims cover 71,007 bytes of a 47K program**, because they overlap
+  and because several are true without explaining anything: 18,431 bytes as one
+  `bitmap`, 8,209 as `data`. Size is a fair proxy for vagueness.
 - **Run 9's scenarios did not survive.** Its document is gone and its transcript
   records a create followed by 33 edits by id, against ids nothing can resolve.
   Run 10's fourteen came across; run 9's twenty-nine did not.

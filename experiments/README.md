@@ -95,6 +95,16 @@ together are several MCP clients or one shared client is a property of the host,
 not the protocol, and it decides how agent sessions have to be keyed. Counting
 them here settles it without setting anything up.
 
+## Experiment 11: the first delta
+
+`11-review/` is the first run that starts from something rather than from an
+empty project. Everything before it measured the first hour; this one asks
+whether an agent can build on — and contradict — work three earlier sessions
+left behind. `setup.sh` builds the silver image and snapshots the before-state;
+`measure.sh` reports the delta and the share of writes that were revisions
+rather than additions, which is the churn question a brief about readability
+cannot ask of itself.
+
 ## Ending a run
 
 ```
