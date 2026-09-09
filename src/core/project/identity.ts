@@ -142,3 +142,22 @@ export function withIds(project: Project, mint: (prefix: IdPrefix) => string = n
       }
     : project;
 }
+
+/**
+ * Whether a string is one of this project's ids.
+ *
+ * **The invariant that makes names usable as aliases.** An id is a three-letter
+ * prefix, an underscore and six characters of `[0-9a-z]`; no field type this
+ * model spells can take that shape — `u8`, `i8`, `u16`, `u16be`, `ptr`, `ptrbe`,
+ * `char(n)`, `bytes(n)` and `bits(n)` contain no underscore and none is nine
+ * characters of that form. So a reference stored in the document is never
+ * ambiguous between an id and a built-in type, and the alias layer above it can
+ * accept either without a rule about which wins.
+ *
+ * It is checked rather than assumed, because it holds by construction today and
+ * would stop holding the moment somebody added a type spelling with an
+ * underscore in it.
+ */
+export function isEntityId(text: string): boolean {
+  return /^[a-z]{3}_[0-9a-z]{6}$/.test(text.trim());
+}

@@ -347,7 +347,10 @@ export function parseFieldType(
   // makes `u8[4][8]` read as C reads it: four of eight, outer dimension first.
   const dimensions: { count: number; origin: number; countId?: string }[] = [];
   for (;;) {
-    const found = /\[\s*([A-Za-z_][A-Za-z0-9_]*|-?\d+)\s*(?:\.\.\s*([A-Za-z_][A-Za-z0-9_]*|-?\d+)\s*)?\]$/.exec(
+    // `@` is in the identifier class because a count may be written
+    // `CreatureCount@cst_kj39fa` — the disambiguated form the alias layer emits
+    // when two constants answer to one name, and accepts straight back.
+    const found = /\[\s*([A-Za-z_][A-Za-z0-9_@]*|-?\d+)\s*(?:\.\.\s*([A-Za-z_][A-Za-z0-9_@]*|-?\d+)\s*)?\]$/.exec(
       trimmed
     );
     if (!found) break;
@@ -464,9 +467,33 @@ export function parseFieldType(
     error:
       `"${trimmed}" is not a field type and is not a type this project declares. ` +
       `Use u8, i8, u16, u16be, ptr, ptrbe, char(n), char(n,screen), bytes(n), ` +
-      `or the name of a type from list_types. Any of those takes [n] for an ` +
+      `or a type from list_types — its id, its name where exactly one thing ` +
+      `answers to that, or name@id where more than one does. Any of those takes ` +
+      `[n] for an ` +
       `array of them, or [first..last] where the first index is not zero.`,
   };
+}
+
+/**
+ * A field type as the **document** stores it: every reference an id.
+ *
+ * A field type is one string, which is what made arrays cost nothing to add.
+ * The references inside it — another type, a constant naming a count — were
+ * stored as *names*, so renaming a type silently rewrote the meaning of every
+ * field pointing at it and two types could share a name with nothing able to
+ * say which was meant.
+ *
+ * Names remain how a person and an agent write one; they are resolved at the
+ * boundary and this is what is kept. `u8[CreatureCount]` goes in and
+ * `u8[cst_kj39fa]` is stored, so renaming the constant changes how the field
+ * *reads* and never what it *means*.
+ */
+export function storedFieldType(type: FieldType): string {
+  return formatFieldType(
+    type,
+    (typeId) => typeId,
+    (constantId) => constantId
+  );
 }
 
 /** A field type, written back out the way it was typed. */

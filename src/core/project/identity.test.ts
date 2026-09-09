@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { newId, derivedId, isId, withIds } from "./identity.js";
+import { newId, derivedId, isId, withIds, isEntityId } from "./identity.js";
 
 describe("newId", () => {
   it("mints distinct ids", () => {
@@ -104,5 +104,55 @@ describe("giving a project ids whatever shape it arrived in", () => {
     const project = withIds(compact, (prefix) => `${prefix}_y`);
     expect(project.layers[0].id).toBe("lay_y");
     expect(project.layers[0].labels?.[0].id).toBe("lbl_y");
+  });
+});
+
+describe("no field type can be mistaken for an id", () => {
+  /**
+   * **The invariant that lets a name be an alias at all.**
+   *
+   * A field type is one string and the references inside it are now ids, so a
+   * reader writing `u8` must never be handed a type somebody declared and
+   * called `u8` — and an id must never be read as a built-in. An id is three
+   * letters, an underscore and six of `[0-9a-z]`; no spelling this model has
+   * for a field type takes that shape.
+   *
+   * It holds by construction and is asserted anyway, because it would stop
+   * holding the moment somebody added a type spelling with an underscore in it
+   * and nothing else would notice.
+   */
+  const SPELLINGS = [
+    "u8",
+    "i8",
+    "u16",
+    "u16be",
+    "ptr",
+    "ptrbe",
+    "char(40)",
+    "char(40,screen)",
+    "bytes(8)",
+    "bits(3)",
+  ];
+
+  it("says no to every built-in spelling, and yes to a real id", () => {
+    for (const spelling of SPELLINGS) {
+      expect(isEntityId(spelling), spelling).toBe(false);
+      // Arrays of them too, since that is what a field type usually is.
+      expect(isEntityId(`${spelling}[8]`), spelling).toBe(false);
+    }
+    for (const prefix of ["typ", "cst", "fld", "clm", "tgt"]) {
+      expect(isEntityId(newId(prefix as Parameters<typeof newId>[0]))).toBe(true);
+    }
+    expect(isEntityId(derivedId("typ", "Creature"))).toBe(true);
+  });
+
+  it("says no to a name that merely looks like one", () => {
+    // Near misses, so the shape is pinned rather than approximated.
+    expect(isEntityId("typ_")).toBe(false);
+    expect(isEntityId("typ_kj39f")).toBe(false);
+    expect(isEntityId("typ_kj39faz")).toBe(false);
+    expect(isEntityId("typ-kj39fa")).toBe(false);
+    expect(isEntityId("Creature")).toBe(false);
+    expect(isEntityId("Creature@typ_kj39fa")).toBe(false);
   });
 });

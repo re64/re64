@@ -102,6 +102,7 @@ import {
   fieldBits,
   fieldSize,
   formatFieldType,
+  storedFieldType,
   parseFieldType,
   pathAt,
 } from "../core/memory/type.js";
@@ -2483,21 +2484,10 @@ export class Workspace {
     // bit record whose offsets started being read as bytes halfway through an
     // edit would reject every field it already held.
     const unit = type.unit ?? existing?.unit;
-    const idForName = (name: string) => declared.find((t) => t.name === name)?.id;
-    // A count written as a constant — `u8[LevelCount]` — resolved through the
-    // one constant with that name. Two with the same name resolve to neither,
-    // which `byName` already decides: declaring is additive, so a name is not
-    // an identity, and a layout is not the place to guess which was meant.
-    const countForName = (name: string) => {
-      // From the document: a constant names a value, and no view can change
-      // which. Read through a loaded project this made declaring a *layout*
-      // require a choice of stack.
-      const named = (this.document().constants ?? []).filter((c) => c.name === name);
-      if (named.length !== 1 || named[0].id === undefined) return undefined;
-      const raw = named[0].value;
-      const value = typeof raw === "number" ? raw : parseProjectAddress(raw);
-      return { id: named[0].id, value };
-    };
+    // The one alias layer, shared with `add_field` and `edit_field` so the three
+    // writers cannot drift: an id, or a name exactly one thing answers to, or
+    // `name@id` when more than one does. See `fieldTypeNames`.
+    const { ambiguous, idForName, countForName } = this.fieldTypeNames();
     // `address`, not `offset`, because every batch tool here reports what it
     // declined in one shape and the shape is the contract. The value is spelled
     // as an offset — `+$A0` — so nobody reads it as an address in memory.
@@ -2527,9 +2517,13 @@ export class Workspace {
       // A fact about the request, which is the only kind of reason a write here
       // may refuse for — and partial, like every batch: one bad field must not
       // lose the nineteen somebody proved from a copy routine.
+      const before = ambiguous.length;
       const parsed = parseFieldType(field.type, idForName, countForName);
       if ("error" in parsed) {
-        rejected.push({ address: key, reason: parsed.error });
+        // An ambiguous name is a better reason than "not a field type", and it
+        // is the one that tells a reader what to do about it.
+        const said = ambiguous.slice(before);
+        rejected.push({ address: key, reason: said.length ? said.join(" ") : parsed.error });
         continue;
       }
       // `bits(n)` needs somewhere to sit, and a byte-addressed record has no
@@ -2556,7 +2550,16 @@ export class Workspace {
       }
       // Minted here: a field is addressed on its own, and no caller supplies
       // an id for something that does not exist yet.
-      fields[offset] = { ...field, id: existing?.fields?.[String(offset)]?.id ?? newId("fld") };
+      //
+      // **And the type is re-emitted as ids.** The caller wrote `Creature[42]`
+      // or `u8[CreatureCount]`; what is stored is `typ_…[42]` and `u8[cst_…]`,
+      // because a name is a field somebody may change and a reference must not
+      // change with it. The name is how it renders, resolved on the way out.
+      fields[offset] = {
+        ...field,
+        type: storedFieldType(parsed),
+        id: existing?.fields?.[String(offset)]?.id ?? newId("fld"),
+      };
     }
 
     if (Object.keys(fields).length === 0 && Object.keys(type.fields).length > 0) {
@@ -2633,12 +2636,12 @@ export class Workspace {
           `share an offset; edit_field moves one, remove_field takes it back.`
       );
     }
-    const parsed = parseFieldType(field.type, this.typeIdForName(), this.countForName());
-    if ("error" in parsed) throw new Error(parsed.error);
+    // Ids, not the caller's names — see `fieldTypeNames`.
+    const type = this.storedFrom(field.type);
 
     const id = newId("fld");
     const result = this.editDocument(caller, () => [
-      { op: "field.add", id, typeId, offset, ...field } as Op,
+      { op: "field.add", id, typeId, offset, ...field, type } as Op,
     ]);
     return { ...result, field: id };
   }
@@ -2657,17 +2660,17 @@ export class Workspace {
     if (!Object.values(held.fields).some((f) => f.id === id)) {
       throw new Error(`No field ${id} in ${held.name}. list_types shows its fields with ids.`);
     }
-    if (fields.type !== undefined) {
-      const parsed = parseFieldType(fields.type, this.typeIdForName(), this.countForName());
-      if ("error" in parsed) throw new Error(parsed.error);
-    }
+    const stored =
+      fields.type === undefined ? fields : { ...fields, type: this.storedFrom(fields.type) };
     if (fields.offset !== undefined) {
       const taken = Object.entries(held.fields).find(
         ([at, f]) => Number(at) === fields.offset && f.id !== id
       );
       if (taken) throw new Error(`+${fields.offset} of ${held.name} is already ${taken[1].name}.`);
     }
-    return this.editDocument(caller, () => [{ op: "field.set", id, typeId, fields } as Op]);
+    return this.editDocument(caller, () => [
+      { op: "field.set", id, typeId, fields: stored } as Op,
+    ]);
   }
 
   removeField(caller: Caller, typeId: string, id: string): EditResult {
@@ -2679,21 +2682,86 @@ export class Workspace {
     return this.editDocument(caller, () => [{ op: "field.remove", id, typeId } as Op]);
   }
 
-  /** The two resolvers a field type needs, so the three writers agree. */
-  private typeIdForName() {
-    const declared = this.document().types ?? [];
-    return (name: string) => declared.find((t) => t.name === name)?.id;
-  }
-  private countForName() {
-    // The document's constants, for the same reason as the one in `setType`:
-    // a field type naming a count is a fact about a layout, not about a stack.
-    const named = this.document().constants ?? [];
-    return (name: string) => {
-      const found = named.filter((c) => c.name === name);
-      if (found.length !== 1 || found[0].id === undefined) return undefined;
-      const raw = found[0].value;
-      return { id: found[0].id, value: typeof raw === "number" ? raw : parseProjectAddress(raw) };
+  /**
+   * How a written field type reaches the ids the document stores.
+   *
+   * **Names are an alias layer, and this is the whole of it.** An agent writes
+   * `Creature[CreatureCount]` because language is suggestive and the suggestion
+   * is worth having — `Creature[creatureIndex]` reads as something a person can
+   * be wrong about out loud, where `typ_kj39fa[cst_x0plq2]` reads as nothing.
+   * What is *stored* is the ids, so renaming changes how a field reads and never
+   * what it means.
+   *
+   * Three spellings are accepted, and the third is the interesting one:
+   *
+   * - an **id** — `typ_kj39fa` — always, and never ambiguous
+   * - a **name**, when exactly one thing answers to it
+   * - **`name@id`** — `Creature@typ_kj39fa` — when more than one does
+   *
+   * A bare name that two things answer to is **refused**, with both `@id` forms
+   * in the message. That refusal is the signal: a reader who meets it learns
+   * that the document now holds two `Creature`s, which is a thing they wanted to
+   * know. Resolving to the first would have been a confident wrong answer, and
+   * this surface has been caught doing that before.
+   *
+   * Deliberately stateless: it asks the document as it is *now* rather than what
+   * this session last saw. A per-session name table would make one caller's
+   * write mean something different from another's — which is the offline/online
+   * rule's failure case, not an optimisation of it.
+   */
+  private fieldTypeNames(): {
+    ambiguous: string[];
+    idForName: (named: string) => string | undefined;
+    countForName: (named: string) => { id: string; value: number } | undefined;
+  } {
+    const project = this.document();
+    const ambiguous: string[] = [];
+
+    const pick = <T extends { id?: string; name: string }>(
+      held: readonly T[],
+      named: string
+    ): T | undefined => {
+      const at = named.indexOf("@");
+      if (at >= 0) {
+        // `name@id`: the id decides, and the name half has to agree — a stale
+        // copy of a name that has since moved must not resolve quietly.
+        const wanted = named.slice(0, at);
+        const byId = held.find((x) => x.id === named.slice(at + 1));
+        return byId && byId.name === wanted ? byId : undefined;
+      }
+      const byId = held.find((x) => x.id === named);
+      if (byId) return byId;
+      const matches = held.filter((x) => x.name === named);
+      if (matches.length > 1) {
+        ambiguous.push(
+          `"${named}" names ${matches.length} of them — say which: ` +
+            matches.map((m) => `${named}@${m.id}`).join(", ")
+        );
+        return undefined;
+      }
+      return matches[0];
     };
+
+    return {
+      ambiguous,
+      idForName: (named) => pick(project.types ?? [], named)?.id,
+      countForName: (named) => {
+        const found = pick(project.constants ?? [], named);
+        if (!found || found.id === undefined) return undefined;
+        const raw = found.value;
+        return { id: found.id, value: typeof raw === "number" ? raw : parseProjectAddress(raw) };
+      },
+    };
+  }
+
+  /** A field type from a caller, as the document stores it, or a reason it is not one. */
+  private storedFrom(text: string): string {
+    const names = this.fieldTypeNames();
+    const parsed = parseFieldType(text, names.idForName, names.countForName);
+    if ("error" in parsed) {
+      throw new Error(names.ambiguous.length ? names.ambiguous.join(" ") : parsed.error);
+    }
+    return storedFieldType(parsed);
   }
 
   removeType(caller: Caller, id: string): EditResult {
@@ -2744,7 +2812,22 @@ export class Workspace {
     // project with several targets and no view named.
     const project = this.document();
     const index = projectTypes(project);
-    const constantName = new Map((project.constants ?? []).map((c) => [c.id, c.name]));
+    // **The alias layer, the other way round.** The document holds ids; this is
+    // where they become the names somebody wrote. A name two things answer to is
+    // rendered `name@id` — readable, and the suffix is itself the notice that
+    // the plain name would no longer be accepted as input.
+    const alias = <T extends { id?: string; name: string }>(held: readonly T[]) => {
+      const shared = new Map<string, number>();
+      for (const x of held) shared.set(x.name, (shared.get(x.name) ?? 0) + 1);
+      const byId = new Map(held.filter((x) => x.id).map((x) => [x.id!, x.name]));
+      return (id: string): string | undefined => {
+        const name = byId.get(id);
+        if (name === undefined) return undefined;
+        return (shared.get(name) ?? 0) > 1 ? `${name}@${id}` : name;
+      };
+    };
+    const constantName = alias(project.constants ?? []);
+    const typeName = alias(project.types ?? []);
     // Where a claim uses a layout is an *address*, so it exists only inside a
     // view. A caller that named none on a project with several gets the layouts
     // and is told the addresses are missing, rather than being refused an answer
@@ -2783,11 +2866,7 @@ export class Workspace {
           fields: laid.map(({ offset, field }) => ({
             offset: `+$${offset.toString(16).toUpperCase().padStart(2, "0")}`,
             name: field.name,
-            type: formatFieldType(
-              field.type,
-              (id) => index.get(id)?.name,
-              (id) => constantName.get(id)
-            ),
+            type: formatFieldType(field.type, typeName, constantName),
             ...(field.description === undefined ? {} : { description: field.description }),
           })),
           // Holes are legal and are the point: a reader who has proved nineteen

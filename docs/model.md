@@ -108,11 +108,45 @@ target orphaned every claim framed on it and two targets could share a name with
 nothing able to tell them apart. Names stay usable at the API, where a person
 types them, and are resolved at the boundary; what reaches the document is an id.
 
-The same question is open elsewhere and is worth naming rather than discovering:
-a field type refers to another type and to a count constant **by name**
-(`Creature[42]`, `u8[CreatureCount]`), and a capture refers to its bytes by
-**filename**. The first is argued — the text is the equate an assembler would
-write — and the second is a defect the Codex review reproduced.
+The same rule now holds inside a **field type**, which is where it was hardest.
+A field type is one string and the references in it — another type, a constant
+naming a count — were names. `u8[CreatureCount]` goes in; `u8[cst_kj39fa]` is
+stored.
+
+**Names survive as an alias layer, because the suggestion is worth having.**
+`Creature[creatureIndex]` is something a reader can be wrong about out loud;
+`typ_kj39fa[cst_x0plq2]` is something nobody can be wrong about because nobody
+can read it. That bias is useful — it is how a mis-typed table gets noticed — so
+it is kept where it belongs, in what a person writes and what a surface renders,
+and never in what the document holds. Three spellings are accepted:
+
+| | |
+|---|---|
+| `typ_kj39fa` | an id, always, never ambiguous |
+| `Creature` | a name, when exactly one thing answers to it |
+| `Creature@typ_kj39fa` | when more than one does |
+
+A bare name two things answer to is **refused**, with both `@id` forms in the
+message, and the same form is accepted straight back. The refusal is the point:
+a reader who meets it learns the document has grown a second `Creature`, which
+is a thing they wanted to know. `list_types` renders the suffix for the same
+reason — it is the notice that the plain name is no longer resolvable.
+
+**Resolution asks the document as it is, not what a session last saw.** A
+per-session name table was considered and rejected: it would make one caller's
+write mean something different from another's, which is the offline/online
+rule's failure case rather than an optimisation of it. Ambiguity refusing, plus
+`expectVersion` on the write, covers what a session cache would have.
+
+**One invariant holds this up**: no field-type spelling can be mistaken for an
+id. An id is three letters, an underscore and six of `[0-9a-z]`; `u8`, `u16be`,
+`char(n)`, `bytes(n)` and `bits(n)` contain no underscore. It is true by
+construction and asserted anyway, in `identity.test.ts`, because it would stop
+being true the moment a spelling with an underscore was added.
+
+Still breaking the rule, and named here rather than left to be discovered: a
+**capture refers to its bytes by filename**, mutably mapped to a hash — a defect
+the Codex review reproduced (R8) — and a **layer refers to its file by path**.
 
 **Which arrangement a claim is about, and the default.** A claim on a byte no
 layer supplies — zero page, an I/O register, a KERNAL vector — is framed on the

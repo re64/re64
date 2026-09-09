@@ -1269,6 +1269,11 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "proved and leave the rest unexplained, rather than inventing padding. " +
       "`size` is bytes per record; how many records a claim holds is derived " +
       "from its extent, never stored. " +
+      "A field type may name another type or a count constant — `Creature[42]`, " +
+      "`u8[CreatureCount]` — and **the document stores the id it resolves to**, " +
+      "so renaming either changes how the field reads and never what it means. " +
+      "A name two things answer to is refused rather than guessed, with both " +
+      "`name@id` forms in the message; that form is accepted straight back. " +
       "Returns the id. Bind it with add_claim is:\"record\" typeId:<id>.",
     {
       project,
@@ -1399,7 +1404,15 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         .min(0)
         .describe("Into the record, in its own unit: bytes, or bits when unit is \"bits\""),
       name: z.string().min(1),
-      type: z.string().describe("As add_type's field type: u8, char(40), u8[8], bits(3), …"),
+      type: z
+        .string()
+        .describe(
+          "As add_type's field type: u8, char(40), u8[8], bits(3), … or another " +
+            "type. A reference may be its id, its name where exactly one thing " +
+            "answers to that, or name@id where more than one does — the document " +
+            "stores the id either way, so renaming changes how a field reads and " +
+            "never what it means."
+        ),
       description: z.string().optional(),
       expectVersion: z.string().optional(),
     },

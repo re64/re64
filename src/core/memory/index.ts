@@ -27,6 +27,7 @@ export {
   fieldSize,
   parseFieldType,
   formatFieldType,
+  storedFieldType,
   pathAt,
 } from "./type.js";
 export {

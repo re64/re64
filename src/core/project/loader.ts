@@ -592,14 +592,30 @@ function resolveFieldType(
   declared: readonly ProjectType[],
   constants: readonly ProjectConstant[]
 ): FieldType {
+  // **An id first, a name as a legacy alias.** The document stores ids now, so
+  // this resolves one to itself; a name is honoured because files written before
+  // that stay loadable and the next write persists an id — the same latitude
+  // every other id here gets. A name that is not unique resolves to nothing
+  // rather than to the first match, which is what an ambiguous reference
+  // deserves and what the alias layer above refuses outright.
+  const unique = <T extends { id?: string; name: string }>(
+    held: readonly T[],
+    named: string
+  ): T | undefined => {
+    const byId = held.find((x) => x.id === named);
+    if (byId) return byId;
+    const byName = held.filter((x) => x.name === named);
+    return byName.length === 1 ? byName[0] : undefined;
+  };
+
   const parsed = parseFieldType(
     text,
-    (name) => declared.find((t) => t.name === name)?.id,
-    (name) => {
+    (named) => unique(declared, named)?.id,
+    (named) => {
       // The count a constant names, resolved on load rather than stored, so a
       // constant whose value changes changes the layout that named it. The
-      // document holds `u8[LevelCount]`; the number lives only here.
-      const found = constants.find((c) => c.name === name);
+      // document holds `u8[cst_kj39fa]`; the number lives only here.
+      const found = unique(constants, named);
       if (!found || found.id === undefined) return undefined;
       const value = typeof found.value === "number" ? found.value : parseProjectAddress(found.value);
       return value === undefined ? undefined : { id: found.id, value };

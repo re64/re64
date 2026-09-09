@@ -80,6 +80,25 @@ today's work. `TRIAGE.md` is what happened and the order I would fix them in;
       events, redo order.
 - [ ] **R13, R14, R15** — provenance clear semantics, canonical projection
       order, strict numeric parsing.
+
+## 4. References in the document are ids
+
+- [x] Claim frames name a target by id; names are aliases resolved at the
+      boundary. (R5 + R6 residual.)
+- [x] Field types refer to a type and a count constant by id. Names stay as an
+      alias layer — `Creature`, or `Creature@typ_kj39fa` where two answer to one
+      name — because the suggestion in a name is worth keeping and belongs
+      outside the document. Ambiguity refuses and says both.
+- [x] The invariant behind the alias layer: no field-type spelling can be
+      mistaken for an id. Asserted in `identity.test.ts`.
+- [ ] **A capture refers to its bytes by filename**, mutably mapped to a hash.
+      This is R8 and it is the same rule.
+- [ ] **A layer refers to its file by path.** Same shape, smaller stakes.
+- [ ] **Not doing: per-session name tables.** Resolution asks the document as it
+      is; a session-scoped table would make one caller's write mean something
+      different from another's, which is the offline/online rule's failure case.
+      Ambiguity refusing plus `expectVersion` covers what it would have bought.
+      Revisit only if something reproduces a gap those two leave.
 - [x] **R6 residual** — done with R5 above. Duplicate target names are now
       refused when used to select, and named, rather than the first silently
       winning.

@@ -2313,3 +2313,110 @@ describe("a target only where a target means something", () => {
     expect(refused.isError).toBe(true);
   });
 });
+
+describe("a field type refers by id and reads by name", () => {
+  /**
+   * **Names are suggestive and that is worth keeping.** `Creature[CreatureCount]`
+   * is something a reader can be wrong about out loud; `typ_kj39fa[cst_x0plq2]`
+   * is something nobody can be wrong about because nobody can read it. So the
+   * name stays the way it is written and the way it renders, and the *reference*
+   * stored in the document is an id — renaming then changes how a field reads
+   * and never what it means.
+   *
+   * Which makes ambiguity the interesting case, and it is refused rather than
+   * guessed: a bare name two types answer to comes back with both `name@id`
+   * forms, and that refusal is itself the notice that the document has grown a
+   * second `Creature`.
+   */
+  it("stores an id for a type a caller named, and renders the name back", async () => {
+    const made = await callTool("add_type", {
+      name: "Creature",
+      size: 4,
+      fields: { 0: { name: "kind", type: "u8" } },
+    });
+    expect(made.isError, made.text).toBe(false);
+    const creature = (made.value as { type: string }).type;
+
+    const holder = await callTool("add_type", {
+      name: "Wave",
+      size: 8,
+      fields: { 0: { name: "first", type: "Creature" } },
+    });
+    expect(holder.isError, holder.text).toBe(false);
+
+    // Rendered as the name...
+    const listed = (await callTool("list_types", {})).value as {
+      types: { name: string; fields: { name: string; type: string }[] }[];
+    };
+    const wave = listed.types.find((t) => t.name === "Wave")!;
+    expect(wave.fields.find((f) => f.name === "first")!.type).toBe("Creature");
+
+    // ...and stored as the id, which is what a rename must not disturb.
+    const exported = JSON.parse(
+      ((await callTool("export_project", {})).value as { text: string }).text
+    ) as { types: { name: string; fields: Record<string, { type: string }> }[] };
+    const stored = exported.types.find((t) => t.name === "Wave")!;
+    expect(Object.values(stored.fields)[0].type).toBe(creature);
+  });
+
+  it("refuses a name two types answer to, and names both", async () => {
+    const first = await callTool("add_type", { name: "Twin", size: 2, fields: {} });
+    const second = await callTool("add_type", { name: "Twin", size: 2, fields: {} });
+    expect(first.isError, first.text).toBe(false);
+    expect(second.isError, second.text).toBe(false);
+    const a = (first.value as { type: string }).type;
+    const b = (second.value as { type: string }).type;
+
+    // A whole declaration whose only field is ambiguous refuses, and says which
+    // two — the refusal is the notice that a second `Twin` now exists.
+    const refused = await callTool("add_type", {
+      name: "Holder",
+      size: 4,
+      fields: { 0: { name: "which", type: "Twin" } },
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain(`Twin@${a}`);
+    expect(refused.text).toContain(`Twin@${b}`);
+
+    // The disambiguated form is accepted straight back, on the same call.
+    const made = await callTool("add_type", {
+      name: "Holder",
+      size: 4,
+      fields: { 0: { name: "which", type: `Twin@${b}` } },
+    });
+    expect(made.isError, made.text).toBe(false);
+    const holder = (made.value as { type: string }).type;
+
+    // Stored as the id it named, not as either name.
+    const exported = JSON.parse(
+      ((await callTool("export_project", {})).value as { text: string }).text
+    ) as { types: { id: string; fields: Record<string, { type: string }> }[] };
+    const stored = exported.types.find((t) => t.id === holder)!;
+    expect(Object.values(stored.fields)[0].type).toBe(b);
+
+    // And rendered back with the suffix, because the plain name is no longer
+    // something this project can resolve.
+    const listed = (await callTool("list_types", {})).value as {
+      types: { id: string; fields: { type: string }[] }[];
+    };
+    expect(listed.types.find((t) => t.id === holder)!.fields[0].type).toBe(`Twin@${b}`);
+
+    // add_field takes the same three spellings, since one resolver serves all
+    // three writers.
+    const byId = await callTool("add_field", {
+      typeId: holder,
+      offset: 2,
+      name: "other",
+      type: a,
+    });
+    expect(byId.isError, byId.text).toBe(false);
+    const byBareName = await callTool("add_field", {
+      typeId: holder,
+      offset: 3,
+      name: "nope",
+      type: "Twin",
+    });
+    expect(byBareName.isError).toBe(true);
+    expect(byBareName.text).toContain("say which");
+  });
+});
