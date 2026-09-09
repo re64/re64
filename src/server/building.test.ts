@@ -556,6 +556,33 @@ describe("building a project from a disk image", () => {
     expect(marked.instructions.after).toBeGreaterThan(2000);
   });
 
+  it("reports the address the caller passed, not the offset it was stored at", () => {
+    // **The bug that hid a systematic displacement through three sessions.**
+    // A claim is stored as an offset into the layer supplying its bytes, and a
+    // write's `did` is the one place a writer looks to confirm what happened.
+    // It resolved that offset back to an address by rebuilding the memory map
+    // with a loader that refuses to read files — and a .prg layer's load
+    // address is in the first two bytes of its file, so on every real project
+    // it threw, the layer starts stayed empty, and every receipt reported the
+    // offset instead: `name +$87FF` for a claim written at `$9000`.
+    //
+    // Eighty claims imported one load address low went unnoticed because the
+    // receipt agreed with the mistake. Experiment 11's reviewer found the
+    // displacement from the bytes, and named this as the reason nobody had.
+    ws.createProject("camels");
+    const camels = upload("camels", "p.prg", new Uint8Array([0x00, 0x80, 0xa9, 0x01, 0x60]));
+    camels.addByteLayer(builder, { type: "prg", path: "p.prg" });
+
+    const named = camels.addClaim(builder, { at: 0x8002, name: "afterTheLoadAddress" });
+    expect(named.did.join(" ")).toContain("$8002");
+    expect(named.did.join(" ")).not.toContain("+$");
+
+    // And the claim really is layer-framed, so this is the resolution working
+    // rather than the frame having quietly stopped being used.
+    const here = camels.claimsAt(0x8002);
+    expect(here.claims[0].scope).toMatch(/^layer:/);
+  });
+
   it("refuses a layer over a file the project does not hold", () => {
     ws.createProject("camels");
     const camels = upload("camels", "there.prg", new Uint8Array([0x00, 0x80, 0x60]));

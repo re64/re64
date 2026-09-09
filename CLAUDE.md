@@ -40,7 +40,7 @@ person reading the same code see each other's work as it happens.
 | `docs/algebra.md` | the operation rules: two shapes, thirty operations, no third |
 | `docs/model.md` | the model as reference, with its open tensions |
 | `docs/api.md` | the tools — **generated**, do not hand-edit |
-| `docs/experiments.md` | ten runs, and which line of code each moved |
+| `docs/experiments.md` | eleven runs, and which line of code each moved |
 | `docs/decisions/` | the argument and the history, by subject |
 
 `docs/decisions/` is where the reasoning went. It is **append-only history**: an
@@ -168,7 +168,7 @@ committed generated file goes stale in silence.
 
 ## Working with experiments
 
-Most of this design came out of ten runs with agents on real binaries.
+Most of this design came out of eleven runs with agents on real binaries.
 `docs/experiments.md` says what each asked and what it moved. Two rules make them
 produce measurements rather than anecdotes:
 

@@ -1,6 +1,6 @@
 # The experiments, and what each one changed
 
-Ten runs. They exist to find gaps in re64 by watching agents hit them, rather
+Eleven runs. They exist to find gaps in re64 by watching agents hit them, rather
 than by imagining what an agent would want — so what matters about each is not
 whether it "went well" but which line of code it moved.
 
@@ -241,7 +241,7 @@ piece was done.
 **The prior memo changed the run, and improved it.** The readers found 249 lines
 of findings from experiment 7 on the same binary within ninety seconds, and
 flagged it rather than transcribing it. The editor's response is the most
-productive instruction anybody gave in ten runs: *anything already in that memo
+productive instruction anybody gave in eleven runs: *anything already in that memo
 is not news unless you can show it to me — a sentence I cannot photograph, play
 or watch happen is the weakest thing I can print.* Three of the article's best
 findings are **corrections** to that memo, and each came from somebody being made
@@ -444,6 +444,96 @@ report mentions it in a list; only the call counts show what it cost.
 did not: the tool was broken and was fixed between the stages. The document
 recorded neither the observation nor the correction, because both went to chat —
 which is itself the finding run 9 ended on, arriving a second time.
+
+### 11 — one reviewer, on work three runs had already done
+
+**Question.** Every run before this began with an empty project, so all ten
+measured the first hour and none could ask whether an agent builds on somebody
+else's work — or contradicts it. The starting point was the silver image:
+981 objects from runs 7, 9 and 10 under nine authors, imported faithfully and
+reviewed by nobody. The brief asked three things — resolve conflicts, fill gaps,
+sharpen claims that are too broad — held to one standard: could a person who has
+never seen this program open the listing and follow it.
+
+**It was also the first experiment with a scoring key**, computed from the
+before-state and not shown to the reviewer, which is only possible because there
+was a baseline to be a delta from.
+
+| | before | after |
+|---|---|---|
+| instructions decoded | 2,451 | **3,388** |
+| hygiene findings | 206 | 163 |
+| disagreements | 43 | 12 |
+| decode warnings | 146 | 12 |
+
+204 calls: 106 reads, 13 additions, **85 revisions**.
+
+**87% of its writes were revisions, and that is not churn.** The brief was
+written to guard against exactly that number, and the guard held the wrong way
+round: read the log and the revisions are one systematic repair.
+
+**It found a bug in the artefact, that the artefact's author had not.** All 79
+of run 10's layer-framed claims sat exactly `$0801` below the bytes they
+described. A layer-framed claim stores an *offset*; the import passed those
+offsets to `add_claim`, which takes an *address*. So `msg_stand_by_player` was
+labelling sprite pixels, `reserved_9FEF_BFFF` called 8,209 bytes of live code
+reserved, and three of six record types were bound to spans describing nothing.
+
+It proved this three ways before touching anything — the bytes at +`$0801` read
+as the names say; nine claims carry their correct address inside their own name
+while sitting lower; and every one has a semantic twin by a different author at
+exactly +`$0801` — then **moved** them rather than deleting, because experiment
+10 had been right about the bytes every time.
+
+The same confusion had already been caught once, in this repository, in the
+overlap count in `build.mjs`'s own header — and fixed only in the measurement,
+not in the import that produced it.
+
+**Why three sessions missed it, which is the more useful half.** The write
+receipt reported the offset. `add_claim` at `$5199` answered `name +$4998`,
+because the resolver that turns a stored offset back into an address rebuilt the
+memory map with a loader that refuses to read files — and a `.prg` layer's load
+address is in the first two bytes of its file, so on every real project it threw,
+the layer starts stayed empty, and every receipt fell back to the offset. Every
+*read* surface answered correctly. Only the one place a writer looks to confirm
+a write agreed with the mistake. Fixed, and pinned by a test.
+
+**What it could not do, in its own counts.**
+
+- **A refuted claim renders exactly as before.** It probed this deliberately:
+  `refutes` on a displaced claim changed nothing in the listing. So "decide in
+  the open" and "a reader meets one clear answer" pull against each other, and
+  the only way to stop a wrong reading rendering is `remove_claim` — which also
+  destroys the evidence attached to it, including the record carrying
+  authorship. It moved 78 claims instead of refuting them for that reason.
+  `bind_primary_name` is named in the instructions and it called it zero times,
+  correctly: that chooses which of several *names* wins, and cannot make a claim
+  in the wrong place stop rendering. **There is no way to withdraw a claim
+  without destroying it**, and this is the first run that needed one.
+- **Record fields merge per offset across authors and cannot be un-declared by
+  another author.** It replaced four of `ZoneRecord`'s per-index columns with
+  `u8[8]` arrays to match the other fifteen; the arrays appeared *and* the 28
+  original fields stayed, so each column rendered twice. `edit_type`'s "a field
+  you leave out is one you removed" holds only for your own fields. Reverted,
+  and noted in the document so the inconsistency does not read as a judgement.
+- `preview` takes `start`; `add_claim` takes `at`. Six refusals. The **third**
+  independent agent to pay for that inconsistency, after run 10's editor and the
+  build script's 238.
+
+**What the shipped fixes bought.** `add_constant` had been called zero times
+across two runs; four idioms were added to its description, and this run
+declared `ZONE_STRIDE = $C8` and bound it, so the line reads `ADC #ZONE_STRIDE`.
+One constant is not a vindication, but it is not zero. `add_evidence` was called
+four times deliberately, against three in the project's entire prior history.
+`preview` — never used by run 10 — was its most-used read after `read_bytes`.
+
+**And it did the work it was asked for.** The zone table's shape came out of its
+copy loop: `LoadZoneTemplates` moves exactly `$98` bytes to `$1DA0`, where
+nineteen `tmpl*` arrays were already named eight bytes apart — so a zone is
+nineteen columns of eight, one per creature type, plus seven VIC scalars and a
+40-byte title. `ZoneRecord` went from 128 unexplained bytes to 0, `PlayerSlot`
+from 85 to 0. The leftover assembler source at `$5F26` matches `$93E4`–`$93EF`
+instruction for instruction, which named `$3F` and gave the stride constant.
 
 ---
 

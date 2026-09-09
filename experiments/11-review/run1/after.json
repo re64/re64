@@ -1,0 +1,16 @@
+{
+ "claims": 630,
+ "evidence": 634,
+ "types": 6,
+ "constants": 19,
+ "comments": 369,
+ "hygiene": 163,
+ "hygieneByKind": {
+  "label.duplicated": 2,
+  "type.redundantClaim": 57,
+  "claim.interpretationsDiffer": 104
+ },
+ "disagreements": 12,
+ "addressesWithTwoNames": 90,
+ "instructions": 3388
+}

@@ -396,12 +396,25 @@ async function main() {
     }
   }
 
+  // **A layer-framed claim stores an offset, and a tool argument is absolute.**
+  // Run 10's document holds `at: "$491A"` beside `layer: "lay_…"`, which is
+  // $491A *into the runtime layer* — $511B. Passing it through as an address
+  // put all seventy-nine of them 4,098 bytes low, which is where experiment
+  // 11's reviewer found them: `msg_stand_by_player` labelling sprite pixels,
+  // `reserved_9FEF_BFFF` calling 8,209 bytes of live code reserved, and three
+  // record types bound to spans describing nothing.
+  //
+  // The same confusion had already been caught once, in the overlap count in
+  // this file's own header, and fixed only in the measurement.
+  const runtimeStart = 0x0801;
+  const absolute = (c) => (c.layer ? hex(addressOf(c.at) + runtimeStart) : c.at);
+
   for (const c of ten.claims ?? []) {
     await attempt(
       "add_claim",
       {
         target: "runtime",
-        at: c.at,
+        at: absolute(c),
         ...(c.extent !== undefined ? { extent: c.extent } : {}),
         ...(c.name ? { name: c.name } : {}),
         ...(c.is ? { is: c.is } : {}),
@@ -416,9 +429,12 @@ async function main() {
   }
   for (const layer of ten.layers ?? []) {
     for (const c of layer.comments ?? []) {
+      // Comments are owned by a layer and stored the same way, so they carry
+      // the same offset and need the same correction.
+      const at = layer.type === "symbols" ? c.address : hex(addressOf(c.address) + runtimeStart);
       await attempt(
         "add_comment",
-        { target: "runtime", address: c.address, text: c.text, ...(c.placement ? { placement: c.placement } : {}) },
+        { target: "runtime", address: at, text: c.text, ...(c.placement ? { placement: c.placement } : {}) },
         whoTen(c.id)
       );
     }

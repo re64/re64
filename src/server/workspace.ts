@@ -5319,13 +5319,17 @@ export class Workspace {
     const before = this.program().instructions.size;
     const decodedBefore = new Set(this.program().instructions.all().map((i) => i.address));
     const warnedBefore = new Set(this.program().warnings.map(describeWarning));
-    const ops = build(this.program().loaded);
+    const loaded = this.program().loaded;
+    const ops = build(loaded);
 
     const { descriptions } = this.room.store.runOps(
       ops,
       caller.userId,
       Date.now(),
-      caller.sessionId
+      caller.sessionId,
+      // The layer starts this workspace already resolved, so a receipt can say
+      // the address the caller passed rather than the offset it was stored at.
+      new Map(loaded.map.getLayers().map((l): [string, number] => [l.id, l.start]))
     );
     const after = this.program().instructions.size;
 

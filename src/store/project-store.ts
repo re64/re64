@@ -450,7 +450,24 @@ export class ProjectStore {
     ops: readonly Op[],
     author: string,
     now: number,
-    session?: string
+    session?: string,
+    /**
+     * Where each layer starts, from a caller that already knows.
+     *
+     * **A description resolves a layer-framed claim to an address, and could
+     * not.** `addressesOf` derives the starts by building a memory map with a
+     * loader that refuses to read files — and a `.prg` layer's load address is
+     * in the first two bytes of its file, so on every real project that throws,
+     * the starts stay empty, and every write receipt reports the *offset*
+     * instead: `name +$87FF` for a claim written at `$9000`.
+     *
+     * That is the one place a writer looks to confirm a write, and
+     * `docs/model.md` says offsets never appear in an answer. It hid a
+     * systematic displacement of eighty claims through three sessions and an
+     * import, and the reviewer that found it named this as the reason nobody
+     * had: the receipt agreed with the mistake.
+     */
+    layerStarts?: ReadonlyMap<string, number>
   ): { applied: number; descriptions: string[]; changeset: string } {
     // One call is one changeset, however many ops it takes. The boundary is
     // this function; it simply went unrecorded, which is why undo used to take
@@ -491,7 +508,7 @@ export class ProjectStore {
       // Resolved against the project the ops were just applied to, so a
       // description speaks the addresses the caller used rather than the
       // offsets a layer-framed claim is stored as.
-      const absolute = addressesOf(text);
+      const absolute = addressesOf(text, layerStarts);
       return {
         applied: ops.length,
         descriptions: ops.map((op) => describeOp(op, absolute)),
@@ -731,8 +748,11 @@ export function entryFromChanges(
  * Built from the text the ops were applied to, so it knows where each layer
  * landed — which is the whole of what resolving an offset needs.
  */
-function addressesOf(text: string): AddressResolver {
-  let starts: Map<string, number> | undefined;
+function addressesOf(
+  text: string,
+  known?: ReadonlyMap<string, number>
+): AddressResolver {
+  let starts: Map<string, number> | undefined = known === undefined ? undefined : new Map(known);
   return (claim) => {
     if (claim.frame?.space !== "layer") return claim.at;
     if (!starts) {
