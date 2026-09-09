@@ -21,7 +21,13 @@ user="${RE64_USER:-agent}"
 session="${RE64_SESSION:-run-1}"
 
 tool="${1:?usage: mcp-call.sh <tool> '<json arguments>'}"
-args="${2:-{\}}"
+# Plainly, in two steps. Written as a `${2:-{\}}` default it produced a literal
+# backslash inside the JSON — `"params":{\}}` — which no server parses, so
+# `tools/list` returned nothing at all and the first thing a new agent does
+# failed silently. Experiment 10's editor reported exactly this and the routing
+# was fixed without the quoting being tested.
+args="${2-}"
+[ -z "$args" ] && args='{}'
 
 # `tools/list` and `initialize` are methods, not tools — and every experiment so
 # far has begun by writing a four-line script to reach them, because this
@@ -32,7 +38,7 @@ case "$tool" in
   tools/list|initialize|list|tools)
     method="${tool/#list/tools\/list}"
     method="${method/#tools$/tools\/list}"
-    body="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$method\",\"params\":${args:-\{\}}}"
+    body="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$method\",\"params\":$args}"
     ;;
   *)
     body="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$tool\",\"arguments\":$args}}"
