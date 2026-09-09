@@ -109,6 +109,33 @@ describe("speaking the protocol", () => {
     for (const idiom of ["count", "bit mask", "members of a set"]) {
       expect(said, idiom).toContain(idiom);
     }
+
+    // **Everything a reader has to reach for, named here.** A per-tool
+    // description cannot say which tool answers which question, and every
+    // mechanism below was built, shipped, and then went unused by a run that
+    // needed it: evidence three times in the project's history, `where` twice,
+    // constants never. This paragraph is where that is fixed, so it is asserted
+    // rather than trusted to stay written.
+    for (const mechanism of [
+      "add_evidence",
+      "disagreements",
+      "describe_project",
+      "bind_primary_name",
+      "claims_at",
+      "list_targets",
+      "run_scenario",
+      "find_undecoded",
+      "preview",
+      "effects",
+    ]) {
+      expect(said, mechanism).toContain(mechanism);
+    }
+
+    // And the three concepts a document with somebody else's work in it needs,
+    // which no run before the eleventh could have met.
+    expect(said).toContain("You may not be the first here");
+    expect(said).toContain("re-verifies");
+    expect(said).toContain("A target is a view");
   });
 
   it("answers more than one request, which a shared transport would not", async () => {
