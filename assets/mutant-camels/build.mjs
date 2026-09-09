@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 //
-// Build the Camels gold standard, through the API that agents use.
+// Build the Camels **silver** image, through the API that agents use.
+//
+// Silver, not gold: this is everything three runs established, imported
+// faithfully and reviewed by nobody. It becomes a gold standard when agents and
+// a person have been over it — enriching what is thin and *correcting* what is
+// wrong — and not before. What it is today is a baseline good enough to measure
+// the next run as a delta against, which is the job it has to do first.
 //
 //   node assets/mutant-camels/build.mjs [--port 5164] [--out camels.re64]
 //
@@ -27,13 +33,24 @@
 //   this repository  the 2021 patch, the keyboard matrix, the OATS reading, and
 //                  the errata — findings verified in tests rather than in prose.
 //
-// Measured before any of it was merged: **490 distinct addresses are named
-// across the three runs, and only 25 are named by more than one.** Of those 25,
-// four agree on the name outright and 21 are the same finding worded
-// differently — `TickObjectLifetime` and `AgeCreature` at `$9A39`, `zoneDataTable`
-// and `zoneTable` at `$6700`. That is what the provenance restructure was for:
-// one claim, several supporting records, each keeping its author and method,
-// instead of two claims nobody can merge.
+// Measured across the three: **431 distinct addresses are named, 73 of them by
+// more than one run** — 49 shared by runs 7 and 10, 13 by runs 7 and 9, and 11
+// by all three. Exactly one of the 73 agrees on the name outright. The other 72
+// are the same finding worded differently: `TickObjectLifetime` and
+// `AgeCreature` at `$9A39`, `zoneDataTable` and `zoneTable` at `$6700`,
+// `NextRandom` and `RandomByteFromBASICROM` at `$8D1D`.
+//
+// (A first count said 25, and was wrong. Run 10's claims are **layer-framed** —
+// `at: "$0000"` with a `layer`, meaning an offset into the runtime layer at
+// `$0801` — and comparing those offsets against run 7's absolute addresses hid
+// three quarters of the overlap. Worth stating rather than quietly fixing: the
+// frame is the thing about this model most likely to be read wrong from
+// outside it, and the number it produced was used to argue a plan.)
+//
+// **The 72 are imported as they stand, not merged.** Two names for one routine
+// is a state this model tolerates by design — the name still reaches exactly
+// one address — and choosing between them is a judgement nobody has made. That
+// is the next run's job, and leaving them is what makes it legible.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -253,7 +270,12 @@ async function main() {
   // means nobody said, which is true of every one of these.
   const seven = JSON.parse(readFileSync(join(HERE, "sources", "run07.re64"), "utf-8"));
   const authors = JSON.parse(readFileSync(join(HERE, "sources", "run07-authors.json"), "utf-8"));
-  const who = (id) => authors[id] ?? "project";
+  // **Namespaced by run.** All three runs called their agents `one`, `two` and
+  // `ed`, or `reader-1..3`, and two different agents sharing a name would read
+  // as one agent corroborating itself — which is exactly the correlated-account
+  // error `method` exists to catch. An author is who vouched, so it has to
+  // identify them across the whole document.
+  const who = (id) => (authors[id] ? `exp7-${authors[id]}` : "exp7");
 
   let imported = 0;
   const failed = [];
@@ -334,11 +356,174 @@ async function main() {
       );
     }
   }
-  say(`  imported ${imported} objects from experiment 7 under their own authors`);
+  say(`  experiment 7: ${imported} objects, under the three readers who made them`);
+
+  // ------------------------------------- what runs 9 and 10 add, and correct
+  //
+  // 93 addresses run 7 never named, and 21 it named differently. Those 21 are
+  // imported as **second claims at the same address**, not merged: two names
+  // for one routine is a state this model tolerates by design — the name still
+  // reaches exactly one address — and choosing between `TickObjectLifetime` and
+  // `AgeCreature` is a judgement nobody has made yet. Leaving them is what makes
+  // the next run's job legible.
+  const ten = JSON.parse(readFileSync(join(HERE, "sources", "run10.re64"), "utf-8"));
+  const tenAuthors = JSON.parse(readFileSync(join(HERE, "sources", "run10-authors.json"), "utf-8"));
+  const whoTen = (id) => (tenAuthors[id] ? `exp10-${tenAuthors[id]}` : "exp10");
+
+  // Types first: a record claim needs the layout it is an array of, and the ids
+  // are minted fresh here so the old ones have to be mapped.
+  const typeFor = {};
+  for (const t of ten.types ?? []) {
+    try {
+      const made = await call(
+        "add_type",
+        {
+          name: t.name,
+          size: typeof t.size === "string" ? addressOf(t.size) : t.size,
+          fields: Object.fromEntries(
+            Object.entries(t.fields).map(([offset, f]) => [
+              offset,
+              { name: f.name, type: f.type, ...(f.description ? { description: f.description } : {}) },
+            ])
+          ),
+        },
+        whoTen(t.id)
+      );
+      typeFor[t.id] = made.type;
+      imported += 1;
+    } catch (error) {
+      failed.push(`add_type ${t.name}: ${error.message}`);
+    }
+  }
+
+  for (const c of ten.claims ?? []) {
+    await attempt(
+      "add_claim",
+      {
+        target: "runtime",
+        at: c.at,
+        ...(c.extent !== undefined ? { extent: c.extent } : {}),
+        ...(c.name ? { name: c.name } : {}),
+        ...(c.is ? { is: c.is } : {}),
+        ...(c.typeId && typeFor[c.typeId] ? { typeId: typeFor[c.typeId] } : {}),
+        ...(c.encoding ? { encoding: c.encoding } : {}),
+        ...(c.view ? { view: c.view } : {}),
+        ...(c.root ? { root: c.root } : {}),
+        ...(c.method ? { method: c.method } : {}),
+      },
+      whoTen(c.id)
+    );
+  }
+  for (const layer of ten.layers ?? []) {
+    for (const c of layer.comments ?? []) {
+      await attempt(
+        "add_comment",
+        { target: "runtime", address: c.address, text: c.text, ...(c.placement ? { placement: c.placement } : {}) },
+        whoTen(c.id)
+      );
+    }
+  }
+
+  // Run 9's document is gone; 111 successful writes survive in its transcript
+  // and replay. Its scenarios do not — they are a create followed by 33 edits
+  // by id, and the ids are the old document's — so what comes across is the
+  // durable analysis: the claims, the comments and the record layouts.
+  const nine = JSON.parse(readFileSync(join(HERE, "sources", "run09-writes.json"), "utf-8"));
+  const nineTypes = [];
+  for (const w of nine) {
+    const a = w.args;
+    if (w.tool !== "add_type") continue;
+    try {
+      const made = await call("add_type", { name: a.name, size: a.size, fields: a.fields }, `exp9-${w.by}`);
+      nineTypes.push({ name: a.name, size: a.size, id: made.type });
+      imported += 1;
+    } catch (error) {
+      failed.push(`add_type ${a.name}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Which of run 9's types a claim meant, worked out rather than looked up.
+   *
+   * Its document is gone and its transcript records only what was *sent*, so the
+   * ids `add_type` returned — and which its record claims then named — are not
+   * anywhere. They are still recoverable, because a record claim's extent is a
+   * whole number of records: `zoneTable` is 8,400 bytes and `ZoneRecord` is 200,
+   * which is 42 of them, and the music claims are 404, 218, 218 and 800 against
+   * a `MusicEvent` of 2. Each old id is matched to the one declared type whose
+   * size divides every extent claiming it, and an ambiguous one is refused
+   * rather than guessed.
+   */
+  const typeForNine = {};
+  {
+    const extents = {};
+    for (const w of nine) {
+      const a = w.args;
+      for (const c of w.tool === "add_claim" ? [a] : (a.claims ?? [])) {
+        if (c.is === "record" && c.typeId) (extents[c.typeId] ??= []).push(c.extent ?? 0);
+      }
+    }
+    // Solved by elimination rather than per id, because divisibility alone is
+    // not decisive: 8,400 is a whole number of 200-byte records *and* of 2-byte
+    // ones. The music claims settle it — 404 bytes is not a multiple of 200, so
+    // that id can only be `MusicEvent` — and the zone table takes the layout
+    // left over. Anything still ambiguous when no more can be pinned is refused,
+    // which is the same rule as everywhere else here: a guess is worse than a gap.
+    const pool = [...nineTypes];
+    let pending = Object.entries(extents);
+    for (let settled = true; settled && pending.length > 0; ) {
+      settled = false;
+      const still = [];
+      for (const [old, sizes] of pending) {
+        const fits = pool.filter((t) => sizes.every((e) => e > 0 && e % t.size === 0));
+        if (fits.length === 1) {
+          typeForNine[old] = fits[0].id;
+          pool.splice(pool.indexOf(fits[0]), 1);
+          settled = true;
+        } else {
+          still.push([old, sizes]);
+        }
+      }
+      pending = still;
+    }
+    for (const [old, sizes] of pending) {
+      failed.push(
+        `type ${old}: extents ${sizes.join(", ")} fit more than one of run 9's layouts ` +
+          `and nothing else pins it, so which one is a guess`
+      );
+    }
+  }
+  for (const w of nine) {
+    const a = w.args;
+    const by = `exp9-${w.by}`;
+    const one = async (c) =>
+      attempt(
+        "add_claim",
+        {
+          target: "runtime",
+          at: c.at,
+          ...(c.extent !== undefined ? { extent: c.extent } : {}),
+          ...(c.name ? { name: c.name } : {}),
+          ...(c.is ? { is: c.is } : {}),
+          ...(c.typeId && typeForNine[c.typeId] ? { typeId: typeForNine[c.typeId] } : {}),
+          ...(c.encoding ? { encoding: c.encoding } : {}),
+          ...(c.view ? { view: c.view } : {}),
+          ...(c.root ? { root: c.root } : {}),
+          ...(c.method ? { method: c.method } : {}),
+          ...(c.comment ? { comment: c.comment } : {}),
+        },
+        by
+      );
+    if (w.tool === "add_claim") await one(a);
+    if (w.tool === "add_claims") for (const c of a.claims ?? []) await one(c);
+    if (w.tool === "add_comment" && a.address)
+      await attempt("add_comment", { target: "runtime", address: a.address, text: a.text }, by);
+  }
+  say(`  imported ${imported} objects in total, from three runs under nine authors`);
   if (failed.length) {
     say(`  ${failed.length} refused:`);
-    for (const f of failed.slice(0, 12)) say(`    ${f}`);
-    if (failed.length > 12) say(`    ... ${failed.length - 12} more`);
+    for (const f of failed.slice(0, 8)) say(`    ${f}`);
+    if (failed.length > 8) say(`    ... ${failed.length - 8} more`);
   }
 
   // ------------------------------------------------------- the build checks

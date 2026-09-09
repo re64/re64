@@ -1,0 +1,5044 @@
+[
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "decrunch",
+   "description": "Run the loader until it hands control on, and keep what it expanded.",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$080D"
+    },
+    {
+     "kind": "run",
+     "leaves": true,
+     "maxInstructions": 20000000
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$0801",
+     "to": "$C11F",
+     "name": "runtime.prg"
+    }
+   ]
+  },
+  "by": "setup",
+  "at": "2026-09-07T09:17:22.153Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$88D5",
+   "name": "IRQHandler",
+   "root": "entry",
+   "method": "read",
+   "comment": "Installed as CINV ($0314/$0315) by sub_886F (STA CINV #$88D5) during init. Reached only via the CPU IRQ vector, never by JSR/JMP, so the static walk never finds it without this claim. Handles the raster split, the SID music player, and (via $8BC9) the sprite/cheat-key logic."
+  },
+  "by": "two",
+  "at": "2026-09-07T09:22:17.681Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$88D4",
+   "name": "NMIHandler",
+   "root": "entry",
+   "method": "read",
+   "comment": "Installed as NMINV ($0318/$0319) by sub_886F. A single RTI - NMI is effectively disabled/ignored."
+  },
+  "by": "two",
+  "at": "2026-09-07T09:22:22.676Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-boot",
+   "description": "Boot the decrunched image and photograph the first screens",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 200
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "ed-boot-200.json"
+    },
+    {
+     "kind": "run",
+     "frames": 300
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "ed-boot-500.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:22:45.455Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$96D2",
+   "name": "CheckCheatKey",
+   "method": "read",
+   "comment": "Reads LSTX ($C5), the KERNAL last-key-matrix-code. Walks a 5-entry table at $96F7 (matrix codes for G O A T S, verified against the standard C64 keyboard matrix) using an index/counter in $5F: table[X] is the key already accepted, table[X+1] is the key wanted next. A wrong key resets the counter. On the 5th correct key it sets $5E (cheat flag) and tail-jumps into sub_9406 (the message-line clear/redraw routine used all over the game), which is why typing G-O-A-T-S during play redraws the message line as CHEAT MODE OPERATIVE."
+  },
+  "by": "two",
+  "at": "2026-09-07T09:23:06.325Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$57EF",
+   "is": "text",
+   "encoding": "screen",
+   "extent": 40,
+   "name": "CheatModeBannerText",
+   "method": "read",
+   "comment": "Screen-code text \"  CHEAT  MODE   OPERATIVE  \" padded to 40 chars, poked into the message line ($0590) with colour $01 (white) when the cheat flag $5E is set."
+  },
+  "by": "two",
+  "at": "2026-09-07T09:23:28.085Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$57D1",
+   "name": "MaybeShowCheatBanner",
+   "method": "read",
+   "comment": "Called unconditionally at the end of ClearMessageLine (sub_9406). If cheat flag $5E is zero, just RTS (message line stays blank). If set, redraws the 40-column message line with CheatModeBannerText in colour $01. So every ordinary message-line clear during play doubles as the cheat banner refresh once the code is entered."
+  },
+  "by": "two",
+  "at": "2026-09-07T09:23:28.150Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-probe",
+   "description": "boot and look at screen RAM",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 150
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$0400",
+     "to": "$07FF",
+     "name": "ed-scr1.bin"
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$D000",
+     "to": "$D030",
+     "name": "ed-vic1.bin"
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "ed-probe.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:25:01.250Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-probe2",
+   "description": "where does boot get to",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "breakpoints": [
+      "$8AE7"
+     ],
+     "maxInstructions": 2000000
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-trace1.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:25:34.290Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-bisect",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 100
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:22.049Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 50
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:22.089Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 100
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:22.185Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 200
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:22.255Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 400
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:22.329Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 800
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:22.405Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 1600
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:22.476Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 3200
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:22.558Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 6400
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:22.637Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 12800
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:22.715Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 25600
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:22.806Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 51200
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:22.916Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 400
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:35.024Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 425
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:35.118Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 450
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:35.200Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 475
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:35.282Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 500
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:35.365Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 525
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:35.437Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 550
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:35.503Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 575
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:35.572Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 600
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:35.642Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 625
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:35.718Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 650
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:35.789Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 675
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:35.858Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 700
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:35.928Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 725
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:35.999Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 750
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:36.073Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_63si0u",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 775
+    },
+    {
+     "kind": "capture",
+     "what": "trace",
+     "name": "ed-b.txt"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:26:36.146Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-romtest",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$0200"
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$0200": 173,
+      "$0201": 0,
+      "$0202": 160,
+      "$0203": 141,
+      "$0204": 0,
+      "$0205": 4,
+      "$0206": 173,
+      "$0207": 0,
+      "$0208": 224,
+      "$0209": 141,
+      "$020A": 1,
+      "$020B": 4,
+      "$020C": 173,
+      "$020D": 254,
+      "$020E": 255,
+      "$020F": 141,
+      "$0210": 2,
+      "$0211": 4,
+      "$0212": 76,
+      "$0213": 18,
+      "$0214": 2
+     }
+    },
+    {
+     "kind": "run",
+     "maxInstructions": 50
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$0400",
+     "to": "$0403",
+     "name": "ed-romtest.bin"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:27:39.330Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-boot-machine",
+   "description": "Boot the game on a machine with real ROMs",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 250
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "m250.json"
+    },
+    {
+     "kind": "run",
+     "frames": 250
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "m500.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:28:43.886Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-attract",
+   "description": "Attract mode over 60 seconds, one shot every 50 frames",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 60
+    },
+    {
+     "kind": "capture",
+     "what": "frames",
+     "count": 60,
+     "every": 50,
+     "name": "attract.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:29:06.869Z"
+ },
+ {
+  "tool": "add_type",
+  "args": {
+   "name": "ZoneRecord",
+   "size": 200,
+   "fields": {
+    "16": {
+     "name": "spriteFirst0",
+     "type": "u8",
+     "description": "First animation frame for creature type 0 (columnar: +8 per type index, 0-7)"
+    },
+    "17": {
+     "name": "spriteFirst1",
+     "type": "u8"
+    },
+    "18": {
+     "name": "spriteFirst2",
+     "type": "u8"
+    },
+    "19": {
+     "name": "spriteFirst3",
+     "type": "u8"
+    },
+    "20": {
+     "name": "spriteFirst4",
+     "type": "u8"
+    },
+    "21": {
+     "name": "spriteFirst5",
+     "type": "u8"
+    },
+    "22": {
+     "name": "spriteFirst6",
+     "type": "u8"
+    },
+    "23": {
+     "name": "spriteFirst7",
+     "type": "u8",
+     "description": "Explosion type in every zone seen so far: 3-frame anim starting here"
+    },
+    "24": {
+     "name": "spriteLast0",
+     "type": "u8"
+    },
+    "25": {
+     "name": "spriteLast1",
+     "type": "u8"
+    },
+    "26": {
+     "name": "spriteLast2",
+     "type": "u8"
+    },
+    "27": {
+     "name": "spriteLast3",
+     "type": "u8"
+    },
+    "28": {
+     "name": "spriteLast4",
+     "type": "u8"
+    },
+    "29": {
+     "name": "spriteLast5",
+     "type": "u8"
+    },
+    "30": {
+     "name": "spriteLast6",
+     "type": "u8"
+    },
+    "31": {
+     "name": "spriteLast7",
+     "type": "u8"
+    },
+    "56": {
+     "name": "nextType0",
+     "type": "u8",
+     "description": "Creature this type becomes when its lifetime hits zero. $FF = dies for good. Read from sub_9A39 ($9A4F) as dat_1DD8,Y with Y=live type."
+    },
+    "57": {
+     "name": "nextType1",
+     "type": "u8"
+    },
+    "58": {
+     "name": "nextType2",
+     "type": "u8"
+    },
+    "59": {
+     "name": "nextType3",
+     "type": "u8"
+    },
+    "60": {
+     "name": "nextType4",
+     "type": "u8"
+    },
+    "61": {
+     "name": "nextType5",
+     "type": "u8"
+    },
+    "62": {
+     "name": "nextType6",
+     "type": "u8"
+    },
+    "63": {
+     "name": "nextType7",
+     "type": "u8",
+     "description": "The explosion type's own nextType. $FF in every zone checked so far -- explosions do not chain."
+    },
+    "128": {
+     "name": "lifetime0",
+     "type": "u8",
+     "description": "Ticks before this type ages out and consults nextType. Reload value; live countdown lives in RAM at dat_1E90,X, decremented by sub_9A39."
+    },
+    "129": {
+     "name": "lifetime1",
+     "type": "u8"
+    },
+    "130": {
+     "name": "lifetime2",
+     "type": "u8"
+    },
+    "131": {
+     "name": "lifetime3",
+     "type": "u8"
+    },
+    "132": {
+     "name": "lifetime4",
+     "type": "u8"
+    },
+    "133": {
+     "name": "lifetime5",
+     "type": "u8"
+    },
+    "134": {
+     "name": "lifetime6",
+     "type": "u8"
+    },
+    "135": {
+     "name": "lifetime7",
+     "type": "u8",
+     "description": "Explosion type: 12 in every zone checked so far -- the animation runs for 12 ticks then the slot is freed."
+    },
+    "160": {
+     "name": "name",
+     "type": "char(40,screen)",
+     "description": "Zone name, screen-code text, centred with leading/trailing spaces. Trailing bytes past the visible text are not always blank -- see hygiene note."
+    }
+   }
+  },
+  "by": "one",
+  "at": "2026-09-07T09:29:21.463Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$6700",
+   "name": "zoneTable",
+   "is": "record",
+   "typeId": "typ_baq2d6",
+   "extent": 8400,
+   "root": "data",
+   "method": "read",
+   "comment": "42 records x 200 bytes = 8400. Record size confirmed from the NEXINI zone-pointer stepping loop at $93E4 (LDA $3E / CLC / ADC #$C8 / STA $3E), which starts from $6700 (LDX #$08/LDA #$67 at $93D3) and never dereferences the table directly -- every access is through ($3E),Y, which is why find_instructions cannot see it. Field offsets for nextType/lifetime/sprite range traced through sub_9772 (spawn) and sub_9A39 (age-out) and confirmed against raw bytes of zone 4 (ATTACK OF THE MUTANT MUTANT CAMELS): type 7 there has spriteFirst=$EC spriteLast=$EE lifetime=12 nextType=$FF, matching a 3-frame explosion animation that ages out after 12 ticks and does not chain into anything else."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:29:34.466Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-play",
+   "description": "Press fire and get into zone 1",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 200
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true
+    },
+    {
+     "kind": "run",
+     "frames": 30
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false
+    },
+    {
+     "kind": "run",
+     "frames": 100
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "play1.json"
+    },
+    {
+     "kind": "run",
+     "frames": 200
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "play2.json"
+    },
+    {
+     "kind": "run",
+     "frames": 400
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "play3.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:29:46.244Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$C000",
+   "name": "CheckZone41Cheat",
+   "method": "read",
+   "comment": "Reads CIA1PRB ($DC01) raw (not via KERNAL scan) and CMPs it against #$50 twice in a row with no instruction in between that could change A. The first CMP/BEQ is live (-> loc_C012, normal start). The second CMP/BEQ (-> loc_C00E, which sets zone counter $58 to #$29=41 decimal, i.e. jump straight to the LAST zone, zone index 41 = REVENGE OF THE MUTANT MUTANT CAMELIDS, verified by reading its name at $87A8) can never be taken: A cannot differ between two CMP #$50s with nothing in between. Whatever the second key code was meant to be, it was never filled in (or was edited to match the first by mistake). A skip-to-the-last-zone cheat, dead on arrival."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:29:54.329Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$C00E",
+   "name": "SetZone41_dead",
+   "method": "read",
+   "comment": "LDA #$29 (41 decimal); STA $58 -- $58 is the zone-index variable consumed by the NEXINI stepping loop at $93E0-$93F2. Only reachable via the second, impossible CMP #$50 in CheckZone41Cheat at $C000."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:29:54.384Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-play-long",
+   "description": "Into zone 1 and keep going, one shot every 40 frames",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 200
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true
+    },
+    {
+     "kind": "run",
+     "frames": 30
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false
+    },
+    {
+     "kind": "run",
+     "frames": 300
+    },
+    {
+     "kind": "capture",
+     "what": "frames",
+     "count": 80,
+     "every": 40,
+     "name": "playlong.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:30:02.037Z"
+ },
+ {
+  "tool": "add_type",
+  "args": {
+   "name": "MusicEvent",
+   "size": 2,
+   "fields": {
+    "0": {
+     "name": "ticks",
+     "type": "u8",
+     "description": "duration in PAL frames (1/50s) this note/rest holds before the next event"
+    },
+    "1": {
+     "name": "note",
+     "type": "u8",
+     "description": "index into the frequency table at $898C/$89CD (SID freq words, lo/hi split tables); $F0 = rest, $FF = end of stream"
+    }
+   }
+  },
+  "by": "two",
+  "at": "2026-09-07T09:30:10.641Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$C023",
+   "name": "PokeZoneTransitionCode",
+   "method": "read",
+   "comment": "Pokes 7 opcode bytes into code at $9C22/$9EEA/$9FBB (LDA zp $A5 -> DEC zp $C6), $9E68 (LDA abs,Y $B9 -> STA abs,Y $99), $9FB0 (LDA abs,X $BD -> STA abs,X $9D), $9EB8 (LDA abs,X $BD -> DEC abs,X $DE), $9C12 (LDA abs,X $BD -> INC abs,X $FE), then JSR sub_9E0A. Called from loc_9D59 at $9D99, which is the same zone-transition routine CheckZone41Cheat feeds into. Read directly with read_bytes: all 7 target addresses in the shipped image ALREADY hold the poked (write-mode) bytes, not the original LDA forms -- see $C046."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:30:10.652Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$C046",
+   "name": "RestoreZoneTransitionCode_unreachable",
+   "root": "routine",
+   "method": "read",
+   "comment": "The mirror image of PokeZoneTransitionCode ($C023): pokes $A5/$B9/$BD back into the same 7 sites, undoing the poke. No inbound reference (find_references), and the byte pair 46 C0 (its own address, little-endian) occurs nowhere in the 47K image (find_bytes), so nothing -- code or a pointer table -- can reach it. As shipped the poke can only ever go forward: the game was saved to disk with the self-modified (write-mode) opcodes already in place at all 7 sites, and the code that would put them back can never run. The file is a photograph of a machine mid-session, not a pristine build."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:30:10.692Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$6320",
+   "is": "record",
+   "typeId": "typ_7r93qv",
+   "extent": 404,
+   "name": "ShortTuneVoice2",
+   "method": "derived",
+   "comment": "Reachable (tick,note) stream for voice 2 of the event-triggered short tune. Seeded by sub_9170 (pointer $15/$16 = $631E, pre-incremented by 2 before first read, so playback truly starts at $6320). 202 pairs, 891 ticks of duration (~17.8s at 50 ticks/sec), ends with an $FF terminator at $64B2. Table decoded and verified with read_bytes + a small script, not by eye."
+  },
+  "by": "two",
+  "at": "2026-09-07T09:30:20.465Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$C065",
+   "name": "LoadHighScoreFile",
+   "method": "read",
+   "comment": "SETLFS device 8 secondary 0; SETNAM len $10 name at $C102 = \"ATTACK MUTANT.HI\" (skips the @: prefix at $C100, which is only meaningful for a save); LOAD with secondary 0 so the address in the file header wins. Filename proved by reading $C100 directly with read_bytes: 40 3A 41 54 54 41 43 4B 20 4D 55 54 41 4E 54 2E 48 49 = \"@:ATTACK MUTANT.HI\". The file is named after the 1983 prequel (Attack of the Mutant Camels), not this game."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:30:23.988Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$C082",
+   "name": "SaveHighScoreFile",
+   "method": "read",
+   "comment": "SEI, IOINIT, RESTOR (KERNAL reinit), sub_C0B9 (calls sub_F48A), sets border+bg to black, then SETLFS device 8 secondary 0, SETNAM len $12 name at $C100 = \"@:ATTACK MUTANT.HI\" (the @: prefix means replace-on-save), SAVE of $5E00-$5ED0 (208 bytes, ZP pointer pair at $FB/$FC) via SAVE. Only inbound reference is a JMP from loc_9F90 at $9FE6 -- reached from the game-over/high-score path. Only caller found by find_references (absolute addressing only, per its own caveat)."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:30:24.031Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$64BA",
+   "is": "record",
+   "typeId": "typ_7r93qv",
+   "extent": 218,
+   "root": "data",
+   "name": "OrphanTune",
+   "method": "ran",
+   "comment": "Same (tick,note) format as the real music streams: 109 pairs, 406 ticks (~8.1s), ends with a proper $FF terminator at the byte before $64C7... wait see exact address in claim. Sits 6 bytes after the real voice-2 short-tune ($6320-$64B3, ends $FF at $64B2) in the same data area, structurally identical, well-formed melody (notes 0x24-0x3F, a plausible ~2-octave range, durations 1/2/4/6 ticks) -- not noise. VERIFIED unreachable three ways: (1) find_bytes for the literal pointer bytes BA 64 anywhere in the 47K image returns zero hits -- no table, no pushed address, nothing points here; (2) the only two routines anywhere that ever write the voice-pointer zero page cells $13/$14/$15/$16 are sub_5768 and sub_9170 (find_instructions from:$0013 to:$0016), and neither uses this address; (3) find_references shows no inbound JSR/JMP. Nothing static or dynamic reaches this block; it can only be heard by pointing a scenario at it directly."
+  },
+  "by": "two",
+  "at": "2026-09-07T09:30:29.468Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$9772",
+   "name": "SpawnCreature",
+   "method": "read",
+   "comment": "Entry: Y = creature type (0-7), X = live-slot base. Copies ~13 fields from the current zones template block ($1DA0+, one 8-byte column per field, Y-indexed) into the live slot at X, including spriteFirst/spriteLast (offsets $10/$18 in the 152-byte template = zoneTable record +$10/+$18) and the lifetime reload (record +$80). Reached three ways in this program: a fresh spawn, aging out (sub_9A39, tail-jumps here with the new type in Y), and (per the prior-run memo, not independently re-checked by me) being shot. All land in the same call -- an explosion is just another creature type (see nextType/$FF, lifetime=12, sprite $EC-$EE on the type-7 column of every zone I sampled)."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:30:37.700Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$898C",
+   "name": "NoteFreqLo",
+   "extent": 65,
+   "method": "derived",
+   "comment": "SID V1FREQLO table, indexed by note code 0-64. Paired with NoteFreqHi at $89CD (same index). Computed each entry as a SID frequency word and converted to Hz at PAL clock (985248.4 Hz, hz = reg*clock/2^24): index 0 = 31.48 Hz, and every +12 index doubles the frequency exactly (index 12=62.95, 24=125.97, 36=251.99, 48=504.04) -- true equal temperament, tuned about a quarter-tone flat of concert pitch (A440 would put A at index ~45=44.9 vs the actual table)."
+  },
+  "by": "two",
+  "at": "2026-09-07T09:30:37.739Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$9A39",
+   "name": "AgeCreature",
+   "method": "read",
+   "comment": "Per-frame lifetime countdown for a live creature slot at X. If dat_1E90,X (lifetime) is 0, does nothing (immortal at this stage). Otherwise decrements it; when it reaches 0: Y = dat_1D10,X (this slots creature type), reload dat_1E90,X from the template lifetime column ($1DA0+$80,Y = zoneTable record+$80), then read nextType from $1DA0+$38,Y = zoneTable record+$38. If nextType is $FF the slot is freed (JMP sub_9328). Otherwise Y=nextType and JMP sub_9772 (SpawnCreature) -- the slot respawns in place as the new type. Verified with find_instructions on $1E90 and $1DD8 ($1DA0+$38): both addresses have exactly the reads/writes this description claims and no others."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:30:37.773Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$89CD",
+   "name": "NoteFreqHi",
+   "extent": 65,
+   "method": "derived"
+  },
+  "by": "two",
+  "at": "2026-09-07T09:30:37.810Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-action",
+   "description": "Play zone 1 with the stick and the fire button",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 200
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true
+    },
+    {
+     "kind": "run",
+     "frames": 30
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false
+    },
+    {
+     "kind": "run",
+     "frames": 420
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": true,
+     "down": false,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 18
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false,
+     "up": false,
+     "down": false,
+     "right": false
+    },
+    {
+     "kind": "run",
+     "frames": 8
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": true,
+     "down": false,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 18
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false,
+     "up": false,
+     "down": false,
+     "right": false
+    },
+    {
+     "kind": "run",
+     "frames": 8
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": false,
+     "down": true,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 18
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false,
+     "up": false,
+     "down": false,
+     "right": false
+    },
+    {
+     "kind": "run",
+     "frames": 8
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": false,
+     "down": true,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 18
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false,
+     "up": false,
+     "down": false,
+     "right": false
+    },
+    {
+     "kind": "run",
+     "frames": 8
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": true,
+     "down": false,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 18
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false,
+     "up": false,
+     "down": false,
+     "right": false
+    },
+    {
+     "kind": "run",
+     "frames": 8
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": true,
+     "down": false,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 18
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false,
+     "up": false,
+     "down": false,
+     "right": false
+    },
+    {
+     "kind": "run",
+     "frames": 8
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": false,
+     "down": true,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 18
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false,
+     "up": false,
+     "down": false,
+     "right": false
+    },
+    {
+     "kind": "run",
+     "frames": 8
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": false,
+     "down": true,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 18
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false,
+     "up": false,
+     "down": false,
+     "right": false
+    },
+    {
+     "kind": "run",
+     "frames": 8
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": true,
+     "down": false,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 18
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false,
+     "up": false,
+     "down": false,
+     "right": false
+    },
+    {
+     "kind": "run",
+     "frames": 8
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": true,
+     "down": false,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 18
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false,
+     "up": false,
+     "down": false,
+     "right": false
+    },
+    {
+     "kind": "run",
+     "frames": 8
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": false,
+     "down": true,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 18
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false,
+     "up": false,
+     "down": false,
+     "right": false
+    },
+    {
+     "kind": "run",
+     "frames": 8
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": false,
+     "down": true,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 18
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false,
+     "up": false,
+     "down": false,
+     "right": false
+    },
+    {
+     "kind": "run",
+     "frames": 8
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": true,
+     "down": false,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 18
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false,
+     "up": false,
+     "down": false,
+     "right": false
+    },
+    {
+     "kind": "run",
+     "frames": 8
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": true,
+     "down": false,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 18
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false,
+     "up": false,
+     "down": false,
+     "right": false
+    },
+    {
+     "kind": "run",
+     "frames": 8
+    },
+    {
+     "kind": "capture",
+     "what": "frames",
+     "count": 40,
+     "every": 8,
+     "name": "action.json"
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$07F8",
+     "to": "$07FF",
+     "name": "sprptr.bin"
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$D000",
+     "to": "$D02F",
+     "name": "vicregs.bin"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:30:54.929Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "beryl-boot-probe",
+   "description": "Probe how many frames it takes to reach a stable running state after cold start, for staging the orphan-tune capture.",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 100
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "probe-100.json"
+    },
+    {
+     "kind": "run",
+     "frames": 400
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "probe-500.json"
+    }
+   ]
+  },
+  "by": "two",
+  "at": "2026-09-07T09:31:37.106Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-spritetest",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$0200"
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$0200": 162,
+      "$0201": 63,
+      "$0202": 169,
+      "$0203": 255,
+      "$0204": 157,
+      "$0205": 64,
+      "$0206": 3,
+      "$0207": 202,
+      "$0208": 16,
+      "$0209": 250,
+      "$020A": 169,
+      "$020B": 13,
+      "$020C": 141,
+      "$020D": 248,
+      "$020E": 7,
+      "$020F": 169,
+      "$0210": 1,
+      "$0211": 141,
+      "$0212": 21,
+      "$0213": 208,
+      "$0214": 169,
+      "$0215": 100,
+      "$0216": 141,
+      "$0217": 0,
+      "$0218": 208,
+      "$0219": 169,
+      "$021A": 100,
+      "$021B": 141,
+      "$021C": 1,
+      "$021D": 208,
+      "$021E": 169,
+      "$021F": 7,
+      "$0220": 141,
+      "$0221": 39,
+      "$0222": 208,
+      "$0223": 169,
+      "$0224": 27,
+      "$0225": 141,
+      "$0226": 17,
+      "$0227": 208,
+      "$0228": 169,
+      "$0229": 21,
+      "$022A": 141,
+      "$022B": 24,
+      "$022C": 208,
+      "$022D": 76,
+      "$022E": 45,
+      "$022F": 2
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 3
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "sprtest.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:32:00.831Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "orphan-tune-playback",
+   "description": "Boot the game to a stable running frame, then redirect the voice-2 music pointer from the real (reachable) short tune to the orphan block at $64BA and let the IRQ-driven player run it as if it were real music, capturing every SID register write it makes. This is the tune nothing in the game ever points at.",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 100
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$15": 184,
+      "$16": 100,
+      "$19": 1,
+      "$1A": 1
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 420
+    },
+    {
+     "kind": "capture",
+     "what": "sid",
+     "name": "orphan-tune-sid.json"
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "orphan-tune-screen.json"
+    }
+   ]
+  },
+  "by": "two",
+  "at": "2026-09-07T09:32:01.497Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_fzusng",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$0200"
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$0200": 162,
+      "$0201": 63,
+      "$0202": 169,
+      "$0203": 255,
+      "$0204": 157,
+      "$0205": 64,
+      "$0206": 3,
+      "$0207": 202,
+      "$0208": 16,
+      "$0209": 250,
+      "$020A": 169,
+      "$020B": 13,
+      "$020C": 141,
+      "$020D": 248,
+      "$020E": 7,
+      "$020F": 169,
+      "$0210": 1,
+      "$0211": 141,
+      "$0212": 21,
+      "$0213": 208,
+      "$0214": 169,
+      "$0215": 100,
+      "$0216": 141,
+      "$0217": 0,
+      "$0218": 208,
+      "$0219": 169,
+      "$021A": 100,
+      "$021B": 141,
+      "$021C": 1,
+      "$021D": 208,
+      "$021E": 169,
+      "$021F": 7,
+      "$0220": 141,
+      "$0221": 39,
+      "$0222": 208,
+      "$0223": 169,
+      "$0224": 27,
+      "$0225": 141,
+      "$0226": 17,
+      "$0227": 208,
+      "$0228": 169,
+      "$0229": 21,
+      "$022A": 141,
+      "$022B": 24,
+      "$022C": 208,
+      "$022D": 169,
+      "$022E": 6,
+      "$022F": 141,
+      "$0230": 33,
+      "$0231": 208,
+      "$0232": 169,
+      "$0233": 14,
+      "$0234": 141,
+      "$0235": 32,
+      "$0236": 208,
+      "$0237": 76,
+      "$0238": 55,
+      "$0239": 2
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 30
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "sprtest.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:32:23.088Z"
+ },
+ {
+  "tool": "add_evidence",
+  "args": {
+   "claim": "clm_7tw31e",
+   "kind": "supports",
+   "scenario": "scn_9pffxy",
+   "capture": "cap_rb3sxy",
+   "note": "Ran the real IRQ music player against this data by pointing the voice-2 pointer at $64B8 (pre-increment lands at $64BA) after a normal boot to a stable frame. The captured SID register writes reconstruct to note indices 0x2d 0x28 0x24 0x24 0x24 0x26 0x28 0x28 0x28 0x28 ... which is an exact match, in order, to the (tick,note) pairs decoded straight from the bytes at $64BA. The player has no idea this data was never meant to be reached; it plays it exactly like real music."
+  },
+  "by": "two",
+  "at": "2026-09-07T09:32:45.649Z"
+ },
+ {
+  "tool": "edit_type",
+  "args": {
+   "name": "ZoneRecord",
+   "size": 200,
+   "fields": {
+    "16": {
+     "name": "spriteFirst0",
+     "type": "u8",
+     "description": "First animation frame for creature type 0 (columnar: +8 per type index, 0-7)"
+    },
+    "17": {
+     "name": "spriteFirst1",
+     "type": "u8"
+    },
+    "18": {
+     "name": "spriteFirst2",
+     "type": "u8"
+    },
+    "19": {
+     "name": "spriteFirst3",
+     "type": "u8"
+    },
+    "20": {
+     "name": "spriteFirst4",
+     "type": "u8"
+    },
+    "21": {
+     "name": "spriteFirst5",
+     "type": "u8"
+    },
+    "22": {
+     "name": "spriteFirst6",
+     "type": "u8"
+    },
+    "23": {
+     "name": "spriteFirst7",
+     "type": "u8",
+     "description": "Explosion type in every zone seen so far: 3-frame anim starting here"
+    },
+    "24": {
+     "name": "spriteLast0",
+     "type": "u8"
+    },
+    "25": {
+     "name": "spriteLast1",
+     "type": "u8"
+    },
+    "26": {
+     "name": "spriteLast2",
+     "type": "u8"
+    },
+    "27": {
+     "name": "spriteLast3",
+     "type": "u8"
+    },
+    "28": {
+     "name": "spriteLast4",
+     "type": "u8"
+    },
+    "29": {
+     "name": "spriteLast5",
+     "type": "u8"
+    },
+    "30": {
+     "name": "spriteLast6",
+     "type": "u8"
+    },
+    "31": {
+     "name": "spriteLast7",
+     "type": "u8"
+    },
+    "56": {
+     "name": "nextType0",
+     "type": "u8",
+     "description": "Creature this type becomes when its lifetime hits zero. $FF = dies for good. Read from sub_9A39 ($9A4F) as dat_1DD8,Y with Y=live type."
+    },
+    "57": {
+     "name": "nextType1",
+     "type": "u8"
+    },
+    "58": {
+     "name": "nextType2",
+     "type": "u8"
+    },
+    "59": {
+     "name": "nextType3",
+     "type": "u8"
+    },
+    "60": {
+     "name": "nextType4",
+     "type": "u8"
+    },
+    "61": {
+     "name": "nextType5",
+     "type": "u8"
+    },
+    "62": {
+     "name": "nextType6",
+     "type": "u8"
+    },
+    "63": {
+     "name": "nextType7",
+     "type": "u8",
+     "description": "The explosion type's own nextType. $FF in every zone checked so far -- explosions do not chain."
+    },
+    "128": {
+     "name": "lifetime0",
+     "type": "u8",
+     "description": "Ticks before this type ages out and consults nextType. Reload value; live countdown lives in RAM at dat_1E90,X, decremented by sub_9A39."
+    },
+    "129": {
+     "name": "lifetime1",
+     "type": "u8"
+    },
+    "130": {
+     "name": "lifetime2",
+     "type": "u8"
+    },
+    "131": {
+     "name": "lifetime3",
+     "type": "u8"
+    },
+    "132": {
+     "name": "lifetime4",
+     "type": "u8"
+    },
+    "133": {
+     "name": "lifetime5",
+     "type": "u8"
+    },
+    "134": {
+     "name": "lifetime6",
+     "type": "u8"
+    },
+    "135": {
+     "name": "lifetime7",
+     "type": "u8",
+     "description": "Explosion type: 12 in every zone checked so far -- the animation runs for 12 ticks then the slot is freed."
+    },
+    "155": {
+     "name": "maxLiveSlots_maybe",
+     "type": "u8",
+     "description": "0x08 in 41 zones, 0x06 in zone 6 only -- matches the prior-run memo (07-scale)s description of a dead sprite-multiplexer slot-search limit. Data-side match only, not traced to code by me."
+    },
+    "156": {
+     "name": "difficultyTier_maybe",
+     "type": "u8",
+     "description": "0 for zones 0-25, 2 for 26-29, 4 for 30-35, 6 for 36-41. Monotonic non-decreasing, four plateaus. Data-side pattern only, not traced to code."
+    },
+    "159": {
+     "name": "reserved",
+     "type": "u8",
+     "description": "0x00 in every one of the 42 zones, no exceptions."
+    },
+    "160": {
+     "name": "name",
+     "type": "char(40,screen)",
+     "description": "Zone name, screen-code text, centred with leading/trailing spaces. Trailing bytes past the visible text are not always blank -- see hygiene note."
+    }
+   },
+   "id": "typ_baq2d6"
+  },
+  "by": "one",
+  "at": "2026-09-07T09:34:02.062Z"
+ },
+ {
+  "tool": "edit_type",
+  "args": {
+   "name": "ZoneRecord",
+   "size": 200,
+   "fields": {
+    "16": {
+     "name": "spriteFirst0",
+     "type": "u8",
+     "description": "First animation frame for creature type 0 (columnar: +8 per type index, 0-7)"
+    },
+    "17": {
+     "name": "spriteFirst1",
+     "type": "u8"
+    },
+    "18": {
+     "name": "spriteFirst2",
+     "type": "u8"
+    },
+    "19": {
+     "name": "spriteFirst3",
+     "type": "u8"
+    },
+    "20": {
+     "name": "spriteFirst4",
+     "type": "u8"
+    },
+    "21": {
+     "name": "spriteFirst5",
+     "type": "u8"
+    },
+    "22": {
+     "name": "spriteFirst6",
+     "type": "u8"
+    },
+    "23": {
+     "name": "spriteFirst7",
+     "type": "u8",
+     "description": "Explosion type in every zone seen so far: 3-frame anim starting here"
+    },
+    "24": {
+     "name": "spriteLast0",
+     "type": "u8"
+    },
+    "25": {
+     "name": "spriteLast1",
+     "type": "u8"
+    },
+    "26": {
+     "name": "spriteLast2",
+     "type": "u8"
+    },
+    "27": {
+     "name": "spriteLast3",
+     "type": "u8"
+    },
+    "28": {
+     "name": "spriteLast4",
+     "type": "u8"
+    },
+    "29": {
+     "name": "spriteLast5",
+     "type": "u8"
+    },
+    "30": {
+     "name": "spriteLast6",
+     "type": "u8"
+    },
+    "31": {
+     "name": "spriteLast7",
+     "type": "u8"
+    },
+    "56": {
+     "name": "nextType0",
+     "type": "u8",
+     "description": "Creature this type becomes when its lifetime hits zero. $FF = dies for good. Read from sub_9A39 ($9A4F) as dat_1DD8,Y with Y=live type."
+    },
+    "57": {
+     "name": "nextType1",
+     "type": "u8"
+    },
+    "58": {
+     "name": "nextType2",
+     "type": "u8"
+    },
+    "59": {
+     "name": "nextType3",
+     "type": "u8"
+    },
+    "60": {
+     "name": "nextType4",
+     "type": "u8"
+    },
+    "61": {
+     "name": "nextType5",
+     "type": "u8"
+    },
+    "62": {
+     "name": "nextType6",
+     "type": "u8"
+    },
+    "63": {
+     "name": "nextType7",
+     "type": "u8",
+     "description": "The explosion type's own nextType. $FF in every zone checked so far -- explosions do not chain."
+    },
+    "128": {
+     "name": "lifetime0",
+     "type": "u8",
+     "description": "Ticks before this type ages out and consults nextType. Reload value; live countdown lives in RAM at dat_1E90,X, decremented by sub_9A39."
+    },
+    "129": {
+     "name": "lifetime1",
+     "type": "u8"
+    },
+    "130": {
+     "name": "lifetime2",
+     "type": "u8"
+    },
+    "131": {
+     "name": "lifetime3",
+     "type": "u8"
+    },
+    "132": {
+     "name": "lifetime4",
+     "type": "u8"
+    },
+    "133": {
+     "name": "lifetime5",
+     "type": "u8"
+    },
+    "134": {
+     "name": "lifetime6",
+     "type": "u8"
+    },
+    "135": {
+     "name": "lifetime7",
+     "type": "u8",
+     "description": "Explosion type: 12 in every zone checked so far -- the animation runs for 12 ticks then the slot is freed."
+    },
+    "152": {
+     "name": "zoneParam53",
+     "type": "u8",
+     "description": "Loaded into ZP $53 by the setup chain at $9CB8, first of a run of four consecutive scalar bytes read via the same sub_9CFB reader. Role not traced further."
+    },
+    "153": {
+     "name": "zoneParam52",
+     "type": "u8",
+     "description": "Loaded into ZP $52 at $9CBD. Role not traced further."
+    },
+    "154": {
+     "name": "zoneParam51",
+     "type": "u8",
+     "description": "Loaded into ZP $51 at $9CC2. Role not traced further."
+    },
+    "155": {
+     "name": "maxLiveSlots",
+     "type": "u8",
+     "description": "Confirmed by tracing: loaded into ZP $42 by the per-zone setup routine (JSR sub_9CFB chain at $9CB5-$9CC7), which is the exact bound CPX $42 checks in sub_9735 (FindFreeObjectSlot, LDX#2..CPX$42). 0x08 in 41 zones, 0x06 in zone 6. Matches the prior-run memos dead-sprite-multiplexer finding, now traced end to end."
+    },
+    "156": {
+     "name": "zoneParam02_maybe",
+     "type": "u8",
+     "description": "Loaded into ZP $02 by the same setup chain. Ramps 0/2/4/6 across the 42 zones in 4 plateaus (0-25,26-29,30-35,36-41). NOT confirmed as difficulty -- ZP $02 is reused as transient scratch elsewhere (e.g. AgeCreature/SpawnCreature at $97E4), so whether this value survives to matter or is immediately overwritten is unresolved."
+    },
+    "157": {
+     "name": "spriteMulticolor0",
+     "type": "u8",
+     "description": "Loaded straight into SPMC0 ($D025) by the per-zone setup chain at $9CD1. Per-zone sprite multicolor palette, first color."
+    },
+    "158": {
+     "name": "spriteMulticolor1",
+     "type": "u8",
+     "description": "Loaded straight into SPMC1 ($D026) at $9CD7. Per-zone sprite multicolor palette, second color."
+    },
+    "159": {
+     "name": "reserved",
+     "type": "u8",
+     "description": "0x00 in every one of the 42 zones, no exceptions."
+    },
+    "160": {
+     "name": "name",
+     "type": "char(40,screen)",
+     "description": "Zone name, screen-code text, centred with leading/trailing spaces. Trailing bytes past the visible text are not always blank -- see hygiene note."
+    }
+   },
+   "id": "typ_baq2d6"
+  },
+  "by": "one",
+  "at": "2026-09-07T09:34:59.647Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$9735",
+   "name": "FindFreeObjectSlot",
+   "method": "read",
+   "comment": "LDX #$02 (slots 0-1 reserved); loop: LDA dat_1F80,X (slot occupied flag); BEQ found (X=free slot); INX; CPX $42 (max live slots, loaded per-zone from zoneTable record+$9B=maxLiveSlots); BNE loop; else LDX #$FF (no free slot). Matches the prior-run memos description of the sprite multiplexers dead search-limit routine, now with the limits data source traced."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:35:11.933Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$9CB5",
+   "name": "LoadZoneScalars",
+   "method": "read",
+   "comment": "Reads the zone records 8 scalar bytes (record+$98..$9F) in order via repeated JSR sub_9CFB, storing to ZP $53,$52,$51,$42(=maxLiveSlots, the FindFreeObjectSlot bound),$02(=zoneParam02_maybe),SPMC0($D025),SPMC1($D026),... -- confirms which zoneTable scalar field feeds which live variable."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:35:11.983Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$9735",
+   "name": "FindFreeObjectSlot",
+   "method": "read",
+   "comment": "Searches object slots X=2.. up to $42 (exclusive) for the first with dat_1F80,X==0 (free); returns X, or $FF if none found. $42 is loaded per-zone from the zone record scalar field (record+$9B, see loc_9CB5/sub_9CFB) - 8 in 41 of the 42 zones, 6 in zone 6 (one confirmed by reading the code, matching reader one's data-side finding independently). Slots 0/1 are skipped (reserved, presumably player + bullet). Since this loop never runs past $42, and $42 never exceeds 8 across the whole zone table, object slots 8-15 (a second sprite bank) are never allocated by this path -- structural confirmation of the memo's dead sprite-multiplexer claim."
+  },
+  "by": "two",
+  "at": "2026-09-07T09:35:15.624Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$5870",
+   "name": "AuthorSourceFragment",
+   "root": "data",
+   "method": "read",
+   "comment": "BASIC-style tokenized-listing text sitting in the middle of otherwise-unexplained data: fragments read (via read_bytes, plain ASCII) as \"...STA $07F7,X\" / RTS / \"SSET TYA\" / PHA / \"AND #$07\" / SEC / TAY / INY / \"LDA #$00\" / \"TANGE ROL A\". Checked against the live disassembly at $92F6: TYA/PHA/AND#$07/SEC/TAY/INY/LDA#$00/ROL A/DEY/BNE -- byte-for-byte identical, instruction for instruction. So $92F6 really is what the author called SSET and $92FF is TANGE. This is the authors own source buffer, saved as part of the memory image."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:36:21.716Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "cheat-banner-demo",
+   "description": "Boot to a stable frame and set the cheat flag ($5E) directly (the scenario machine model has no keyboard-input step, only joystick, so this substitutes for typing O-A-T-S on the real keyboard - the routine that would set it, CheckCheatKey at $96D2, is verified separately by run_block), then let the message line redraw naturally to show the banner.",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 150
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$5E": 1
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 10
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "cheat-banner.json"
+    }
+   ]
+  },
+  "by": "two",
+  "at": "2026-09-07T09:36:26.653Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "cheat-banner-demo",
+   "description": "Boot to a stable frame and set the cheat flag ($5E) directly (the scenario machine model has no keyboard-input step, only joystick, so this substitutes for typing O-A-T-S on the real keyboard - the routine that would set it, CheckCheatKey at $96D2, is verified separately by run_block), then let the message line redraw naturally to show the banner.",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 150
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$5E": 1
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 10
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "cheat-banner.json"
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$0590",
+     "to": "$05B7",
+     "name": "cheat-banner-messageline.json"
+    }
+   ]
+  },
+  "by": "two",
+  "at": "2026-09-07T09:36:42.015Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-sid",
+   "description": "Capture what the intro music writes to the SID",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 800
+    },
+    {
+     "kind": "capture",
+     "what": "sid",
+     "name": "introsid.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:37:03.565Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$8D1D",
+   "name": "RandomByteFromBASICROM",
+   "method": "read",
+   "comment": "INC $24; LDX $24; LDA $A000,X; RTS -- a free-running index into BASIC ROM used as the entropy source, 11 callers. Confirmed with the machine target (BASIC ROM now linked at $A000): the bytes there are real ROM content (CBMBASIC0 signature visible right at $A000), not zeros. On the runtime target alone (no ROM loaded) this reads as 8192 zero bytes and the RNG looks broken; it is deterministic on real hardware -- same counter position, same byte, every run."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:38:12.622Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "find-clearmessageline-call",
+   "description": "probe: run until sub_9406 (ClearMessageLine) is naturally called",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "breakpoints": [
+      "$9406"
+     ],
+     "maxInstructions": 50000000
+    }
+   ]
+  },
+  "by": "two",
+  "at": "2026-09-07T09:38:31.491Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-cheat",
+   "description": "Set the cheat flag $5E and photograph what the message line does next",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 200
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true
+    },
+    {
+     "kind": "run",
+     "frames": 30
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false
+    },
+    {
+     "kind": "run",
+     "frames": 200
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1
+     }
+    },
+    {
+     "kind": "capture",
+     "what": "frames",
+     "count": 30,
+     "every": 30,
+     "name": "cheat.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:39:17.307Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$0801",
+   "is": "bitmap",
+   "view": "char:8",
+   "extent": 2000,
+   "method": "guessed",
+   "comment": "probe: is this a hires/charset bitmap? checking visually before committing to a real claim"
+  },
+  "by": "one",
+  "at": "2026-09-07T09:40:05.332Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$0801",
+   "is": "bitmap",
+   "view": "sprite",
+   "extent": 2016,
+   "method": "guessed",
+   "comment": "probe: sprite sheet?"
+  },
+  "by": "one",
+  "at": "2026-09-07T09:40:23.054Z"
+ },
+ {
+  "tool": "edit_claim",
+  "args": {
+   "id": "clm_p2hw7i",
+   "name": "SpriteSheet_0801"
+  },
+  "by": "one",
+  "at": "2026-09-07T09:41:09.228Z"
+ },
+ {
+  "tool": "add_comment",
+  "args": {
+   "address": "$0801",
+   "placement": "before",
+   "text": "32 x 63-byte hardware sprites (24x21). Tried view=char:8 (hires) first -- wrong shape, garbled. view=sprite renders cleanly. Sits in the normal BASIC program area; the game does not return to BASIC after its SYS stub, so this space is reused for sprite data. Biggest undecoded span in the image (18KB from $0801); only the first 2016 bytes (32 frames) are checked. Have not matched a sprite pointer table or identified which frame is which creature."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:41:17.689Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$65A0",
+   "is": "record",
+   "typeId": "typ_7r93qv",
+   "extent": 218,
+   "name": "IntroVoice3Bass",
+   "method": "read",
+   "comment": "Third stream of the title-screen 3-part arrangement, same (tick,note) format. Pointer $2B/$2C seeded to $659E by sub_9170 (pre-increments to $65A0 on first read). Played by loc_91BA, chained immediately after the voice1/voice2 player (loc_88F7 ends with JMP loc_91BA). Voice3 also clears the shared $1A active-flag on its own $FF terminator, same as voice2."
+  },
+  "by": "two",
+  "at": "2026-09-07T09:41:54.968Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$6000",
+   "is": "record",
+   "typeId": "typ_7r93qv",
+   "extent": 800,
+   "name": "IntroVoice1Melody",
+   "method": "read",
+   "comment": "First stream of the 3-part title-screen arrangement (melody). Pointer $13/$14 seeded to $5FFE by sub_9170 (pre-increments to $6000)."
+  },
+  "by": "two",
+  "at": "2026-09-07T09:41:55.023Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$91BA",
+   "name": "PlayIntroVoice3",
+   "method": "read",
+   "comment": "Third-voice (bass) player, same tick/note stepping logic as loc_88F7 (voice1/voice2), reading via pointer $2B/$2C, writing V3FREQLO/V3FREQHI ($D40E/$D40F). Chained from loc_88F7 unconditionally every raster IRQ. Shares the $1A active-flag with voice2: whichever of voice2/voice3 hits its own $FF terminator first clears $1A for all three."
+  },
+  "by": "two",
+  "at": "2026-09-07T09:41:55.080Z"
+ },
+ {
+  "tool": "edit_claim",
+  "args": {
+   "id": "clm_dyw1m9",
+   "name": "IntroVoice2Harmony"
+  },
+  "by": "two",
+  "at": "2026-09-07T09:42:09.709Z"
+ },
+ {
+  "tool": "edit_claim",
+  "args": {
+   "id": "clm_7tw31e",
+   "name": "DuplicatedTailOfHarmonyVoice"
+  },
+  "by": "two",
+  "at": "2026-09-07T09:42:15.131Z"
+ },
+ {
+  "tool": "add_comment",
+  "args": {
+   "address": "$64BA",
+   "text": "CORRECTION (beryl, after ed spotted this by decoding the streams independently): this is NOT a cut arrangement or a fourth voice. It is a byte-for-byte duplicate of $63DA-$64B1, the last 216 bytes of the real, reachable harmony voice (IntroVoice2Harmony, $6320-$64B1). Confirmed with read_bytes: all 216 bytes identical, position for position. Preceded by 7 bytes of $FF padding ($64B2-$64B8) plus one stray $30 at $64B9 between the end of the real stream and this duplicate. Still unreachable (no pointer anywhere in the image points here) and still real, well-formed music data - just not new music. Most likely an editing/assembly artifact: whoever built the sound data left an old copy of the tail of the harmony part lying around when the stream was extended or edited, and it was never deleted.",
+   "placement": "before"
+  },
+  "by": "two",
+  "at": "2026-09-07T09:42:47.220Z"
+ },
+ {
+  "tool": "add_evidence",
+  "args": {
+   "claim": "clm_7tw31e",
+   "kind": "refutes",
+   "note": "Refutes the earlier framing of this as new/cut music. read_bytes on $63DA-$64B1 (216 bytes) and $64BA-$6591 (216 bytes) are byte-for-byte identical. It is a duplicate of the tail of IntroVoice2Harmony (clm_dyw1m9, $6320-$64B1), not independent composition. Caught by ed (the editor) decoding the streams independently and comparing; confirmed here with two read_bytes calls and a diff."
+  },
+  "by": "two",
+  "at": "2026-09-07T09:42:54.210Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$925F",
+   "name": "MultiplexSpritesThisFrame",
+   "method": "read",
+   "comment": "INC $30/AND #$01 toggles the multiplex parity flag each frame. Loop X=8..1 over the 8 hardware sprites; for each, calls sub_929D (parity even) or sub_92CF (parity odd), which read from two disjoint 8-slot field arrays ($1F40-7F split in half) for X/Y/colour/pointer and write SP0X/SP0Y/SPMC1/the real VIC sprite-pointer table at dat_1F87... wait: at screen+$3F8 (dat_07F7,X). Two groups of 8 live-object slots (16 total) time-share 8 hardware sprites, one group per frame -- this is the two shadow banks the prior-run memo describes, more precisely."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:44:49.182Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$1001",
+   "name": "SpriteSheet_1001_duplicate",
+   "method": "read",
+   "comment": "Byte-identical to $0801-$1000 (verified with two read_bytes calls, exact match, 2047 bytes checked). Sprite pointer 32 ($0800/64) and pointer 64 ($1000/64) fetch the same picture. Have not found any direct-addressed write into the second half of MultiplexSpritesThisFrames 16-slot field arrays (slots 9-16), which is what would actually make use of a second copy -- so this looks like either an unused second multiplexer bank or a plain editing duplicate."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:44:49.250Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$0059",
+   "name": "RandomZoneModeFlag",
+   "method": "read",
+   "comment": "Boolean, toggled by F1 (matrix code 4) on the options screen (loc_51EB/loc_5271, EOR #$FF at $527B). When set, zone selection at loc_937B draws RandomByteFromBASICROM AND #$1F (0-31) into $58, the zone-index variable the NEXINI stepping loop reads - confirms the credits text at $5B73 (\"next wave randomly drawn from any of the first 32\") exactly: zones 33-42 (index 32-41) can never be chosen by random mode, only by playing through sequentially or by the dead $C000 cheat basalt found."
+  },
+  "by": "two",
+  "at": "2026-09-07T09:45:30.775Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$51EB",
+   "name": "OptionsScreen",
+   "method": "read",
+   "comment": "Options-menu input loop. F1 (matrix 4) toggles RandomZoneModeFlag $59. F3 (matrix 5) toggles a second binary flag $56 (0/1) - not yet identified, candidate: number-of-players or difficulty. F5 (matrix 6) steps $57 by 2, wrapping 21 back to 7 - a numeric setting, effect not yet traced. F7 (matrix 3) exits back into the game (JMP loc_8AEA, discarding two return addresses off the stack the way $985E does for spawn-cancel)."
+  },
+  "by": "two",
+  "at": "2026-09-07T09:45:30.845Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "watch-second-sprite-bank",
+   "description": "Does anything ever write the second half of the sprite multiplex field arrays ($1F48-7F)?",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 200
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true
+    },
+    {
+     "kind": "run",
+     "frames": 100
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false
+    },
+    {
+     "kind": "run",
+     "frames": 900,
+     "watchpoints": [
+      {
+       "from": "$1F48",
+       "to": "$1F4F",
+       "on": "write"
+      },
+      {
+       "from": "$1F58",
+       "to": "$1F5F",
+       "on": "write"
+      },
+      {
+       "from": "$1F68",
+       "to": "$1F6F",
+       "on": "write"
+      },
+      {
+       "from": "$1F78",
+       "to": "$1F7F",
+       "on": "write"
+      }
+     ]
+    }
+   ]
+  },
+  "by": "one",
+  "at": "2026-09-07T09:45:38.238Z"
+ },
+ {
+  "tool": "add_comment",
+  "args": {
+   "address": "$96D2",
+   "text": "What cheat mode actually does, exhaustively checked: only 5 sites in the whole program read $5E. $57D1 draws the CHEAT MODE OPERATIVE banner. $581A (sub_5817) makes the attract-mode caption cycler stop overwriting the message line once cheat mode is on. $9751 (sub_9744, creature-spawn path) conditionally stashes the currently-held key's matrix code into scratch byte $46 if cheat mode is on and a key is held - inconclusive: $46 is reused by 8+ unrelated routines and no confirmed consumer of this particular write was found. No confirmed effect on lives, invulnerability, zone selection, or anything else. As far as this project can show, the cheat is cosmetic: it changes what the message line says and nothing else.",
+   "placement": "after"
+  },
+  "by": "two",
+  "at": "2026-09-07T09:46:16.341Z"
+ },
+ {
+  "tool": "add_evidence",
+  "args": {
+   "claim": "clm_3bg7lo",
+   "kind": "supports",
+   "scenario": "scn_3o6wlr",
+   "note": "Watched writes to the second-bank field arrays during real gameplay: only the single boundary byte $1F48 was ever hit (a fencepost overlap from an 8-slot index array), nothing at $1F49 and above in a 900-frame play session. Consistent with the second sprite-sheet copy being unused."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:46:41.505Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$9468",
+   "name": "CheatZoneSkipTrigger",
+   "method": "read",
+   "comment": "Inside CCAMEL (sub_9444, the player routine, called every frame): LDA $46; BEQ normal-joystick-handling; else JMP loc_9D59 (zone advance). $46 is stashed with the held key by sub_9744 ($9751) only when cheat mode ($5E) is on and a creature spawn just succeeded. $46 is cleared back to 0 by loc_9699 as part of the new zones setup (LDA #$00/STA $46 at $96A5-96A7), so this fires once per trigger, not every frame. Net effect: cheat mode + holding any key at a spawn moment skips straight to the next zone. Traced end to end; not run live yet."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:48:19.855Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "verify-cheat-zone-skip",
+   "description": "Force cheat mode + a held key at spawn time, watch $58 (zone index) for a write.",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 200
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true
+    },
+    {
+     "kind": "run",
+     "frames": 100
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$5E": 1
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 5,
+     "watchpoints": [
+      {
+       "from": "$0058",
+       "to": "$0058",
+       "on": "write"
+      }
+     ]
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$C5": 13
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 5,
+     "watchpoints": [
+      {
+       "from": "$0058",
+       "to": "$0058",
+       "on": "write"
+      }
+     ]
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$C5": 13
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 5,
+     "watchpoints": [
+      {
+       "from": "$0058",
+       "to": "$0058",
+       "on": "write"
+      }
+     ]
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$C5": 13
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 5,
+     "watchpoints": [
+      {
+       "from": "$0058",
+       "to": "$0058",
+       "on": "write"
+      }
+     ]
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$C5": 13
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 5,
+     "watchpoints": [
+      {
+       "from": "$0058",
+       "to": "$0058",
+       "on": "write"
+      }
+     ]
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$C5": 13
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 60,
+     "watchpoints": [
+      {
+       "from": "$0058",
+       "to": "$0058",
+       "on": "write"
+      }
+     ]
+    }
+   ]
+  },
+  "by": "one",
+  "at": "2026-09-07T09:48:46.425Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$9091",
+   "name": "DrawStatusPanelRow2",
+   "method": "read",
+   "comment": "Copies dat_90F7 (\"NEUTRONIUM STATUS  HHHHHHHHHHHHHHHHH\") into screen+colour RAM. Every byte is AND #$3F (ASCII into the low 64-code range the custom font shares with the message line) EXCEPT when the source byte is literally ASCII H (#$48, CMP #$48/BEQ skips the mask) - that one byte is written unmasked. Glyph $48 in the character set at $2000 (offset $2240) is a solid horizontal bar (00 00 FF FF FF FF FF 00), not a letter - the masked H glyph at code $08 ($2040: 66 66 66 7E E6 E6 E6 00) is a normal H. So the neutronium gauge is a string of literal H characters in the source text that render as a solid bar because this one routine deliberately lets that one byte through unmasked, reaching a second character bank the rest of the game never touches."
+  },
+  "by": "two",
+  "at": "2026-09-07T09:49:26.745Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$85DE",
+   "name": "TelecomsComeuppanceZone",
+   "method": "read",
+   "comment": "Zone 10 (0-indexed 9), $6700+9*200=$85DE. Clean 4-step transform chain with 4 distinct sprites: type0 ($E5,1f,32t)->type1($E6-E7,2f,32t)->type2($E8,1f,1t)->type3($E8,1f,life=0=never ages, sits until shot). Types 4/6/7 present but unreached by any nextType in this zone. Types 0-3 all AND #$3F-masked colour data at record+$20 confirmed distinct too. Picked over zone4/ATTACK OF THE MUTANT MUTANT CAMELS because that zones chain (type5->type4) shares one sprite ($CD) across the pair and most of its other types share $91-$93, so a diagram of TELECOMS COMEUPPANCE shows more."
+  },
+  "by": "one",
+  "at": "2026-09-07T09:51:41.720Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-zoneskip",
+   "description": "cheat flag + a held key, does the zone index move",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 200
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true
+    },
+    {
+     "kind": "run",
+     "frames": 30
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false
+    },
+    {
+     "kind": "run",
+     "frames": 500
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$0044",
+     "to": "$0060",
+     "name": "zp_before.bin"
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$0044",
+     "to": "$0060",
+     "name": "zp_after.bin"
+    },
+    {
+     "kind": "run",
+     "frames": 40
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$0044",
+     "to": "$0060",
+     "name": "zp_after2.bin"
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "skip.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:58:20.121Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_x72fo1",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 200
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true
+    },
+    {
+     "kind": "run",
+     "frames": 30
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false
+    },
+    {
+     "kind": "run",
+     "frames": 500
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$0044",
+     "to": "$0060",
+     "name": "zp3.bin"
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "skip.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:58:33.866Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_x72fo1",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 200
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true
+    },
+    {
+     "kind": "run",
+     "frames": 30
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false
+    },
+    {
+     "kind": "run",
+     "frames": 500
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$0058",
+     "to": "$0059",
+     "name": "zA.bin"
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$005E": 1,
+      "$00C5": 38
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 2
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$0058",
+     "to": "$0059",
+     "name": "zB.bin"
+    },
+    {
+     "kind": "run",
+     "frames": 250
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$0058",
+     "to": "$0059",
+     "name": "zC.bin"
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "skip.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T09:58:50.140Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-panel",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 200
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true
+    },
+    {
+     "kind": "run",
+     "frames": 30
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false
+    },
+    {
+     "kind": "run",
+     "frames": 400
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$0400",
+     "to": "$0450",
+     "name": "panel.bin"
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$D800",
+     "to": "$D850",
+     "name": "panelcol.bin"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T10:05:11.104Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-latezone",
+   "description": "force the zone index to 39 and photograph what arrives",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 200
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true
+    },
+    {
+     "kind": "run",
+     "frames": 30
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false
+    },
+    {
+     "kind": "run",
+     "frames": 300
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$0058": 39
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 200
+    },
+    {
+     "kind": "capture",
+     "what": "frames",
+     "count": 50,
+     "every": 30,
+     "name": "late.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T10:13:00.622Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-composite",
+   "description": "screen plus the object table, so the sprites can be drawn back in",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 200
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true
+    },
+    {
+     "kind": "run",
+     "frames": 30
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false
+    },
+    {
+     "kind": "run",
+     "frames": 700
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 40
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "comp.json"
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$1F40",
+     "to": "$1F80",
+     "name": "objs.bin"
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$1D00",
+     "to": "$1D20",
+     "name": "types.bin"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T10:16:44.944Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-composite2",
+   "description": "six paired screen+object captures for compositing",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 200
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true
+    },
+    {
+     "kind": "run",
+     "frames": 30
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": false
+    },
+    {
+     "kind": "run",
+     "frames": 700
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": true,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 37
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "c0.json"
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$1F40",
+     "to": "$1F80",
+     "name": "o0.bin"
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": false,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 37
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "c1.json"
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$1F40",
+     "to": "$1F80",
+     "name": "o1.bin"
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": true,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 37
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "c2.json"
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$1F40",
+     "to": "$1F80",
+     "name": "o2.bin"
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": false,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 37
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "c3.json"
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$1F40",
+     "to": "$1F80",
+     "name": "o3.bin"
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": true,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 37
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "c4.json"
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$1F40",
+     "to": "$1F80",
+     "name": "o4.bin"
+    },
+    {
+     "kind": "input",
+     "port": 2,
+     "fire": true,
+     "up": false,
+     "right": true
+    },
+    {
+     "kind": "run",
+     "frames": 37
+    },
+    {
+     "kind": "capture",
+     "what": "screen",
+     "name": "c5.json"
+    },
+    {
+     "kind": "capture",
+     "what": "ram",
+     "from": "$1F40",
+     "to": "$1F80",
+     "name": "o5.bin"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T10:17:44.810Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-sid-full",
+   "description": "The whole title tune, as SID writes with cycle timestamps. 636 ticks at 7 frames a tick.",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 4900
+    },
+    {
+     "kind": "capture",
+     "what": "sid",
+     "name": "sidfull.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T12:14:16.783Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_k67nct",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 4900,
+     "maxInstructions": 80000000
+    },
+    {
+     "kind": "capture",
+     "what": "sid",
+     "name": "sidfull.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T12:14:30.614Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-orphan-full",
+   "description": "beryl's orphan-tune-playback (scn_9pffxy), run long enough to reach the end. The orphan is 406 ticks and a tick is seven PAL frames, so it needs ~2850 frames rather than 420.",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 100
+    },
+    {
+     "kind": "set",
+     "memory": {
+      "$0015": 184,
+      "$0016": 100,
+      "$0019": 1,
+      "$001A": 1
+     }
+    },
+    {
+     "kind": "run",
+     "frames": 3000,
+     "maxInstructions": 60000000
+    },
+    {
+     "kind": "capture",
+     "what": "sid",
+     "name": "orphanfull.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T12:15:49.231Z"
+ },
+ {
+  "tool": "add_scenario",
+  "args": {
+   "name": "ed-flicker",
+   "description": "Consecutive title-screen frames, to see the REVENGE letters change colour while their shape does not.",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 300
+    },
+    {
+     "kind": "capture",
+     "what": "frames",
+     "count": 16,
+     "every": 1,
+     "name": "flicker.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T12:19:38.930Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_gqvml3",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 1300
+    },
+    {
+     "kind": "capture",
+     "what": "frames",
+     "count": 16,
+     "every": 1,
+     "name": "flicker.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T12:19:52.708Z"
+ },
+ {
+  "tool": "edit_scenario",
+  "args": {
+   "id": "scn_gqvml3",
+   "steps": [
+    {
+     "kind": "start",
+     "at": "$8A3C"
+    },
+    {
+     "kind": "run",
+     "frames": 400
+    },
+    {
+     "kind": "capture",
+     "what": "frames",
+     "count": 18,
+     "every": 1,
+     "name": "flicker.json"
+    }
+   ]
+  },
+  "by": "ed",
+  "at": "2026-09-07T12:20:43.532Z"
+ },
+ {
+  "tool": "add_claim",
+  "args": {
+   "at": "$2740",
+   "name": "SixteenTonWeight",
+   "is": "bitmap",
+   "view": "sprite",
+   "extent": 64
+  },
+  "by": "watch",
+  "at": "2026-09-07T17:43:40.959Z"
+ }
+]
