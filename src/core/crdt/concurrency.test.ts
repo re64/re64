@@ -533,3 +533,70 @@ describe("equal state projects the same way, whatever order it arrived in", () =
     );
   });
 });
+
+describe("the sort key is read one way per root", () => {
+  /**
+   * **Choosing numeric or textual comparison from each *pair* is not a
+   * comparator.**
+   *
+   * `"9"` and `"$10"` both parse, so they compare numerically and `9 < 16`.
+   * `"$ZZ"` parses to `NaN`, so it compares against each of them as text — and
+   * `"$10" < "$ZZ"` while `"$ZZ" < "9"`, because `$` sorts before a digit. That
+   * is a cycle: 9 < $10 < $ZZ < 9. `Array.prototype.sort` given a cycle produces
+   * whatever its input order suggests, which is the insertion dependence this
+   * whole change exists to remove — the repair reintroducing the defect one
+   * level down.
+   *
+   * So the kind is a property of the **root**, declared at the call: an address,
+   * a start, a value and a claim's `at` are numbers; a name, a filename and a
+   * referenced id are text. Nothing is decided from the values in hand.
+   */
+  const names = ["$10", "9", "$ZZ", "Alpha", "10", "2x", "3"];
+
+  const withNames = (order: readonly string[]): CrdtDoc => {
+    const doc = docFromProject(PROJECT);
+    for (const name of order) {
+      applyOpToDoc(doc, {
+        op: "type.add",
+        id: `typ_${name.replace(/\W/g, "_")}`,
+        name,
+        size: 1,
+        fields: [],
+      });
+    }
+    return doc;
+  };
+
+  const permutations = <T>(items: readonly T[]): T[][] =>
+    items.length <= 1
+      ? [[...items]]
+      : items.flatMap((item, i) =>
+          permutations([...items.slice(0, i), ...items.slice(i + 1)]).map((rest) => [
+            item,
+            ...rest,
+          ])
+        );
+
+  it("projects the same order however the names arrived", () => {
+    const canonical = projectFromDoc(withNames(names)).types!.map((t) => t.name);
+    // Every arrival order of seven names that mix parseable and unparseable.
+    for (const order of permutations(names)) {
+      expect(projectFromDoc(withNames(order)).types!.map((t) => t.name)).toEqual(canonical);
+    }
+  });
+
+  it("orders addresses by value, not as text", () => {
+    // The other half of one comparator serving both: `$100` is after `$99`.
+    const doc = docFromProject(PROJECT);
+    for (const at of [0x100, 0x99, 0x9]) {
+      applyOpToDoc(doc, {
+        op: "claim.add",
+        claim: { id: `clm_${at}`, at, says: { is: "data" }, origin: "user" },
+      });
+    }
+    const mine = projectFromDoc(doc)
+      .claims!.filter((c) => c.id!.startsWith("clm_2") || /^clm_\d+$/.test(c.id!))
+      .map((c) => c.at);
+    expect(mine).toEqual(["$0009", "$0099", "$0100"]);
+  });
+});
