@@ -2578,7 +2578,7 @@ export class Workspace {
     // declined in one shape and the shape is the contract. The value is spelled
     // as an offset — `+$A0` — so nobody reads it as an address in memory.
     const rejected: { address: string; reason: string }[] = [];
-    const fields: Record<number, TypeField> = {};
+    const fields: TypeField[] = [];
 
     for (const [key, field] of Object.entries(type.fields)) {
       const offset = parseProjectAddress(key);
@@ -2641,10 +2641,10 @@ export class Workspace {
       // or `u8[CreatureCount]`; what is stored is `typ_…[42]` and `u8[cst_…]`,
       // because a name is a field somebody may change and a reference must not
       // change with it. The name is how it renders, resolved on the way out.
-      fields[offset] = { ...field, type: storedFieldType(parsed), id: newId("fld") };
+      fields.push({ ...field, offset, type: storedFieldType(parsed), id: newId("fld") });
     }
 
-    if (Object.keys(fields).length === 0 && Object.keys(type.fields).length > 0) {
+    if (fields.length === 0 && Object.keys(type.fields).length > 0) {
       throw new Error(
         `None of the ${Object.keys(type.fields).length} fields could be declared. ` +
           rejected.map((r) => `${r.address}: ${r.reason}`).join(" ")

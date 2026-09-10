@@ -331,13 +331,10 @@ export function diffProjects(from: Project, to: Project): Op[] {
   for (const [id, type] of afterTypes) {
     const before = beforeTypes.get(id);
     const size = typeof type.size === "string" ? parseProjectAddress(type.size) : type.size;
-    // Keyed by the field's own `offset`, not by its position in the list — the
-    // fields were an offset-keyed object and `Object.entries` over the list that
-    // replaced it hands back array *indices*, which land silently as offsets 0,
-    // 1, 2 for a record laid out at 0, 8 and $A0.
-    const asFields: Record<number, TypeField> = Object.fromEntries(
-      type.fields.map((field) => [field.offset, { ...field, id: field.id! }])
-    );
+    // The list as it stands. An offset-keyed object here kept one field per
+    // offset, so a type holding two at one offset — a legal state — reached a
+    // peer that had never seen it with one of them missing.
+    const asFields: TypeField[] = type.fields.map((field) => ({ ...field, id: field.id! }));
     if (!before) {
       ops.push({
         op: "type.add",

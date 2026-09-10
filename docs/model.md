@@ -383,6 +383,16 @@ field to different offsets produced **two entries carrying one id** — after wh
 at its key, so `field.set` wrote the whole of it and a rename lost to a
 concurrent description edit. Verbs on a shape that cannot honour them.
 
+A document stored before that — a `.re64db` whose snapshot holds fields keyed by
+offset as plain objects — is brought to this shape when the store opens it, and
+the migration is persisted like any update, because a later edit to a migrated
+field names items the migration created. The text migration alone never reached a
+stored document: a store restores its snapshot directly and does not pass through
+the file. And `type.add` carries its fields as a **list**, each with its id and
+offset, because a payload keyed by offset can hold one field per offset and
+silently dropped the second whenever a type was recreated — by the file
+reconciler, or by undoing its removal.
+
 **Two fields at one offset both stand**, and hygiene reports the pair. Offset
 keys made that case merge into one field and silently lose a reader's work; it is
 now the same shape as two claims at one address, which this model keeps rather
