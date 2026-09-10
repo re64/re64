@@ -228,10 +228,18 @@ const alice = { userId: 'alice', label: 'Alice', sessionId: 'alice-session' };
   applyOpToDoc(a, { op: 'decoder.add', id: 'dec_a', name: 'Alpha', source: 'a' });
   applyOpToDoc(b, { op: 'decoder.add', id: 'dec_b', name: 'Beta', source: 'b' });
   sync(a, b);
+  // RE-RUN NOTE (re64, 2026-09-10): fixed. `sortedValues` parsed every sort key
+  // as a number, and seven roots do not have one — `parseInt("Alpha")` is NaN,
+  // and `NaN !== 0` is true, so the comparator returned NaN and the id
+  // tiebreaker below it was never reached. Numbers sort by value now and
+  // everything else as text, and `primaryLabels` is key-sorted for the same
+  // reason. The production test is `src/core/crdt/concurrency.test.ts` →
+  // "equal state projects the same way, whatever order it arrived in".
   const orderA = projectFromDoc(a).decoders.map(d => d.id);
   const orderB = projectFromDoc(b).decoders.map(d => d.id);
-  assert.notDeepEqual(orderA, orderB);
-  output('equal CRDT state has arrival dependent projection ordering', { orderA, orderB });
+  assert.deepEqual(orderA, orderB);
+  assert.equal(JSON.stringify(projectFromDoc(a)), JSON.stringify(projectFromDoc(b)));
+  output('FIXED: equal state projects identically whatever the arrival order', { orderA, orderB });
 }
 {
   class FailingStorage extends SqliteStorage {

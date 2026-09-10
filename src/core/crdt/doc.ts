@@ -396,8 +396,15 @@ export function projectFromDoc(doc: Y.Doc): Project {
     if (value !== undefined) (project as unknown as Record<string, unknown>)[key] = value;
   }
 
+  // Sorted, for the same reason and by the same rule as every list above: an
+  // object's keys come out in insertion order, so two peers that bound the same
+  // two addresses in different orders would serialise differently and hash
+  // differently while holding identical state.
   const primaryJson = primary.toJSON() as Record<string, string>;
-  if (Object.keys(primaryJson).length) project.primaryLabels = primaryJson;
+  const primaryKeys = Object.keys(primaryJson).sort();
+  if (primaryKeys.length) {
+    project.primaryLabels = Object.fromEntries(primaryKeys.map((k) => [k, primaryJson[k]]));
+  }
 
   const constantList = sortedValues<ProjectConstant>(constants, "value").map((c) =>
     inOrder<ProjectConstant>(c as unknown as Record<string, unknown>, CONSTANT_FIELDS)
@@ -606,9 +613,28 @@ function sortedValues<T>(map: Y.Map<Y.Map<unknown>>, key: string): T[] {
   return [...map.values()]
     .map((entry) => entry.toJSON() as T)
     .sort((a, b) => {
-      const delta =
-        parseAddress((a as Record<string, unknown>)[key]) -
-        parseAddress((b as Record<string, unknown>)[key]);
+      const left = (a as Record<string, unknown>)[key];
+      const right = (b as Record<string, unknown>)[key];
+
+      // **Numbers by value, everything else as text.**
+      //
+      // This parsed every sort key as a number, and seven of the roots sort by
+      // one that is not: decoder, type, target and scenario names, a capture's
+      // filename, a piece of evidence's claim id. `parseInt("Alpha")` is `NaN`,
+      // `NaN - NaN` is `NaN`, and `NaN !== 0` is **true** — so the comparator
+      // returned `NaN`, the id tiebreaker below was never reached, and those
+      // arrays kept whatever order the map happened to be built in. Two peers
+      // that added the same two decoders in different orders projected them
+      // differently, for ever.
+      //
+      // That is not only a cosmetic difference in the file. The version hash is
+      // taken over the projection, so equal logical state did not determine
+      // equal versions.
+      const byNumber = parseAddress(left) - parseAddress(right);
+      const delta = Number.isNaN(byNumber)
+        ? String(left ?? "").localeCompare(String(right ?? ""))
+        : byNumber;
+
       return delta !== 0
         ? delta
         : String((a as { id?: string }).id).localeCompare(String((b as { id?: string }).id));
