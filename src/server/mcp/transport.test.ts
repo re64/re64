@@ -2584,3 +2584,84 @@ describe("a session reads its own copy of the document", () => {
     expect(forBeta.isError, forBeta.text).toBe(false);
   });
 });
+
+describe("two requests overlapping keep their own identities", () => {
+  /**
+   * **The caller was a server-global closure**, reassigned at the top of each
+   * `/mcp` request and read *later*, during tool execution — with the request
+   * body still arriving in between. Two requests overlapping by that much is
+   * ordinary rather than exotic, and the second replaced the first's identity: a
+   * claim asked for by one user was recorded as another, under another's session
+   * and in another's undo scope.
+   *
+   * It became worse when a session started reading its own copy of the document:
+   * a request that resolves the wrong caller reads the wrong *replica* too.
+   *
+   * `Workspace` could not have caught this. It answers correctly for whatever
+   * caller it is handed, and the defect is in what hands it one — so this test
+   * has to be over the real transport, with a body held open.
+   */
+  const send = (user: string, payload: string) =>
+    fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "x-re64-user": user,
+        "x-re64-session": `ses_${user}`,
+      },
+      body: payload,
+    });
+
+  it("records a slow request under the user that sent it", async () => {
+    const body = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "add_claim", arguments: { address: "$8E40", name: "FromAlice" } },
+    });
+
+    // A stream that dribbles the body out, so a second request can complete in
+    // the middle of the first — which is the whole point.
+    const slow = new ReadableStream({
+      async start(controller) {
+        const bytes = new TextEncoder().encode(body);
+        controller.enqueue(bytes.slice(0, 20));
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        controller.enqueue(bytes.slice(20));
+        controller.close();
+      },
+    });
+
+    const alice = fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "x-re64-user": "usr_alice",
+        "x-re64-session": "ses_alice",
+      },
+      body: slow,
+      // undici wants this to stream a request body rather than buffer it, which
+      // is the whole point here: the overlap only exists while the body is
+      // still arriving.
+      duplex: "half",
+    });
+
+    // Bob finishes while Alice's body is still on the wire.
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const bob = await send(
+      "usr_bob",
+      JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "whoami" } })
+    );
+    expect(bob.ok).toBe(true);
+    await alice;
+
+    const changes = (await callTool("changes_since", { cursor: 0 })).value as {
+      changes: { did: string; by?: string }[];
+    };
+    const naming = changes.changes.find((c) => c.did.includes("FromAlice"));
+    expect(naming, "Alice's claim never landed").toBeDefined();
+    expect(naming!.by).toBe("usr_alice");
+  });
+});

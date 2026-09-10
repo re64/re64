@@ -47,9 +47,15 @@ try {
   assert.equal(JSON.parse(bob.text).userId, 'bob');
   delayed.end(aliceBody.slice(20));
   assert.equal((await result).isError, false);
+  // RE-RUN NOTE (re64, 2026-09-10): fixed. The caller was a server-global
+  // closure, reassigned per request and read *later* during tool execution —
+  // with the body still arriving in between. It is resolved once now, into a
+  // local, and passed to `handle` for that request. Production test:
+  // `src/server/mcp/transport.test.ts` -> "two requests overlapping keep their
+  // own identities".
   const written = storage.readOps().filter(c => c.op.op === 'claim.add');
-  assert.equal(written[0].author, 'bob');
-  console.log(JSON.stringify({ case: 'overlapping MCP calls use another caller identity', port: server.port, requestUser: 'alice', recordedAuthor: written[0].author, recordedSession: written[0].session }));
+  assert.equal(written[0].author, 'alice');
+  console.log(JSON.stringify({ case: 'FIXED: an overlapped request keeps its own identity', requestUser: 'alice', recordedAuthor: written[0].author }));
 
   const malformed = await call('alice', 'add_claim', { address: '$8000+1', name: 'MalformedAddress' });
   assert.equal(malformed.isError, false);

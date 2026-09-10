@@ -153,7 +153,26 @@ export interface McpContext {
 
 /** Built once, then asked to handle each request. */
 export interface McpEndpoint {
-  handle(request: IncomingMessage, response: ServerResponse, body: unknown): Promise<void>;
+  /**
+   * Answer one request, as one caller.
+   *
+   * **The context is an argument rather than a property**, and that is the whole
+   * of the fix for a defect worth naming. It used to be supplied once at
+   * construction and read *later*, during tool execution — with an
+   * `await readBody(request)` in between. So a second request arriving while the
+   * first was still receiving its body replaced the identity the first would
+   * resolve, and a claim asked for by one user was recorded as another, under
+   * another's session and another's undo scope.
+   *
+   * A request must never resolve its caller through anything a later request can
+   * reach.
+   */
+  handle(
+    request: IncomingMessage,
+    response: ServerResponse,
+    body: unknown,
+    context: () => McpContext
+  ): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -166,7 +185,6 @@ type ToolRegistrar = (server: unknown, context: () => McpContext) => void;
  * without it still serves everything else.
  */
 export async function createMcpEndpoint(options: {
-  context: () => McpContext;
   registerTools: ToolRegistrar;
   log?: McpLog;
   name?: string;
@@ -207,7 +225,7 @@ export async function createMcpEndpoint(options: {
      * shadow one that already exists a layer down. Registration is schemas
      * only, and costs nothing worth caching.
      */
-    async handle(request, response, body) {
+    async handle(request, response, body, context) {
       const server = new McpServer(
         {
           name: options.name ?? "re64",
@@ -215,7 +233,9 @@ export async function createMcpEndpoint(options: {
         },
         { instructions: INSTRUCTIONS }
       );
-      options.registerTools(server, options.context);
+      // Registered against *this* request's context, so every tool a request
+      // runs resolves the caller it arrived with.
+      options.registerTools(server, context);
 
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       response.on("close", () => {
@@ -240,7 +260,7 @@ export async function createMcpEndpoint(options: {
             ...describeRequest(body),
             at: new Date(started).toISOString(),
             ms: Date.now() - started,
-            ...safeCaller(options.context),
+            ...safeCaller(context),
             session: header(request, "mcp-session-id"),
             bytes: watching.bytes(),
             ...replyOf(watching.text(), { truncated: watching.truncated() }),
