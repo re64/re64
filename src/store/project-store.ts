@@ -539,16 +539,21 @@ export class ProjectStore {
    * On failure the in-memory document is discarded and rebuilt from what
    * actually committed, so the server never keeps serving state that no restart
    * would reproduce.
+   *
+   * **Two failures, and they are not the same failure.** Before the commit,
+   * nothing happened and the caller must be told so. After it, the write is
+   * durable and a restart would find it — so a listener that throws is a
+   * *delivery* problem, and reporting it as a failed write invites the caller to
+   * retry an action that already landed. This is the shape a check that cannot
+   * see something must not skip: the write succeeded, one subscriber did not
+   * hear about it, and both halves get said.
    */
   private committing<T>(work: () => T): T {
     if (this.publishing) return this.storage.transaction(work);
     this.publishing = true;
+    let committed: T;
     try {
-      const result = this.storage.transaction(work);
-      for (const [update, origin] of this.held) {
-        for (const listener of this.listeners) listener(update, origin);
-      }
-      return result;
+      committed = this.storage.transaction(work);
     } catch (error) {
       // Nothing was published, and the document is now ahead of the log. Drop
       // it: `document()` rebuilds from the snapshot and the updates that
@@ -556,12 +561,47 @@ export class ProjectStore {
       this.held.length = 0;
       this.doc = undefined;
       this.lastProjection = undefined;
+      this.publishing = false;
       throw error;
+    }
+
+    // Committed. From here the write stands whatever happens, so the document is
+    // never dropped and nothing is rethrown to the caller.
+    //
+    // **Drained rather than snapshotted**, because a listener may write. Its
+    // write sees `publishing` and commits inside this same boundary, queueing its
+    // own update here — which a snapshot taken before the loop would leave
+    // behind, published to nobody. A listener that writes on every notification
+    // does not terminate, which is true of any observer that feeds itself.
+    try {
+      while (this.held.length) {
+        for (const [update, origin] of this.held.splice(0, this.held.length)) {
+          for (const listener of this.listeners) {
+            try {
+              listener(update, origin);
+            } catch (error) {
+              // Said rather than swallowed, and one listener's failure does not
+              // cost the others their notification.
+              this.onPublishError?.(error, origin);
+            }
+          }
+        }
+      }
     } finally {
       this.held.length = 0;
       this.publishing = false;
     }
+    return committed;
   }
+
+  /**
+   * Told when a listener throws on a write that has already committed.
+   *
+   * Not an argument to `committing`, because the failure belongs to whoever
+   * subscribed rather than to whoever wrote. Unset, a throwing listener is
+   * silent — which is the wrong default and is why the server sets it.
+   */
+  onPublishError?: (error: unknown, origin: unknown) => void;
 
   runOps(
     ops: readonly Op[],

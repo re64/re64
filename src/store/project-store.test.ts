@@ -1085,6 +1085,7 @@ describe("history written in the old type shapes", () => {
       expect(described(f.store)).toBeUndefined();
     } finally {
       f.close();
+    }
   });
 });
 
@@ -1143,6 +1144,83 @@ describe("a failed write is not served", () => {
       expect(
         projectFromDoc(new ProjectStore(storage).document()).claims![0].name
       ).toBe("Original");
+    } finally {
+      storage.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * **The other half: a write that committed is not a write that failed.**
+   *
+   * Both loops shared one `try`, so a listener throwing *after* the commit was
+   * handled as a transaction failure — the document dropped and an error thrown
+   * to the caller, for a write the database had already accepted and a restart
+   * would find. That invites a retry of an action that landed, which is a worse
+   * outcome than the one it was guarding.
+   */
+  it("keeps a committed write when a listener throws, and says so", () => {
+    const dir = mkdtempSync(join(tmpdir(), "re64-publish-"));
+    const storage = new SqliteStorage(join(dir, "p.re64db"), "p");
+    storage.initialize(project, Date.now(), "commit");
+
+    const store = new ProjectStore(storage);
+    store.document();
+    const failures: unknown[] = [];
+    store.onPublishError = (error) => failures.push(error);
+
+    const heard: unknown[] = [];
+    store.onUpdate(() => {
+      throw new Error("injected listener failure");
+    });
+    store.onUpdate(() => heard.push(1));
+
+    try {
+      expect(() =>
+        store.runOps([{ op: "claim.set", id: "clm_a", fields: { name: "Committed" } }], "alice", 1)
+      ).not.toThrow();
+
+      // The write stands, in memory and on disk.
+      expect(projectFromDoc(store.document()).claims![0].name).toBe("Committed");
+      expect(
+        projectFromDoc(new ProjectStore(storage).document()).claims![0].name
+      ).toBe("Committed");
+
+      // The delivery failure is reported rather than swallowed...
+      expect(failures).toHaveLength(1);
+      expect((failures[0] as Error).message).toMatch(/injected listener/);
+      // ...and one listener throwing does not cost the next one its update.
+      expect(heard).toHaveLength(1);
+    } finally {
+      storage.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("publishes an update a listener's own write produced", () => {
+    const dir = mkdtempSync(join(tmpdir(), "re64-nested-"));
+    const storage = new SqliteStorage(join(dir, "p.re64db"), "p");
+    storage.initialize(project, Date.now(), "commit");
+
+    const store = new ProjectStore(storage);
+    store.document();
+
+    // A listener that writes commits inside the same publication boundary and
+    // queues its own update there. Snapshotting the queue before the loop left
+    // that one published to nobody.
+    let wrote = false;
+    const seen: number[] = [];
+    store.onUpdate(() => {
+      seen.push(1);
+      if (wrote) return;
+      wrote = true;
+      store.runOps([{ op: "claim.set", id: "clm_a", fields: { name: "FromListener" } }], "bob", 2);
+    });
+
+    try {
+      store.runOps([{ op: "claim.set", id: "clm_a", fields: { name: "First" } }], "alice", 1);
+      expect(seen.length).toBeGreaterThanOrEqual(2);
+      expect(projectFromDoc(store.document()).claims![0].name).toBe("FromListener");
     } finally {
       storage.close();
       rmSync(dir, { recursive: true, force: true });

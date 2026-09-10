@@ -155,8 +155,18 @@ export function startServer(options: ServerOptions): RunningServer {
     const storage = isDatabase
       ? new SqliteStorage(projectPath, projectId)
       : new FileStorage(pathsFor(projectPath));
+    const store = new ProjectStore(storage);
+    // A write that committed and a subscriber that did not hear about it are two
+    // different facts, and the second one is only useful if somebody says it.
+    store.onPublishError = (error, origin) =>
+      console.error(
+        `${projectId}: a listener threw on a committed write${
+          typeof origin === "string" ? ` from ${origin}` : ""
+        }:`,
+        error
+      );
     const sync = new SyncServer({
-      store: new ProjectStore(storage),
+      store,
       // Long enough that a page reload rejoins the same session rather than
       // splitting one piece of work across two history entries.
       idleMs: 30_000,
