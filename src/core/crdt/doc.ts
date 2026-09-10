@@ -109,6 +109,19 @@ function mapFrom(record: Record<string, unknown>): Y.Map<unknown> {
 }
 
 /**
+ * Code units, never `localeCompare`, for anything the document derives.
+ *
+ * Two peers must project one document to the same bytes and the version hash is
+ * taken over that projection. `localeCompare` answers by the reader's locale —
+ * `fld_ä` before `fld_z` in one, after it in another — and by ICU's equivalence
+ * rules, under which the distinct ids `fld_\u00e9` and `fld_e\u0301` compare
+ * *equal*, so two peers holding both kept them in opposite insertion orders for
+ * ever. The root comparator was fixed first; the tiebreak inside a record's
+ * fields is the same invariant one level down.
+ */
+const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
  * Build a document from a project.
  *
  * Deterministic: same input, same bytes, on every client.
@@ -193,12 +206,12 @@ export function docFromProject(declared: Project): Y.Doc {
     const targets = doc.getMap<Y.Map<unknown>>(ROOT_TARGETS);
     // Keyed by id, like every other collection here. It was keyed by name,
     // which made a target the one entity whose identity could be edited.
-    for (const target of [...(project.targets ?? [])].sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const target of [...(project.targets ?? [])].sort((a, b) => byCodeUnit(a.name, b.name))) {
       targets.set(target.id!, mapFrom(target as unknown as Record<string, unknown>));
     }
 
     const files = doc.getMap<Y.Map<unknown>>(ROOT_FILES);
-    for (const file of [...(project.files ?? [])].sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const file of [...(project.files ?? [])].sort((a, b) => byCodeUnit(a.name, b.name))) {
       files.set(file.name, mapFrom(file as unknown as Record<string, unknown>));
     }
 
@@ -316,10 +329,9 @@ function fieldList(type: ProjectType): ProjectField[] {
 
 /** Layout order, then id, so a projection is the same on every peer. */
 const byOffset = (a: ProjectField, b: ProjectField): number =>
-  a.offset - b.offset || (a.id ?? "").localeCompare(b.id ?? "");
+  a.offset - b.offset || byCodeUnit(a.id ?? "", b.id ?? "");
 
-const byId = (a: { id?: string }, b: { id?: string }) =>
-  (a.id ?? "").localeCompare(b.id ?? "");
+const byId = (a: { id?: string }, b: { id?: string }) => byCodeUnit(a.id ?? "", b.id ?? "");
 
 /** Read a document back as a plain project. */
 export function projectFromDoc(doc: Y.Doc): Project {
