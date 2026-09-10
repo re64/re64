@@ -88,6 +88,8 @@ import {
 import { runDecoder } from "../sandbox/run.js";
 import { renderTextWith } from "../sandbox/sync.js";
 import { databaseFileBytes } from "../store/load.js";
+import { hashBytes } from "../store/blobs.js";
+import type { RomLoader } from "../core/project/loader.js";
 import { CommentPlacement, TextEncoding, describeWarning } from "../core/index.js";
 import { MAX_MESSAGE_LENGTH } from "../core/crdt/chat.js";
 import { TypeField } from "../core/ops/types.js";
@@ -609,8 +611,12 @@ export class Workspace {
    * - the **view**, since two targets over one document are two machines;
    * - where each layer landed and how long it is, which is what a target does
    *   and is worth stating directly rather than trusting the view to imply;
-   * - the ROMs this host did **not** supply, because a project that asks for the
-   *   KERNAL executes differently on a machine that has it, at the same version.
+   * - the **ROMs themselves**, by content. Which ones are missing is not enough:
+   *   a KERNAL is a file on the host that this project neither carries nor
+   *   versions, so swapping one for a patched build changes what every run does
+   *   while the document, the view and the placements all stay put. The
+   *   character ROM matters twice over, because it is handed to the renderer
+   *   separately and decides what a capture *looks like*.
    *
    * The step prefix is added by `prefixKey`, so resuming from step five is still
    * cheap; this is only the "these bytes" half of that key.
@@ -625,9 +631,11 @@ export class Workspace {
       this.version(),
       loaded.selectedTarget?.id ?? "(implied)",
       stack,
-      loaded.romsMissing.join("+"),
+      romFingerprint(nodeRomBytes()),
     ].join("|");
   }
+
+
 
   /** Content-addressed, for anything crossing a process boundary. */
   version(): string {
@@ -6440,4 +6448,30 @@ function explainsBytes(kind: ByteReading | undefined): boolean {
 /** Whether a field type is, or contains, a run of bits. */
 function holdsBits(type: FieldType): boolean {
   return type.is === "bits" || (type.is === "array" && holdsBits(type.of));
+}
+
+/**
+ * The machine's own bytes, hashed, for a scenario's execution key.
+ *
+ * **Which ROMs are missing is not enough.** A KERNAL is a file on the host that
+ * this project neither carries nor versions, so swapping one for a patched build
+ * changes what every run does while the document, the view and the placements
+ * all stay put — and the cache would hand back a check that passed against bytes
+ * it never ran on. The character ROM counts twice, because it is handed to the
+ * renderer separately and decides what a capture looks like.
+ *
+ * A ROM the host does not have is named as absent rather than left out: absent
+ * and present are different machines, and a check that cannot see something says
+ * so rather than dropping it from the key.
+ *
+ * Once per scenario run, not per step — `prefixKey` adds the step — which is
+ * what makes hashing three images affordable.
+ */
+export function romFingerprint(load: RomLoader): string {
+  return (["basic", "kernal", "characters"] as const)
+    .map((rom) => {
+      const bytes = load(rom);
+      return `${rom}=${bytes ? hashBytes(bytes).slice(0, 12) : "(absent)"}`;
+    })
+    .join("+");
 }

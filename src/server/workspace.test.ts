@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Caller, EffectsAnswer, Workspace } from "./workspace.js";
+import { Caller, EffectsAnswer, Workspace, romFingerprint } from "./workspace.js";
 import { ProjectStore, SqliteStorage, importProject } from "../store/index.js";
 
 /**
@@ -2377,5 +2377,48 @@ describe("saying which tool answers", () => {
     const effects = workspace.effects(0x8172, "routine") as EffectsAnswer;
     expect(effects.reads.some((r) => /^\w+ \(\$[0-9A-F]{4}\)$/.test(r))).toBe(true);
     expect(effects.reads.some((r) => r.startsWith("$(0x"))).toBe(false);
+  });
+});
+
+describe("the execution key names the machine's own bytes", () => {
+  /**
+   * **Which ROMs are absent is not which ROMs these are.** The key carried
+   * `romsMissing` — the names of the ones this host could not supply — so two
+   * runs over different KERNAL images were one execution to the cache, at the
+   * same document, view and placements. A patched KERNAL is exactly the case
+   * somebody reverse-engineering a game has on disk.
+   *
+   * The character ROM counts twice over: it is handed to the renderer separately
+   * from the machine, so it changes what a capture *looks like* without touching
+   * anything else in the key.
+   */
+  const loader =
+    (bytes: Partial<Record<"basic" | "kernal" | "characters", Uint8Array>>) =>
+    (rom: "basic" | "kernal" | "characters") =>
+      bytes[rom];
+
+  it("changes when a present ROM's content changes", () => {
+    const before = romFingerprint(loader({ kernal: new Uint8Array([1, 2, 3]) }));
+    const after = romFingerprint(loader({ kernal: new Uint8Array([1, 2, 4]) }));
+    expect(before).not.toBe(after);
+  });
+
+  it("changes when the character ROM changes, which only the renderer sees", () => {
+    const before = romFingerprint(loader({ characters: new Uint8Array([0xff]) }));
+    const after = romFingerprint(loader({ characters: new Uint8Array([0x00]) }));
+    expect(before).not.toBe(after);
+  });
+
+  it("says a ROM is absent rather than leaving it out", () => {
+    // Absent and present are different machines, so the key has to carry the
+    // difference — and it must not be expressible by any content either.
+    const missing = romFingerprint(loader({}));
+    expect(missing).toContain("kernal=(absent)");
+    expect(missing).not.toBe(romFingerprint(loader({ kernal: new Uint8Array([0]) })));
+  });
+
+  it("is the same key for the same bytes", () => {
+    const bytes = { kernal: new Uint8Array([9, 9]), basic: new Uint8Array([1]) };
+    expect(romFingerprint(loader(bytes))).toBe(romFingerprint(loader({ ...bytes })));
   });
 });
