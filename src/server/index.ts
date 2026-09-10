@@ -508,16 +508,39 @@ export function startServer(options: ServerOptions): RunningServer {
         if (!requested) {
           return sendJson(res, 400, { error: "path parameter required" });
         }
-        const { storage } = room(projectOf(url));
+        const { sync, storage } = room(projectOf(url));
+        // **The document decides, here as everywhere else.** This read went
+        // straight to the mutable name table, so an upload over an existing name
+        // served the replacement's bytes while the document still named the old
+        // hash — the defect this change is about, left in the one place a
+        // browser actually fetches bytes from. The name table is the fallback
+        // for a file uploaded but not yet recorded, which is a real window
+        // because the upload and the `file.add` are two steps.
+        const recorded =
+          storage instanceof SqliteStorage
+            ? projectFromDoc(sync.store.document()).files?.find((f) => f.name === requested)?.hash
+            : undefined;
         const bytes =
           storage instanceof SqliteStorage
-            ? storage.blob(requested)
+            ? (recorded ? storage.blobByHash(recorded) : undefined) ?? storage.blob(requested)
             : fromDisk(projectPath, requested);
         if (bytes === undefined) {
           return sendJson(res, 404, { error: `no such file: ${requested}` });
         }
         if (bytes === FORBIDDEN) {
           return sendJson(res, 403, { error: "path escapes the project directory" });
+        }
+        const etag =
+          storage instanceof SqliteStorage
+            ? `"${recorded ?? storage.blobHash(requested) ?? ""}"`
+            : undefined;
+        // **Advertising revalidation and never honouring it is worse than not
+        // offering it**, because a client pays the round trip and always gets
+        // the whole body back. A disk image is 174KB and the browser fetches it
+        // on every load.
+        if (etag && etag !== '""' && req.headers["if-none-match"] === etag) {
+          res.writeHead(304, { etag, "cache-control": "public, max-age=0, must-revalidate" });
+          return res.end();
         }
         res.writeHead(200, {
           // Typed by extension, so a rendered sprite sheet opens in a browser
@@ -534,9 +557,7 @@ export function startServer(options: ServerOptions): RunningServer {
           // right bytes when something did.
           "cache-control":
             storage instanceof SqliteStorage ? "public, max-age=0, must-revalidate" : "no-store",
-          ...(storage instanceof SqliteStorage
-            ? { etag: `"${storage.blobHash(requested) ?? ""}"` }
-            : {}),
+          ...(etag ? { etag } : {}),
         });
         res.end(bytes);
         return;
