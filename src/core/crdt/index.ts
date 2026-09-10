@@ -3,6 +3,7 @@ export {
   CrdtDoc,
   docFromProject,
   docFromUpdates,
+  migrateDoc,
   emptyDoc,
   projectFromDoc,
   programFromDoc,

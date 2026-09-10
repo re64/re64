@@ -16,6 +16,23 @@ import { encodeClaim, decodeClaim, claimsRoot } from "./claims.js";
 
 const hex4 = (n: number) => "$" + n.toString(16).toUpperCase().padStart(4, "0");
 
+/**
+ * Which entry an unbind means: the site when the operation names one, and the
+ * entry carrying its use id when it does not — an operation stored before the
+ * site was the key, replayed by undo or redo against a document that has since
+ * been rekeyed.
+ */
+function siteKeyFor(
+  uses: Y.Map<Y.Map<unknown>>,
+  op: { id: string; address?: number }
+): string | undefined {
+  if (op.address !== undefined) return hex4(op.address);
+  return [...uses.keys()].find((key) => {
+    const held = uses.get(key);
+    return held instanceof Y.Map && held.get("id") === op.id;
+  });
+}
+
 function layerById(doc: Y.Doc, id: string): Y.Map<unknown> {
   for (const layer of doc.getArray<Y.Map<unknown>>("layers")) {
     if (layer.get("id") === id) return layer;
@@ -188,9 +205,12 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         break;
       }
 
-      case "labelUse.unbind":
-        childMap(layerById(doc, op.layerId), "labelUses").delete(hex4(op.address));
+      case "labelUse.unbind": {
+        const uses = childMap(layerById(doc, op.layerId), "labelUses");
+        const key = siteKeyFor(uses, op);
+        if (key !== undefined) uses.delete(key);
         break;
+      }
 
       case "constant.add": {
         const constants = doc.getMap<Y.Map<unknown>>("constants");
@@ -576,9 +596,12 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         break;
       }
 
-      case "constantUse.unbind":
-        childMap(layerById(doc, op.layerId), "constantUses").delete(hex4(op.address));
+      case "constantUse.unbind": {
+        const uses = childMap(layerById(doc, op.layerId), "constantUses");
+        const key = siteKeyFor(uses, op);
+        if (key !== undefined) uses.delete(key);
         break;
+      }
 
       case "layer.set": {
         const layers = doc.getArray<Y.Map<unknown>>("layers");

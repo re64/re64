@@ -45,6 +45,7 @@ import {
   setPrimaryLabel,
   setProjectMeta,
   unbindConstant,
+  UseSite,
   unbindLabel,
   upsertComment,
   upsertFile,
@@ -102,27 +103,42 @@ function findRegion(project: Project, id: string): Found<ProjectRegion> | undefi
 function constantUseAt(
   project: Project,
   layerId: string,
-  address: number
+  site: { address?: number; id: string }
 ): Found<ProjectConstantUse> | undefined {
   const layerIndex = project.layers.findIndex((l) => l.id === layerId);
   if (layerIndex < 0) return undefined;
-  const entry = project.layers[layerIndex].constantUses?.find(
-    (u) => parseProjectAddress(u.address) === address
-  );
+  const entry = project.layers[layerIndex].constantUses?.find((u) => atSite(u, site));
   return entry ? { layerIndex, entry } : undefined;
 }
 
 function labelUseAt(
   project: Project,
   layerId: string,
-  address: number
+  site: { address?: number; id: string }
 ): Found<ProjectLabelUse> | undefined {
   const layerIndex = project.layers.findIndex((l) => l.id === layerId);
   if (layerIndex < 0) return undefined;
-  const entry = project.layers[layerIndex].labelUses?.find(
-    (u) => parseProjectAddress(u.address) === address
-  );
+  const entry = project.layers[layerIndex].labelUses?.find((u) => atSite(u, site));
   return entry ? { layerIndex, entry } : undefined;
+}
+
+/** The site an unbind names, or the record, for the text writers. */
+const siteOf = (op: { id: string; address?: number }): UseSite =>
+  op.address !== undefined ? { address: op.address } : { id: op.id };
+
+/**
+ * By the site when the operation names one, by the use id when it does not —
+ * the latter being an operation stored before the site was the key. Compared
+ * as numbers: a use may spell its address `32768` or `"$8000"`, and the two are
+ * one site.
+ */
+function atSite(
+  use: { id?: string; address: number | string },
+  site: { address?: number; id: string }
+): boolean {
+  return site.address !== undefined
+    ? parseProjectAddress(use.address) === site.address
+    : use.id === site.id;
 }
 
 function findComment(project: Project, id: string): Found<ProjectComment> | undefined {
@@ -303,10 +319,13 @@ export function applyOp(raw: string, op: Op): string {
         label: op.labelId,
       });
 
-    case "labelUse.unbind":
-      // The address, not the id: the site is the key, and both were `string`
-      // so nothing but this line says which one this is.
-      return unbindLabel(raw, layerIndexOf(project, op.layerId), addressHex(op.address));
+    case "labelUse.unbind": {
+      // The site, resolved through the id only for an operation stored before
+      // the site was the key. Nothing there: nothing to do.
+      const found = labelUseAt(project, op.layerId, op);
+      if (!found) return raw;
+      return unbindLabel(raw, found.layerIndex, siteOf(op));
+    }
 
     case "claim.add":
       return upsertClaim(raw, projectClaimOf(op.claim));
@@ -547,8 +566,11 @@ export function applyOp(raw: string, op: Op): string {
         constant: op.constantId,
       });
 
-    case "constantUse.unbind":
-      return unbindConstant(raw, layerIndexOf(project, op.layerId), addressHex(op.address));
+    case "constantUse.unbind": {
+      const found = constantUseAt(project, op.layerId, op);
+      if (!found) return raw;
+      return unbindConstant(raw, found.layerIndex, siteOf(op));
+    }
 
     case "layer.add":
       return insertLayer(
@@ -703,7 +725,7 @@ export function invertOp(raw: string, op: Op): Op {
     }
 
     case "labelUse.bind": {
-      const found = labelUseAt(project, op.layerId, op.address);
+      const found = labelUseAt(project, op.layerId, op);
       if (!found) return { op: "labelUse.unbind", id: op.id, layerId: op.layerId, address: op.address };
       return {
         op: "labelUse.bind",
@@ -715,7 +737,7 @@ export function invertOp(raw: string, op: Op): Op {
     }
 
     case "labelUse.unbind": {
-      const found = labelUseAt(project, op.layerId, op.address);
+      const found = labelUseAt(project, op.layerId, op);
       if (!found) return op;
       return {
         op: "labelUse.bind",
@@ -1011,7 +1033,7 @@ export function invertOp(raw: string, op: Op): Op {
     }
 
     case "constantUse.bind": {
-      const found = constantUseAt(project, op.layerId, op.address);
+      const found = constantUseAt(project, op.layerId, op);
       if (!found) return { op: "constantUse.unbind", id: op.id, layerId: op.layerId, address: op.address };
       return {
         op: "constantUse.bind",
@@ -1023,7 +1045,7 @@ export function invertOp(raw: string, op: Op): Op {
     }
 
     case "constantUse.unbind": {
-      const found = constantUseAt(project, op.layerId, op.address);
+      const found = constantUseAt(project, op.layerId, op);
       if (!found) return op;
       return {
         op: "constantUse.bind",

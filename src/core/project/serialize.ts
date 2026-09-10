@@ -802,27 +802,44 @@ export function bindConstant(
   const layer = project.layers[layerIndex];
   if (!layer) throw new Error(`No layer at index ${layerIndex} to own a constant use`);
 
+  // **Compared as numbers, and every use at the site goes.** A use may spell
+  // its address `32768` or `"$8000"` — both are legal in a file — and comparing
+  // the spellings appended a second use at one site, which the document adapter
+  // had just stopped doing. A file written while binds accumulated may hold
+  // several at one site already; binding again is the update, so it replaces
+  // all of them.
   const uses = (layer.constantUses ??= []);
-  const at = uses.findIndex((u) => u.address === use.address);
-  if (at >= 0) {
-    if (uses[at].constant === use.constant && uses[at].id === use.id) return raw;
-    uses[at] = use;
-  } else {
-    uses.push(use);
-  }
+  const here = uses.filter((u) => sameSite(u.address, use.address));
+  if (here.length === 1 && here[0].constant === use.constant && here[0].id === use.id) return raw;
+  layer.constantUses = [...uses.filter((u) => !sameSite(u.address, use.address)), use];
   return formatProject(project);
 }
 
-/** Release a site. By the address, for the reason `bindConstant` gives. */
-export function unbindConstant(raw: string, layerIndex: number, address: string): string {
+/**
+ * Release a site, for the reason `bindConstant` gives — or one record, when the
+ * operation predates sites and names only a use id. The distinction matters in
+ * a file that still holds two uses at one site: an old unbind meant "this
+ * record", and taking its neighbour with it would be a guess.
+ */
+export function unbindConstant(raw: string, layerIndex: number, site: UseSite): string {
   const project = parseProject(raw);
   const layer = project.layers[layerIndex];
-  if (!layer?.constantUses?.some((u) => u.address === address)) return raw;
+  if (!layer?.constantUses?.some((u) => atSite(u, site))) return raw;
 
-  layer.constantUses = layer.constantUses.filter((u) => u.address !== address);
+  layer.constantUses = layer.constantUses.filter((u) => !atSite(u, site));
   if (layer.constantUses.length === 0) delete layer.constantUses;
   return formatProject(project);
 }
+
+/** Which use an unbind means: every one at the address, or the one with the id. */
+export type UseSite = { address: number; id?: string } | { address?: undefined; id: string };
+
+const atSite = (use: { id?: string; address: number | string }, site: UseSite): boolean =>
+  site.address !== undefined ? sameSite(use.address, site.address) : use.id === site.id;
+
+/** One site under either spelling. */
+const sameSite = (a: number | string, b: number | string): boolean =>
+  parseProjectAddress(a) === parseProjectAddress(b);
 
 
 /** Bind a site to a label, and release it. Idempotent, like the rest. */
@@ -832,22 +849,18 @@ export function bindLabel(raw: string, layerIndex: number, use: ProjectLabelUse)
   if (!layer) throw new Error(`No layer at index ${layerIndex} to own a label use`);
 
   const uses = (layer.labelUses ??= []);
-  const at = uses.findIndex((u) => u.address === use.address);
-  if (at >= 0) {
-    if (uses[at].label === use.label && uses[at].id === use.id) return raw;
-    uses[at] = use;
-  } else {
-    uses.push(use);
-  }
+  const here = uses.filter((u) => sameSite(u.address, use.address));
+  if (here.length === 1 && here[0].label === use.label && here[0].id === use.id) return raw;
+  layer.labelUses = [...uses.filter((u) => !sameSite(u.address, use.address)), use];
   return formatProject(project);
 }
 
-export function unbindLabel(raw: string, layerIndex: number, address: string): string {
+export function unbindLabel(raw: string, layerIndex: number, site: UseSite): string {
   const project = parseProject(raw);
   const layer = project.layers[layerIndex];
-  if (!layer?.labelUses?.some((u) => u.address === address)) return raw;
+  if (!layer?.labelUses?.some((u) => atSite(u, site))) return raw;
 
-  layer.labelUses = layer.labelUses.filter((u) => u.address !== address);
+  layer.labelUses = layer.labelUses.filter((u) => !atSite(u, site));
   if (layer.labelUses.length === 0) delete layer.labelUses;
   return formatProject(project);
 }

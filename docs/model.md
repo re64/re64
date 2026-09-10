@@ -163,6 +163,15 @@ a minted use id, so every bind added a competitor — two uses at one site, the
 loaded index keeping whichever sorted last by an id nobody chose, and unbinding
 leaving the other still resolving.
 
+A document stored before that — a `.re64db` whose snapshot holds uses keyed by
+use id — is rekeyed by site when the store opens it, and the migration is
+persisted like any update, because a later operation names items it created.
+Where a stored map held two uses at one site, the one whose id sorts last is
+kept: that is the one every view was already showing, and the records carry no
+time to choose by otherwise. History written then carries no site on its
+unbinds; those are read by the use id they name, against whatever they are
+applied to, so undo and redo work across the upgrade rather than throwing.
+
 **Open, and decided but not built**, as
 [#26](https://github.com/re64/re64/issues/26). A binding names an instruction's
 operand, so it should travel with its layer when the layer is relocated — and a
