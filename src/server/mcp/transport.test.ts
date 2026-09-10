@@ -615,6 +615,55 @@ describe("naming a value has an on-ramp", () => {
   });
 });
 
+describe("undoing a rebind puts back what was there", () => {
+  /**
+   * **A bind mints a fresh use id, and the inverse looked the pre-state up by
+   * it.** On a rebind that id does not exist yet, so nothing was found, the
+   * inverse became `unbind`, and undoing a rebind cleared the site rather than
+   * restoring the constant it replaced. The keying fix is what makes the right
+   * answer available: one binding per site, so "what was here" has one answer.
+   */
+  it("restores the first constant after a rebind is undone", async () => {
+    const sites = (
+      (await callTool("find_immediates", { value: "$01" })).value as {
+        sites: { address: string }[];
+      }
+    ).sites;
+    expect(sites.length).toBeGreaterThan(0);
+    const at = sites[0].address;
+
+    const one = (
+      (await callTool("add_constant", { name: "FIRST_ONE", value: "$01" })).value as {
+        constant: string;
+      }
+    ).constant;
+    const other = (
+      (await callTool("add_constant", { name: "SECOND_ONE", value: "$01" })).value as {
+        constant: string;
+      }
+    ).constant;
+
+    expect((await callTool("bind_constant", { address: at, constant: one })).isError).toBe(false);
+    expect((await callTool("bind_constant", { address: at, constant: other })).isError).toBe(
+      false
+    );
+
+    const boundTo = async (): Promise<string | undefined> =>
+      (
+        (await callTool("find_immediates", { value: "$01" })).value as {
+          sites: { address: string; boundTo?: string }[];
+        }
+      ).sites.find((s) => s.address === at)?.boundTo;
+
+    // One binding at the site, and it is the second one.
+    expect(await boundTo()).toBe("SECOND_ONE");
+
+    const undone = await callTool("undo", {});
+    expect(undone.isError, undone.text).toBe(false);
+    expect(await boundTo()).toBe("FIRST_ONE");
+  });
+});
+
 describe("what counts as explained", () => {
   /**
    * `find_undecoded` is a work queue, so a kind it does not recognise tells a
