@@ -50,6 +50,15 @@ export interface ImportResult {
  * Any history sitting beside the file comes too, so importing does not quietly
  * discard the record of who did what.
  */
+/** A recorded name that will not normalise is matched as written rather than refused. */
+function normalizedOrRaw(name: string): string {
+  try {
+    return normalizeBlobName(name);
+  } catch {
+    return name;
+  }
+}
+
 export function importProject(
   projectPath: string,
   databasePath = databasePathFor(projectPath),
@@ -84,18 +93,22 @@ export function importProject(
   // exists for the window between an upload and its `file.add`, standing open
   // permanently instead. Recorded here for the same reason ids are minted here:
   // the document carries it from its first snapshot.
-  const already = new Map((project.files ?? []).map((f) => [f.name, f]));
-  const recorded = wanted.map(
-    (file) =>
-      already.get(file.name) ?? {
-        name: file.name,
-        hash: hashBytes(file.bytes),
-        size: file.bytes.length,
-      }
-  );
-  if (recorded.length) project.files = recorded;
+  //
+  // **Added to the registry, never replacing it.** `wanted` is the layer
+  // sources only — a capture or anything else the project recorded is not among
+  // them — and assigning the registry from it threw those records away on
+  // import. A record the file already carries is kept as written, its hash
+  // included: the file is the authority on what it recorded, and a hash that
+  // no longer matches the bytes beside it is a fact to surface, not to repair
+  // silently here.
+  const existing = project.files ?? [];
+  const known = new Set(existing.map((f) => normalizedOrRaw(f.name)));
+  const added = wanted
+    .filter((file) => !known.has(file.name))
+    .map((file) => ({ name: file.name, hash: hashBytes(file.bytes), size: file.bytes.length }));
+  if (added.length) project.files = [...existing, ...added];
 
-  const text = project === parsed && !recorded.length ? raw : formatProject(project);
+  const text = project === parsed && !added.length ? raw : formatProject(project);
 
   const storage = new SqliteStorage(databasePath, projectId);
   storage.initialize(text, Date.now(), projectId);
