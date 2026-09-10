@@ -525,12 +525,15 @@ export function startServer(options: ServerOptions): RunningServer {
           // stays an octet stream, which is the honest answer for a `.prg`.
           "content-type": mimeOf(requested),
           "content-length": bytes.length,
-          // Content-addressed and immutable: a name maps to bytes that never
-          // change under it, so a reload need not refetch a 174KB disk image.
+          // **A name is not content-addressed, so it is not immutable.** This
+          // said `immutable` for a year on a URL that is a *name*, and a name
+          // can be pointed at other bytes — uploading over one, or undoing the
+          // record of one, leaves every browser that fetched it holding the old
+          // content with no reason to ask again. The ETag is the hash, so a
+          // revalidating client gets a cheap 304 when nothing moved and the
+          // right bytes when something did.
           "cache-control":
-            storage instanceof SqliteStorage
-              ? "public, max-age=31536000, immutable"
-              : "no-store",
+            storage instanceof SqliteStorage ? "public, max-age=0, must-revalidate" : "no-store",
           ...(storage instanceof SqliteStorage
             ? { etag: `"${storage.blobHash(requested) ?? ""}"` }
             : {}),

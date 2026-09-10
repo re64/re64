@@ -256,9 +256,17 @@ const alice = { userId: 'alice', label: 'Alice', sessionId: 'alice-session' };
     f.store.undo(alice.userId, alice.sessionId);
     const documentHash = projectFromDoc(f.store.document()).files[0].hash;
     const servedHash = f.storage.blobHash('capture.prg');
+    // RE-RUN NOTE (re64, 2026-09-10): fixed. Blobs are stored by content hash,
+    // but the read went through a mutable name-to-hash table that `putBlob`
+    // rewrites whenever a name is reused — so undo restored the document's hash
+    // and left every read of that name serving the replacement. The document is
+    // authoritative now: the loader resolves a name through it, and the derived
+    // table is brought back in line whenever operations are applied, undo
+    // included. Production test: `src/store/project-store.test.ts` -> "the
+    // document decides which bytes a name means".
     assert.equal(documentHash, hashA);
-    assert.equal(servedHash, hashB);
-    output('undo restores file hash but reads still serve replacement bytes', { documentHash, servedHash, servedByte: f.storage.blob('capture.prg')[2] });
+    assert.equal(servedHash, hashA);
+    output('FIXED: the document decides which bytes a name means', { documentHash, servedHash, servedByte: f.storage.blob('capture.prg')[2] });
   } finally { f.close(); }
 }
 {

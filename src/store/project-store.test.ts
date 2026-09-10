@@ -1086,6 +1086,57 @@ describe("history written in the old type shapes", () => {
       expect(described(f.store)).toBeUndefined();
     } finally {
       f.close();
+  });
+});
+
+describe("the document decides which bytes a name means", () => {
+  /**
+   * Blobs are stored by **content hash**, and reads went through a separate,
+   * mutable `files` name-to-hash table that `putBlob` rewrites whenever a name
+   * is reused. The CRDT records its own mapping through `file.add`, and undo
+   * changes only that one — so undoing a replacement restored the document's
+   * hash and left every read of the name serving the replacement's bytes. A
+   * capture recorded earlier then fetched somebody else's output under its own
+   * name.
+   *
+   * The document is authoritative: the loader resolves a name through it, and
+   * the derived table is brought back in line whenever operations are applied —
+   * undo included, which is the case that exposed the drift.
+   */
+  const project = JSON.stringify({ name: "blobs", layers: [] });
+
+  it("serves what the document holds after a replacement is undone", () => {
+    const dir = mkdtempSync(join(tmpdir(), "re64-blobs-"));
+    const storage = new SqliteStorage(join(dir, "p.re64db"), "p");
+    storage.initialize(project, Date.now(), "blobs");
+    const store = new ProjectStore(storage);
+    try {
+      const first = storage.putBlob("capture.prg", new Uint8Array([0, 0x80, 1]));
+      store.runOps(
+        [{ op: "file.add", name: "capture.prg", hash: first, size: 3 }],
+        "alice",
+        1,
+        "s"
+      );
+      const second = storage.putBlob("capture.prg", new Uint8Array([0, 0x80, 2]));
+      store.runOps(
+        [{ op: "file.add", name: "capture.prg", hash: second, size: 3 }],
+        "alice",
+        2,
+        "s"
+      );
+      expect(storage.blob("capture.prg")![2]).toBe(2);
+
+      store.undo("alice", "s");
+
+      const held = projectFromDoc(store.document()).files![0].hash;
+      expect(held).toBe(first);
+      // The read follows, which is the half that did not.
+      expect(storage.blobHash("capture.prg")).toBe(first);
+      expect(storage.blob("capture.prg")![2]).toBe(1);
+    } finally {
+      storage.close();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

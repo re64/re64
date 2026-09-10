@@ -82,6 +82,8 @@ import {
   encodeDoc,
   participants as participantsOf,
   projectFromDoc,
+  stateVectorOf,
+  updateSince,
 } from "../core/crdt/index.js";
 import { runDecoder } from "../sandbox/run.js";
 import { renderTextWith } from "../sandbox/sync.js";
@@ -564,18 +566,26 @@ export class Workspace {
 
   private load(): LoadedProject {
     const { store, storage, projectPath } = this.room;
+    // **The room's document, not this session's copy** — and that is a known
+    // inconsistency rather than a decision. `document()` answers from the
+    // replica, so a document-level read is stable while a view-bound one is not.
+    // Closing it needs every path that mutates the room to reach the replica,
+    // which undo did not, and it is stage-3 work rather than this change's.
+    const project = projectFromDoc(store.document());
     // Blobs come from wherever this project keeps them; a plain project file
-    // names files on disk beside it, a database carries them.
+    // names files on disk beside it, a database carries them. The document's
+    // hash decides which bytes a name stands for — the SQL name table is
+    // mutable and `putBlob` rewrites it whenever a name is reused.
     const bytes =
       storage instanceof SqliteStorage
-        ? databaseFileBytes(storage)
+        ? databaseFileBytes(storage, project.files ?? [])
         : nodeFileBytes(dirname(projectPath));
 
     // Through the selected target, so analysis, ownership and annotations all
     // see the same narrowed stack. `describe_project` reads the unfiltered
     // project separately, since a caller needs to see the layers a target hides
     // in order to switch to one that shows them.
-    return buildMemoryMap(projectFromDoc(store.document()), makeFileLoader(bytes), {
+    return buildMemoryMap(project, makeFileLoader(bytes), {
       loadRom: nodeRomBytes(),
       ...(this.room.target === undefined ? {} : { target: this.room.target }),
     });
@@ -5942,6 +5952,16 @@ export class Workspace {
 
 
 
+  /**
+   * Take back this session's most recent action.
+   *
+   * The store applies the inverses to the room's document, so the session's own
+   * copy has to be told — it is *this* caller's undo, and a caller that could
+   * not see its own undo would be the one thing a deferred inbox must never do.
+   * Rather than replay the inverses here, the replica takes everything the room
+   * now has: undoing is an explicit act, so folding in whatever else arrived
+   * alongside is the honest reading of it rather than a surprise.
+   */
   undo(caller: Caller): { undone: string | null; version: string } {
     const outcome = this.room.store.undo(caller.userId, caller.sessionId);
     return { ...outcome, version: this.version() };
