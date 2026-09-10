@@ -602,15 +602,14 @@ Declare a record layout: what the bytes of one array element mean. The thing a c
 
 #### `edit_type`
 
-Correct a record layout, by its id. **Fields merge per offset: one you leave out is kept, not removed.** That is what lets two readers add different fields to one record and both survive, and it is why this is the wrong call for changing a single field — use add_field, edit_field and remove_field, which work by the field's own id. This one is for declaring a layout.
+Correct a record itself, by its id: what it is called, how big it is, what its offsets count. Omitted fields are left alone, so renaming a record does not mean restating its size. **It does not carry fields.** A field has its own id and its own three calls — add_field, edit_field, remove_field — and two fields may sit at one offset while readers disagree about a layout, so an offset cannot say which one an edit meant.
 
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** | Type id, from list_types or add_type |
-| `name` | `string` | **required** |  |
-| `size` | `integer` | **required** |  |
+| `name` | `string` | optional |  |
+| `size` | `integer` | optional |  |
 | `unit` | `bytes` \| `bits` | optional | Kept as it was when omitted |
-| `fields` | `object` | **required** |  |
 
 #### `remove_type`
 
@@ -622,7 +621,7 @@ Take back a record layout, by its id. A claim still referencing it renders its b
 
 #### `add_field`
 
-Add one field to a record layout, without restating the others. `edit_type` sends a whole layout, which is right for declaring a nineteen-field record and wrong for changing one: it merges per offset, so a field you leave out is **kept**. Returns the field's id. Two fields cannot share an offset.
+Add one field to a record layout, without restating the others. `add_type` declares a layout whole, which is right for a nineteen-field record; this is how one arrives afterwards. `edit_type` corrects the record itself and never its fields. Returns the field's id. Two fields cannot share an offset.
 
 | argument | type | | |
 |---|---|---|---|

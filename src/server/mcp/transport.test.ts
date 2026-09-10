@@ -1300,14 +1300,16 @@ describe("editing as an agent", () => {
     const typeId = (type.value as { type: string }).type;
 
     // `size` is still bytes, so the bound is eight times as far and an offset
-    // past it is refused by number rather than silently wrapping.
-    const past = await callTool("edit_type", {
-      id: typeId,
-      name: "VicControl1",
-      size: 1,
-      fields: { 8: { name: "nowhere", type: "bits(1)" } },
+    // past it is refused by number rather than silently wrapping. Through
+    // `add_field`, which is where a single field arrives now: `edit_type`
+    // corrects the record and never its parts.
+    const past = await callTool("add_field", {
+      typeId,
+      offset: 8,
+      name: "nowhere",
+      type: "bits(1)",
     });
-    expect(past.text).toMatch(/8 bits|bit 8/);
+    expect(`${past.text}${JSON.stringify(past.value)}`).toMatch(/8 bits|bit 8/);
 
     // And bits(n) needs somewhere to sit: a byte-addressed record has no
     // sub-byte offsets, so it is refused rather than rounded up to a byte.
@@ -2478,6 +2480,79 @@ describe("a field type refers by id and reads by name", () => {
     });
     expect(byBareName.isError).toBe(true);
     expect(byBareName.text).toContain("say which");
+  });
+});
+
+describe("a field is addressed by its id, and a record is not its fields", () => {
+  /**
+   * **Two routes wrote one storage, and one of them was keyed on the thing that
+   * is explicitly not an identity.** `edit_type` required a whole layout back and
+   * merged it per offset. Once two fields may sit at one offset — which they may,
+   * because two readers disagreeing about a layout is the state this model exists
+   * to hold — an offset cannot say which of them an edit meant, and it took
+   * whichever it found first.
+   *
+   * It also made renaming a record restate its size, which is how a caller loses
+   * a field: send the layout back one field short and the short version wins.
+   */
+  it("renames a record without being told its size or its fields", async () => {
+    const made = await callTool("add_type", {
+      name: "Zone",
+      size: 8,
+      fields: { 0: { name: "left", type: "u8" }, 4: { name: "right", type: "u8" } },
+    });
+    expect(made.isError, made.text).toBe(false);
+    const id = (made.value as { type: string }).type;
+
+    const renamed = await callTool("edit_type", { id, name: "ZoneEntry" });
+    expect(renamed.isError, renamed.text).toBe(false);
+
+    const listed = (await callTool("list_types", {})).value as {
+      types: { id: string; name: string; size: number | string; fields: { name: string }[] }[];
+    };
+    const held = listed.types.find((t) => t.id === id)!;
+    expect(held.name).toBe("ZoneEntry");
+    expect(held.fields.map((f) => f.name)).toEqual(["left", "right"]);
+  });
+
+  it("refuses a size that would strand the fields already in the record", async () => {
+    const made = await callTool("add_type", {
+      name: "Wide",
+      size: 8,
+      fields: { 0: { name: "head", type: "u8" }, 6: { name: "tail", type: "u8" } },
+    });
+    const id = (made.value as { type: string }).type;
+
+    const shrunk = await callTool("edit_type", { id, size: 4 });
+    expect(shrunk.isError).toBe(true);
+    expect(`${shrunk.text}`).toContain("tail");
+  });
+
+  it("checks an offset against the offsets, not against a position in a list", async () => {
+    // `Object.entries` over a **list** hands back array indices, so this
+    // compared 0, 1 against a record laid out at 0 and $A0 — the third time this
+    // project has been caught by that exact substitution.
+    const made = await callTool("add_type", {
+      name: "Sparse",
+      size: 0x100,
+      fields: { 0: { name: "head", type: "u8" }, 0xa0: { name: "tail", type: "u8" } },
+    });
+    const id = (made.value as { type: string }).type;
+    const fields = (
+      (await callTool("list_types", {})).value as {
+        types: { id: string; fields: { id: string; name: string; offset: number }[] }[];
+      }
+    ).types.find((t) => t.id === id)!.fields;
+    const head = fields.find((f) => f.name === "head")!;
+
+    // Offset 1 is free, and only an index-shaped check would say otherwise.
+    const moved = await callTool("edit_field", { typeId: id, id: head.id, offset: 1 });
+    expect(moved.isError, moved.text).toBe(false);
+
+    // $A0 is taken, and only an offset-shaped check can see that.
+    const onto = await callTool("edit_field", { typeId: id, id: head.id, offset: 0xa0 });
+    expect(onto.isError).toBe(true);
+    expect(onto.text).toContain("tail");
   });
 });
 

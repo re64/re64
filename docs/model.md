@@ -361,11 +361,11 @@ describes no bytes, so there is no layer for it to travel with.
 | type | `{id, name, size, fields}` | `says: {is: "record", typeId}` on a claim |
 
 **Types.** `size` is bytes per record, declared rather than summed, so holes are
-legal. `fields` is keyed by offset and each carries an **id**: two fields cannot
-share an offset, so the key is enough for *storage*, but an offset is a property
-of a field and moving one would otherwise be a delete plus a create, losing its
-description. Fields merge by offset, so two readers adding different fields to
-one record both survive. Field types: `u8`, `i8`, `u16`, `u16be`,
+legal. `fields` is a list, each carrying an **id**, and the document keys them by
+that id: an offset says where a field sits, never which field it is. Two readers
+adding different fields to one record both survive because they touch different
+keys — and two who add one at the *same* offset both survive too, which an
+offset key could not express. Field types: `u8`, `i8`, `u16`, `u16be`,
 `ptr`, `ptrbe`, `char(n)`, `char(n,encoding)`, `bytes(n)`, or another type's
 name. How many records a claim holds is `extent / size`, derived.
 
@@ -388,7 +388,8 @@ keys made that case merge into one field and silently lose a reader's work; it i
 now the same shape as two claims at one address, which this model keeps rather
 than prevents. `type.set` therefore never carries
 `fields`: it names the type's own name, size and unit and leaves the children
-alone. Editing a record by resending its whole field list is how one writer's
+alone, and `edit_type` above it does the same — so renaming a record no longer
+means restating its size, which is its own way of losing a field. Editing a record by resending its whole field list is how one writer's
 new field disappears when another writer resends a list minted before it, and
 being nested inside a type is no reason for a field to be exposed to that.
 

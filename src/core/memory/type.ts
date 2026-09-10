@@ -73,6 +73,18 @@ export interface RecordType {
  * honest way to express assembler logic.
  */
 export interface Field {
+  /**
+   * Which field this is, carried through from the document.
+   *
+   * The layout below is keyed by offset because walking a record is an offset
+   * question. The *identity* is not, and it has to survive into the view or
+   * `edit_field` and `remove_field` are reachable only from whatever `add_field`
+   * last returned — the whole vocabulary, addressable for one call.
+   *
+   * Optional because a type built in memory by an analysis has no document
+   * behind it to have one.
+   */
+  readonly id?: string;
   readonly name: string;
   readonly type: FieldType;
   /** What it means, where the name does not say. */
@@ -262,8 +274,9 @@ export class TypeIndex {
   /**
    * Fields in the order they appear in memory, with their offsets.
    *
-   * Derived from the keys, which is why the fields need no ids and no order of
-   * their own. A hole between two fields is left as a hole: it is a real gap in
+   * Derived from the keys, which is why the fields need no order of their own.
+   * They do carry an id — an offset says where a field sits, never which field it
+   * is. A hole between two fields is left as a hole: it is a real gap in
    * interpretation, and the whole point of allowing one.
    */
   layout(id: string): { offset: number; field: Field }[] {

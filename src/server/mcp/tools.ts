@@ -1414,46 +1414,36 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
 
   tool(
     "edit_type",
-    "Correct a record layout, by its id. " +
-      "**Fields merge per offset: one you leave out is kept, not removed.** " +
-      "That is what lets two readers add different fields to one record and " +
-      "both survive, and it is why this is the wrong call for changing a single " +
-      "field — use add_field, edit_field and remove_field, which work by the " +
-      "field's own id. This one is for declaring a layout.",
+    "Correct a record itself, by its id: what it is called, how big it is, what " +
+      "its offsets count. Omitted fields are left alone, so renaming a record " +
+      "does not mean restating its size. " +
+      "**It does not carry fields.** A field has its own id and its own three " +
+      "calls — add_field, edit_field, remove_field — and two fields may sit at " +
+      "one offset while readers disagree about a layout, so an offset cannot say " +
+      "which one an edit meant.",
     {
       project,
       id: z.string().describe("Type id, from list_types or add_type"),
-      name: z.string().min(1),
-      size: z.number().int().min(1).max(0x10000),
+      name: z.string().min(1).optional(),
+      size: z.number().int().min(1).max(0x10000).optional(),
       unit: z
         .enum(["bytes", "bits"])
         .optional()
         .describe("Kept as it was when omitted"),
-      fields: z.record(
-        z.string(),
-        z.strictObject({
-          name: z.string().min(1),
-          type: z.string(),
-          description: z.string().optional(),
-        })
-      ),
     },
     (args: {
       project?: string;
       id: string;
-      name: string;
-      size: number;
+      name?: string;
+      size?: number;
       unit?: "bytes" | "bits";
-      fields: Record<string, { name: string; type: string; description?: string }>;
     }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project);
-      return space.setType(caller, {
-        id: args.id,
-        name: args.name,
-        size: args.size,
+      return space.reviseType(caller, args.id, {
+        ...(args.name === undefined ? {} : { name: args.name }),
+        ...(args.size === undefined ? {} : { size: args.size }),
         ...(args.unit === undefined ? {} : { unit: args.unit }),
-        fields: args.fields,
       });
     }
   );
@@ -1461,9 +1451,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   tool(
     "add_field",
     "Add one field to a record layout, without restating the others. " +
-      "`edit_type` sends a whole layout, which is right for declaring a " +
-      "nineteen-field record and wrong for changing one: it merges per offset, " +
-      "so a field you leave out is **kept**. " +
+      "`add_type` declares a layout whole, which is right for a nineteen-field " +
+      "record; this is how one arrives afterwards. `edit_type` corrects the " +
+      "record itself and never its fields. " +
       "Returns the field's id. Two fields cannot share an offset.",
     {
       project,

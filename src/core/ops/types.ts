@@ -297,12 +297,16 @@ export interface TypeAddOp {
 /**
  * Revise a type by id. Omitted leaves alone.
  *
- * `fields` is **merged by offset**, and a `null` at an offset removes that one
- * field — never a whole-map write. Two people adding different fields to one
- * record touch different keys and both survive, which is the merge property the
- * offset keys exist for; sending the map as one value would make it
- * last-writer-wins over the lot and lose a field somebody proved from a copy
- * routine.
+ * **A parent edit does not carry its children**, which `docs/algebra.md` has said
+ * since fields became first class and this operation went on contradicting. It
+ * carried an offset-keyed `fields` patch — a second writer for the same storage,
+ * keyed on the thing that is explicitly not an identity. Once two fields may sit
+ * at one offset, which is now a legal state, that patch cannot say which of them
+ * it edits or removes, and it silently picked whichever it found first.
+ *
+ * `field.add`, `field.set` and `field.remove` are the route, by id, and the file
+ * reconciler in `diff.ts` uses the same three rather than a bulk form of its own.
+ * `type.add` still carries fields, because creating a record creates its parts.
  */
 export interface TypeSetOp {
   op: "type.set";
@@ -311,7 +315,6 @@ export interface TypeSetOp {
     name?: string;
     size?: number;
     unit?: "bytes" | "bits";
-    fields?: Record<number, TypeField | null>;
   };
 }
 
@@ -821,14 +824,8 @@ export function describeOp(op: Op, resolve?: AddressResolver): string {
     case "field.remove":
       return `remove the field ${op.id} from ${op.typeId}`;
 
-    case "type.set": {
-      // Names the fields, because a merge that touches one offset and a rename
-      // are the two different things this op does and they read alike otherwise.
-      const touched = Object.keys(op.fields.fields ?? {}).length;
-      return `revise type ${op.id}${op.fields.name ? ` to ${op.fields.name}` : ""}${
-        touched ? `, ${touched} field(s)` : ""
-      }`;
-    }
+    case "type.set":
+      return `revise type ${op.id}${op.fields.name ? ` to ${op.fields.name}` : ""}`;
     case "type.remove":
       return `remove type ${op.id}`;
     case "constantUse.bind":
