@@ -1086,6 +1086,7 @@ describe("history written in the old type shapes", () => {
       expect(described(f.store)).toBeUndefined();
     } finally {
       f.close();
+    }
   });
 });
 

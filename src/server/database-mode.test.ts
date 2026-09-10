@@ -71,6 +71,52 @@ describe("a server given a database", () => {
     expect(res.headers.get("etag")).toMatch(/^"[0-9a-f]{64}"$/);
   });
 
+  it("answers a matching If-None-Match with 304, which is what the tag promises", async () => {
+    // Advertising revalidation and never honouring it is worse than not offering
+    // it: the client pays the round trip and gets the whole body back anyway.
+    // A disk image is 174KB and the browser fetches it on every load.
+    const first = await fetch(`${base}/api/blob?path=gridrunner.prg&project=${project}`);
+    const etag = first.headers.get("etag")!;
+
+    const again = await fetch(`${base}/api/blob?path=gridrunner.prg&project=${project}`, {
+      headers: { "if-none-match": etag },
+    });
+    expect(again.status).toBe(304);
+    expect((await again.arrayBuffer()).byteLength).toBe(0);
+
+    // A tag that does not match still gets the bytes.
+    const stale = await fetch(`${base}/api/blob?path=gridrunner.prg&project=${project}`, {
+      headers: { "if-none-match": '"not-this-one"' },
+    });
+    expect(stale.status).toBe(200);
+    expect((await stale.arrayBuffer()).byteLength).toBe(4098);
+  });
+
+  it("serves the bytes the document names, not the ones a name was last pointed at", async () => {
+    // **The route read the mutable name table directly.** So an upload over an
+    // existing name served the replacement immediately, while the document still
+    // named the old hash and every other reader still got the old bytes — the
+    // defect this change is about, left in the one place a browser fetches from.
+    //
+    // The window is real rather than theoretical: storing the blob and recording
+    // `file.add` are two steps, and this is between them.
+    const storage = new SqliteStorage(databaseUnderTest, project);
+    try {
+      const before = await fetch(`${base}/api/blob?path=gridrunner.prg&project=${project}`);
+      const original = new Uint8Array(await before.arrayBuffer());
+
+      // Stored under the same name, and not recorded in the document.
+      storage.putBlob("gridrunner.prg", new Uint8Array([1, 2, 3, 4]));
+
+      const after = await fetch(`${base}/api/blob?path=gridrunner.prg&project=${project}`);
+      const served = new Uint8Array(await after.arrayBuffer());
+      expect(served.length).toBe(original.length);
+      expect(after.headers.get("etag")).toBe(before.headers.get("etag"));
+    } finally {
+      storage.close();
+    }
+  });
+
   it("reports a file it does not hold", async () => {
     const res = await fetch(`${base}/api/blob?path=absent.prg&project=${project}`);
     expect(res.status).toBe(404);

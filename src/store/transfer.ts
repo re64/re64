@@ -14,7 +14,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { writeFileAtomic } from "../fsutil.js";
 import { basename, dirname, resolve } from "node:path";
 import { blobPaths, formatProject, parseProject, withIds } from "../core/index.js";
-import { normalizeBlobName } from "./blobs.js";
+import { hashBytes, normalizeBlobName } from "./blobs.js";
 import { HistoryEntry } from "./storage.js";
 import { SqliteStorage } from "./sqlite-storage.js";
 
@@ -69,7 +69,6 @@ export function importProject(
   // rewrite a file that was already complete, and layout is not worth
   // preserving here because the export is regenerated anyway.
   const project = withIds(parsed);
-  const text = project === parsed ? raw : formatProject(project);
 
   // Read the binaries before the database exists, so a missing one fails the
   // import rather than leaving a database that cannot be disassembled.
@@ -78,6 +77,25 @@ export function importProject(
     name: normalizeBlobName(name),
     bytes: new Uint8Array(readFileSync(resolve(baseDir, name))),
   }));
+
+  // **And record them, so the document knows which bytes each name means.**
+  // The blobs were stored and nothing said so, which left every imported project
+  // resolving names through the mutable SQL table for ever — the fallback that
+  // exists for the window between an upload and its `file.add`, standing open
+  // permanently instead. Recorded here for the same reason ids are minted here:
+  // the document carries it from its first snapshot.
+  const already = new Map((project.files ?? []).map((f) => [f.name, f]));
+  const recorded = wanted.map(
+    (file) =>
+      already.get(file.name) ?? {
+        name: file.name,
+        hash: hashBytes(file.bytes),
+        size: file.bytes.length,
+      }
+  );
+  if (recorded.length) project.files = recorded;
+
+  const text = project === parsed && !recorded.length ? raw : formatProject(project);
 
   const storage = new SqliteStorage(databasePath, projectId);
   storage.initialize(text, Date.now(), projectId);
