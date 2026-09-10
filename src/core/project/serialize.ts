@@ -41,6 +41,18 @@ function compactObject(obj: Record<string, unknown>): string {
 }
 
 /** Serialize a project in the hand-maintained house style. */
+/** A field's keys in the order the file writes them; anything unknown follows. */
+function fieldInOrder(field: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of ["id", "offset", "name", "type", "description"]) {
+    if (field[key] !== undefined) out[key] = field[key];
+  }
+  for (const [key, value] of Object.entries(field)) {
+    if (!(key in out) && value !== undefined) out[key] = value;
+  }
+  return out;
+}
+
 export function formatProject(project: Project): string {
   const lines: string[] = ["{"];
   const body: string[] = [];
@@ -158,9 +170,15 @@ export function formatProject(project: Project): string {
       .map((t) => {
         // Tolerant of the offset-keyed shape, like every other entry point: a
         // project handed here in memory has not been through `parseProject`.
+        // **One key order, whatever path built the field.** `field.add` spells
+        // one `{id, offset, name, type}`, the offset migration `{id, name, type,
+        // offset}`, and the document whatever order its map was filled in — and
+        // `compactObject` writes keys as it finds them. Equal state was
+        // producing unequal text, and undo compares text to decide whether a
+        // recorded operation still holds.
         const fields = [...fieldsOfType(t)]
           .sort((a, b) => a.offset - b.offset || (a.id ?? "").localeCompare(b.id ?? ""))
-          .map((f) => `        ${compactObject(f as unknown as Record<string, unknown>)}`)
+          .map((f) => `        ${compactObject(fieldInOrder(f as unknown as Record<string, unknown>))}`)
           .join(",\n");
         const head = [
           `      "id": ${JSON.stringify(t.id)}`,

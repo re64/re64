@@ -1032,4 +1032,59 @@ describe("history written in the old type shapes", () => {
       f.close();
     }
   });
+
+  /**
+   * **A legacy child value was a replacement, not a patch.** The old adapter
+   * wrote `fields[offset] = field`, so a child that omitted `description`
+   * removed one — and the inverses it recorded rely on that. Reading the child
+   * as a patch kept a description the row meant to clear, while reporting the
+   * row applied. Checked on the description itself, not on the outcome count.
+   */
+  const described = (store: ProjectStore) =>
+    projectFromDoc(store.document()).types![0].fields[0].description;
+  const child = (description?: string) => ({
+    op: "type.set",
+    id: "typ_a",
+    fields: { fields: { 0: { id: "fld_a", name: "x", type: "u8", ...(description === undefined ? {} : { description }) } } },
+  });
+
+  it("takes back a description an old child patch added", () => {
+    const f = opened(
+      JSON.stringify({
+        name: "h",
+        layers: [{ id: "lay_a", type: "bytes", address: "$8000", bytes: "a9016000" }],
+        types: [{ id: "typ_a", name: "Sprite", size: 8, fields: { 0: { id: "fld_a", name: "x", type: "u8", description: "new description" } } }],
+      })
+    );
+    try {
+      // The row: the field had no description, and the child gave it one.
+      f.storage.appendOps(row(child("new description"), child()));
+      expect(f.store.undo("alice", "ses_old").skipped).toEqual([]);
+      expect(described(f.store)).toBeUndefined();
+      expect(f.store.redo("alice", "ses_old").skipped).toEqual([]);
+      expect(described(f.store)).toBe("new description");
+    } finally {
+      f.close();
+    }
+  });
+
+  it("clears a description again when an old child patch that cleared it is redone", () => {
+    const f = opened(
+      JSON.stringify({
+        name: "h",
+        layers: [{ id: "lay_a", type: "bytes", address: "$8000", bytes: "a9016000" }],
+        types: [{ id: "typ_a", name: "Sprite", size: 8, fields: { 0: { id: "fld_a", name: "x", type: "u8" } } }],
+      })
+    );
+    try {
+      // The row: the field said "old description", and the child omitted it.
+      f.storage.appendOps(row(child(), child("old description")));
+      expect(f.store.undo("alice", "ses_old").skipped).toEqual([]);
+      expect(described(f.store)).toBe("old description");
+      expect(f.store.redo("alice", "ses_old").skipped).toEqual([]);
+      expect(described(f.store)).toBeUndefined();
+    } finally {
+      f.close();
+    }
+  });
 });
