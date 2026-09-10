@@ -17,6 +17,7 @@ import {
   ProjectScenario,
   ProjectCapture,
   ProjectEvidence,
+  fieldsOfType,
   ProjectMessage,
   ProjectLink,
   Project,
@@ -146,13 +147,20 @@ export function formatProject(project: Project): string {
 
   if (project.types?.length) {
     // A field per line, in offset order, so adding one is a one-line diff and a
-    // reader sees the layout laid out the way memory is. The offsets are the
-    // keys, so nothing else carries the order.
+    // reader sees the layout laid out the way memory is.
+    //
+    // **A list, not an offset-keyed object.** The offset was the key, which read
+    // well and could not represent two fields at one offset — a state the model
+    // now tolerates and reports rather than prevents. Each entry carries its own
+    // offset, and the order is still layout order because that is how a record
+    // is read.
     const entries = project.types
       .map((t) => {
-        const fields = Object.entries(t.fields)
-          .sort((a, b) => Number(a[0]) - Number(b[0]))
-          .map(([offset, f]) => `        ${JSON.stringify(offset)}: ${compactObject(f as unknown as Record<string, unknown>)}`)
+        // Tolerant of the offset-keyed shape, like every other entry point: a
+        // project handed here in memory has not been through `parseProject`.
+        const fields = [...fieldsOfType(t)]
+          .sort((a, b) => a.offset - b.offset || (a.id ?? "").localeCompare(b.id ?? ""))
+          .map((f) => `        ${compactObject(f as unknown as Record<string, unknown>)}`)
           .join(",\n");
         const head = [
           `      "id": ${JSON.stringify(t.id)}`,
@@ -164,7 +172,7 @@ export function formatProject(project: Project): string {
           // `layer.add` did twice. Anything added to `ProjectType` needs a line.
           ...(t.unit === undefined ? [] : [`      "unit": ${JSON.stringify(t.unit)}`]),
         ].join(",\n");
-        return `    {\n${head},\n      "fields": {\n${fields}\n      }\n    }`;
+        return `    {\n${head},\n      "fields": [\n${fields}\n      ]\n    }`;
       })
       .join(",\n");
     body.push(`  "types": [\n${entries}\n  ]`);

@@ -36,6 +36,8 @@ import {
   ProjectScenario,
   ProjectCapture,
   ProjectEvidence,
+  ProjectField,
+  fieldsOfType,
   ProjectMessage,
   ProjectConstantUse,
   ProjectLabel,
@@ -255,13 +257,18 @@ export function docFromProject(declared: Project): Y.Doc {
 }
 
 /**
- * A type, with its fields as a map of their own.
+ * A type, with its fields as a map of their own, **keyed by field id**.
  *
  * The nesting is the whole point and is not incidental: two readers adding
  * different fields to one record touch different keys of the inner map and both
  * survive, where a flattened field list would be one value that
- * last-writer-wins throws half of away. It is what makes fields need no ids —
- * an offset cannot be shared, so the key is the identity.
+ * last-writer-wins throws half of away.
+ *
+ * The *key* took two goes. It was the offset, argued on the grounds that two
+ * fields cannot share one — true of one writer. Under two it made a move a
+ * delete plus a create, so moving one field to two different offsets produced
+ * two entries carrying one id, and removing it by that id took away one and left
+ * the other. An offset is a property; the id is the identity.
  */
 function typeMapFrom(type: ProjectType): Y.Map<unknown> {
   const map = new Y.Map<unknown>();
@@ -270,9 +277,19 @@ function typeMapFrom(type: ProjectType): Y.Map<unknown> {
   map.set("size", type.size);
   if (type.unit !== undefined) map.set("unit", type.unit);
 
+  // **Each field is a map of its own**, not a plain object at a key. A whole
+  // object is one value, so two readers changing different properties of one
+  // field made the later write win over a property it never read — the same
+  // defect `claim.set` had one level up. Nested, a rename and a description
+  // touch different keys and both survive.
   const fields = new Y.Map<unknown>();
-  for (const key of Object.keys(type.fields).sort((a, b) => Number(a) - Number(b))) {
-    fields.set(key, type.fields[key]);
+  for (const field of fieldList(type).sort(byOffset)) {
+    if (!field.id) continue;
+    const inner = new Y.Map<unknown>();
+    for (const [key, value] of Object.entries(field)) {
+      if (value !== undefined) inner.set(key, value);
+    }
+    fields.set(field.id, inner);
   }
   map.set("fields", fields);
   return map;
@@ -283,6 +300,22 @@ function siteKey(address: number | string): string {
   const at = typeof address === "number" ? address : parseProjectAddress(address);
   return `$${at.toString(16).toUpperCase().padStart(4, "0")}`;
 }
+
+/**
+ * A type's fields as a list, whatever shape they arrived in.
+ *
+ * `parseProject` converts the offset-keyed object every file written before ids
+ * uses, but this is also reached with a project built in memory — the CRDT entry
+ * points take whatever a caller hands them, which is why the migration lives in
+ * both places rather than only at the file boundary.
+ */
+function fieldList(type: ProjectType): ProjectField[] {
+  return [...fieldsOfType(type)];
+}
+
+/** Layout order, then id, so a projection is the same on every peer. */
+const byOffset = (a: ProjectField, b: ProjectField): number =>
+  a.offset - b.offset || (a.id ?? "").localeCompare(b.id ?? "");
 
 const byId = (a: { id?: string }, b: { id?: string }) =>
   (a.id ?? "").localeCompare(b.id ?? "");
@@ -382,9 +415,16 @@ export function projectFromDoc(doc: Y.Doc): Project {
 
   // By name, like decoders and constants: an id sorts by nothing a reader cares
   // about, and a `.re64` should read the way somebody would have written it.
-  const typeList = sortedValues<ProjectType>(types, "name").map((t) =>
-    inOrder<ProjectType>(t as unknown as Record<string, unknown>, TYPE_FIELDS)
-  );
+  const typeList = sortedValues<ProjectType>(types, "name").map((t) => {
+    const ordered = inOrder<ProjectType>(t as unknown as Record<string, unknown>, TYPE_FIELDS);
+    // The document keys fields by id; the projection is a list in layout order,
+    // because that is how a record reads and because an offset-keyed object
+    // cannot hold two fields at one offset — which is now a legal state.
+    // `toJSON` on the outer map already turned each nested field map into a
+    // plain object, so this only has to drop the keying and put them in order.
+    const held = ordered.fields as unknown as Record<string, ProjectField>;
+    return { ...ordered, fields: Object.values(held ?? {}).sort(byOffset) };
+  });
   if (typeList.length) project.types = typeList;
 
   const fileList = sortedValues<ProjectFile>(files, "name").map((f) =>

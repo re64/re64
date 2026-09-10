@@ -57,6 +57,8 @@ export type HygieneKind =
   | "type.extentMismatch"
   /** A claim describes bytes a record layout already describes. */
   | "type.redundantClaim"
+  /** Two fields of one record are declared at the same offset. */
+  | "type.fieldsShareOffset"
   /** One span says these bytes are X and a span inside it says they are Y. */
   | "claim.interpretationsDiffer";
 
@@ -262,6 +264,34 @@ export function checkHygiene(
     });
   }
 
+  // **Two readings of the same bytes, kept rather than prevented.** A field is
+  // keyed by its id, so two readers who each declare something at `+$08` both
+  // survive the merge — which is the same shape as two claims at one address,
+  // and gets the same treatment: both stand, this says so, and choosing is
+  // somebody's judgement rather than the write's.
+  //
+  // Only the last one at an offset renders, so without this the other is
+  // invisible work: declared, merged, and silently absent from every listing.
+  for (const type of loaded.project.types ?? []) {
+    const byOffset = new Map<number, typeof type.fields>();
+    for (const field of type.fields) {
+      byOffset.set(field.offset, [...(byOffset.get(field.offset) ?? []), field]);
+    }
+    for (const [offset, sharing] of byOffset) {
+      if (sharing.length < 2) continue;
+      const at = `+$${offset.toString(16).toUpperCase().padStart(2, "0")}`;
+      found.push({
+        kind: "type.fieldsShareOffset",
+        message:
+          `${type.name} declares ${sharing.length} fields at ${at}: ` +
+          `${sharing.map((f) => `"${f.name}"`).join(", ")}. Only the last renders. ` +
+          `Two readings of one field is a state this keeps rather than refuses — ` +
+          `remove_field takes one back, and edit_field moves one.`,
+        subjects: sharing.map((f) => ({ id: f.id })),
+      });
+    }
+  }
+
   // A record claim whose layout has gone renders its bytes rather than
   // breaking, which is the right behaviour and is also invisible — so the one
   // place it becomes visible is here.
@@ -308,12 +338,13 @@ export function checkHygiene(
       if (other.id === claim.id || other.says === undefined) continue;
       if (other.at < span.start || other.at >= span.end) continue;
       const offset = (other.at - claim.at) % size;
-      if (!Object.prototype.hasOwnProperty.call(type.fields, String(offset))) continue;
+      const at = type.fields.find((f) => f.offset === offset);
+      if (!at) continue;
       found.push({
         kind: "type.redundantClaim",
         message:
           `The claim at ${hex4(other.at)} describes bytes that ${type.name} already ` +
-          `describes as "${type.fields[String(offset)].name}" at +$` +
+          `describes as "${at.name}" at +$` +
           `${offset.toString(16).toUpperCase().padStart(2, "0")}. Both render; ` +
           `removing one is a judgement, so nothing has removed it.`,
         subjects: [{ id: other.id, address: hex4(other.at) }],

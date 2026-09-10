@@ -13,6 +13,7 @@ import * as Y from "yjs";
 import { ClaimEdit, Op } from "../ops/types.js";
 import { Claim } from "../claims/model.js";
 import { encodeClaim, decodeClaim, claimsRoot } from "./claims.js";
+import { derivedId } from "../project/identity.js";
 
 const hex4 = (n: number) => "$" + n.toString(16).toUpperCase().padStart(4, "0");
 
@@ -97,7 +98,16 @@ function revise(entry: Y.Map<unknown>, fields: Record<string, unknown>): void {
   }
 }
 
-/** A type's field map, made on first use. Nested, so offsets merge separately. */
+/** One field as a map of its own, so its properties merge independently. */
+function fieldMap(field: Record<string, unknown>): Y.Map<unknown> {
+  const map = new Y.Map<unknown>();
+  for (const [key, value] of Object.entries(field)) {
+    if (value !== undefined) map.set(key, value);
+  }
+  return map;
+}
+
+/** A type's field map, made on first use. Nested, so fields merge separately. */
 function fieldsOf(entry: Y.Map<unknown>): Y.Map<unknown> {
   let fields = entry.get("fields") as Y.Map<unknown> | undefined;
   if (!(fields instanceof Y.Map)) {
@@ -341,7 +351,13 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
           ...(op.unit === undefined ? {} : { unit: op.unit }),
         });
         const fields = fieldsOf(entry);
-        for (const [offset, field] of Object.entries(op.fields)) fields.set(offset, field);
+        // The op's payload is offset-keyed; the document keys fields by id.
+        for (const [offset, field] of Object.entries(op.fields)) {
+          // Derived rather than minted, so this path and the text path agree on
+          // a field the operation did not name.
+          const id = field.id ?? derivedId("fld", op.id, offset);
+          fields.set(id, fieldMap({ ...field, id, offset: Number(offset) }));
+        }
         break;
       }
 
@@ -365,12 +381,27 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
             ...(op.fields.unit === undefined ? {} : { unit: op.fields.unit }),
           });
           if (op.fields.fields) {
+            // `type.set` speaks offsets — it is the whole-layout route, and its
+            // payload has always been keyed that way. Resolved to an id here, so
+            // the two routes write the same shape: a field already at that
+            // offset keeps its identity, and `null` removes whatever is there.
             const fields = fieldsOf(entry);
+            const atOffset = (want: number): string | undefined =>
+              [...fields.keys()].find((k) => {
+                const held = fields.get(k);
+                return held instanceof Y.Map && held.get("offset") === want;
+              });
             for (const [offset, field] of Object.entries(op.fields.fields)) {
-              if (field === null) fields.delete(offset);
-              else if (JSON.stringify(fields.get(offset)) !== JSON.stringify(field)) {
-                fields.set(offset, field);
+              const at = Number(offset);
+              const existing = atOffset(at);
+              if (field === null) {
+                if (existing) fields.delete(existing);
+                continue;
               }
+              const id = field.id ?? existing ?? derivedId("fld", op.id, offset);
+              const held = fields.get(id);
+              if (held instanceof Y.Map) revise(held, { ...field, id, offset: at });
+              else fields.set(id, fieldMap({ ...field, id, offset: at }));
             }
           }
         }
@@ -381,19 +412,31 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         doc.getMap<Y.Map<unknown>>("types").delete(op.id);
         break;
 
-      // **A field is written into its record's own map, keyed by offset.** That
-      // key is the merge property — two readers adding different fields to one
-      // record touch different keys and both survive — so these operate on it
-      // directly rather than replacing the map, exactly as `type.set` does.
+      // **A field is written into its record's own map, keyed by its id.**
+      //
+      // The nesting is the merge property — two readers adding different fields
+      // to one record touch different keys and both survive — and the *key* took
+      // two goes. It was the offset, on the grounds that two fields cannot share
+      // one. True of one writer: under two, a move was a delete plus a create,
+      // so moving one field to two different offsets produced two entries
+      // carrying one id, and `field.remove` took away one and left the other.
+      //
+      // Keyed by id, a move sets a number and there is nothing to lose. Two
+      // fields left at one offset both stand, and hygiene says so — different
+      // readings of the same bytes are kept here, not prevented.
       case "field.add": {
         const entry = entryFor(doc.getMap<Y.Map<unknown>>("types"), op.typeId);
         if (entry) {
-          fieldsOf(entry).set(String(op.offset), {
-            id: op.id,
-            name: op.name,
-            type: op.type,
-            ...(op.description === undefined ? {} : { description: op.description }),
-          });
+          fieldsOf(entry).set(
+            op.id,
+            fieldMap({
+              id: op.id,
+              offset: op.offset,
+              name: op.name,
+              type: op.type,
+              ...(op.description === undefined ? {} : { description: op.description }),
+            })
+          );
         }
         break;
       }
@@ -401,34 +444,17 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
       case "field.set": {
         const entry = entryFor(doc.getMap<Y.Map<unknown>>("types"), op.typeId);
         if (!entry) break;
-        const fields = fieldsOf(entry);
-        const at = [...fields.keys()].find(
-          (k) => (fields.get(k) as { id?: string } | undefined)?.id === op.id
-        );
-        if (at === undefined) break;
-        const was = fields.get(at) as Record<string, unknown>;
-        const next: Record<string, unknown> = { ...was };
-        if (op.fields.name !== undefined) next.name = op.fields.name;
-        if (op.fields.type !== undefined) next.type = op.fields.type;
-        if (op.fields.description === null) delete next.description;
-        else if (op.fields.description !== undefined) next.description = op.fields.description;
-
-        // A move is a delete and a set on the *key*, which is the one thing
-        // offset-as-identity could not express without losing the field.
-        const to = String(op.fields.offset ?? at);
-        if (to !== at) fields.delete(at);
-        fields.set(to, next);
+        const was = fieldsOf(entry).get(op.id);
+        // Per key, so two readers changing different properties of one field
+        // both survive — a whole-object write is one value, and the later one
+        // would win over a property it never read.
+        if (was instanceof Y.Map) revise(was, { ...op.fields });
         break;
       }
 
       case "field.remove": {
         const entry = entryFor(doc.getMap<Y.Map<unknown>>("types"), op.typeId);
-        if (!entry) break;
-        const fields = fieldsOf(entry);
-        const at = [...fields.keys()].find(
-          (k) => (fields.get(k) as { id?: string } | undefined)?.id === op.id
-        );
-        if (at !== undefined) fields.delete(at);
+        if (entry) fieldsOf(entry).delete(op.id);
         break;
       }
 

@@ -61,6 +61,7 @@ import {
 } from "../project/serialize.js";
 import { ClaimEdit, EvidenceSetOp, Op, TypeAddOp, TypeField } from "./types.js";
 import { Claim, Provenance } from "../claims/model.js";
+import { derivedId } from "../project/identity.js";
 import { ProjectClaim, ProjectEvidence, ProjectField, projectClaims } from "../project/project.js";
 
 /** Position of a layer in the project, by id. */
@@ -378,22 +379,37 @@ export function applyOp(raw: string, op: Op): string {
         name: op.name,
         size: op.size,
         ...(op.unit === undefined ? {} : { unit: op.unit }),
-        fields: Object.fromEntries(
-          Object.entries(op.fields).map(([offset, field]) => [String(offset), field])
-        ),
+        // The op's payload is offset-keyed; the document is not. Each gets an
+        // id here, because a field is an entity and `add` mints identities.
+        // **Derived, not minted.** Two adapters each minting a random id for a
+        // field the operation did not name can never agree, and the round-trip
+        // harness compares them — so an id-less field gets one derived from
+        // where it is, which every client computes the same way.
+        fields: Object.entries(op.fields).map(([offset, field]) => ({
+          ...field,
+          offset: Number(offset),
+          id: field.id ?? derivedId("fld", op.id, offset),
+        })),
       });
 
-    // Fields merge **by offset**, and `null` at an offset removes that one.
-    // Never a whole-map write: two people adding different fields to one record
-    // touch different keys and both survive, which is the merge property the
-    // offset keys exist for.
+    // Fields merge **by offset here**, because that is what `type.set`'s payload
+    // is keyed by: it is the older, whole-layout route and stays offset-shaped
+    // for its callers. `null` at an offset removes whatever sits there. The
+    // identity-preserving route is `field.set`, which names a field by its id.
     case "type.set": {
       const held = held0(project.types, op.id, "type", op.id);
-      const fields = { ...held.fields };
+      const byOffset = new Map(held.fields.map((f) => [f.offset, f] as const));
       for (const [offset, field] of Object.entries(op.fields.fields ?? {})) {
-        if (field === null) delete fields[String(offset)];
-        else fields[String(offset)] = field;
+        const at = Number(offset);
+        if (field === null) byOffset.delete(at);
+        else
+          byOffset.set(at, {
+            ...field,
+            offset: at,
+            id: field.id ?? byOffset.get(at)?.id ?? derivedId("fld", op.id, offset),
+          });
       }
+      const fields = [...byOffset.values()].sort((a, b) => a.offset - b.offset);
       return upsertType(raw, {
         id: op.id,
         name: op.fields.name ?? held.name,
@@ -408,50 +424,49 @@ export function applyOp(raw: string, op: Op): string {
     case "type.remove":
       return deleteType(raw, op.id);
 
-    // **A field, by its own id.** Stored inside its record keyed by offset, so
-    // finding it is a search — which is the price of the storage shape and not
-    // of the identity. Moving one rewrites the key, which is the change that
-    // was inexpressible while an offset *was* the identity.
+    // **A field, by its own id**, which is what the document keys it under. An
+    // offset is a property, so moving one sets a number rather than rewriting a
+    // key — and two fields left at one offset both stand, which hygiene reports.
     case "field.add": {
       const held = held0(project.types, op.typeId, "type", op.typeId);
       return upsertType(raw, {
         ...held,
-        fields: {
+        fields: [
           ...held.fields,
-          [String(op.offset)]: {
+          {
             id: op.id,
+            offset: op.offset,
             name: op.name,
             type: op.type,
             ...(op.description === undefined ? {} : { description: op.description }),
           },
-        },
+        ].sort((a, b) => a.offset - b.offset),
       });
     }
 
     case "field.set": {
       const held = held0(project.types, op.typeId, "type", op.typeId);
-      const at = Object.keys(held.fields).find((k) => held.fields[k].id === op.id);
-      if (at === undefined) throw new Error(`No field ${op.id} in ${op.typeId}.`);
-      const was = held.fields[at];
+      const was = held.fields.find((f) => f.id === op.id);
+      if (!was) throw new Error(`No field ${op.id} in ${op.typeId}.`);
       const next = { ...was };
       if (op.fields.name !== undefined) next.name = op.fields.name;
       if (op.fields.type !== undefined) next.type = op.fields.type;
+      if (op.fields.offset !== undefined) next.offset = op.fields.offset;
       if (op.fields.description === null) delete next.description;
       else if (op.fields.description !== undefined) next.description = op.fields.description;
 
-      const fields = { ...held.fields };
-      delete fields[at];
-      fields[String(op.fields.offset ?? Number(at))] = next;
-      return upsertType(raw, { ...held, fields });
+      return upsertType(raw, {
+        ...held,
+        fields: held.fields
+          .map((f) => (f.id === op.id ? next : f))
+          .sort((a, b) => a.offset - b.offset),
+      });
     }
 
     case "field.remove": {
       const held = held0(project.types, op.typeId, "type", op.typeId);
-      const at = Object.keys(held.fields).find((k) => held.fields[k].id === op.id);
-      if (at === undefined) return raw;
-      const fields = { ...held.fields };
-      delete fields[at];
-      return upsertType(raw, { ...held, fields });
+      if (!held.fields.some((f) => f.id === op.id)) return raw;
+      return upsertType(raw, { ...held, fields: held.fields.filter((f) => f.id !== op.id) });
     }
 
     case "scenario.add":
@@ -843,7 +858,7 @@ export function invertOp(raw: string, op: Op): Op {
       // one that was there comes back, one that was not is removed with `null`.
       const fields: Record<number, TypeField | null> = {};
       for (const offset of Object.keys(op.fields.fields ?? {})) {
-        const was = found.fields[String(offset)];
+        const was = found.fields.find((f) => f.offset === Number(offset));
         fields[Number(offset)] = was ? { ...was, id: was.id! } : null;
       }
       return {
@@ -864,9 +879,8 @@ export function invertOp(raw: string, op: Op): Op {
 
     case "field.set": {
       const held = project.types?.find((t) => t.id === op.typeId);
-      const at = held && Object.keys(held.fields).find((k) => held.fields[k].id === op.id);
-      if (!held || at === undefined) return op;
-      const was = held.fields[at];
+      const was = held?.fields.find((f) => f.id === op.id);
+      if (!held || !was) return op;
       return {
         op: "field.set",
         id: op.id,
@@ -877,21 +891,20 @@ export function invertOp(raw: string, op: Op): Op {
           ...(op.fields.description === undefined
             ? {}
             : { description: was.description ?? null }),
-          ...(op.fields.offset === undefined ? {} : { offset: Number(at) }),
+          ...(op.fields.offset === undefined ? {} : { offset: was.offset }),
         },
       };
     }
 
     case "field.remove": {
       const held = project.types?.find((t) => t.id === op.typeId);
-      const at = held && Object.keys(held.fields).find((k) => held.fields[k].id === op.id);
-      if (!held || at === undefined) return op;
-      const was = held.fields[at];
+      const was = held?.fields.find((f) => f.id === op.id);
+      if (!held || !was) return op;
       return {
         op: "field.add",
         id: op.id,
         typeId: op.typeId,
-        offset: Number(at),
+        offset: was.offset,
         name: was.name,
         type: was.type,
         ...(was.description === undefined ? {} : { description: was.description }),
@@ -1110,8 +1123,10 @@ function typeAddOpFor(found: ProjectType): Op {
     id: found.id!,
     size: typeof found.size === "string" ? parseProjectAddress(found.size) : found.size,
     name: found.name,
+    // By each field's own offset, not by its position in the list — the same
+    // trap the diff fell into when fields stopped being an offset-keyed object.
     fields: Object.fromEntries(
-      Object.entries(found.fields).map(([offset, field]) => [Number(offset), field])
+      found.fields.map((field) => [field.offset, field])
     ) as TypeAddOp["fields"],
   };
 }

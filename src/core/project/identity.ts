@@ -103,9 +103,10 @@ export function withIds(project: Project, mint: (prefix: IdPrefix) => string = n
     const withId = give(t, "typ");
     return {
       ...withId,
-      fields: Object.fromEntries(
-        Object.entries(withId.fields).map(([offset, field]) => [offset, give(field, "fld")])
-      ),
+      // A list, and each entry keeps or is given an id — which is what the
+      // document keys it under, so a file that omits one still loads and the
+      // next write persists a real one.
+      fields: withId.fields.map((field) => give(field, "fld")),
     };
   });
   // Targets were skipped for the same reason decoders were — they were keyed by
