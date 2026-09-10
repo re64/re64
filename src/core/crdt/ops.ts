@@ -11,6 +11,8 @@
 
 import * as Y from "yjs";
 import { ClaimEdit, Op } from "../ops/types.js";
+import { legacyChildTarget, legacyTypeSetChildren, typeAddFields } from "../ops/legacy.js";
+import { derivedId } from "../project/identity.js";
 import { Claim } from "../claims/model.js";
 import { encodeClaim, decodeClaim, claimsRoot } from "./claims.js";
 
@@ -350,7 +352,7 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
           ...(op.unit === undefined ? {} : { unit: op.unit }),
         });
         const fields = fieldsOf(entry);
-        for (const field of op.fields) {
+        for (const field of typeAddFields(op)) {
           fields.set(field.id, fieldMap({ ...field }));
         }
         break;
@@ -364,6 +366,27 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
             ...(op.fields.size === undefined ? {} : { size: op.fields.size }),
             ...(op.fields.unit === undefined ? {} : { unit: op.fields.unit }),
           });
+          // History only: see `legacy.ts`. A current operation carries none.
+          const children = legacyTypeSetChildren(op);
+          if (children) {
+            const fields = fieldsOf(entry);
+            const held = (): { id: string; offset: number }[] =>
+              [...fields.entries()].flatMap(([id, v]) =>
+                v instanceof Y.Map ? [{ id, offset: Number(v.get("offset")) }] : []
+              );
+            for (const [key, child] of Object.entries(children)) {
+              const offset = Number(key);
+              const target = legacyChildTarget(held(), offset, child);
+              if (child === null) {
+                if (target) fields.delete(target.id);
+                continue;
+              }
+              const id = target?.id ?? child.id ?? derivedId("fld", op.id, offset);
+              const was = fields.get(id);
+              if (was instanceof Y.Map) revise(was, { ...child, id, offset });
+              else fields.set(id, fieldMap({ ...child, id, offset }));
+            }
+          }
         }
         break;
       }

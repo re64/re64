@@ -391,7 +391,11 @@ stored document: a store restores its snapshot directly and does not pass throug
 the file. And `type.add` carries its fields as a **list**, each with its id and
 offset, because a payload keyed by offset can hold one field per offset and
 silently dropped the second whenever a type was recreated — by the file
-reconciler, or by undoing its removal.
+reconciler, or by undoing its removal. History recorded in the old shapes — a
+`type.add` keyed by offset, a `type.set` carrying a child patch — is not
+rewritten, because a row is applied to whatever state it meets; both adapters
+read those two shapes through `ops/legacy.ts` and nothing else does, so undo and
+redo of work done before the change keep meaning what they meant.
 
 **Two fields at one offset both stand**, and hygiene reports the pair. Offset
 keys made that case merge into one field and silently lose a reader's work; it is
