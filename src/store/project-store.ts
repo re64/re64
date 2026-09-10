@@ -60,6 +60,7 @@ import {
   docFromUpdates,
   encodeDoc,
   projectFromDoc,
+  programFromDoc,
 } from "../core/crdt/index.js";
 
 /**
@@ -196,7 +197,9 @@ export class ProjectStore {
    */
   version(): string {
     return createHash("sha256")
-      .update(JSON.stringify(projectFromDoc(this.document())))
+      // The *program*, not the conversation: a message is a document change
+      // and not a program change, so it must not read as one.
+      .update(JSON.stringify(programFromDoc(this.document())))
       .digest("hex")
       .slice(0, 12);
   }

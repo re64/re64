@@ -104,7 +104,7 @@ what was declined in `rejected`, and fail only when nothing was applicable.
 
 ## The tools
 
-94 tools.
+96 tools.
 
 ### Orienting
 
@@ -1038,15 +1038,32 @@ Return the project as .re64 text. The document is the truth and holds every edit
 
 ### Talking
 
-A message describes no bytes, so it reaches no `.re64` and moves no version.
+A message describes no bytes, so it moves no version and re-analyses nothing — and it is part of the document all the same, so it travels with the exported file and shows in `changes_since`. A project should arrive with the argument that produced it, not only the conclusions. Undo does not reach chat: taking a message back is something you decide.
 
 #### `post_message`
 
-Say something to whoever else is in this project — people in a browser see it live. Use it to say what you are about to work on, ask about something ambiguous, or report what you found. It is not an annotation: it goes nowhere near the listing, leaves no history entry, cannot be undone, and is not in the exported file. Put a conclusion in a comment; put a conversation here. At most 2000 characters, and it refuses rather than truncating — a long status post is several messages.
+Say something to whoever else is in this project — people in a browser see it live. Use it to say what you are about to work on, ask about something ambiguous, or report what you found. **It is not an annotation**: it goes nowhere near the listing and moves no version, so it re-analyses nothing. Put a conclusion in a comment; put a conversation here. It *is* part of the document — it travels with the exported file and shows in changes_since, so a project arrives with the argument that produced it rather than only the conclusions. Undo does not reach it: taking a message back is remove_message, which is a thing you decide rather than a thing Ctrl-Z does to you. Returns the id. At most 2000 characters, and it refuses rather than truncating — a long status post is several messages.
 
 | argument | type | | |
 |---|---|---|---|
 | `text` | `string` | **required** |  |
+
+#### `edit_message`
+
+Reword something already said, by id. Only the text: who said it and when are what was true at the time, and rewriting either would rewrite history rather than correct a sentence.
+
+| argument | type | | |
+|---|---|---|---|
+| `id` | `string` | **required** |  |
+| `text` | `string` | **required** |  |
+
+#### `remove_message`
+
+Take back something said, by id. Not a redaction, and worth being plain about: this document keeps its update log, so what was removed is still recoverable from it. Chat is not private and never was.
+
+| argument | type | | |
+|---|---|---|---|
+| `id` | `string` | **required** |  |
 
 #### `read_messages`
 

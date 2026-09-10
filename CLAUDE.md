@@ -37,7 +37,7 @@ person reading the same code see each other's work as it happens.
 | `docs/purpose.md` | what this is for, and what it refuses to be |
 | `docs/developer-guide.md` | **start here** — the model and the API, end to end |
 | `docs/invariants.md` | what must not break, the bug behind each, and what pins it |
-| `docs/algebra.md` | the operation rules: two shapes, forty-two operations, no third |
+| `docs/algebra.md` | the operation rules: two shapes, forty-five operations, no third |
 | `docs/model.md` | the model as reference, with its open tensions |
 | `docs/api.md` | the tools — **generated**, do not hand-edit |
 | `docs/experiments.md` | eleven runs, and which line of code each moved |

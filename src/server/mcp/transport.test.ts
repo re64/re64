@@ -2420,3 +2420,48 @@ describe("a field type refers by id and reads by name", () => {
     expect(byBareName.text).toContain("say which");
   });
 });
+
+describe("a message is an entity", () => {
+  /**
+   * **Messages have carried an id since they existed and no surface returned
+   * one**, so nothing could revise or take one back. F1 in the place it is
+   * easiest to miss: the value was minted, stored and read back, and stopped at
+   * the door.
+   */
+  it("returns the id it minted, and takes it back by that id", async () => {
+    const said = await callTool("post_message", { text: "starting on the loader" });
+    expect(said.isError, said.text).toBe(false);
+    const id = (said.value as { message: string }).message;
+    expect(id).toMatch(/^msg_/);
+
+    const reworded = await callTool("edit_message", { id, text: "starting on the decruncher" });
+    expect(reworded.isError, reworded.text).toBe(false);
+
+    const held = (await callTool("read_messages", {})).value as {
+      messages: { id: string; text: string; from: string }[];
+    };
+    const mine = held.messages.find((m) => m.id === id)!;
+    expect(mine.text).toBe("starting on the decruncher");
+
+    const gone = await callTool("remove_message", { id });
+    expect(gone.isError, gone.text).toBe(false);
+    const after = (await callTool("read_messages", {})).value as { messages: { id: string }[] };
+    expect(after.messages.some((m) => m.id === id)).toBe(false);
+  });
+
+  it("is in the document, and moves no version", async () => {
+    // The two halves of the decision. Chat travels with the exported file, so a
+    // project arrives with the argument that produced it — and it re-analyses
+    // nothing, which is what the old fifth-root design was protecting and what
+    // `programFromDoc` now protects by a stated rule instead of by omission.
+    const before = (await callTool("describe_project", {})).value as { version: string };
+    const said = await callTool("post_message", { text: "the zone table is 42 x 200" });
+    expect(said.isError, said.text).toBe(false);
+
+    const exported = ((await callTool("export_project", {})).value as { text: string }).text;
+    expect(exported).toContain("the zone table is 42 x 200");
+
+    const after = (await callTool("describe_project", {})).value as { version: string };
+    expect(after.version).toBe(before.version);
+  });
+});

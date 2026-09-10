@@ -97,6 +97,9 @@ const BASE = `{
   "evidence": [
     { "id": "evd_1", "claim": "clm_1", "kind": "supports", "note": "watched it" }
   ],
+  "messages": [
+    { "id": "msg_1", "at": 1720000000000, "author": "usr_a", "name": "amber", "text": "starting on the loader" }
+  ],
   "primaryLabels": { "$8000": "clm_1" }
 }
 `;
@@ -111,6 +114,16 @@ interface Case {
    * never as a way past a failure.
    */
   readonly notInProject?: string;
+  /**
+   * Skipped from the undo check, with the reason.
+   *
+   * One user so far, and it is a decision rather than a gap: **Ctrl-Z must not
+   * eat what somebody said.** Chat is outside the undo manager's tracked roots,
+   * which is a statement about what undo replays and not about what the algebra
+   * covers — the operations exist, invert, diff and round-trip like everything
+   * else, and taking a message back is `remove_message`, an explicit act.
+   */
+  readonly notUndoable?: string;
 }
 
 /**
@@ -340,6 +353,35 @@ const CASES: { [K in Op["op"]]: Case } = {
     },
   },
   "evidence.remove": { op: { op: "evidence.remove", id: "evd_1" } },
+
+  // **Chat, which used to be outside this vocabulary on purpose.** The ground
+  // was that `src/core/ops` holds things with computable inverses and "unsay
+  // that" is not one — but `message.add` inverts to `message.remove`, and the
+  // real objection was that undo must not eat what somebody said, which is a
+  // question about what undo replays rather than about what the algebra covers.
+  //
+  // Appended, not keyed: ordering is the content of a conversation, so this is
+  // the one entity whose storage is a list. The id still makes it addressable,
+  // which is a separate property.
+  "message.add": {
+    op: {
+      op: "message.add",
+      id: "msg_2",
+      at: 1720000001000,
+      author: "usr_b",
+      name: "beryl",
+      text: "the zone table is 42 records of 200",
+    },
+    notUndoable: "undo must not eat what somebody said",
+  },
+  "message.set": {
+    op: { op: "message.set", id: "msg_1", fields: { text: "reworded" } },
+    notUndoable: "undo must not eat what somebody said",
+  },
+  "message.remove": {
+    op: { op: "message.remove", id: "msg_1" },
+    notUndoable: "undo must not eat what somebody said",
+  },
 };
 
 const kinds = Object.keys(CASES) as Op["op"][];
@@ -415,7 +457,7 @@ describe("every operation reaches every path", () => {
   it("covers the whole vocabulary", () => {
     // The table is exhaustive by type; this only reports the count, so a
     // vocabulary that grows is visible in the output rather than only in a diff.
-    expect(kinds.length).toBe(42);
+    expect(kinds.length).toBe(45);
   });
 
   for (const kind of kinds) {
@@ -469,7 +511,7 @@ describe("every operation reaches every path", () => {
       });
 
       it("is taken back by undo", () => {
-        if (notInProject) return;
+        if (notInProject || CASES[kind].notUndoable) return;
 
         const doc = docFromProject(parseProject(BASE));
         const undo = undoManagerFor(doc, "harness");
@@ -590,6 +632,10 @@ describe("the operation algebra", () => {
     "scenario",
     "capture",
     "evidence",
+    // A conversation is not an edit, and a message is still an entity: it has
+    // an id and three verbs like the rest. What stays true is that undo does not
+    // reach it — a different question, answered where undo is.
+    "message",
   ] as const;
 
   /** A key-to-id map. Binding a key again is how a binding is updated. */

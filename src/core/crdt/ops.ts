@@ -23,6 +23,26 @@ function layerById(doc: Y.Doc, id: string): Y.Map<unknown> {
   throw new Error(`No layer with id ${id}`);
 }
 
+/**
+ * One message and where it currently sits, by id.
+ *
+ * A scan, because chat is the one root stored as a list: the sequence is the
+ * state, so an id-keyed map would have to agree an order some other way. The
+ * index is only valid inside the transaction that found it — a concurrent
+ * insert moves it — which is why nothing holds one.
+ */
+function messageAt(
+  doc: Y.Doc,
+  id: string
+): { entry: Y.Map<unknown>; index: number } | undefined {
+  const chat = doc.getArray<Y.Map<unknown>>("chat");
+  for (let index = 0; index < chat.length; index++) {
+    const entry = chat.get(index);
+    if (entry?.get("id") === id) return { entry, index };
+  }
+  return undefined;
+}
+
 function childMap(layer: Y.Map<unknown>, key: string): Y.Map<Y.Map<unknown>> {
   let map = layer.get(key) as Y.Map<Y.Map<unknown>> | undefined;
   if (!map) {
@@ -494,6 +514,36 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
             });
           }
         }
+        break;
+      }
+
+      // **A list, so these are the only three operations here that are not
+      // keyed.** Ordering is the content of a conversation and the array CRDT
+      // converges it without a clock; the id makes an entry addressable, which
+      // is a separate property and one chat also wants. Finding an entry is a
+      // scan, which is affordable for the one root whose size is bounded by how
+      // much people type.
+      case "message.add": {
+        const chat = doc.getArray<Y.Map<unknown>>("chat");
+        const entry = new Y.Map<unknown>();
+        entry.set("id", op.id);
+        entry.set("at", op.at);
+        entry.set("author", op.author);
+        entry.set("name", op.name);
+        entry.set("text", op.text);
+        chat.push([entry]);
+        break;
+      }
+
+      case "message.set": {
+        const held = messageAt(doc, op.id);
+        if (held && op.fields.text !== undefined) held.entry.set("text", op.fields.text);
+        break;
+      }
+
+      case "message.remove": {
+        const held = messageAt(doc, op.id);
+        if (held) doc.getArray<Y.Map<unknown>>("chat").delete(held.index, 1);
         break;
       }
 

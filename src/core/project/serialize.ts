@@ -17,6 +17,7 @@ import {
   ProjectScenario,
   ProjectCapture,
   ProjectEvidence,
+  ProjectMessage,
   ProjectLink,
   Project,
   ProjectComment,
@@ -200,6 +201,15 @@ export function formatProject(project: Project): string {
       .map((c) => `    ${compactObject(c as unknown as Record<string, unknown>)}`)
       .join(",\n");
     body.push(`  "captures": [\n${entries}\n  ]`);
+  }
+
+  // Last, and in the order they were said. A conversation reads worst sorted,
+  // and it is the one root whose sequence is its content.
+  if (project.messages?.length) {
+    const entries = project.messages
+      .map((m) => `    ${compactObject(m as unknown as Record<string, unknown>)}`)
+      .join(",\n");
+    body.push(`  "messages": [\n${entries}\n  ]`);
   }
 
   const primary = Object.entries(project.primaryLabels ?? {});
@@ -678,6 +688,36 @@ export function deleteEvidence(raw: string, id: string): string {
   if (!project.evidence?.some((x) => x.id === id)) return raw;
   project.evidence = project.evidence.filter((x) => x.id !== id);
   if (project.evidence.length === 0) delete project.evidence;
+  return formatProject(project);
+}
+
+/**
+ * Append what somebody said.
+ *
+ * Appended, never keyed: a conversation's order is its content. The text path
+ * and the document path therefore agree on sequence rather than on a sort, which
+ * is the one root where that is true.
+ */
+export function addMessage(raw: string, message: ProjectMessage): string {
+  const project = parseProject(raw);
+  const messages = project.messages ?? [];
+  if (messages.some((m) => m.id === message.id)) return raw;
+  project.messages = [...messages, message];
+  return formatProject(project);
+}
+
+export function reviseMessage(raw: string, id: string, text: string): string {
+  const project = parseProject(raw);
+  if (!project.messages?.some((m) => m.id === id)) return raw;
+  project.messages = project.messages.map((m) => (m.id === id ? { ...m, text } : m));
+  return formatProject(project);
+}
+
+export function deleteMessage(raw: string, id: string): string {
+  const project = parseProject(raw);
+  if (!project.messages?.some((m) => m.id === id)) return raw;
+  project.messages = project.messages.filter((m) => m.id !== id);
+  if (project.messages.length === 0) delete project.messages;
   return formatProject(project);
 }
 

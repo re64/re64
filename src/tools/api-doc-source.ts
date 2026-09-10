@@ -201,8 +201,13 @@ export const SECTIONS: { title: string; blurb: string; tools: string[] }[] = [
   },
   {
     title: "Talking",
-    blurb: "A message describes no bytes, so it reaches no `.re64` and moves no version.",
-    tools: ["post_message", "read_messages"],
+    blurb:
+      "A message describes no bytes, so it moves no version and re-analyses " +
+      "nothing — and it is part of the document all the same, so it travels with " +
+      "the exported file and shows in `changes_since`. A project should arrive " +
+      "with the argument that produced it, not only the conclusions. Undo does " +
+      "not reach chat: taking a message back is something you decide.",
+    tools: ["post_message", "edit_message", "remove_message", "read_messages"],
   },
 ];
 

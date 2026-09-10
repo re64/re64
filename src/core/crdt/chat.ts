@@ -1,21 +1,36 @@
 /**
- * Chat: a fifth root, and the only one the project cannot see.
+ * Chat: the root that used to be the one the project could not see.
  *
  * People and agents working the same document need somewhere to talk, and a
- * message is not an annotation — it describes no bytes, belongs to no layer,
- * and has no place in a `.re64`. So it lives at its own top-level root, and
- * that one decision is what keeps it out of everything else:
+ * message is not an annotation — it describes no bytes and belongs to no layer.
+ * For a long time that was expressed by keeping it out of everything:
+ * `projectFromDoc` whitelisted four roots and never looked here, so a message
+ * reached no `Project`, no exported file, no version and no `ops` row, and the
+ * argument was that "unsay that" has no computable inverse.
  *
- * `projectFromDoc` is an explicit whitelist of four roots. It never looks here,
- * so a message never reaches a `Project`, never reaches the exported file, never
- * changes `ProjectStore.version()`, and produces no `ops` row. Nothing had to be
- * added to exclude it — but it is asserted by a test, because a property that
- * holds by omission is one a later edit can quietly take away.
+ * **Two of those three reasons held and one did not.** `message.add` inverts to
+ * `message.remove` perfectly well; the real objection was that Ctrl-Z must not
+ * eat what somebody said, which is a question about what *undo* replays rather
+ * than about what the vocabulary covers. So chat has three operations now, and
+ * stays outside the undo manager's tracked roots on purpose.
  *
- * Deliberately **not** an operation. `src/core/ops` is a closed vocabulary of
- * things with computable inverses, and "unsay that" is not one of them; the
- * boundary test forbids Yjs there anyway. For the same reason chat is outside
- * the undo manager's tracked roots, so Ctrl-Z cannot eat what somebody said.
+ * It is in the projection because a session has to be able to learn that
+ * discussion is waiting for it. The changes feed is built from the operation
+ * log and the socket path derives operations by diffing projections, so a root
+ * outside the projection can reach neither. And a project handed to somebody
+ * else should arrive with the argument that produced its conclusions.
+ *
+ * What the old shape was protecting is kept and made explicit instead:
+ * `programFromDoc` is the projection *without* the conversation, and that is
+ * what `version()` hashes and what a client compares before rebuilding. A
+ * message therefore still re-derives nothing and stales no cache — the property
+ * that mattered, held by a stated rule rather than by omission.
+ *
+ * Messages stay a `Y.Array`. Ordering is the content of a conversation and the
+ * array CRDT converges it without anyone agreeing a clock — the opposite of a
+ * field or a binding, where position was masquerading as identity. Each entry
+ * carries an id all the same, because being addressable and being ordered are
+ * different properties and chat wants both.
  *
  * Messages are plain scalars in a `Y.Map`, never `Y.Text`. The document runs
  * with `gc: false`, which is justified on the grounds that it holds maps of
@@ -23,7 +38,7 @@
  * would undermine that argument for the whole document, to make a chat box
  * marginally nicer.
  *
- * Worth knowing and not fixed: because collection is off, a deleted message
+ * Worth knowing and not fixed: because collection is off, a removed message
  * stays recoverable in the update log forever. Chat is not private.
  */
 

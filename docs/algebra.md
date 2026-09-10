@@ -19,7 +19,18 @@ Has an **id**, minted by the writer. Lives in a collection.
 | `<n>.remove` | by id. |
 
 Members: **capture, claim, comment, constant, decoder, evidence, field, layer,
-scenario, target, type.**
+message, scenario, target, type.**
+
+**A message is an entity, and undo still does not reach it.** Chat was outside
+this vocabulary on the ground that "unsay that" has no computable inverse —
+`message.add` inverts to `message.remove`, so it does. The real objection was
+that Ctrl-Z must not eat what somebody said, and that is a question about what
+*undo replays*, not about what the algebra covers. Chat therefore has three
+verbs and stays outside the undo manager's tracked roots; taking a message back
+is `remove_message`, which somebody decides. It is also the one entity stored as
+a **list** rather than an id-keyed map, because the order of a conversation is
+its content — the opposite of a field or a binding, where position was
+masquerading as identity.
 
 **Being nested does not make something a lesser entity.** A field lives inside a
 type and a capture inside a scenario, but each has its own id and its own three
@@ -140,7 +151,7 @@ it loudly rather than misapply it. `.re64db` files are gitignored working
 databases, so this costs stored undo history in local experiment projects and
 nothing that is committed.
 
-## The forty-two operations
+## The forty-five operations
 
 ```
 capture.add      capture.set      capture.remove
@@ -149,6 +160,7 @@ comment.add      comment.set      comment.remove
 constant.add     constant.set     constant.remove
 decoder.add      decoder.set      decoder.remove
 evidence.add     evidence.set     evidence.remove
+message.add      message.set      message.remove
 field.add        field.set        field.remove
 layer.add        layer.set        layer.remove
 scenario.add     scenario.set     scenario.remove
@@ -163,7 +175,7 @@ file.add         file.remove
 meta.set
 ```
 
-Eleven entities × three verbs, three bindings × two, one attachment × two, one
+Twelve entities × three verbs, three bindings × two, one attachment × two, one
 singleton. There is nothing else, and `src/core/crdt/roundtrip.test.ts` asserts
 it: the shapes, the verbs, that no operation spells removal as `delete`, that
 every `set` carries its changes under `fields`, that every `add` mints an

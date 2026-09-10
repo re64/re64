@@ -315,15 +315,44 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     "Say something to whoever else is in this project — people in a browser see " +
       "it live. Use it to say what you are about to work on, ask about something " +
       "ambiguous, or report what you found. " +
-      "It is not an annotation: it goes nowhere near the listing, leaves no " +
-      "history entry, cannot be undone, and is not in the exported file. Put a " +
-      "conclusion in a comment; put a conversation here. " +
-      "At most 2000 characters, and it refuses rather than truncating — a " +
-      "long status post is several messages.",
+      "**It is not an annotation**: it goes nowhere near the listing and moves no " +
+      "version, so it re-analyses nothing. Put a conclusion in a comment; put a " +
+      "conversation here. " +
+      "It *is* part of the document — it travels with the exported file and shows " +
+      "in changes_since, so a project arrives with the argument that produced it " +
+      "rather than only the conclusions. Undo does not reach it: taking a message " +
+      "back is remove_message, which is a thing you decide rather than a thing " +
+      "Ctrl-Z does to you. " +
+      "Returns the id. At most 2000 characters, and it refuses rather than " +
+      "truncating — a long status post is several messages.",
     { project, text: z.string().min(1).max(2000) },
     ({ project: id, text  }: { project?: string; text: string  }) => {
       const { workspace, caller } = context();
       return workspace(id).postMessage(caller, text);
+    }
+  );
+
+  tool(
+    "edit_message",
+    "Reword something already said, by id. Only the text: who said it and when " +
+      "are what was true at the time, and rewriting either would rewrite history " +
+      "rather than correct a sentence.",
+    { project, id: z.string().min(1), text: z.string().min(1).max(2000) },
+    (args: { project?: string; id: string; text: string }) => {
+      const { workspace, caller } = context();
+      return workspace(args.project).editMessage(caller, args.id, args.text);
+    }
+  );
+
+  tool(
+    "remove_message",
+    "Take back something said, by id. Not a redaction, and worth being plain " +
+      "about: this document keeps its update log, so what was removed is still " +
+      "recoverable from it. Chat is not private and never was.",
+    { project, id: z.string().min(1) },
+    (args: { project?: string; id: string }) => {
+      const { workspace, caller } = context();
+      return workspace(args.project).removeMessage(caller, args.id);
     }
   );
 

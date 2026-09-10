@@ -425,6 +425,35 @@ export function diffProjects(from: Project, to: Project): Op[] {
     });
   }
 
+  // **Chat, which the diff could not see until a message became an entity.**
+  // By id like every other collection, even though the storage is a list: the
+  // sequence is what the array CRDT converges, and a diff is about which things
+  // exist and what they say, not about where they sit.
+  const beforeSaid = new Map((from.messages ?? []).filter((m) => m.id).map((m) => [m.id!, m]));
+  const afterSaid = new Map((to.messages ?? []).filter((m) => m.id).map((m) => [m.id!, m]));
+  for (const id of beforeSaid.keys()) {
+    if (!afterSaid.has(id)) ops.push({ op: "message.remove", id });
+  }
+  for (const [id, message] of afterSaid) {
+    const before = beforeSaid.get(id);
+    if (!before) {
+      ops.push({
+        op: "message.add",
+        id,
+        at: message.at,
+        author: message.author,
+        name: message.name,
+        text: message.text,
+      });
+      continue;
+    }
+    // Only the text can move. Who said it and when are what was true then, and
+    // rewriting either would rewrite history rather than correct it.
+    if (before.text !== message.text) {
+      ops.push({ op: "message.set", id, fields: { text: message.text } });
+    }
+  }
+
   // Scenarios and captures, removals before additions like everything else.
   const beforeScenarios = new Map((from.scenarios ?? []).filter((x) => x.id).map((x) => [x.id!, x]));
   const afterScenarios = new Map((to.scenarios ?? []).filter((x) => x.id).map((x) => [x.id!, x]));

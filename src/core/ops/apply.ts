@@ -36,6 +36,9 @@ import {
   deleteCapture,
   upsertEvidence,
   deleteEvidence,
+  addMessage,
+  reviseMessage,
+  deleteMessage,
   insertLayer,
   removeLayer,
   renameLayer,
@@ -501,6 +504,21 @@ export function applyOp(raw: string, op: Op): string {
       return upsertEvidence(raw, merged as unknown as ProjectEvidence);
     }
 
+    case "message.add":
+      return addMessage(raw, {
+        id: op.id,
+        at: op.at,
+        author: op.author,
+        name: op.name,
+        text: op.text,
+      });
+
+    case "message.set":
+      return op.fields.text === undefined ? raw : reviseMessage(raw, op.id, op.fields.text);
+
+    case "message.remove":
+      return deleteMessage(raw, op.id);
+
     case "evidence.remove":
       return deleteEvidence(raw, op.id);
 
@@ -919,6 +937,30 @@ export function invertOp(raw: string, op: Op): Op {
         fields[key] = was[key] ?? null;
       }
       return { op: "evidence.set", id: op.id, fields: fields as EvidenceSetOp["fields"] };
+    }
+
+    case "message.add":
+      return { op: "message.remove", id: op.id };
+
+    case "message.set": {
+      const found = project.messages?.find((m) => m.id === op.id);
+      if (!found) return op;
+      return { op: "message.set", id: op.id, fields: { text: found.text } };
+    }
+
+    case "message.remove": {
+      const found = project.messages?.find((m) => m.id === op.id);
+      if (!found) return op;
+      // The whole of it, so undoing a removal puts back what was said rather
+      // than an empty line with the right id.
+      return {
+        op: "message.add",
+        id: op.id,
+        at: found.at,
+        author: found.author,
+        name: found.name,
+        text: found.text,
+      };
     }
 
     case "evidence.remove": {

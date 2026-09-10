@@ -378,6 +378,29 @@ export interface Project {
   scenarios?: ProjectScenario[];
   captures?: ProjectCapture[];
   evidence?: ProjectEvidence[];
+  /**
+   * What was said while the work was done.
+   *
+   * **In the file, and that is a decision that was made twice.** Chat began as a
+   * fifth root the project could not see — "a message describes no bytes,
+   * belongs to no layer, and has no place in a `.re64`" — and stayed out of the
+   * projection, the export and the operation log by an explicit whitelist.
+   *
+   * It comes in because a message stopped being a stray and became an entity.
+   * The changes feed is built from the operation log, and the socket path
+   * derives operations by diffing *projections*; a root outside the projection
+   * can reach neither. So a session could not be told that discussion was
+   * waiting for it without either putting chat here or building a second
+   * mechanism for the one root that is small — and a project handed to somebody
+   * else would arrive with its reasoning and without the argument that produced
+   * it.
+   *
+   * Ordering is the content of a conversation, so this is a list and stays a
+   * list. In the document it is a `Y.Array`, whose CRDT converges an order
+   * without anyone agreeing a clock — the opposite of a field or a binding,
+   * where position was masquerading as identity.
+   */
+  messages?: ProjectMessage[];
 }
 
 /**
@@ -673,6 +696,22 @@ export type EvidenceKind =
   | "refutes"
   /** Takes it out of the working set, keeping it and the reason in the document. */
   | "retires";
+
+/**
+ * One thing somebody said, with an id like everything else here.
+ *
+ * `author` is who, `name` is how they were called *then* — stored rather than
+ * resolved on read, because a log records what was said and who said it at the
+ * time, and looking the name up later would rewrite history on every rename.
+ */
+export interface ProjectMessage {
+  id?: string;
+  /** Milliseconds since the epoch, taken on the poster's machine. */
+  at: number;
+  author: string;
+  name: string;
+  text: string;
+}
 
 export interface ProjectField {
   /**

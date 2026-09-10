@@ -5,6 +5,7 @@ export {
   docFromUpdates,
   emptyDoc,
   projectFromDoc,
+  programFromDoc,
   encodeDoc,
   applyUpdate,
   clientsInUpdate,

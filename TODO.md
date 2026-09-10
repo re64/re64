@@ -145,14 +145,14 @@ one does not**, which is what makes this smaller than it looks:
 
 Work:
 
-- [ ] `message.add` / `message.set` / `message.remove`. Algebra 42 → 45. The
+- [x] `message.add` / `message.set` / `message.remove`. Algebra 42 → 45. The
       round-trip harness is keyed by `Op["op"]`, so it will not compile until
       each has a case.
-- [ ] `post_message` **returns the id**. Messages have had ids since they
+- [x] `post_message` **returns the id**. Messages have had ids since they
       existed and no surface has ever exposed one. F1, again.
-- [ ] `edit_message` and `remove_message`, by id.
-- [ ] Undo skips message ops, as a stated rule with the reason.
-- [ ] Chat reaches `changes_since`, which is the point: it is how a session
+- [x] `edit_message` and `remove_message`, by id.
+- [x] Undo skips message ops, as a stated rule with the reason.
+- [x] Chat reaches `changes_since`, which is the point: it is how a session
       peeks at what is waiting without merging it.
 
 **The fork this turns on, and it needs a decision.** `changes_since` is fed from
@@ -169,7 +169,7 @@ exported `.re64` too.
 - **(B) Chat stays out**, and reaches the feed by a second mechanism that the
   socket path cannot see.
 
-**Recommended: (A).** (B) buys a parallel path for the one root that is small,
+**Decided: (A).** (B) buys a parallel path for the one root that is small,
 and leaves a project's discussion behind when the file is handed to somebody.
 The argument it overturns — *"a message … has no place in a `.re64`"* — was made
 when chat was not first class.

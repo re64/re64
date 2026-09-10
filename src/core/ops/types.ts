@@ -462,6 +462,48 @@ export interface PrimaryUnbindOp {
   address: number;
 }
 
+/**
+ * Say something to the people working here. **Always adds.**
+ *
+ * **Chat used to be deliberately outside this vocabulary**, on the ground that
+ * `src/core/ops` holds things with computable inverses and "unsay that" is not
+ * one. It plainly is: this inverts to `message.remove`. The real objection was
+ * that Ctrl-Z must not eat what somebody said, and that is a question about
+ * which operations *undo* replays, not about whether the vocabulary covers
+ * them — so it is answered there, and answered explicitly.
+ *
+ * Appended rather than keyed, because ordering is the content of a conversation.
+ * `at` is the poster's clock and is informational; the sequence is what the
+ * array CRDT converges.
+ */
+export interface MessageAddOp {
+  op: "message.add";
+  id: string;
+  at: number;
+  author: string;
+  /** How the author was called *then*: a log records who said it at the time. */
+  name: string;
+  text: string;
+}
+
+/** Revise something said, by id. Omitted leaves alone. */
+export interface MessageSetOp {
+  op: "message.set";
+  id: string;
+  fields: { text?: string };
+}
+
+/**
+ * Take back something said, by id.
+ *
+ * Not a redaction: the document runs with collection off, so a removed message
+ * stays in the update log. `chat.ts` has always said chat is not private.
+ */
+export interface MessageRemoveOp {
+  op: "message.remove";
+  id: string;
+}
+
 /** Say something about a claim. **Always adds.** */
 export interface EvidenceAddOp {
   op: "evidence.add";
@@ -576,6 +618,7 @@ export type Op =
   | ScenarioAddOp | ScenarioSetOp | ScenarioRemoveOp
   | CaptureAddOp | CaptureSetOp | CaptureRemoveOp
   | EvidenceAddOp | EvidenceSetOp | EvidenceRemoveOp
+  | MessageAddOp | MessageSetOp | MessageRemoveOp
   // Bindings: bind / unbind, by key
   | LabelBindOp | LabelUnbindOp
   | ConstantBindOp | ConstantUnbindOp
@@ -785,6 +828,13 @@ export function describeOp(op: Op, resolve?: AddressResolver): string {
       return `revise evidence ${op.id}`;
     case "evidence.remove":
       return `withdraw evidence ${op.id}`;
+
+    case "message.add":
+      return `say "${op.text.length > 40 ? `${op.text.slice(0, 40)}…` : op.text}"`;
+    case "message.set":
+      return `reword message ${op.id}`;
+    case "message.remove":
+      return `take back message ${op.id}`;
 
     case "layer.add":
       return `add ${op.layerType} layer ${op.name}`;

@@ -36,6 +36,7 @@ import {
   ProjectScenario,
   ProjectCapture,
   ProjectEvidence,
+  ProjectMessage,
   ProjectConstantUse,
   ProjectLabel,
   ProjectLabelUse,
@@ -89,6 +90,7 @@ const ROOT_EVIDENCE = "evidence";
 const ROOT_FILES = "files";
 const ROOT_TARGETS = "targets";
 const ROOT_CLAIMS = "claims";
+const ROOT_CHAT = "chat";
 
 /** Scalars a project carries outside its layers. */
 const META_KEYS = ["name", "description", "entryPoints"] as const;
@@ -229,6 +231,17 @@ export function docFromProject(declared: Project): Y.Doc {
     const evidence = doc.getMap<Y.Map<unknown>>(ROOT_EVIDENCE);
     for (const item of [...(project.evidence ?? [])].sort(byId)) {
       evidence.set(item.id!, mapFrom(item as unknown as Record<string, unknown>));
+    }
+
+    // A list, not a map: ordering is the content of a conversation, and the
+    // array CRDT converges it without anyone agreeing a clock. Each entry still
+    // carries an id, so a message is addressable — the two properties are
+    // independent and chat wants both.
+    const chat = doc.getArray<Y.Map<unknown>>(ROOT_CHAT);
+    if (chat.length === 0 && project.messages?.length) {
+      chat.push(
+        project.messages.map((m) => mapFrom(m as unknown as Record<string, unknown>))
+      );
     }
   }, "load");
 
@@ -397,7 +410,36 @@ export function projectFromDoc(doc: Y.Doc): Project {
   ).map((e) => inOrder<ProjectEvidence>(e as unknown as Record<string, unknown>, EVIDENCE_FIELDS));
   if (evidenceList.length) project.evidence = evidenceList;
 
+  // In the order the array holds them, which is the order they were said in.
+  // Not `sortedValues`: every other root is a map and sorting it is what makes a
+  // projection deterministic, where here the sequence *is* the state.
+  const messageList = doc
+    .getArray<Y.Map<unknown>>(ROOT_CHAT)
+    .toArray()
+    .map((m) => inOrder<ProjectMessage>(m.toJSON() as Record<string, unknown>, MESSAGE_FIELDS))
+    .filter((m) => typeof m.text === "string");
+  if (messageList.length) project.messages = messageList;
+
   return project;
+}
+
+/**
+ * The projection without the conversation.
+ *
+ * **Two questions that were one answer while chat was invisible.** "What does
+ * this project hold" now includes what was said; "has the program description
+ * changed" does not, and neither does "must I re-analyse". A message is a
+ * document change and not a program change, so it exports, merges and reaches
+ * the changes feed — and it moves no version and triggers no re-derivation.
+ *
+ * Read the other way round: this is what `version()` hashes and what a client
+ * compares before rebuilding. Hashing the full projection would re-analyse the
+ * whole program once per line of conversation, which is the cost the fifth-root
+ * design was avoiding and is worth keeping without it.
+ */
+export function programFromDoc(doc: Y.Doc): Project {
+  const { messages: _said, ...program } = projectFromDoc(doc);
+  return program;
 }
 
 /**
@@ -410,6 +452,7 @@ export function projectFromDoc(doc: Y.Doc): Project {
  */
 // A label no longer carries a comment: comments are their own objects. Read
 // from an older document, the key is simply absent.
+const MESSAGE_FIELDS = ["id", "at", "author", "name", "text"] as const;
 const LABEL_FIELDS = ["id", "address", "name", "type", "extent"] as const;
 const REGION_FIELDS = [
   "id",

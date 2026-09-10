@@ -41,6 +41,8 @@ export const VIEWLESS: ReadonlySet<string> = new Set([
   "create_project",
   "list_participants",
   "post_message",
+  "edit_message",
+  "remove_message",
   "read_messages",
 
   // **The views themselves.** `list_targets` is the case that makes the whole

@@ -32,7 +32,7 @@ import {
   resolveOwningLayer,
 } from "../core/index.js";
 import { Claim, Interpretation, RootKind } from "../core/claims/model.js";
-import { ChatMessage, Participant, projectFromDoc } from "../core/crdt/index.js";
+import { ChatMessage, Participant, programFromDoc, projectFromDoc } from "../core/crdt/index.js";
 import { ConnectionStatus, DocClient, OpenOptions } from "./doc-client.js";
 
 /** What the debug view reports. Read-only; nothing acts on it. */
@@ -89,22 +89,22 @@ export class ProjectSession {
     // serialised because rebuilding is async — a burst of updates would
     // otherwise interleave two rebuilds and leave the later one's result
     // overwritten by the earlier one's.
-    session.lastProjection = JSON.stringify(projectFromDoc(client.doc));
+    session.lastProjection = JSON.stringify(programFromDoc(client.doc));
 
     client.onChange(() => {
       session.changeCount++;
 
-      // Not every document change is a change to the *project*. Chat lives at
-      // its own root, so a message is an update that the projection cannot see
-      // — and rebuilding for one would re-derive the model and re-analyse the
-      // whole program per line of conversation.
+      // Not every document change is a change to the *program*. Chat is in the
+      // projection now — it exports and it merges — but a message re-derives
+      // nothing, and rebuilding for one would re-analyse the whole program per
+      // line of conversation.
       //
       // Compared by projection rather than by asking which Yjs types moved,
-      // because that catches anything invisible to the project rather than only
-      // the one case known today, and it keeps the check on this side of the
-      // CRDT boundary. `projectFromDoc` is a fraction of a millisecond; a
-      // rebuild is tens.
-      const projection = JSON.stringify(projectFromDoc(client.doc));
+      // because that catches anything that does not reach the program rather
+      // than only the one case known today, and it keeps the check on this side
+      // of the CRDT boundary. `programFromDoc` is a fraction of a millisecond;
+      // a rebuild is tens.
+      const projection = JSON.stringify(programFromDoc(client.doc));
       if (projection === session.lastProjection) return;
       session.lastProjection = projection;
 

@@ -1605,13 +1605,14 @@ export class Workspace {
    */
   messages(limit = 50): {
     total: number;
-    messages: { at: string; from: string; text: string }[];
+    messages: { id: string; at: string; from: string; text: string }[];
   } {
     const all = chatMessages(this.room.store.document());
     const shown = all.slice(Math.max(0, all.length - limit));
     return {
       total: all.length,
       messages: shown.map((m) => ({
+        id: m.id,
         at: new Date(m.at).toISOString(),
         from: m.name,
         text: m.text,
@@ -1620,7 +1621,10 @@ export class Workspace {
   }
 
   /** Say something to whoever else is in this project. */
-  postMessage(caller: Caller, text: string): { posted: boolean; at?: string; as?: string } {
+  postMessage(
+    caller: Caller,
+    text: string
+  ): { posted: boolean; message?: string; at?: string; as?: string } {
     const posted = postChatMessage(
       this.room.store.document(),
       // The codename is how a person watching a live transcript tells two
@@ -1629,8 +1633,46 @@ export class Workspace {
       caller.sessionId
     );
     return posted
-      ? { posted: true, at: new Date(posted.at).toISOString(), as: posted.name }
+      ? {
+          posted: true,
+          // **The id, which a message has always had and no surface ever
+          // returned.** Nothing could revise or take back a message because
+          // nothing could name one. F1, in the place it is easiest to miss: the
+          // value existed, was stored, was read back, and stopped at the door.
+          message: posted.id,
+          at: new Date(posted.at).toISOString(),
+          as: posted.name,
+        }
       : { posted: false };
+  }
+
+  /**
+   * Reword something already said.
+   *
+   * Only the text. Who said it and when are what was true at the time, and
+   * rewriting either would rewrite history rather than correct a sentence.
+   */
+  editMessage(caller: Caller, id: string, text: string): EditResult {
+    const said = (this.document().messages ?? []).find((m) => m.id === id);
+    if (!said) throw new Error(`No message ${id}. read_messages shows them, with ids.`);
+    const trimmed = text.trim();
+    if (!trimmed) throw new Error("A message with nothing in it is a row taken up for nothing.");
+    return this.editDocument(caller, () => [
+      { op: "message.set", id, fields: { text: trimmed } } as Op,
+    ]);
+  }
+
+  /**
+   * Take back something said.
+   *
+   * Not a redaction, and worth being plain about: the document runs with
+   * collection off, so what was removed stays in the update log. Chat is not
+   * private and never was.
+   */
+  removeMessage(caller: Caller, id: string): EditResult {
+    const said = (this.document().messages ?? []).find((m) => m.id === id);
+    if (!said) throw new Error(`No message ${id}. read_messages shows them, with ids.`);
+    return this.editDocument(caller, () => [{ op: "message.remove", id } as Op]);
   }
 
   /**
