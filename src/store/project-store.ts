@@ -74,6 +74,25 @@ import {
 const asClaims = (project: Project): Project =>
   needsMigration(project) ? migrateToClaims(project).project : project;
 
+/**
+ * A project's text with every object's keys sorted, for deciding whether two
+ * spellings are one state. Arrays keep their order, because there it is state.
+ */
+function canonical(text: string): string {
+  const sorted = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(sorted);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.keys(value as Record<string, unknown>)
+          .sort()
+          .map((k) => [k, sorted((value as Record<string, unknown>)[k])])
+      );
+    }
+    return value;
+  };
+  return JSON.stringify(sorted(JSON.parse(text)));
+}
+
 export class ProjectStore {
   private doc: CrdtDoc | undefined;
   private readonly authors = new Set<string>();
@@ -828,7 +847,13 @@ export class ProjectStore {
         // mean anything: what was applied last time round. Undoing checks the
         // original op, redoing checks the inverse that undid it.
         const settled = undone ? change.op : change.inverse;
-        if (applyOp(text, settled) !== text) {
+        // **Compared as state, not as text.** Key order is not state, and a
+        // writer that deletes and reinserts a key moves it — so replaying an
+        // operation whose values already held could change the bytes and
+        // nothing else, and this refused an undo as "changed by someone else"
+        // with nobody else in the room. The file's own order is fixed in
+        // `formatProject`; this is the check's half of the same rule.
+        if (canonical(applyOp(text, settled)) !== canonical(text)) {
           skipped.push({
             description: describeOp(change.op, absolute),
             reason: "changed by someone else since",

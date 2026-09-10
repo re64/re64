@@ -40,19 +40,43 @@ function compactObject(obj: Record<string, unknown>): string {
   return `{ ${parts.join(", ")} }`;
 }
 
-/** Serialize a project in the hand-maintained house style. */
-/** A field's keys in the order the file writes them; anything unknown follows. */
-function fieldInOrder(field: Record<string, unknown>): Record<string, unknown> {
+/**
+ * An entity's keys in the order the file writes them; anything unknown follows.
+ *
+ * `compactObject` writes keys as it finds them, and the paths that build an
+ * object do not agree on an order: `field.add` and the offset migration spelled
+ * one field two ways, and `evidence.set` deletes and reinserts the three
+ * provenance keys, so setting a value back to what it was moved `author`,
+ * `method` and `when` after `note`. Equal state, unequal text. The order is
+ * fixed here, per entity, because the file is where it shows.
+ */
+function inOrder(entity: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const key of ["id", "offset", "name", "type", "description"]) {
-    if (field[key] !== undefined) out[key] = field[key];
+  for (const key of keys) {
+    if (entity[key] !== undefined) out[key] = entity[key];
   }
-  for (const [key, value] of Object.entries(field)) {
+  for (const [key, value] of Object.entries(entity)) {
     if (!(key in out) && value !== undefined) out[key] = value;
   }
   return out;
 }
 
+const FIELD_KEYS = ["id", "offset", "name", "type", "description"] as const;
+/** As the document projects a piece of evidence; see `EVIDENCE_FIELDS` in `crdt/doc.ts`. */
+const EVIDENCE_KEYS = [
+  "id",
+  "claim",
+  "kind",
+  "author",
+  "method",
+  "when",
+  "scenario",
+  "capture",
+  "other",
+  "note",
+] as const;
+
+/** Serialize a project in the hand-maintained house style. */
 export function formatProject(project: Project): string {
   const lines: string[] = ["{"];
   const body: string[] = [];
@@ -178,7 +202,7 @@ export function formatProject(project: Project): string {
         // recorded operation still holds.
         const fields = [...fieldsOfType(t)]
           .sort((a, b) => a.offset - b.offset || (a.id ?? "").localeCompare(b.id ?? ""))
-          .map((f) => `        ${compactObject(fieldInOrder(f as unknown as Record<string, unknown>))}`)
+          .map((f) => `        ${compactObject(inOrder(f as unknown as Record<string, unknown>, FIELD_KEYS))}`)
           .join(",\n");
         const head = [
           `      "id": ${JSON.stringify(t.id)}`,
@@ -217,7 +241,7 @@ export function formatProject(project: Project): string {
 
   if (project.evidence?.length) {
     const entries = project.evidence
-      .map((x) => `    ${compactObject(x as unknown as Record<string, unknown>)}`)
+      .map((x) => `    ${compactObject(inOrder(x as unknown as Record<string, unknown>, EVIDENCE_KEYS))}`)
       .join(",\n");
     body.push(`  "evidence": [\n${entries}\n  ]`);
   }

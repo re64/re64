@@ -2240,6 +2240,17 @@ describe("evidence, and saying things about a claim", () => {
     expect(cleared.isError, cleared.text).toBe(false);
     expect((await shown())?.method).toBeUndefined();
     expect((await shown())?.author).toBe(signedBy);
+
+    // And walked back, with nobody else in the room: a replay of unchanged
+    // provenance used to move its keys in the text and read as a conflict.
+    const undone = await callTool("undo", {});
+    expect(undone.isError, undone.text).toBe(false);
+    expect((undone.value as { applied: number }).applied).toBe(1);
+    expect((await shown())?.method).toBe("read");
+    const again = await callTool("undo", {});
+    expect((again.value as { applied: number }).applied).toBe(1);
+    expect((await shown())?.method).toBe("guessed");
+    expect((await shown())?.author).toBe(signedBy);
   });
 
   it("retires a settled reading out of the working set, and puts it back", async () => {

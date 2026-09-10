@@ -1375,3 +1375,57 @@ describe("a failed write is not served", () => {
     }
   });
 });
+
+describe("revising provenance is undoable and redoable", () => {
+  /**
+   * **Replaying an unchanged provenance moved three keys and nothing else.**
+   * `evidence.set` deletes and reinserts `author`, `method` and `when`, so a
+   * value set back to what it already was landed after `note` in the text —
+   * and the conflict check compared text, so an undo with nobody else in the
+   * room was refused as "changed by someone else since". The check compares
+   * state now, and the writer fixes the order besides.
+   */
+  const project = JSON.stringify({
+    name: "provenance",
+    layers: [{ id: "lay_a", type: "bytes", address: "$8000", bytes: "a9016000" }],
+    claims: [{ id: "clm_a", at: "$8000", name: "Start", origin: "user" }],
+    evidence: [
+      { id: "evd_a", claim: "clm_a", kind: "supports", author: "usr_agent", method: "guessed", when: 123456, note: "keep" },
+    ],
+  });
+
+  it("walks set → clear → undo → undo → redo → redo with a note beside it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "re64-provenance-"));
+    const storage = new SqliteStorage(join(dir, "p.re64db"), "p");
+    storage.initialize(project, Date.now(), "provenance");
+    const store = new ProjectStore(storage);
+    const by = () => {
+      const e = projectFromDoc(store.document()).evidence![0];
+      return [e.author, e.method, e.when, e.note];
+    };
+    try {
+      store.runOps(
+        [{ op: "evidence.set", id: "evd_a", fields: { by: { author: "usr_agent", method: "read", when: 123456 } } }],
+        "usr_agent", 1, "ses"
+      );
+      store.runOps(
+        [{ op: "evidence.set", id: "evd_a", fields: { by: { author: "usr_agent", when: 123456 } } }],
+        "usr_agent", 2, "ses"
+      );
+      expect(by()).toEqual(["usr_agent", undefined, 123456, "keep"]);
+
+      expect(store.undo("usr_agent", "ses").skipped).toEqual([]);
+      expect(by()).toEqual(["usr_agent", "read", 123456, "keep"]);
+      expect(store.undo("usr_agent", "ses").skipped).toEqual([]);
+      expect(by()).toEqual(["usr_agent", "guessed", 123456, "keep"]);
+
+      expect(store.redo("usr_agent", "ses").skipped).toEqual([]);
+      expect(by()).toEqual(["usr_agent", "read", 123456, "keep"]);
+      expect(store.redo("usr_agent", "ses").skipped).toEqual([]);
+      expect(by()).toEqual(["usr_agent", undefined, 123456, "keep"]);
+    } finally {
+      storage.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
