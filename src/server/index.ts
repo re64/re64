@@ -27,7 +27,7 @@ import { needsMigration, migrateToClaims } from "../core/claims/migrate.js";
 import { SyncServer } from "./sync.js";
 import { CheckpointCache } from "../core/machine/scenario.js";
 import { SessionReplica, Workspace } from "./workspace.js";
-import { McpEndpoint, createMcpEndpoint } from "./mcp/transport.js";
+import { McpContext, McpEndpoint, createMcpEndpoint } from "./mcp/transport.js";
 import { Caller, resolveCaller } from "./mcp/identity.js";
 import { registerTools } from "./mcp/tools.js";
 import { McpLog, defaultMcpLogPath, openMcpLog } from "./mcp/log.js";
@@ -209,7 +209,6 @@ export function startServer(options: ServerOptions): RunningServer {
    * nobody points an agent at should not pay to load it.
    */
   let endpoint: Promise<McpEndpoint | undefined> | undefined;
-  let callerFor: () => Caller = () => ({ userId: "agent", label: "agent" });
 
   /**
    * Agent sessions, held here rather than per project: one caller working
@@ -302,20 +301,9 @@ export function startServer(options: ServerOptions): RunningServer {
     options.mcpLog === undefined ? defaultMcpLogPath(projectPath) : options.mcpLog
   );
 
-  const mcp = () =>
-    (endpoint ??= createMcpEndpoint({
-      registerTools,
-      log: mcpLog,
-      context: () => {
-        const caller = callerFor();
-        return {
-          // The session, so this caller reads its own copy of the document.
-          workspace: (projectId, target) =>
-            workspaceFor(projectId ?? defaultProject(), target, caller.sessionId),
-          caller,
-        };
-      },
-    }));
+  const mcp = () => (endpoint ??= createMcpEndpoint({ registerTools, log: mcpLog }));
+
+
 
   /**
    * One Workspace per project *and target*, holding its analysis cache.
@@ -399,27 +387,44 @@ export function startServer(options: ServerOptions): RunningServer {
             error: "The MCP endpoint is unavailable; its SDK could not be loaded",
           });
         }
-        callerFor = () => {
-          const { storage } = room(projectOf(url));
-          const who = resolveCaller(req, url, storage);
-          const { key, explicit } = sessionKeyOf(req.headers, who.userId);
-          const lease = leases.claim(key, who);
-          // Idempotent, and re-run per request so `last_seen_at` tracks a lease
-          // that is still being used rather than one that was once opened.
-          if (storage instanceof SqliteStorage) {
-            storage.startSession(lease.id, lease.userId, Date.now(), lease.codename);
-          }
-          showPresence(projectOf(url), lease);
-          return {
-            ...who,
-            sessionId: lease.id,
-            codename: lease.codename,
-            sharedSession: !explicit,
-          };
+        // **Resolved now, for this request, and held in a local.**
+        //
+        // This was a server-global closure, reassigned here and read *later*
+        // during tool execution — with the `await readBody` below in between.
+        // Two requests overlapping by that much is ordinary, and the second
+        // replaced the first's identity: a claim asked for by Alice was recorded
+        // as Bob, under Bob's session and in Bob's undo scope. A request must
+        // never resolve its caller through anything a later request can reach.
+        //
+        // It matters more since a session reads its own copy of the document: a
+        // request that resolves the wrong caller now reads the wrong *replica*
+        // as well as recording the wrong author.
+        const { storage } = room(projectOf(url));
+        const who = resolveCaller(req, url, storage);
+        const { key, explicit } = sessionKeyOf(req.headers, who.userId);
+        const lease = leases.claim(key, who);
+        // Idempotent, and re-run per request so `last_seen_at` tracks a lease
+        // that is still being used rather than one that was once opened.
+        if (storage instanceof SqliteStorage) {
+          storage.startSession(lease.id, lease.userId, Date.now(), lease.codename);
+        }
+        showPresence(projectOf(url), lease);
+        const caller: Caller = {
+          ...who,
+          sessionId: lease.id,
+          codename: lease.codename,
+          sharedSession: !explicit,
         };
+        const context = (): McpContext => ({
+          // The session, so this caller reads its own copy of the document.
+          workspace: (projectId, target) =>
+            workspaceFor(projectId ?? defaultProject(), target, caller.sessionId),
+          caller,
+        });
+
         // The transport wants the parsed body; a GET or DELETE carries none.
         const raw = req.method === "POST" ? await readBody(req) : "";
-        return endpoint.handle(req, res, raw ? JSON.parse(raw) : undefined);
+        return endpoint.handle(req, res, raw ? JSON.parse(raw) : undefined, context);
       }
 
       if (path === "/api/projects" && req.method === "GET") {
