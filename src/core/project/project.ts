@@ -426,7 +426,15 @@ export interface ProjectType {
    * with eight offsets in it. Nothing that already reads a size has to know.
    */
   unit?: "bytes" | "bits";
-  fields: Record<string, ProjectField>;
+  /**
+   * In layout order in the file, keyed by id in the document.
+   *
+   * A list here because a `.re64` should read the way somebody would have
+   * written one — top of the record downwards — and because an offset-keyed
+   * object cannot represent two fields at one offset, which is now a state the
+   * model tolerates.
+   */
+  fields: ProjectField[];
 }
 
 /**
@@ -717,19 +725,22 @@ export interface ProjectField {
   /**
    * Stable identity, derived from content when a file omits it.
    *
-   * Fields used to be keyed by offset alone, argued on the grounds that two
-   * fields cannot share one so the key *is* the identity. True of the storage,
-   * and not enough for the API: an offset is a **property** of a field and a
-   * reader who has just worked out that a record is laid out differently is
-   * changing it, which under offset-keying is a delete plus a create — losing
-   * the description and everything else somebody wrote.
+   * **And the key the document stores it under**, which took two goes. Fields
+   * were keyed by offset, argued on the grounds that two cannot share one so the
+   * key *is* the identity. That is true of one writer and false of two: giving
+   * the object an `id` while the storage stayed offset-keyed meant a move was
+   * still a delete plus a create, so two readers moving one field to different
+   * offsets produced **two fields carrying one id** — and `field.remove` then
+   * took away one of them and left the other.
    *
-   * The cost is stated rather than hidden: offset keys made two readers adding
-   * different fields merge for free, and two adding a field at the *same*
-   * offset now both stand. That is a hygiene finding, exactly as two claims at
-   * one address are, and it is the trade this project makes everywhere else.
+   * Keyed by id, an offset is what it always was: a property. Two fields at one
+   * offset both stand and are a hygiene finding, exactly as two claims at one
+   * address are, and different readings of the same bytes is a thing this model
+   * keeps rather than prevents.
    */
   id?: string;
+  /** Into the record, in its own unit: bytes, or bits when the type says so. */
+  offset: number;
   name: string;
   /**
    * `u8`, `i8`, `u16`, `u16be`, `ptr`, `ptrbe`, `char(n)`, `char(n,screen)`,
@@ -1061,8 +1072,31 @@ export function projectRegionsToRegions(
 }
 
 /** Load and parse a project file */
+/**
+ * A type's fields as a list, whatever shape they arrived in.
+ *
+ * **One migration, reached from four places.** Every file written before fields
+ * were keyed by id spells them as an object keyed by offset, and the entry
+ * points take a project from a file *and* from memory — `parseProject`,
+ * `docFromProject`, `formatProject` and the loader. The key becomes the `offset`
+ * property it always described; the next write persists a list.
+ */
+export function fieldsOfType(type: { fields: unknown }): ProjectField[] {
+  const held = type.fields;
+  if (Array.isArray(held)) return held as ProjectField[];
+  return Object.entries((held ?? {}) as Record<string, ProjectField>)
+    .map(([offset, field]) => ({ ...field, offset: Number(offset) }))
+    .sort((a, b) => a.offset - b.offset);
+}
+
 export function parseProject(json: string): Project {
   const project = JSON.parse(json) as Project;
+
+  // **A record's fields used to be an object keyed by offset.** Every file
+  // written before they were keyed by id says so, and they stay loadable: the
+  // key becomes the `offset` property it always described, and the next write
+  // persists a list. The same latitude ids get everywhere here.
+  for (const type of project.types ?? []) type.fields = fieldsOfType(type);
 
   // Validate required fields
   if (!project.layers || !Array.isArray(project.layers)) {

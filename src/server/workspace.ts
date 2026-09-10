@@ -2654,7 +2654,7 @@ export class Workspace {
       fields[offset] = {
         ...field,
         type: storedFieldType(parsed),
-        id: existing?.fields?.[String(offset)]?.id ?? newId("fld"),
+        id: existing?.fields?.find((f) => f.offset === offset)?.id ?? newId("fld"),
       };
     }
 
@@ -2711,7 +2711,7 @@ export class Workspace {
     typeId: string,
     offset: number,
     field: { name: string; type: string; description?: string }
-  ): EditResult & { field: string } {
+  ): EditResult & { field: string; note?: string } {
     // The document, not a view: a record layout and a piece of evidence are
     // both project-level, so neither can need a stack chosen to be written.
     const loaded = { project: this.document() };
@@ -2725,13 +2725,14 @@ export class Workspace {
           (held.unit === "bits" ? `, which is ${bound} bits.` : ".")
       );
     }
-    const taken = Object.entries(held.fields).find(([at]) => Number(at) === offset);
-    if (taken) {
-      throw new Error(
-        `+${offset} of ${held.name} is already ${taken[1].name}. Two fields cannot ` +
-          `share an offset; edit_field moves one, remove_field takes it back.`
-      );
-    }
+    // **A shared offset is not refused.** It used to be, on the ground that two
+    // fields cannot share one — which the storage then failed to enforce anyway,
+    // since two readers moving a field to the same place both landed. A field is
+    // keyed by its id now, so two readings of one offset both stand, and hygiene
+    // reports them: the same treatment two claims at one address get, and the
+    // same reason. A write that refuses here would be taking a decision it is
+    // not entitled to.
+    const taken = held.fields.find((f) => f.offset === offset);
     // Ids, not the caller's names — see `fieldTypeNames`.
     const type = this.storedFrom(field.type);
 
@@ -2739,6 +2740,18 @@ export class Workspace {
     const result = this.editDocument(caller, () => [
       { op: "field.add", id, typeId, offset, ...field, type } as Op,
     ]);
+    // Said at the point it becomes true, rather than left for somebody to find
+    // in a hygiene sweep: only the last field at an offset renders.
+    if (taken) {
+      return {
+        ...result,
+        field: id,
+        note:
+          `+${offset} of ${held.name} was already "${taken.name}". Both stand — ` +
+          `two readings of one field is a state this keeps — but only one ` +
+          `renders. edit_field moves one, remove_field takes one back.`,
+      };
+    }
     return { ...result, field: id };
   }
 

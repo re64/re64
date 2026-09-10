@@ -331,11 +331,12 @@ export function diffProjects(from: Project, to: Project): Op[] {
   for (const [id, type] of afterTypes) {
     const before = beforeTypes.get(id);
     const size = typeof type.size === "string" ? parseProjectAddress(type.size) : type.size;
+    // Keyed by the field's own `offset`, not by its position in the list — the
+    // fields were an offset-keyed object and `Object.entries` over the list that
+    // replaced it hands back array *indices*, which land silently as offsets 0,
+    // 1, 2 for a record laid out at 0, 8 and $A0.
     const asFields: Record<number, TypeField> = Object.fromEntries(
-      Object.entries(type.fields).map(([offset, field]) => [
-        Number(offset),
-        { ...field, id: field.id! },
-      ])
+      type.fields.map((field) => [field.offset, { ...field, id: field.id! }])
     );
     if (!before) {
       ops.push({
@@ -361,14 +362,13 @@ export function diffProjects(from: Project, to: Project): Op[] {
     // offset that moved. `field.add`/`set`/`remove` are what a caller who holds
     // an id uses; both land in the same place.
     const fields: Record<number, TypeField | null> = {};
-    for (const offset of new Set([
-      ...Object.keys(before.fields),
-      ...Object.keys(type.fields),
-    ])) {
-      const was = before.fields[offset];
-      const now = type.fields[offset];
+    const wasAt = new Map(before.fields.map((f) => [f.offset, f] as const));
+    const nowAt = new Map(type.fields.map((f) => [f.offset, f] as const));
+    for (const offset of new Set([...wasAt.keys(), ...nowAt.keys()])) {
+      const was = wasAt.get(offset);
+      const now = nowAt.get(offset);
       if (JSON.stringify(was) === JSON.stringify(now)) continue;
-      fields[Number(offset)] = now ? { ...now, id: now.id! } : null;
+      fields[offset] = now ? { ...now, id: now.id! } : null;
     }
     ops.push({
       op: "type.set",

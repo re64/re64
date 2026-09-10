@@ -311,3 +311,107 @@ describe("a binding is keyed by its site", () => {
     expect(usesOf(a)[0].constant).toBe(usesOf(b)[0].constant);
   });
 });
+
+describe("a field keeps its identity and its parts merge", () => {
+  /**
+   * **Two defects with one cause: the storage did not implement the identity
+   * its verbs promised.**
+   *
+   * Fields were keyed by **offset**, argued on the grounds that two cannot share
+   * one. True of a single writer. Under two it made a move a delete plus a
+   * create, so moving one field to two different offsets produced *two entries
+   * carrying one id* — and `field.remove` then took one away and left the other
+   * in the document.
+   *
+   * And a field was a plain object at that key, so `field.set` wrote the whole
+   * of it: a rename and a description edit made the later win over a property it
+   * never read. That is the same defect `claim.set` had, one level down.
+   *
+   * Adding `field.add` / `field.set` / `field.remove` did not fix either. The
+   * verbs were built on a shape that could not honour them, which is the review's
+   * thesis in miniature.
+   */
+  const WITH_TYPE: Project = {
+    layers: [{ id: "lay_a", type: "prg", path: "game.prg" }],
+    types: [
+      {
+        id: "typ_a",
+        name: "Sprite",
+        size: 4,
+        fields: [{ id: "fld_a", offset: 0, name: "old", type: "u8", description: "old" }],
+      },
+    ],
+  };
+
+  const pair = (): [CrdtDoc, CrdtDoc] => {
+    const a = docFromProject(WITH_TYPE);
+    a.clientID = 1;
+    const b = docFromProject(WITH_TYPE);
+    b.clientID = 2;
+    return [a, b];
+  };
+
+  const fieldsOf = (doc: CrdtDoc) => projectFromDoc(doc).types![0].fields;
+
+  it("keeps a rename and a description written at the same time", () => {
+    const [a, b] = pair();
+    applyOpToDoc(a, { op: "field.set", typeId: "typ_a", id: "fld_a", fields: { name: "renamed" } });
+    applyOpToDoc(b, {
+      op: "field.set",
+      typeId: "typ_a",
+      id: "fld_a",
+      fields: { description: "described" },
+    });
+    syncAll(a, b);
+
+    for (const doc of [a, b]) {
+      const [field] = fieldsOf(doc);
+      expect(field.name).toBe("renamed");
+      expect(field.description).toBe("described");
+    }
+  });
+
+  it("stays one field when two peers move it to different offsets", () => {
+    const [a, b] = pair();
+    applyOpToDoc(a, { op: "field.set", typeId: "typ_a", id: "fld_a", fields: { offset: 1 } });
+    applyOpToDoc(b, { op: "field.set", typeId: "typ_a", id: "fld_a", fields: { offset: 2 } });
+    syncAll(a, b);
+
+    const held = fieldsOf(a).filter((f) => f.id === "fld_a");
+    expect(held).toHaveLength(1);
+    // One of the two offsets, whichever the merge settled on — the point is
+    // that there is one field, not which offset won.
+    expect([1, 2]).toContain(held[0].offset);
+
+    // And removing it by that id removes it, rather than leaving a twin.
+    applyOpToDoc(a, { op: "field.remove", typeId: "typ_a", id: "fld_a" });
+    expect(fieldsOf(a).filter((f) => f.id === "fld_a")).toHaveLength(0);
+  });
+
+  it("keeps two fields that two peers put at one offset", () => {
+    // The trade, stated: offset keys made this merge into one field and lose a
+    // reader's work. Both stand now, and hygiene reports the pair — the same
+    // treatment two claims at one address get.
+    const [a, b] = pair();
+    applyOpToDoc(a, {
+      op: "field.add",
+      typeId: "typ_a",
+      id: "fld_x",
+      offset: 2,
+      name: "fromA",
+      type: "u8",
+    });
+    applyOpToDoc(b, {
+      op: "field.add",
+      typeId: "typ_a",
+      id: "fld_y",
+      offset: 2,
+      name: "fromB",
+      type: "u8",
+    });
+    syncAll(a, b);
+
+    const at2 = fieldsOf(a).filter((f) => f.offset === 2);
+    expect(at2.map((f) => f.name).sort()).toEqual(["fromA", "fromB"]);
+  });
+});

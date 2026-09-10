@@ -58,21 +58,33 @@ const alice = { userId: 'alice', label: 'Alice', sessionId: 'alice-session' };
   applyOpToDoc(a, { op: 'field.set', typeId: 'typ_a', id: 'fld_a', fields: { name: 'new name' } });
   applyOpToDoc(b, { op: 'field.set', typeId: 'typ_a', id: 'fld_a', fields: { description: 'new description' } });
   sync(a, b);
+  // RE-RUN NOTE (re64, 2026-09-10): fixed. A field was a plain object at a map
+  // key, so a whole-object write made the later of two edits win over a property
+  // it never read. Each field is a map of its own now, so a rename and a
+  // description touch different keys. Production test:
+  // `src/core/crdt/concurrency.test.ts` -> "a field keeps its identity and its
+  // parts merge".
   const result = projectFromDoc(a).types[0].fields[0];
-  assert.equal(result.name, 'old');
-  output('field partial edits lose rename', { actual: result });
+  assert.equal(result.name, 'new name');
+  assert.equal(result.description, 'new description');
+  output('FIXED: both concurrent partial edits to one field survive', { actual: result });
 }
 {
   const [a, b] = peers();
   applyOpToDoc(a, { op: 'field.set', typeId: 'typ_a', id: 'fld_a', fields: { offset: 1 } });
   applyOpToDoc(b, { op: 'field.set', typeId: 'typ_a', id: 'fld_a', fields: { offset: 2 } });
   sync(a, b);
-  const duplicated = projectFromDoc(a).types[0].fields;
-  assert.equal(Object.values(duplicated).filter(f => f.id === 'fld_a').length, 2);
+  // RE-RUN NOTE (re64, 2026-09-10): fixed. Fields were keyed by offset, so a
+  // move was a delete plus a create and two concurrent moves produced two
+  // entries carrying one id — after which `field.remove` took one away and left
+  // the other. Keyed by id, a move sets a number: one field, one of the two
+  // offsets, and nothing to leave behind.
+  const moved = projectFromDoc(a).types[0].fields;
+  assert.equal(moved.filter(f => f.id === 'fld_a').length, 1);
   applyOpToDoc(a, { op: 'field.remove', typeId: 'typ_a', id: 'fld_a' });
   const remaining = projectFromDoc(a).types[0].fields;
-  assert.equal(Object.values(remaining).filter(f => f.id === 'fld_a').length, 1);
-  output('concurrent field moves duplicate identity', { duplicated, afterRemove: remaining });
+  assert.equal(remaining.filter(f => f.id === 'fld_a').length, 0);
+  output('FIXED: a move keeps one field, and removing it removes it', { moved, afterRemove: remaining });
 }
 {
   const f = fixture({ ...base, layers: [{ id: 'lay_a', type: 'prg', path: 'review.prg' }], constants: [{ id: 'cst_a', name: 'ONE', value: '$01' }, { id: 'cst_b', name: 'WHITE', value: '$01' }] });

@@ -33,6 +33,7 @@ import {
   projectRegionsToRegions,
   projectClaims,
   retiredClaimIds,
+  fieldsOfType,
   ProjectType,
   ProjectTarget,
   targetLinks,
@@ -351,18 +352,25 @@ export function projectTypes(project: Project): TypeIndex {
       name: declared.name,
       size: typeof declared.size === "string" ? parseProjectAddress(declared.size) : declared.size,
       ...(declared.unit === undefined ? {} : { unit: declared.unit }),
+      // Keyed by offset for *layout* — walking a record is an offset question —
+      // and the document keys them by id, which is the identity question. Two
+      // fields at one offset both stand in the document; the later one wins the
+      // layout here and hygiene reports the pair, which is the same shape two
+      // claims at one address have.
       fields: Object.fromEntries(
-        Object.entries(declared.fields).map(([offset, field]) => [
-          Number(offset),
-          {
-            name: field.name,
-            // Unparseable is not an error here: a field naming a type that has
-            // gone renders its bytes, exactly as a dangling constant renders
-            // the literal. Hygiene reports it; loading does not refuse.
-            type: resolveFieldType(field.type, project.types ?? [], project.constants ?? []),
-            ...(field.description === undefined ? {} : { description: field.description }),
-          },
-        ])
+        fieldsOfType(declared)
+          .sort((a, b) => a.offset - b.offset)
+          .map((field) => [
+            field.offset,
+            {
+              name: field.name,
+              // Unparseable is not an error here: a field naming a type that has
+              // gone renders its bytes, exactly as a dangling constant renders
+              // the literal. Hygiene reports it; loading does not refuse.
+              type: resolveFieldType(field.type, project.types ?? [], project.constants ?? []),
+              ...(field.description === undefined ? {} : { description: field.description }),
+            },
+          ])
       ),
     });
   }

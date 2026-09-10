@@ -369,10 +369,24 @@ one record both survive. Field types: `u8`, `i8`, `u16`, `u16be`,
 `ptr`, `ptrbe`, `char(n)`, `char(n,encoding)`, `bytes(n)`, or another type's
 name. How many records a claim holds is `extent / size`, derived.
 
-**A field is an entity, not an attribute of one.** It has an id, and
-`field.add` / `field.set` / `field.remove` address it by that id the way every
-other entity is addressed — including a move, which rewrites the offset key and
-keeps the id, so the description survives. `type.set` therefore never carries
+**A field is an entity, not an attribute of one** — and the *storage* had to say
+so too, which took two goes. It has an id, and `field.add` / `field.set` /
+`field.remove` address it by that id. The document keys fields by that id and
+each field is a map of its own, so a move sets a number and two readers editing
+different properties of one field both survive.
+
+The first attempt kept the offset as the key and added the verbs on top. Under
+one writer that looks identical; under two it is not, and the Codex review found
+both halves. A move was still a delete plus a create, so two peers moving one
+field to different offsets produced **two entries carrying one id** — after which
+`field.remove` took one away and left the other. And a field was a plain object
+at its key, so `field.set` wrote the whole of it and a rename lost to a
+concurrent description edit. Verbs on a shape that cannot honour them.
+
+**Two fields at one offset both stand**, and hygiene reports the pair. Offset
+keys made that case merge into one field and silently lose a reader's work; it is
+now the same shape as two claims at one address, which this model keeps rather
+than prevents. `type.set` therefore never carries
 `fields`: it names the type's own name, size and unit and leaves the children
 alone. Editing a record by resending its whole field list is how one writer's
 new field disappears when another writer resends a list minted before it, and

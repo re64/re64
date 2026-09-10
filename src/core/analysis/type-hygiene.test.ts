@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import { loadProjectFile } from "../../node-files.js";
 import { analyzeProgram } from "./program.js";
+import { ProjectType } from "../project/project.js";
 import { parseProject } from "../project/project.js";
 
 /**
@@ -25,11 +26,22 @@ function withProject(mutate: (p: ReturnType<typeof parseProject>) => void) {
   }
 }
 
-const zone = (fields: Record<string, { name: string; type: string }>) => ({
+/**
+ * A `Zone` layout, written the way these tests read best: by offset.
+ *
+ * Fields are a list keyed by id in the model now, so the offset becomes the
+ * property it always described. Keeping the offset in the *fixture* is the point
+ * — a layout is read by where things sit.
+ */
+const zone = (fields: Record<string, { name: string; type: string }>): ProjectType => ({
   id: "typ_zone",
   name: "Zone",
   size: 200,
-  fields,
+  fields: Object.entries(fields).map(([offset, field], index) => ({
+    ...field,
+    id: `fld_${index}`,
+    offset: Number(offset),
+  })),
 });
 
 describe("what a record layout can be wrong about", () => {
