@@ -8,6 +8,7 @@ import {
   docFromUpdates,
   emptyDoc,
   encodeDoc,
+  migrateDoc,
   projectFromDoc,
   squashUpdates,
   stateVector,
@@ -368,5 +369,68 @@ describe("comments in the document", () => {
   it("leaves a layer with no comments without the key", () => {
     const bare = { name: "t", layers: [{ id: "lay_a", type: "prg" as const, path: "g.prg" }] };
     expect(projectFromDoc(docFromProject(bare)).layers[0].comments).toBeUndefined();
+  });
+});
+
+describe("migrating a stored document's bindings", () => {
+  /**
+   * The shape a `.re64db` written before bindings were keyed by site holds:
+   * uses keyed by use id. `docFromProject` never sees one — a store restores a
+   * snapshot and its updates directly — so an upgraded project kept the R4
+   * behaviour exactly until the stored map itself was rekeyed.
+   */
+  const legacy = () => {
+    const doc = emptyDoc();
+    const layer = new Y.Map<unknown>();
+    doc.getArray<Y.Map<unknown>>("layers").push([layer]);
+    layer.set("id", "lay_a");
+    layer.set("type", "prg");
+    layer.set("path", "g.prg");
+    const mk = (o: Record<string, unknown>) => {
+      const m = new Y.Map<unknown>();
+      for (const [k, v] of Object.entries(o)) m.set(k, v);
+      return m;
+    };
+    const uses = new Y.Map<unknown>();
+    layer.set("constantUses", uses);
+    uses.set("cst_u1", mk({ id: "cst_u1", address: "$8000", constant: "cst_a" }));
+    uses.set("cst_u0", mk({ id: "cst_u0", address: "$8000", constant: "cst_b" }));
+    uses.set("cst_u2", mk({ id: "cst_u2", address: "$8010", constant: "cst_b" }));
+    const labelUses = new Y.Map<unknown>();
+    layer.set("labelUses", labelUses);
+    labelUses.set("lbl_u1", mk({ id: "lbl_u1", address: "$8004", label: "clm_1" }));
+    return doc;
+  };
+  const constantsOf = (doc: Y.Doc) =>
+    (projectFromDoc(doc).layers[0].constantUses ?? []).map((u) => `${u.address}=${u.constant}`).sort();
+
+  it("keys each use by its site, and where two shared one keeps the last id", () => {
+    const doc = legacy();
+    expect(migrateDoc(doc)).toBe(true);
+    // `cst_u1` sorts after `cst_u0`, and was the one the loaded index showed.
+    expect(constantsOf(doc)).toEqual(["$8000=cst_a", "$8010=cst_b"]);
+    expect(projectFromDoc(doc).layers[0].labelUses).toEqual([
+      { id: "lbl_u1", address: "$8004", label: "clm_1" },
+    ]);
+    const keys = [
+      ...(doc.getArray<Y.Map<unknown>>("layers").get(0).get("constantUses") as Y.Map<unknown>).keys(),
+    ].sort();
+    expect(keys).toEqual(["$8000", "$8010"]);
+  });
+
+  it("takes an unbind stored without an address, by the id it carries", () => {
+    const doc = legacy();
+    migrateDoc(doc);
+    applyOpToDoc(doc, { op: "constantUse.unbind", id: "cst_u2", layerId: "lay_a" });
+    expect(constantsOf(doc)).toEqual(["$8000=cst_a"]);
+    // And one naming an id nothing holds does nothing, rather than guessing.
+    applyOpToDoc(doc, { op: "constantUse.unbind", id: "cst_u0", layerId: "lay_a" });
+    expect(constantsOf(doc)).toEqual(["$8000=cst_a"]);
+  });
+
+  it("moves nothing twice", () => {
+    const doc = legacy();
+    migrateDoc(doc);
+    expect(migrateDoc(doc)).toBe(false);
   });
 });

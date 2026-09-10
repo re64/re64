@@ -229,3 +229,60 @@ describe("a binding's inverse restores what was at the site", () => {
     expect(roundTrips(fresh, withConstants)).toBe(true);
   });
 });
+
+describe("the text writers key a binding by its site under either spelling", () => {
+  /**
+   * A use may spell its address `32768` or `"$8000"` — both are legal in a file
+   * — and the text writers compared the spellings. So an existing use at the
+   * number and a bind at the hex were two sites to them, and one to the
+   * document: the two adapters disagreed again, one level down from where they
+   * had just been made to agree.
+   */
+  const withNumericUse = formatProject(
+    parseProject(`{
+  "name": "Test",
+  "layers": [{
+    "id": "lay_a", "type": "prg", "path": "game.prg",
+    "constantUses": [
+      { "id": "cst_old", "address": 32768, "constant": "cst_a" },
+      { "id": "cst_dup", "address": "$8000", "constant": "cst_b" }
+    ]
+  }],
+  "constants": [
+    { "id": "cst_a", "name": "ONE", "value": "$01" },
+    { "id": "cst_b", "name": "WHITE", "value": "$01" }
+  ]
+}
+`)
+  );
+  const usesIn = (text: string) =>
+    (parseProject(text).layers[0].constantUses ?? []).map((u) => `${u.id}:${u.constant}`);
+
+  it("replaces every use at the site, however each spelled it", () => {
+    const bound = applyOp(withNumericUse, {
+      op: "constantUse.bind",
+      id: "cst_new",
+      layerId: "lay_a",
+      address: 0x8000,
+      constantId: "cst_b",
+    });
+    expect(usesIn(bound)).toEqual(["cst_new:cst_b"]);
+  });
+
+  it("clears the site by number, and by id when the operation predates sites", () => {
+    const cleared = applyOp(withNumericUse, {
+      op: "constantUse.unbind",
+      id: "cst_whatever",
+      layerId: "lay_a",
+      address: 0x8000,
+    });
+    expect(usesIn(cleared)).toEqual([]);
+
+    const byId = applyOp(withNumericUse, {
+      op: "constantUse.unbind",
+      id: "cst_old",
+      layerId: "lay_a",
+    });
+    expect(usesIn(byId)).toEqual(["cst_dup:cst_b"]);
+  });
+});

@@ -58,6 +58,7 @@ import {
   applyUpdate,
   docFromProject,
   docFromUpdates,
+  migrateDoc,
   encodeDoc,
   projectFromDoc,
   programFromDoc,
@@ -136,11 +137,19 @@ export class ProjectStore {
     this.doc.on("update", (update: Uint8Array, origin: unknown) => {
       if (origin === "load") return;
       this.changed++;
-      this.record(update, origin);
+      // A migration is appended like any change — a later operation names
+      // items it created, and a load that cannot find them holds that operation
+      // pending for ever — but it is nobody's action, so it is not recorded as
+      // one and does not reach the changes feed.
+      if (origin !== "migrate") this.record(update, origin);
       this.storage.appendUpdate(update);
       this.dirty = true;
       for (const listener of this.listeners) listener(update, origin);
     });
+
+    // After the observer, so that it is persisted; see `migrateDoc` for why a
+    // migration that is not is worse than none.
+    if (migrateDoc(this.doc)) this.lastProjection = projectFromDoc(this.doc);
 
     return this.doc;
   }

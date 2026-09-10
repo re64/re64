@@ -599,6 +599,60 @@ export function docFromUpdates(updates: readonly Uint8Array[]): Y.Doc {
   return doc;
 }
 
+/**
+ * Bring a stored document up to the shape the operations expect.
+ *
+ * **A document written before bindings were keyed by site holds them keyed by
+ * use id.** `docFromProject` never sees such a document — a store restores a
+ * snapshot plus its updates directly — so rekeying the text import did nothing
+ * for it, and an upgraded project kept the R4 behaviour exactly: binding again
+ * added a second entry beside the id-keyed one, and unbinding removed the new
+ * entry and left the old.
+ *
+ * Each use moves under the site it names. Where a legacy map holds two at one
+ * site — the accumulation this change repairs — **the use whose id sorts last
+ * is kept**, because that is the one every view was already showing: the loaded
+ * index kept whichever sorted last by id. The migration preserves the answer
+ * readers had rather than changing it, and it is the only deterministic choice
+ * available, since the records carry no time. Idempotent; a use already under
+ * its site is not touched.
+ *
+ * Returns whether anything moved, because the caller has to persist a
+ * migration that did — a later operation names items this created, and if they
+ * are not in the log the next load cannot find them.
+ */
+export function migrateDoc(doc: Y.Doc): boolean {
+  let moved = false;
+  doc.transact(() => {
+    for (const layer of doc.getArray<Y.Map<unknown>>(ROOT_LAYERS).toArray()) {
+      for (const root of ["constantUses", "labelUses"] as const) {
+        const uses = layer.get(root);
+        if (!(uses instanceof Y.Map)) continue;
+        const idOf = (v: unknown): string =>
+          String(v instanceof Y.Map ? v.get("id") : ((v as { id?: string })?.id ?? ""));
+        const legacy = [...uses.entries()]
+          .filter(([key, value]) => {
+            if (!(value instanceof Y.Map)) return true;
+            const address = value.get("address") as number | string | undefined;
+            return address === undefined || key !== siteKey(address);
+          })
+          // Set in id order, so where two share a site the last id wins.
+          .sort(([, a], [, b]) => (idOf(a) < idOf(b) ? -1 : idOf(a) > idOf(b) ? 1 : 0));
+        for (const [key, value] of legacy) {
+          const held = (value instanceof Y.Map ? value.toJSON() : value) as Record<string, unknown>;
+          uses.delete(key);
+          if (held.address === undefined) continue;
+          const inner = new Y.Map<unknown>();
+          for (const [k, v] of Object.entries(held)) if (v !== undefined) inner.set(k, v);
+          uses.set(siteKey(held.address as number | string), inner);
+          moved = true;
+        }
+      }
+    }
+  }, "migrate");
+  return moved;
+}
+
 /** The whole document as one update, for sending or storing. */
 export function encodeDoc(doc: Y.Doc): Uint8Array {
   return Y.encodeStateAsUpdate(doc);

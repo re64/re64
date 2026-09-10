@@ -3,7 +3,13 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileStorage, ProjectStorage, ProjectStore, SqliteStorage, pathsFor } from "./index.js";
-import { applyOpToDoc, docFromProject, encodeDoc, projectFromDoc } from "../core/crdt/index.js";
+import {
+  applyOpToDoc,
+  docFromProject,
+  encodeDoc,
+  migrateDoc,
+  projectFromDoc,
+} from "../core/crdt/index.js";
 import { diffProjects, parseProject } from "../core/index.js";
 
 const PROJECT = `{
@@ -701,6 +707,127 @@ describe("a socket update is one action, and each inverse undoes its own op", ()
       expect(new Set(log.map((c) => c.changeset)).size).toBe(1);
     } finally {
       f.close();
+    }
+  });
+});
+
+describe("a document stored before bindings were keyed by site", () => {
+  /**
+   * **Rekeying the text import never reached a stored document.** A store
+   * restores a snapshot plus its updates through `docFromUpdates`, so a
+   * `.re64db` written yesterday still held uses keyed by use id — and an
+   * upgraded project kept the R4 behaviour exactly: binding again added a second
+   * entry beside the id-keyed one, and unbinding removed the new entry and left
+   * the old.
+   *
+   * And its **history** was written in the old shape too. An inverse stored for
+   * a bind was `unbind {id, layerId}` with no address, and the rows are JSON
+   * that nothing rewrites, so undo formatted an address that was not there and
+   * threw. The document can be migrated; the history has to be understood.
+   *
+   * Bytes as `main` wrote them at `c0eeb4b`, cross-checked against its
+   * `docFromProject`: uses keyed by id as nested maps. Two constants at `$8000`
+   * — the accumulation itself — one at `$8004` for labels, and a tail update
+   * adding one at `$8010`.
+   */
+  const SNAPSHOT = Buffer.from(
+    "ARa1/Z3LCAAHAQZsYXllcnMBKAC1/Z3LCAACaWQBdwVsYXlfYSgAtf2dywgABHR5cGUBdwVieXRlcygAtf2dywgAB2FkZHJlc3MBdwUkODAwMCgAtf2dywgABWJ5dGVzAXcQYTkwMTYwMDBhOTAyNjAwMCcAtf2dywgABmxhYmVscwEnALX9ncsIAAdyZWdpb25zAScAtf2dywgACGNvbW1lbnRzAScAtf2dywgADGNvbnN0YW50VXNlcwEnALX9ncsICAZjc3RfdTABKAC1/Z3LCAkCaWQBdwZjc3RfdTAoALX9ncsICQdhZGRyZXNzAXcFJDgwMDAoALX9ncsICQhjb25zdGFudAF3BWNzdF9iJwC1/Z3LCAgGY3N0X3UxASgAtf2dywgNAmlkAXcGY3N0X3UxKAC1/Z3LCA0HYWRkcmVzcwF3BSQ4MDAwKAC1/Z3LCA0IY29uc3RhbnQBdwVjc3RfYScAtf2dywgACWxhYmVsVXNlcwEnALX9ncsIEQZsYmxfdTEBKAC1/Z3LCBICaWQBdwZsYmxfdTEoALX9ncsIEgdhZGRyZXNzAXcFJDgwMDQoALX9ncsIEgVsYWJlbAF3BWNsbV8xAA==",
+    "base64"
+  );
+  const LATER = Buffer.from(
+    "AQS1/Z3LCBYnALX9ncsICAZjc3RfdTIBKAC1/Z3LCBYCaWQBdwZjc3RfdTIoALX9ncsIFgdhZGRyZXNzAXcFJDgwMTAoALX9ncsIFghjb25zdGFudAF3BWNzdF9iAA==",
+    "base64"
+  );
+  const text = JSON.stringify({
+    name: "legacy",
+    layers: [{ id: "lay_a", type: "bytes", address: "$8000", bytes: "a9016000a9026000" }],
+    constants: [
+      { id: "cst_a", name: "ONE", value: "$01" },
+      { id: "cst_b", name: "WHITE", value: "$01" },
+    ],
+    claims: [{ id: "clm_1", at: "$8004", name: "Start", root: "routine", origin: "user" }],
+  });
+
+  const bindings = (store: ProjectStore) => {
+    const layer = projectFromDoc(store.document()).layers[0];
+    return {
+      constants: (layer.constantUses ?? []).map((u) => `${u.address}=${u.constant}`).sort(),
+      labels: (layer.labelUses ?? []).map((u) => `${u.address}=${u.label}`).sort(),
+    };
+  };
+
+  const opened = () => {
+    const dir = mkdtempSync(join(tmpdir(), "re64-legacy-uses-"));
+    const storage = new SqliteStorage(join(dir, "p.re64db"), "p");
+    storage.initialize(text, Date.now(), "legacy");
+    storage.writeSnapshot({ seqUpto: 0, update: new Uint8Array(SNAPSHOT) });
+    storage.appendUpdate(new Uint8Array(LATER));
+    return { dir, storage, store: new ProjectStore(storage) };
+  };
+
+  it("keys every use by its site, keeping the reading views already showed", () => {
+    const f = opened();
+    try {
+      // Two were at $8000; the one whose id sorts last is the one the loaded
+      // index had been showing, so it is the one kept.
+      expect(bindings(f.store)).toEqual({
+        constants: ["$8000=cst_a", "$8010=cst_b"],
+        labels: ["$8004=clm_1"],
+      });
+
+      // Rebinding replaces and unbinding clears — the R4 contract, on an
+      // upgraded project.
+      f.store.runOps(
+        [{ op: "constantUse.bind", id: "cst_new", layerId: "lay_a", address: 0x8000, constantId: "cst_b" }],
+        "alice",
+        1
+      );
+      expect(bindings(f.store).constants).toEqual(["$8000=cst_b", "$8010=cst_b"]);
+      f.store.runOps(
+        [{ op: "constantUse.unbind", id: "cst_new", layerId: "lay_a", address: 0x8000 }],
+        "alice",
+        2
+      );
+      expect(bindings(f.store).constants).toEqual(["$8010=cst_b"]);
+
+      // Reopened: the migration was persisted, so the edits that named the
+      // migrated items are found again.
+      const again = new ProjectStore(f.storage);
+      expect(bindings(again).constants).toEqual(["$8010=cst_b"]);
+      expect(migrateDoc(again.document())).toBe(false);
+    } finally {
+      f.storage.close();
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+
+  it("undoes and redoes history whose inverses carry no address", () => {
+    const f = opened();
+    try {
+      f.store.document();
+      // A row as main recorded it: the bind that produced `cst_u1`, with the
+      // inverse main computed for it — an unbind by id, no site.
+      f.storage.appendOps([
+        {
+          op: { op: "constantUse.bind", id: "cst_u1", layerId: "lay_a", address: 0x8000, constantId: "cst_a" },
+          inverse: { op: "constantUse.unbind", id: "cst_u1", layerId: "lay_a" },
+          author: "alice",
+          session: "ses_old",
+          at: 1,
+          changeset: "cs_old",
+        },
+      ]);
+
+      const undone = f.store.undo("alice", "ses_old");
+      expect(undone.undone).toBeTruthy();
+      expect(bindings(f.store).constants).toEqual(["$8010=cst_b"]);
+
+      const redone = f.store.redo("alice", "ses_old");
+      expect(redone.undone).toBeTruthy();
+      expect(bindings(f.store).constants).toEqual(["$8000=cst_a", "$8010=cst_b"]);
+    } finally {
+      f.storage.close();
+      rmSync(f.dir, { recursive: true, force: true });
     }
   });
 });

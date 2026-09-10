@@ -129,7 +129,7 @@ export interface LabelUnbindOp {
   id: string;
   layerId: string;
   /** The site, which is what a binding is keyed by. See `ConstantUnbindOp`. */
-  address: number;
+  address?: number;
 }
 
 /** Declare that a name exists for a value. **Always adds.** */
@@ -397,8 +397,14 @@ export interface ConstantUnbindOp {
    * Carried because unbinding is "nothing means a constant *here*" — an id
    * identifies which use record happened to be written, and there is only ever
    * one per site now, so the site is the honest handle.
+   *
+   * **Optional only for history.** Every operation written since the site
+   * became the key carries it. The ones stored before — forward ops for redo
+   * and inverses for undo, as JSON rows that nothing rewrites — do not, and
+   * they are resolved through the use id against the state they are applied
+   * to. A missing address on a fresh operation is a bug, not a spelling.
    */
-  address: number;
+  address?: number;
 }
 
 /**
