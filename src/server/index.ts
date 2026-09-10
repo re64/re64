@@ -20,6 +20,7 @@ import {
   ProjectStore,
   SqliteStorage,
   pathsFor,
+  recordedHash,
 } from "../store/index.js";
 import { openDatabase } from "../store/db.js";
 import { diffProjects, parseProject } from "../core/index.js";
@@ -516,16 +517,37 @@ export function startServer(options: ServerOptions): RunningServer {
         // browser actually fetches bytes from. The name table is the fallback
         // for a file uploaded but not yet recorded, which is a real window
         // because the upload and the `file.add` are two steps.
-        const recorded =
-          storage instanceof SqliteStorage
-            ? projectFromDoc(sync.store.document()).files?.find((f) => f.name === requested)?.hash
-            : undefined;
+        //
+        // The same rule the loader uses, from the same function, so the two
+        // cannot disagree about whether a record exists — and a name that will
+        // not normalise is the escape `fromDisk` refuses, refused the same way.
+        let recorded: string | undefined;
+        try {
+          recorded =
+            storage instanceof SqliteStorage
+              ? recordedHash(projectFromDoc(sync.store.document()).files, requested)
+              : undefined;
+        } catch {
+          return sendJson(res, 403, { error: "path escapes the project directory" });
+        }
+        // **A record is not fallen past.** The name table answers only when the
+        // document has no entry; a recorded hash whose bytes are not held is
+        // missing content, and serving whatever the name table has under a tag
+        // naming the recorded hash would be a 304 for bytes nobody ever
+        // recorded.
         const bytes =
           storage instanceof SqliteStorage
-            ? (recorded ? storage.blobByHash(recorded) : undefined) ?? storage.blob(requested)
+            ? recorded !== undefined
+              ? storage.blobByHash(recorded)
+              : storage.blob(requested)
             : fromDisk(projectPath, requested);
         if (bytes === undefined) {
-          return sendJson(res, 404, { error: `no such file: ${requested}` });
+          return sendJson(res, 404, {
+            error:
+              recorded !== undefined
+                ? `"${requested}" is recorded as ${recorded} and those bytes are not held`
+                : `no such file: ${requested}`,
+          });
         }
         if (bytes === FORBIDDEN) {
           return sendJson(res, 403, { error: "path escapes the project directory" });

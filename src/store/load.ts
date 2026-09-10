@@ -20,6 +20,7 @@ import {
   parseProject,
 } from "../core/index.js";
 import { SqliteStorage } from "./sqlite-storage.js";
+import { normalizeBlobName } from "./blobs.js";
 
 /**
  * The bytes a project's files hold, with the **document** deciding which.
@@ -39,11 +40,20 @@ export function databaseFileBytes(
   storage: SqliteStorage,
   files: readonly { name: string; hash: string }[] = []
 ): FileBytes {
-  const hashOf = new Map(files.map((f) => [f.name, f.hash]));
   return (name) => {
-    const hash = hashOf.get(name);
-    const bytes = hash ? storage.blobByHash(hash) : storage.blob(name);
+    const hash = recordedHash(files, name);
+    const bytes = hash !== undefined ? storage.blobByHash(hash) : storage.blob(name);
     if (!bytes) {
+      // Two different absences. A name the document records whose bytes are not
+      // held is content this project promised and cannot produce — saying "no
+      // file called" would send somebody looking for a typo.
+      if (hash !== undefined) {
+        throw new Error(
+          `This project records "${name}" as ${hash.slice(0, 12)}… and does not hold ` +
+            `those bytes. The recorded content must be uploaded again, or the record ` +
+            `pointed at what is held.`
+        );
+      }
       const held = storage.blobNames();
       throw new Error(
         `This project holds no file called "${name}".` +
@@ -52,6 +62,32 @@ export function databaseFileBytes(
     }
     return bytes;
   };
+}
+
+/**
+ * The hash the document records for a name, however the name is spelled.
+ *
+ * `storage.blob` normalises the name it is given and the document lookup did
+ * not, so `./game.prg` walked past the recorded entry for `game.prg` and read
+ * the mutable name table instead — the bypass this whole change closes, open
+ * again under a different spelling. Both sides are normalised here, and this is
+ * the one place that decides whether a document entry exists.
+ */
+export function recordedHash(
+  files: readonly { name: string; hash: string }[] | undefined,
+  name: string
+): string | undefined {
+  const want = normalizeBlobName(name);
+  return files?.find((f) => normalizedOrRaw(f.name) === want)?.hash;
+}
+
+/** A recorded name that will not normalise is matched as written rather than refused. */
+function normalizedOrRaw(name: string): string {
+  try {
+    return normalizeBlobName(name);
+  } catch {
+    return name;
+  }
 }
 
 export function loadProjectFromDatabase(

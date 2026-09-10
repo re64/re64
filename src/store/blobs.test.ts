@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hashBytes, normalizeBlobName } from "./blobs.js";
 import { SqliteStorage } from "./sqlite-storage.js";
+import { databaseFileBytes } from "./load.js";
+import { parseProject } from "../core/index.js";
 import { importProject } from "./transfer.js";
 import { loadProjectFromDatabase } from "./load.js";
 import { analyze } from "../core/index.js";
@@ -138,6 +140,59 @@ describe("a project that carries its own binaries", () => {
       "utf-8"
     );
     expect(() => importProject(projectPath)).toThrow();
+  });
+
+  it("keeps the file records an import did not put there", () => {
+    // **`wanted` is the layer sources, and the registry is not.** A capture,
+    // or anything else the project recorded, is not a layer source — and
+    // assigning `files` from the layer sources threw those records away on
+    // import, silently, with the file still beside the project.
+    const projectPath = join(dir, "gridrunner.re64");
+    const original = JSON.parse(
+      readFileSync("assets/gridrunner/gridrunner.re64", "utf-8")
+    ) as { files?: unknown[] };
+    original.files = [{ name: "capture.png", hash: "ab".repeat(32), size: 3 }];
+    writeFileSync(projectPath, JSON.stringify(original), "utf-8");
+    copyFileSync("assets/gridrunner/gridrunner.prg", join(dir, "gridrunner.prg"));
+
+    const { databasePath, projectId } = importProject(projectPath);
+    const storage = new SqliteStorage(databasePath, projectId);
+    try {
+      const files = parseProject(storage.readText()).files ?? [];
+      expect(files.map((f) => f.name)).toEqual(["capture.png", "gridrunner.prg"]);
+      // The record it carried is as it carried it; the one it lacked is real.
+      expect(files[0].hash).toBe("ab".repeat(32));
+      expect(files[1].hash).toBe(storage.blobHash("gridrunner.prg"));
+    } finally {
+      storage.close();
+    }
+  });
+
+  it("resolves a recorded name however it is spelled, and never past its record", () => {
+    const projectPath = join(dir, "gridrunner.re64");
+    copyFileSync("assets/gridrunner/gridrunner.re64", projectPath);
+    copyFileSync("assets/gridrunner/gridrunner.prg", join(dir, "gridrunner.prg"));
+    const { databasePath, projectId } = importProject(projectPath);
+    const storage = new SqliteStorage(databasePath, projectId);
+    try {
+      const files = parseProject(storage.readText()).files ?? [];
+      // Uploaded over the name and not recorded: the window the name table
+      // exists for, and one a different spelling must not walk through.
+      storage.putBlob("gridrunner.prg", new Uint8Array([1, 2, 3]));
+      const read = databaseFileBytes(storage, files);
+      expect(read("gridrunner.prg").length).toBe(4098);
+      expect(read("./gridrunner.prg").length).toBe(4098);
+
+      // Recorded, and the bytes gone: missing content, said as such — not the
+      // name table's bytes, and not "no file called".
+      storage.putBlob("gridrunner.prg", new Uint8Array([1, 2, 3]));
+      const stale = [{ name: "gridrunner.prg", hash: "0".repeat(64) }];
+      expect(() => databaseFileBytes(storage, stale)("gridrunner.prg")).toThrow(
+        /records "gridrunner\.prg" as 000000000000/
+      );
+    } finally {
+      storage.close();
+    }
   });
 
   it("says what it holds when asked for something else", () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer, RunningServer } from "./index.js";
@@ -90,6 +90,23 @@ describe("a server given a database", () => {
     });
     expect(stale.status).toBe(200);
     expect((await stale.arrayBuffer()).byteLength).toBe(4098);
+  });
+
+  it("resolves a recorded name however the URL spells it", async () => {
+    // `storage.blob` normalises the name and the document lookup did not, so
+    // `./gridrunner.prg` walked past the record and read the name table — the
+    // bypass this change closes, open again under a different spelling.
+    const storage = new SqliteStorage(databaseUnderTest, project);
+    try {
+      const before = await fetch(`${base}/api/blob?path=gridrunner.prg&project=${project}`);
+      storage.putBlob("gridrunner.prg", new Uint8Array([1, 2, 3, 4]));
+      const spelled = await fetch(`${base}/api/blob?path=${encodeURIComponent("./gridrunner.prg")}&project=${project}`);
+      expect(spelled.status).toBe(200);
+      expect((await spelled.arrayBuffer()).byteLength).toBe(4098);
+      expect(spelled.headers.get("etag")).toBe(before.headers.get("etag"));
+    } finally {
+      storage.close();
+    }
   });
 
   it("serves the bytes the document names, not the ones a name was last pointed at", async () => {
@@ -229,5 +246,37 @@ describe("a server given a database", () => {
 
     const after = (await (await fetch(`${base}/api/project?project=${project}`)).json()) as { raw: string };
     expect(after.raw).toContain("RenamedOverHttp");
+  });
+});
+
+describe("a recorded file whose bytes are not held", () => {
+  /**
+   * The route fell past the record to the name table, served whatever sat
+   * there, and labelled it with the recorded hash — so a client got a 304 for
+   * bytes nobody ever recorded. The loader had refused the same read. A
+   * recorded name with no bytes is missing content and is said as such.
+   */
+  it("is a missing-content error, not the name table's bytes under a false tag", async () => {
+    const own = mkdtempSync(join(tmpdir(), "re64-stale-record-"));
+    const projectPath = join(own, "gridrunner.re64");
+    const text = JSON.parse(readFileSync("assets/gridrunner/gridrunner.re64", "utf-8")) as {
+      files?: unknown[];
+    };
+    // Recorded as an earlier version of the file than the one on disk.
+    text.files = [{ name: "gridrunner.prg", hash: "0".repeat(64), size: 4098 }];
+    writeFileSync(projectPath, JSON.stringify(text), "utf-8");
+    copyFileSync("assets/gridrunner/gridrunner.prg", join(own, "gridrunner.prg"));
+    const { databasePath, projectId } = importProject(projectPath);
+
+    const stale = startServer({ projectPath: databasePath, port: 0, host: "127.0.0.1", quiet: true });
+    await stale.ready;
+    try {
+      const res = await fetch(`http://127.0.0.1:${stale.port}/api/blob?path=gridrunner.prg&project=${projectId}`);
+      expect(res.status).toBe(404);
+      expect(((await res.json()) as { error: string }).error).toMatch(/recorded as 0{64}/);
+    } finally {
+      await stale.close();
+      rmSync(own, { recursive: true, force: true });
+    }
   });
 });
