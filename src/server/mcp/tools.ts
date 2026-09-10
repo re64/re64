@@ -49,6 +49,28 @@ const asClaimInput = (c: ClaimArg): ClaimInput => {
  * writes, and every caller found out by being refused. A schema is exercised by
  * nothing but the wire, which is why that is where this was caught.
  */
+/**
+ * A whole number written the three ways this surface accepts, or nothing.
+ *
+ * **A complete match, not a prefix.** `parseInt` stops at the first character it
+ * cannot use and returns what it had, so `$8000+1` parsed as `$8000` and an
+ * `add_claim` for it succeeded — writing at an address the caller did not ask
+ * for. Arithmetic is not offered here, and a caller who wrote some is better
+ * told than quietly obeyed. Decimal fractions, trailing typos and an empty
+ * prefix all went the same way.
+ *
+ * Kept separate from `parsePlace`, which handles `screen[10,2]` and its
+ * bracketed relatives: that is a grammar, and mixing it into a numeric spelling
+ * is what would make arithmetic look supported.
+ */
+function wholeNumber(text: string): number | undefined {
+  const trimmed = text.trim();
+  if (/^\$[0-9a-fA-F]+$/.test(trimmed)) return parseInt(trimmed.slice(1), 16);
+  if (/^0[xX][0-9a-fA-F]+$/.test(trimmed)) return parseInt(trimmed.slice(2), 16);
+  if (/^\d+$/.test(trimmed)) return parseInt(trimmed, 10);
+  return undefined;
+}
+
 const address = z
   .union([z.string(), z.number()])
   .describe(
@@ -88,13 +110,9 @@ const address = z
       return z.NEVER;
     }
 
-    const parsed = text.startsWith("$")
-      ? parseInt(text.slice(1), 16)
-      : text.startsWith("0x")
-        ? parseInt(text.slice(2), 16)
-        : parseInt(text, 10);
+    const parsed = wholeNumber(text);
 
-    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 0xffff) {
+    if (parsed === undefined || parsed < 0 || parsed > 0xffff) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Not an address: ${value}` });
       return z.NEVER;
     }
@@ -114,16 +132,9 @@ const byte = z
   .union([z.number().int(), z.string()])
   .describe("A byte, as $1F, 0x1F, or decimal")
   .transform((value, ctx) => {
-    const parsed =
-      typeof value === "number"
-        ? value
-        : value.trim().startsWith("$")
-          ? parseInt(value.trim().slice(1), 16)
-          : value.trim().startsWith("0x")
-            ? parseInt(value.trim().slice(2), 16)
-            : parseInt(value.trim(), 10);
+    const parsed = typeof value === "number" ? value : wholeNumber(value);
 
-    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 0xff) {
+    if (parsed === undefined || !Number.isFinite(parsed) || parsed < 0 || parsed > 0xff) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Not a byte: ${value}` });
       return z.NEVER;
     }
@@ -135,7 +146,7 @@ const flag = z
   .union([z.number().int(), z.string()])
   .describe("0 or 1")
   .transform((value, ctx) => {
-    const parsed = typeof value === "number" ? value : parseInt(String(value).trim(), 10);
+    const parsed = typeof value === "number" ? value : wholeNumber(String(value));
     if (parsed !== 0 && parsed !== 1) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Not a flag: ${value}` });
       return z.NEVER;
