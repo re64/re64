@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +6,7 @@ import { FileStorage, ProjectStorage, ProjectStore, SqliteStorage, pathsFor } fr
 import {
   applyOpToDoc,
   docFromProject,
+  docFromUpdates,
   encodeDoc,
   migrateDoc,
   projectFromDoc,
@@ -1192,6 +1193,101 @@ describe("a failed write is not served", () => {
       // ...and one listener throwing does not cost the next one its update.
       expect(heard).toHaveLength(1);
     } finally {
+      storage.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("discards a listener's write that rolled back, and still delivers the outer one", () => {
+    // **Nesting and draining are different things, and one flag served both.**
+    // A listener's write made during the drain took the nested shortcut, so
+    // when its own transaction rolled back nothing cleaned up: the live document
+    // kept the rolled-back edit and the drain handed its queued update to every
+    // peer. Live, a receiving replica and a restart all have to agree.
+    const dir = mkdtempSync(join(tmpdir(), "re64-nested-fail-"));
+    const storage = new SqliteStorage(join(dir, "p.re64db"), "p");
+    storage.initialize(project, Date.now(), "commit");
+
+    // Fails only for the nested write, at its last durable step.
+    const failing = Object.create(storage) as SqliteStorage;
+    failing.appendOps = (changes) => {
+      if (JSON.stringify(changes).includes("RolledBackNested")) {
+        throw new Error("injected nested appendOps failure");
+      }
+      return SqliteStorage.prototype.appendOps.call(storage, changes);
+    };
+
+    const store = new ProjectStore(failing);
+    const before = encodeDoc(store.document());
+    const reported: unknown[] = [];
+    store.onPublishError = (error) => reported.push(error);
+
+    let wrote = false;
+    store.onUpdate(() => {
+      if (wrote) return;
+      wrote = true;
+      store.runOps(
+        [{ op: "claim.set", id: "clm_a", fields: { name: "RolledBackNested" } }],
+        "bob",
+        2
+      );
+    });
+    // A peer, receiving whatever is published.
+    const received: Uint8Array[] = [];
+    store.onUpdate((update) => received.push(update));
+
+    const namesIn = (doc: ReturnType<typeof docFromUpdates>) =>
+      (projectFromDoc(doc).claims ?? []).map((c) => c.name);
+
+    try {
+      expect(() =>
+        store.runOps([{ op: "claim.set", id: "clm_a", fields: { name: "CommittedOuter" } }], "alice", 1)
+      ).not.toThrow();
+      // The nested failure was a listener throwing on a committed write: reported.
+      expect(reported.map((e) => (e as Error).message)).toEqual(["injected nested appendOps failure"]);
+
+      // Live...
+      expect(namesIn(store.document())).toEqual(["CommittedOuter"]);
+      // ...what the peer was told...
+      expect(namesIn(docFromUpdates([before, ...received]))).toEqual(["CommittedOuter"]);
+      // ...and what a restart rebuilds.
+      expect(namesIn(new ProjectStore(storage).document())).toEqual(["CommittedOuter"]);
+    } finally {
+      storage.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a committed write when the error reporter throws as well", () => {
+    // The reporter is somebody else's code too. Unguarded, a listener throwing
+    // and the reporter throwing turned a durable write into an exception for
+    // the caller and cost the next listener its update.
+    const dir = mkdtempSync(join(tmpdir(), "re64-reporter-"));
+    const storage = new SqliteStorage(join(dir, "p.re64db"), "p");
+    storage.initialize(project, Date.now(), "commit");
+
+    const store = new ProjectStore(storage);
+    store.document();
+    store.onPublishError = () => {
+      throw new Error("error reporter failed");
+    };
+    store.onUpdate(() => {
+      throw new Error("injected listener failure");
+    });
+    const heard: unknown[] = [];
+    store.onUpdate(() => heard.push(1));
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      expect(() =>
+        store.runOps([{ op: "claim.set", id: "clm_a", fields: { name: "Committed" } }], "alice", 1)
+      ).not.toThrow();
+      expect(heard).toHaveLength(1);
+      expect(projectFromDoc(store.document()).claims![0].name).toBe("Committed");
+      expect(projectFromDoc(new ProjectStore(storage).document()).claims![0].name).toBe("Committed");
+      expect(quiet).toHaveBeenCalled();
+    } finally {
+      quiet.mockRestore();
       storage.close();
       rmSync(dir, { recursive: true, force: true });
     }
