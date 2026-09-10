@@ -76,15 +76,18 @@ import {
   unmarkFunctionOps,
 } from "../core/index.js";
 import {
+  applyOpToDoc,
+  applyUpdate,
   chatMessages,
+  encodeDoc,
   participants as participantsOf,
-  postChatMessage,
   projectFromDoc,
 } from "../core/crdt/index.js";
 import { runDecoder } from "../sandbox/run.js";
 import { renderTextWith } from "../sandbox/sync.js";
 import { databaseFileBytes } from "../store/load.js";
 import { CommentPlacement, TextEncoding, describeWarning } from "../core/index.js";
+import { MAX_MESSAGE_LENGTH } from "../core/crdt/chat.js";
 import { TypeField } from "../core/ops/types.js";
 import {
   Claim,
@@ -195,8 +198,51 @@ export interface Caller {
   sharedSession?: boolean;
 }
 
+/**
+ * A session's own copy of the document — the browser tab an agent does not have.
+ *
+ * **Reads are stable until this session pulls.** Anything a caller writes that
+ * has to be resolved — a name meaning an id, an ambiguity — resolves against
+ * *this*, never against whatever the server currently holds. The resolved
+ * operation carries ids and merges no matter what anybody else did, which is
+ * what the offline rule actually asks for: an operation whose correctness
+ * depends on having seen what everyone else did fails it.
+ *
+ * Only the inbox is deferred. A connected session has no reason to hold its own
+ * writes, so they apply here *and* propagate at once — there is no outbox and no
+ * offline write queue. "Add a constant, then use it" therefore batches, because
+ * the session knows what it just made.
+ *
+ * Freshness is not correctness. A session may never merge; its writes still
+ * converge. What it gets instead is duplicated work and two names for one
+ * routine, which is a state this model tolerates by design and hygiene reports.
+ */
+export interface SessionReplica {
+  /**
+   * Seeded from the room's document, then advanced only by this session.
+   *
+   * Typed off `ProjectStore` rather than as a `Y.Doc`, because naming Yjs here
+   * would put the library outside `src/core/crdt` — which is an invariant with
+   * a test behind it, and the reason this file has never known what a document
+   * *is*.
+   */
+  doc: ReturnType<ProjectStore["document"]>;
+  /** How far into the history this session has caught up. */
+  cursor: number;
+  /** Whose it is, so its own writes never read as waiting for it. */
+  session: string;
+}
+
 export interface Room {
   store: ProjectStore;
+  /**
+   * This session's copy, when the caller has one.
+   *
+   * Absent for the CLI and for tests, which are one participant with nobody to
+   * be out of step with — those read the room's document directly, and that is
+   * the same code path with the replica being the room.
+   */
+  replica?: SessionReplica;
   storage: SqliteStorage | FileStorage;
   projectId: string;
   projectPath: string;
@@ -839,7 +885,7 @@ export class Workspace {
       lastSeen: string;
     }[];
   } {
-    const found = participantsOf(this.room.store.document());
+    const found = participantsOf(this.reading());
     return {
       total: found.length,
       online: found.filter((p) => p.online).length,
@@ -1006,7 +1052,7 @@ export class Workspace {
     }[];
     layers: { id: string; name: string; type: string }[];
   } {
-    const project = projectFromDoc(this.room.store.document());
+    const project = projectFromDoc(this.reading());
     const byId = new Map(
       project.layers.filter((l) => l.id).map((l) => [l.id!, l] as const)
     );
@@ -1061,7 +1107,7 @@ export class Workspace {
     layers: readonly { layer: string; at?: number }[]
   ): { id: string; layer: string; at?: number }[] {
     const known = new Set(
-      projectFromDoc(this.room.store.document())
+      projectFromDoc(this.reading())
         .layers.filter((l) => l.id)
         .map((l) => l.id!)
     );
@@ -1130,7 +1176,7 @@ export class Workspace {
     // The *declared* project, not `loaded.project` — which is narrowed to the
     // current view, so the very layers this is about would be filtered out of
     // it. The same reason `list_targets` reads from the document directly.
-    const project = projectFromDoc(this.room.store.document());
+    const project = projectFromDoc(this.reading());
     const linked = new Set(links.map((l) => (typeof l === "string" ? l : l.layer)));
     const unlinked = (project.layers ?? []).filter(
       (l) => l.id !== undefined && !linked.has(l.id) && l.type !== "symbols"
@@ -1165,7 +1211,7 @@ export class Workspace {
       description?: string;
     }
   ): EditResult & { target: string } {
-    this.mustHold(projectFromDoc(this.room.store.document()).targets ?? [], id, "target", "list_targets");
+    this.mustHold(projectFromDoc(this.reading()).targets ?? [], id, "target", "list_targets");
     if (Object.values(fields).every((v) => v === undefined)) {
       throw new Error("Give at least one field to change: name, layers, entryPoints, order, description.");
     }
@@ -1192,7 +1238,7 @@ export class Workspace {
   }
 
   removeTarget(caller: Caller, id: string): EditResult {
-    this.mustHold(projectFromDoc(this.room.store.document()).targets ?? [], id, "target", "list_targets");
+    this.mustHold(projectFromDoc(this.reading()).targets ?? [], id, "target", "list_targets");
     return this.editDocument(caller, () => [{ op: "target.remove", id }]);
   }
 
@@ -1607,7 +1653,7 @@ export class Workspace {
     total: number;
     messages: { id: string; at: string; from: string; text: string }[];
   } {
-    const all = chatMessages(this.room.store.document());
+    const all = chatMessages(this.reading());
     const shown = all.slice(Math.max(0, all.length - limit));
     return {
       total: all.length,
@@ -1620,30 +1666,38 @@ export class Workspace {
     };
   }
 
-  /** Say something to whoever else is in this project. */
+  /**
+   * Say something to whoever else is in this project.
+   *
+   * Through the operation vocabulary like every other write, rather than
+   * straight into the document as it used to be — which is what puts it in the
+   * changes feed and what makes it reach this session's own copy.
+   */
   postMessage(
     caller: Caller,
     text: string
   ): { posted: boolean; message?: string; at?: string; as?: string } {
-    const posted = postChatMessage(
-      this.room.store.document(),
-      // The codename is how a person watching a live transcript tells two
-      // agents apart; the user id alone would be the same string for both.
-      { author: caller.userId, name: caller.codename ?? caller.label, text },
-      caller.sessionId
-    );
-    return posted
-      ? {
-          posted: true,
-          // **The id, which a message has always had and no surface ever
-          // returned.** Nothing could revise or take back a message because
-          // nothing could name one. F1, in the place it is easiest to miss: the
-          // value existed, was stored, was read back, and stopped at the door.
-          message: posted.id,
-          at: new Date(posted.at).toISOString(),
-          as: posted.name,
-        }
-      : { posted: false };
+    const trimmed = text.trim().slice(0, MAX_MESSAGE_LENGTH);
+    if (!trimmed) return { posted: false };
+
+    const id = newId("msg");
+    const at = Date.now();
+    // The codename is how a person watching a live transcript tells two agents
+    // apart; the user id alone would be the same string for both.
+    const name = caller.codename ?? caller.label;
+    this.editDocument(caller, () => [
+      { op: "message.add", id, at, author: caller.userId, name, text: trimmed } as Op,
+    ]);
+    return {
+      posted: true,
+      // **The id, which a message has always had and no surface ever
+      // returned.** Nothing could revise or take back a message because nothing
+      // could name one. F1, in the place it is easiest to miss: the value
+      // existed, was stored, was read back, and stopped at the door.
+      message: id,
+      at: new Date(at).toISOString(),
+      as: name,
+    };
   }
 
   /**
@@ -5873,7 +5927,64 @@ export class Workspace {
    * it unarguable — asking which views there are cannot itself need one.
    */
   document(): Project {
-    return projectFromDoc(this.room.store.document());
+    return projectFromDoc(this.reading());
+  }
+
+  /**
+   * The document this workspace answers from.
+   *
+   * The session's own where it has one. Every read goes through here so that
+   * "what does this participant know" has exactly one answer, rather than one
+   * per call site that remembered to ask.
+   */
+  private reading(): ReturnType<ProjectStore["document"]> {
+    return this.room.replica?.doc ?? this.room.store.document();
+  }
+
+  /**
+   * What has arrived that this session has not taken in.
+   *
+   * Absent when nothing has, which is the `hygiene` idiom: a counter that reads
+   * `0` on ninety-five calls out of a hundred teaches a reader to stop looking.
+   * Count and who — *what* is `changes_since`'s job, and it already answers it,
+   * so there is nothing to duplicate here until a run asks for it.
+   */
+  pending(): { operations: number; from: string[] } | undefined {
+    const replica = this.room.replica;
+    if (!replica) return undefined;
+    const waiting = this.room.storage
+      .readOps(replica.cursor)
+      .filter((c) => c.session !== replica.session);
+    if (waiting.length === 0) return undefined;
+    const from = [...new Set(waiting.map((c) => c.author ?? "someone"))].sort();
+    return { operations: waiting.length, from };
+  }
+
+  /**
+   * Take in what has arrived, and say what it was.
+   *
+   * Explicit on purpose. Making it a property of every read would be a third
+   * classification of the tool surface, and the last two each caught tools
+   * misclassified in shipped code the moment a test existed — while an agent
+   * that never calls this is *not* wrong, only out of date.
+   */
+  merge(): { merged: number; from: string[]; changes: string[] } {
+    const replica = this.room.replica;
+    if (!replica) return { merged: 0, from: [], changes: [] };
+
+    const waiting = this.room.storage
+      .readOps(replica.cursor)
+      .filter((c) => c.session !== replica.session);
+    applyUpdate(replica.doc, encodeDoc(this.room.store.document()), "merge");
+    replica.cursor = this.room.storage.opsCursor();
+    this.cached = undefined;
+    this.cachedRows = undefined;
+
+    return {
+      merged: waiting.length,
+      from: [...new Set(waiting.map((c) => c.author ?? "someone"))].sort(),
+      changes: waiting.slice(-20).map((c) => describeOp(c.op)),
+    };
   }
 
   /**
@@ -5904,7 +6015,25 @@ export class Workspace {
       Date.now(),
       caller.sessionId
     );
+    this.alsoToReplica(ops);
     return { ok: true, version: this.version(), did: descriptions };
+  }
+
+  /**
+   * Put this session's own writes into its own copy.
+   *
+   * **Only the inbox is deferred.** A write applies here and propagates at once,
+   * so "add a constant, then use it" batches — the session knows what it just
+   * made. What it does *not* do is take in anybody else's work, which is the
+   * whole point: a name resolves against what this participant knows, and that
+   * must not move under it between two calls of one action.
+   */
+  private alsoToReplica(ops: readonly Op[]): void {
+    const replica = this.room.replica;
+    if (!replica) return;
+    for (const op of ops) applyOpToDoc(replica.doc, op, replica.session);
+    this.cached = undefined;
+    this.cachedRows = undefined;
   }
 
   private edit(
@@ -5927,6 +6056,7 @@ export class Workspace {
       // the address the caller passed rather than the offset it was stored at.
       new Map(loaded.map.getLayers().map((l): [string, number] => [l.id, l.start]))
     );
+    this.alsoToReplica(ops);
     const after = this.program().instructions.size;
 
     // What this edit broke, if it broke anything.

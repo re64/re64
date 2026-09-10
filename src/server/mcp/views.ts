@@ -66,6 +66,7 @@ export const VIEWLESS: ReadonlySet<string> = new Set([
   // The project as a whole.
   "set_project_description",
   "export_project",
+  "merge",
   "changes_since",
   "tag_project",
   "list_tags",

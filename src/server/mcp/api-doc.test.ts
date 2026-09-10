@@ -55,14 +55,14 @@ describe("the API document against the live schema", () => {
 /**
  * What a claim-writing tool actually sets, as opposed to what it takes.
  *
- * `project`, `target` and `expectVersion` are request parameters on every tool,
+ * `project` and `target` are request parameters rather than arguments of a tool,
  * and `id` says *which* claim rather than setting anything. `target` is the
  * sharpest of these: as a tool argument it names the **view** to answer for, and
  * as a claim field it is the **scope** — two meanings for one word, which this
  * check would otherwise conflate into "the scope is writable".
  */
 function writableClaimFields(tools: { name: string; inputSchema?: { properties?: Record<string, unknown> } }[]): Set<string> {
-  const REQUEST = new Set(["project", "target", "expectVersion", "id"]);
+  const REQUEST = new Set(["project", "target", "id"]);
   return new Set(
     tools
       .filter((t) => /^(add|edit)_claim$/.test(t.name))

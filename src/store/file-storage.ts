@@ -159,6 +159,12 @@ export class FileStorage implements ProjectStorage {
       .filter((change) => change.seq > afterSeq);
   }
 
+  opsCursor(): number {
+    // Position in the file is the sequence number, so the newest is the count.
+    if (!existsSync(this.paths.ops)) return 0;
+    return decodeChanges(readFileSync(this.paths.ops, "utf-8")).length;
+  }
+
   appendOps(changes: readonly Change[]): void {
     appendFileSync(this.paths.ops, encodeChanges(changes), "utf-8");
   }

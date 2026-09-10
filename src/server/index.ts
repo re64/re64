@@ -26,14 +26,22 @@ import { diffProjects, parseProject } from "../core/index.js";
 import { needsMigration, migrateToClaims } from "../core/claims/migrate.js";
 import { SyncServer } from "./sync.js";
 import { CheckpointCache } from "../core/machine/scenario.js";
-import { Workspace } from "./workspace.js";
+import { SessionReplica, Workspace } from "./workspace.js";
 import { McpEndpoint, createMcpEndpoint } from "./mcp/transport.js";
 import { Caller, resolveCaller } from "./mcp/identity.js";
 import { registerTools } from "./mcp/tools.js";
 import { McpLog, defaultMcpLogPath, openMcpLog } from "./mcp/log.js";
 import { SessionLeases, sessionKeyOf } from "./sessions.js";
 import { MAX_UPLOAD_BYTES, uploadTokens } from "./uploads.js";
-import { applyOpToDoc, joinProject, leaveProject, projectFromDoc } from "../core/crdt/index.js";
+import {
+  applyOpToDoc,
+  applyUpdate,
+  emptyDoc,
+  encodeDoc,
+  joinProject,
+  leaveProject,
+  projectFromDoc,
+} from "../core/crdt/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(__dirname, "../../public");
@@ -219,7 +227,17 @@ export function startServer(options: ServerOptions): RunningServer {
   const spentCodenames = new Set<string>(loadSpentCodenames(projectPath, isDatabase));
 
   const leases = new SessionLeases({
-    onLapsed: (lease) => dropPresence(lease.id),
+    onLapsed: (lease) => {
+      dropPresence(lease.id);
+      // The copy goes with the session that held it. A lapsed lease is not a
+      // participant any more, and its unmerged view is nobody's.
+      for (const key of [...replicas.keys()]) {
+        if (key.startsWith(`${lease.id}\u0000`)) replicas.delete(key);
+      }
+      for (const key of [...workspaces.keys()]) {
+        if (key.startsWith(`${lease.id}\u0000`)) workspaces.delete(key);
+      }
+    },
     onIssued: (lease) => spentCodenames.add(lease.codename),
     spentCodenames: () => spentCodenames,
   });
@@ -288,10 +306,15 @@ export function startServer(options: ServerOptions): RunningServer {
     (endpoint ??= createMcpEndpoint({
       registerTools,
       log: mcpLog,
-      context: () => ({
-        workspace: (projectId, target) => workspaceFor(projectId ?? defaultProject(), target),
-        caller: callerFor(),
-      }),
+      context: () => {
+        const caller = callerFor();
+        return {
+          // The session, so this caller reads its own copy of the document.
+          workspace: (projectId, target) =>
+            workspaceFor(projectId ?? defaultProject(), target, caller.sessionId),
+          caller,
+        };
+      },
     }));
 
   /**
@@ -312,8 +335,34 @@ export function startServer(options: ServerOptions): RunningServer {
    */
   const machines = new Map<string, CheckpointCache>();
 
-  function workspaceFor(projectId: string, target?: string): Workspace {
-    const key = `${projectId}\u0000${target ?? ""}`;
+  /**
+   * One copy of the document per session and project — the browser tab an agent
+   * does not have.
+   *
+   * Reads answer from it, so a name resolves against what *this* participant
+   * knows rather than against whatever the server currently holds. Writes apply
+   * here and propagate at once; only the inbox waits, and only until the session
+   * asks. Dropped when the lease lapses, along with the workspaces over it.
+   */
+  const replicas = new Map<string, SessionReplica>();
+
+  function replicaFor(projectId: string, session: string): SessionReplica {
+    const key = `${session}\u0000${projectId}`;
+    const existing = replicas.get(key);
+    if (existing) return existing;
+
+    const { sync, storage } = room(projectId);
+    const doc = emptyDoc();
+    applyUpdate(doc, encodeDoc(sync.store.document()), "seed");
+    const made: SessionReplica = { doc, cursor: storage.opsCursor(), session };
+    replicas.set(key, made);
+    return made;
+  }
+
+  function workspaceFor(projectId: string, target?: string, session?: string): Workspace {
+    // A workspace holds an analysis of what its session can see, so the session
+    // is part of its identity exactly as the target is.
+    const key = `${session ?? ""}\u0000${projectId}\u0000${target ?? ""}`;
     const existing = workspaces.get(key);
     if (existing) return existing;
 
@@ -331,6 +380,7 @@ export function startServer(options: ServerOptions): RunningServer {
       machines: cache,
       baseUrl: `http://${host === "0.0.0.0" ? "127.0.0.1" : host}:${port}`,
       ...(target === undefined ? {} : { target }),
+      ...(session === undefined ? {} : { replica: replicaFor(projectId, session) }),
     });
     workspaces.set(key, made);
     return made;

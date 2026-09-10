@@ -117,6 +117,13 @@ export interface ProjectStorage {
    */
   appendOps(changes: readonly Change[]): void;
   readOps(afterSeq?: number): StoredChange[];
+  /**
+   * The newest position in the feed.
+   *
+   * What a session pins itself to, so "what has arrived that I have not taken
+   * in" is a read of this log rather than a comparison of two documents.
+   */
+  opsCursor(): number;
   /** Flip the tombstone on one entry, leaving its position alone. */
   markUndone(seq: number, undone: boolean): void;
 

@@ -57,9 +57,13 @@ answered for with a different stack.
 **Addresses** are `"$8000"`, `"0x8000"` or `32768`, anywhere an address is
 taken. Ranges are inclusive at both ends. `extent` is a byte count.
 
-**`expectVersion`** on a write refuses if the project has moved since you read
-it — the conflict dialog an agent cannot be shown. The version comes from
-`describe_project`.
+**There is no `expectVersion`, and that is deliberate.** A write used to be able
+to refuse if the whole document had moved since you read it — which is refusing
+to merge, in a system whose premise is that concurrent edits merge, and which an
+offline participant could never use because it cannot know the current hash. A
+write carries ids, so there is nothing for somebody else's edit to make it mean
+differently. Where a *name* has to be resolved, it resolves against what your
+session knows, and `merge` is how you take in the rest.
 
 ### Ids, and the one rule behind most of these signatures
 
@@ -104,7 +108,7 @@ what was declined in `rejected`, and fail only when nothing was applicable.
 
 ## The tools
 
-96 tools.
+97 tools.
 
 ### Orienting
 
@@ -374,7 +378,6 @@ Say something about an address. **This adds; it never replaces.** A claim carrie
 | `view` | `string` | optional | For a bitmap: char:8, bits:3, sprite, snippet:<id> |
 | `comment` | `string` | optional |  |
 | `method` | `guessed` \| `transcribed` \| `read` \| `derived` \| `ran` | optional | **How you know**, not how sure you are. guessed = a hypothesis; transcribed = copied by hand from a listing or another project; read = reasoned from the code; derived = an analysis here computed it; ran = watched happening in the machine. Two accounts that agree are one account unless the methods differ — which is why this is the axis rather than a confidence score. |
-| `expectVersion` | `string` | optional | Refuse if the project has changed since you read it |
 
 #### `add_claims`
 
@@ -383,7 +386,6 @@ Say several things at once, as one action. Undo takes the whole batch back. Use 
 | argument | type | | |
 |---|---|---|---|
 | `claims` | `array` | **required** |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `edit_claim`
 
@@ -401,7 +403,6 @@ Correct a claim, by its id. The way to change what you said rather than say some
 | `encoding` | `any` | optional |  |
 | `view` | `string,null` | optional |  |
 | `method` | `any` | optional | How you know, revised: a guess you have since run is no longer a guess |
-| `expectVersion` | `string` | optional |  |
 
 #### `remove_claim`
 
@@ -410,7 +411,6 @@ Take back a claim, by its id. By id and only by id: an address cannot identify a
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `mark_function`
 
@@ -420,7 +420,6 @@ Declare an address a subroutine, creating a label if there is none. This makes i
 |---|---|---|---|
 | `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `name` | `string` | optional |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `unmark_function`
 
@@ -429,7 +428,6 @@ Take back a function declaration. An auto-shaped name is removed outright rather
 | argument | type | | |
 |---|---|---|---|
 | `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
-| `expectVersion` | `string` | optional |  |
 
 ---
 
@@ -445,7 +443,6 @@ Choose which of several claims at an address gives the name that renders where n
 |---|---|---|---|
 | `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `claim` | `string` | **required** | From claims_at or list_claims |
-| `expectVersion` | `string` | optional |  |
 
 #### `unbind_primary_name`
 
@@ -454,7 +451,6 @@ Stop choosing, so the name at this address falls back to rank. There was no way 
 | argument | type | | |
 |---|---|---|---|
 | `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
-| `expectVersion` | `string` | optional |  |
 
 #### `bind_name`
 
@@ -467,7 +463,6 @@ Say which name the operands referring to an address mean, over a span. Give `fro
 | `labelAddress` | `string,number` | optional | Where that label is, if not at `address`; renders as name±n |
 | `from` | `string,number` | **required** | First instruction to bind |
 | `to` | `string,number` | optional | Last instruction; just `from` if omitted |
-| `expectVersion` | `string` | optional |  |
 
 #### `unbind_name`
 
@@ -476,7 +471,6 @@ Let the operand at an address resolve by the usual rule again.
 | argument | type | | |
 |---|---|---|---|
 | `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
-| `expectVersion` | `string` | optional |  |
 
 ---
 
@@ -493,7 +487,6 @@ Add a comment about an address, and return its id. "before" gets its own rows ab
 | `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `text` | `string` | **required** |  |
 | `placement` | `before` \| `inline` \| `after` | optional | before (own rows above the label), inline (shares the instruction's row), or after (own rows below it, for an observation about what happens next). Default before. |
-| `expectVersion` | `string` | optional |  |
 
 #### `add_comments`
 
@@ -502,7 +495,6 @@ Add several comments in one call, as one action. Undo takes the batch back whole
 | argument | type | | |
 |---|---|---|---|
 | `comments` | `array` | **required** |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `edit_comment`
 
@@ -513,7 +505,6 @@ Revise a comment by id: its text, its placement, or where it sits among the comm
 | `id` | `string` | **required** | From list_comments or add_comment |
 | `text` | `string` | optional |  |
 | `placement` | `before` \| `inline` \| `after` | optional |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `reorder_comments`
 
@@ -523,7 +514,6 @@ Put the comments at an address in the order given, by id. Ordering is otherwise 
 |---|---|---|---|
 | `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `ids` | `array` | **required** | In the order you want them |
-| `expectVersion` | `string` | optional |  |
 
 #### `remove_comment`
 
@@ -532,7 +522,6 @@ Delete a comment by id. Several comments can share an address, so an address doe
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** | From list_comments |
-| `expectVersion` | `string` | optional |  |
 
 ---
 
@@ -548,7 +537,6 @@ Declare a name for a value: EMPTY_CELL = $00, ORANGE = $08. **Four things are wo
 |---|---|---|---|
 | `name` | `string` | **required** |  |
 | `value` | `string,number` | **required** | A byte, $00-$FF |
-| `expectVersion` | `string` | optional |  |
 
 #### `add_constants`
 
@@ -557,7 +545,6 @@ Declare several constants in one call, as one action. Adds, like add_constant: a
 | argument | type | | |
 |---|---|---|---|
 | `constants` | `array` | **required** |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `edit_constant`
 
@@ -568,7 +555,6 @@ Revise a declared constant by its id: its name, its value, or both. The id comes
 | `id` | `string` | **required** |  |
 | `name` | `string` | optional |  |
 | `value` | `string,number` | optional | A byte, $00-$FF |
-| `expectVersion` | `string` | optional |  |
 
 #### `remove_constant`
 
@@ -577,7 +563,6 @@ Forget a declared constant, by id. Operands bound to it go back to showing the l
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** | From add_constant or list_constants |
-| `expectVersion` | `string` | optional |  |
 
 #### `bind_constant`
 
@@ -587,7 +572,6 @@ Say that the immediate operand at an address means a named constant, so it rende
 |---|---|---|---|
 | `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `constant` | `string` | **required** | A constant id from add_constant or list_constants |
-| `expectVersion` | `string` | optional |  |
 
 #### `bind_constants`
 
@@ -596,7 +580,6 @@ Bind several sites in one call, as one action. add_constants batches the declara
 | argument | type | | |
 |---|---|---|---|
 | `bindings` | `array` | **required** |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `unbind_constant`
 
@@ -605,7 +588,6 @@ Read the operand at an address as its literal value again.
 | argument | type | | |
 |---|---|---|---|
 | `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
-| `expectVersion` | `string` | optional |  |
 
 #### `add_type`
 
@@ -617,7 +599,6 @@ Declare a record layout: what the bytes of one array element mean. The thing a c
 | `size` | `integer` | **required** | Bytes per record |
 | `unit` | `bytes` \| `bits` | optional | What a field's offset counts. "bits" declares a bitmask — $D011 is seven fields in one byte — which is the same shape as a record one level down: named things at offsets, holes legal. `size` stays in bytes either way, so a one-byte register is size 1 with offsets 0 to 7, and bit n is the one worth 2^n. Fields in one take bits(n). |
 | `fields` | `object` | **required** | By offset. Two fields cannot share one, so the key is the identity. |
-| `expectVersion` | `string` | optional |  |
 
 #### `edit_type`
 
@@ -630,7 +611,6 @@ Correct a record layout, by its id. **Fields merge per offset: one you leave out
 | `size` | `integer` | **required** |  |
 | `unit` | `bytes` \| `bits` | optional | Kept as it was when omitted |
 | `fields` | `object` | **required** |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `remove_type`
 
@@ -639,7 +619,6 @@ Take back a record layout, by its id. A claim still referencing it renders its b
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `add_field`
 
@@ -652,7 +631,6 @@ Add one field to a record layout, without restating the others. `edit_type` send
 | `name` | `string` | **required** |  |
 | `type` | `string` | **required** | As add_type's field type: u8, char(40), u8[8], bits(3), … or another type. A reference may be its id, its name where exactly one thing answers to that, or name@id where more than one does — the document stores the id either way, so renaming changes how a field reads and never what it means. |
 | `description` | `string` | optional |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `edit_field`
 
@@ -666,7 +644,6 @@ Revise one field by its id: rename it, retype it, or **move it**. A field carrie
 | `type` | `string` | optional |  |
 | `description` | `string,null` | optional |  |
 | `offset` | `integer` | optional | Move it here |
-| `expectVersion` | `string` | optional |  |
 
 #### `remove_field`
 
@@ -676,7 +653,6 @@ Take one field back out of a record layout. **There was no way to do this**, by 
 |---|---|---|---|
 | `typeId` | `string` | **required** |  |
 | `id` | `string` | **required** | Field id, from list_types |
-| `expectVersion` | `string` | optional |  |
 
 #### `add_decoder`
 
@@ -686,7 +662,6 @@ Keep a decoder in the project so it can be used again and by somebody else. **Al
 |---|---|---|---|
 | `name` | `string` | **required** | What it is for, shown in a listing and a menu |
 | `source` | `string` | **required** | The body of a function taking (bytes, params) |
-| `expectVersion` | `string` | optional |  |
 
 #### `edit_decoder`
 
@@ -697,7 +672,6 @@ Revise a decoder by id. Omitted fields are left alone, so changing the name does
 | `id` | `string` | **required** | From add_decoder or list_decoders |
 | `name` | `string` | optional |  |
 | `source` | `string` | optional |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `remove_decoder`
 
@@ -706,7 +680,6 @@ Drop a decoder from the project. Anything referring to it falls back to showing 
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** |  |
-| `expectVersion` | `string` | optional |  |
 
 ---
 
@@ -727,7 +700,6 @@ Declare a workflow for the machine. **Always adds**, and returns the id. Steps r
 | `name` | `string` | **required** |  |
 | `description` | `string` | optional |  |
 | `steps` | `array` | **required** |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `edit_scenario`
 
@@ -739,7 +711,6 @@ Revise a workflow by id. Omitted fields are left alone; `steps` is written whole
 | `name` | `string` | optional |  |
 | `description` | `string,null` | optional |  |
 | `steps` | `array` | optional |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `remove_scenario`
 
@@ -748,7 +719,6 @@ Forget a workflow, by id. Anything it captured stays, because a capture is evide
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `run_scenario`
 
@@ -757,7 +727,6 @@ Run a workflow and keep what it captured. Says what each step did, where the mac
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `play_sid`
 
@@ -778,7 +747,6 @@ Run the program from an address until it leaves the bytes this project holds —
 | `stopAt` | `string,number` | optional | Stop here instead of running on |
 | `maxInstructions` | `integer` | optional | Default 20 million, about ten seconds |
 | `capture` | `object` | optional |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `run_block`
 
@@ -819,7 +787,6 @@ Say something about a **claim** rather than about an address. `supports` backs i
 | `capture` | `string` | optional | Something a run produced, from list_scenarios |
 | `other` | `string` | optional | Another claim, for a refutation that names it |
 | `note` | `string` | optional | Why, for the part no reference carries |
-| `expectVersion` | `string` | optional |  |
 
 #### `edit_evidence`
 
@@ -834,7 +801,6 @@ Revise a piece of evidence by id. Omitted fields are left alone; `null` clears o
 | `capture` | `string,null` | optional |  |
 | `other` | `string,null` | optional |  |
 | `note` | `string,null` | optional |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `remove_evidence`
 
@@ -843,7 +809,6 @@ Take back a piece of evidence, by id. The claim it was about is untouched — un
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `retire_claim`
 
@@ -857,7 +822,6 @@ Take a claim out of the working set, keeping it and the reason in the document. 
 | `method` | `guessed` \| `transcribed` \| `read` \| `derived` \| `ran` | optional | How you know this, on the same axis as a claim's: guessed, transcribed, read, derived, ran |
 | `scenario` | `string` | optional | A scenario that settled it |
 | `capture` | `string` | optional | What that run produced, from list_scenarios |
-| `expectVersion` | `string` | optional |  |
 
 #### `restore_claim`
 
@@ -866,7 +830,6 @@ Put a retired claim back into the working set, by removing what retired it. Ever
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `list_retired`
 
@@ -915,7 +878,6 @@ Add a layer over bytes — which is what turns an uploaded binary into something
 | `name` | `string` | optional | Defaults to the file's name |
 | `address` | `string,number` | optional | Required for raw and bytes, ignored for prg |
 | `length` | `integer` | optional | For type "bytes": repeat them to this width |
-| `expectVersion` | `string` | optional |  |
 
 #### `add_layer`
 
@@ -924,7 +886,6 @@ Add a symbols layer: names for addresses that hold no loaded bytes — zero page
 | argument | type | | |
 |---|---|---|---|
 | `name` | `string` | **required** |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `add_rom_layer`
 
@@ -933,7 +894,6 @@ Link a machine ROM into this project, as reference rather than as something to r
 | argument | type | | |
 |---|---|---|---|
 | `rom` | `basic` \| `kernal` \| `characters` | **required** |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `remove_layer`
 
@@ -942,7 +902,6 @@ Take a layer out of the project. For the scratch layers a build leaves behind: a
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** | Layer id, from list_targets |
-| `expectVersion` | `string` | optional |  |
 
 #### `add_target`
 
@@ -955,7 +914,6 @@ Declare a view over the layer stack. **Always adds**, and returns the id — `ed
 | `entryPoints` | `array` | optional |  |
 | `order` | `integer` | optional | Where this sits in the program's life: the loader before the image it expands, before the levels |
 | `description` | `string` | optional | What this phase is, in prose — a name carries none of it |
-| `expectVersion` | `string` | optional |  |
 
 #### `edit_target`
 
@@ -969,7 +927,6 @@ Revise a view by id. Omitted fields are left alone, so describing a target does 
 | `entryPoints` | `array` | optional |  |
 | `order` | `integer` | optional |  |
 | `description` | `string` | optional |  |
-| `expectVersion` | `string` | optional |  |
 
 #### `remove_target`
 
@@ -978,7 +935,6 @@ Forget a view, by id. The layers and everything in them are untouched.
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** | From list_targets |
-| `expectVersion` | `string` | optional |  |
 
 #### `set_project_description`
 
@@ -987,13 +943,16 @@ Say what this project is: provenance, what the binary is, anything a reader shou
 | argument | type | | |
 |---|---|---|---|
 | `description` | `string` | **required** |  |
-| `expectVersion` | `string` | optional |  |
 
 ---
 
 ### History and export
 
 There is no save step — an edit is durable when the call returns. `changes_since` is the poll that stands in for the socket a browser has.
+
+#### `merge`
+
+Take in what other people have done since you last looked, and say what it was. **Your view is your own until you call this.** Everything you read answers from the document as *you* last saw it, so a name means the same thing from one call to the next and a batch of writes cannot have the ground move under it halfway through. Your own writes are there immediately — only other people's wait. Nothing forces this and nothing is wrong if you never call it. Working from an out-of-date view is not an error: your writes carry ids and merge whatever anyone else did. What you risk is doing something somebody has already done, which shows up afterwards as two names for one routine — a state this project keeps rather than prevents. `pending` on any answer says how much is waiting and who from; changes_since says what it is, without taking it in.
 
 #### `changes_since`
 

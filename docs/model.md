@@ -132,11 +132,24 @@ a reader who meets it learns the document has grown a second `Creature`, which
 is a thing they wanted to know. `list_types` renders the suffix for the same
 reason — it is the notice that the plain name is no longer resolvable.
 
-**Resolution asks the document as it is, not what a session last saw.** A
-per-session name table was considered and rejected: it would make one caller's
-write mean something different from another's, which is the offline/online
-rule's failure case rather than an optimisation of it. Ambiguity refusing, plus
-`expectVersion` on the write, covers what a session cache would have.
+**Resolution asks what *this session* knows** — and the opposite was tried first,
+which is worth recording because it looked like the careful answer. Resolving
+against the server's current document was defended by citing the offline rule,
+and it *is* the failure the rule names: "an operation whose correctness depends
+on having seen what everyone else did fails the first direction." Whether a write
+succeeded depended on whether somebody else had concurrently declared a second
+`Creature`, and an offline participant could not know.
+
+An MCP session is a proxy for a browser tab, and `src/client/session.ts` was
+already the model. Each holds its own copy of the document. A name resolves
+there, the resolved operation carries ids, and it merges whatever anyone else
+did. Two participants resolving one name to different ids is *correct* — the
+same shape as two readers naming one routine differently, which this model
+tolerates by design and hygiene reports.
+
+Ambiguity is therefore **local**: two `Creature`s in my view must be
+disambiguated; somebody else's concurrent second one does not change what my
+operation meant.
 
 **One invariant holds this up**: no field-type spelling can be mistaken for an
 id. An id is three letters, an underscore and six of `[0-9a-z]`; `u8`, `u16be`,
@@ -162,6 +175,28 @@ program with eleven byte patches over it, `machine` the same program with the
 ROMs banked in. `$02` is `printColumn` in all of them. **Which writes should be
 able to ask for a target frame is undecided**, and is the same question as scoped
 names.
+
+### Freshness is not correctness
+
+**Only the inbox is deferred.** A write applies to the session's own copy and
+propagates at once, so "add a constant, then use it" batches — the session knows
+what it just made. There is no outbox and no offline write queue, because a
+connected session has no reason to hold its own work.
+
+**Nothing forces a merge.** A session may work from an out-of-date view for as
+long as it likes, however online its connection is. Its writes still converge.
+What it risks is doing something somebody has already done, which surfaces
+afterwards as two names for one routine — a state this model keeps rather than
+prevents. So `pending` on an answer says how much is waiting and from whom,
+absent when nothing is; `changes_since` says what it is without taking it in;
+and `merge` takes it in, explicitly.
+
+**There is no `expectVersion` any more.** A write could refuse if the whole
+document had moved since you read it, which is refusing to merge in a system
+whose premise is that concurrent edits merge — and an offline participant can
+never supply a valid whole-document hash, so it was a second mode by
+construction. A write carries ids; there is nothing for a concurrent edit to
+make it mean differently.
 
 ---
 

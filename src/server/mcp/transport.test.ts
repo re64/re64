@@ -989,19 +989,25 @@ describe("editing as an agent", () => {
     expect((value as { instructions: { delta: number } }).instructions.delta).toBeGreaterThan(0);
   });
 
-  it("refuses a write built on a project that has moved", async () => {
-    const { value: described } = await callTool("describe_project");
-    const stale = (described as { version: string }).version;
-
+  it("does not refuse a write because somebody else wrote first", async () => {
+    // **`expectVersion` used to be here, and it was an antipattern.** It refused
+    // a write if the whole document had moved — which is refusing to merge, in a
+    // system whose premise is that concurrent edits merge. Worse, an offline
+    // participant can never supply a valid whole-document hash, so it was a
+    // second mode by construction: a thing only the connected can use.
+    //
+    // What replaces it is not a weaker check but a different shape. A write
+    // carries ids, so there is nothing for a concurrent edit to make it mean
+    // something else; and where a name has to be resolved, it resolves against
+    // what this session knows.
     await callTool("add_claim", { address: "$8870", name: "Meanwhile" });
-    const conflicted = await callTool("add_claim", {
-      address: "$8450",
-      name: "TooLate",
-      expectVersion: stale,
-    });
+    const alongside = await callTool("add_claim", { address: "$8450", name: "Alongside" });
 
-    expect(conflicted.isError).toBe(true);
-    expect(conflicted.text).toMatch(/changed since you read it/);
+    expect(alongside.isError, alongside.text).toBe(false);
+    const here = (await callTool("claims_at", { address: "$8450" })).value as {
+      claims: { name?: string }[];
+    };
+    expect(here.claims.some((c) => c.name === "Alongside")).toBe(true);
   });
 
   it("records the change, attributed to the caller", async () => {
@@ -2468,5 +2474,113 @@ describe("a message is an entity", () => {
 
     const after = (await callTool("describe_project", {})).value as { version: string };
     expect(after.version).toBe(before.version);
+  });
+});
+
+describe("a session reads its own copy of the document", () => {
+  /**
+   * **The browser tab an agent does not have.**
+   *
+   * Everything a session reads answers from the document as *it* last saw it, so
+   * a name means the same thing from one call to the next and a batch cannot
+   * have the ground move under it halfway through. Its own writes are there at
+   * once — only other people's wait, and only until it asks.
+   *
+   * This is what the offline rule actually requires. Resolving against whatever
+   * the server currently holds is "an operation whose correctness depends on
+   * having seen what everyone else did", which is the failure the rule names,
+   * not a defence of it.
+   */
+  const as = async (session: string, name: string, args: Record<string, unknown> = {}) => {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "x-re64-user": "usr_agent",
+        "x-re64-session": session,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name, arguments: args },
+      }),
+    });
+    const text = await res.text();
+    const line = text.split("\n").find((l) => l.startsWith("data: ")) ?? text;
+    const reply = JSON.parse(line.replace(/^data: /, "")) as {
+      result: { content: { text: string }[]; isError?: boolean };
+    };
+    const body = reply.result.content[0].text;
+    const isError = reply.result.isError === true;
+    return { isError, text: body, value: (isError ? undefined : JSON.parse(body)) as never };
+  };
+
+  it("does not show one session another's work until it merges", async () => {
+    // Beta reads first, so its copy exists before alpha writes. A session that
+    // joins *after* a write starts from what is there — there is nothing for it
+    // to be out of step with yet, which is the same rule read forwards.
+    await as("ses_beta", "list_types", {});
+
+    const mine = await as("ses_alpha", "add_type", { name: "Creature", size: 4, fields: {} });
+    expect(mine.isError, mine.text).toBe(false);
+
+    // Alpha sees what alpha just did: only the inbox is deferred, so "add a
+    // type, then use it" works within one session.
+    const own = (await as("ses_alpha", "list_types", {})).value as {
+      types: { name: string }[];
+    };
+    expect(own.types.some((t) => t.name === "Creature")).toBe(true);
+
+    // Beta does not, and is told there is something waiting rather than left to
+    // wonder.
+    const theirs = (await as("ses_beta", "list_types", {})).value as {
+      types: { name: string }[];
+      pending?: { operations: number; from: string[] };
+    };
+    expect(theirs.types.some((t) => t.name === "Creature")).toBe(false);
+    expect(theirs.pending?.operations).toBeGreaterThan(0);
+
+    // And after asking, it does.
+    const merged = (await as("ses_beta", "merge", {})).value as { merged: number };
+    expect(merged.merged).toBeGreaterThan(0);
+    const after = (await as("ses_beta", "list_types", {})).value as {
+      types: { name: string }[];
+      pending?: unknown;
+    };
+    expect(after.types.some((t) => t.name === "Creature")).toBe(true);
+    // Nothing waiting, so nothing said: a counter reading zero on most calls
+    // teaches a reader to stop looking.
+    expect(after.pending).toBeUndefined();
+  });
+
+  it("resolves a name against what this session knows, not what the server holds", async () => {
+    // The point of the whole arrangement. Alpha declares a second `Twin` and
+    // beta, which has not seen it, still resolves `Twin` to the one it knows —
+    // rather than being refused for an ambiguity it cannot see.
+    const first = await as("ses_a2", "add_type", { name: "Twin", size: 2, fields: {} });
+    expect(first.isError, first.text).toBe(false);
+    await as("ses_b2", "merge", {});
+
+    const second = await as("ses_a2", "add_type", { name: "Twin", size: 2, fields: {} });
+    expect(second.isError, second.text).toBe(false);
+
+    // Alpha sees two and must say which.
+    const forAlpha = await as("ses_a2", "add_type", {
+      name: "HolderA",
+      size: 4,
+      fields: { 0: { name: "which", type: "Twin" } },
+    });
+    expect(forAlpha.isError).toBe(true);
+    expect(forAlpha.text).toContain("say which");
+
+    // Beta sees one, and its write means what beta meant.
+    const forBeta = await as("ses_b2", "add_type", {
+      name: "HolderB",
+      size: 4,
+      fields: { 0: { name: "which", type: "Twin" } },
+    });
+    expect(forBeta.isError, forBeta.text).toBe(false);
   });
 });

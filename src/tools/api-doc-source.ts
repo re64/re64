@@ -197,7 +197,15 @@ export const SECTIONS: { title: string; blurb: string; tools: string[] }[] = [
     blurb:
       "There is no save step — an edit is durable when the call returns. " +
       "`changes_since` is the poll that stands in for the socket a browser has.",
-    tools: ["changes_since", "undo", "tag_project", "list_tags", "remove_tag", "export_project"],
+    tools: [
+      "merge",
+      "changes_since",
+      "undo",
+      "tag_project",
+      "list_tags",
+      "remove_tag",
+      "export_project",
+    ],
   },
   {
     title: "Talking",
@@ -270,9 +278,13 @@ answered for with a different stack.
 **Addresses** are \`"$8000"\`, \`"0x8000"\` or \`32768\`, anywhere an address is
 taken. Ranges are inclusive at both ends. \`extent\` is a byte count.
 
-**\`expectVersion\`** on a write refuses if the project has moved since you read
-it — the conflict dialog an agent cannot be shown. The version comes from
-\`describe_project\`.
+**There is no \`expectVersion\`, and that is deliberate.** A write used to be able
+to refuse if the whole document had moved since you read it — which is refusing
+to merge, in a system whose premise is that concurrent edits merge, and which an
+offline participant could never use because it cannot know the current hash. A
+write carries ids, so there is nothing for somebody else's edit to make it mean
+differently. Where a *name* has to be resolved, it resolves against what your
+session knows, and \`merge\` is how you take in the rest.
 
 ### Ids, and the one rule behind most of these signatures
 
