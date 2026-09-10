@@ -550,10 +550,20 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
           const { by, ...rest } = op.fields;
           revise(entry, { ...rest });
           if (by !== undefined) {
+            // **`by` is one value, not a patch of three**, and the two adapters
+            // disagreed about that. `Provenance` cannot exist without an author,
+            // so naming it at all means replacing it: an absent `method` is a
+            // method cleared, and `by: null` is the whole account withdrawn.
+            //
+            // This mapped `null` to `undefined`, and `revise` *skips* undefined
+            // — that is how it tells "leave alone" from "clear". So `by: null`
+            // cleared all three on the text path and nothing at all here, which
+            // is the cross-adapter round-trip contract broken in the one place
+            // an inverse depends on it.
             revise(entry, {
-              author: by === null ? undefined : by.author,
-              method: by === null ? undefined : by.method,
-              when: by === null ? undefined : by.when,
+              author: by === null ? null : by.author,
+              method: by === null ? null : (by.method ?? null),
+              when: by === null ? null : (by.when ?? null),
             });
           }
         }
