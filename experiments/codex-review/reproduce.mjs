@@ -180,9 +180,18 @@ const alice = { userId: 'alice', label: 'Alice', sessionId: 'alice-session' };
     f.store.merge(encodeDoc(peer), 'socket');
     const log = f.storage.readOps();
     const pairs = log.map(c => ({ op: c.op, inverse: c.inverse, session: c.session, changeset: c.changeset }));
-    assert.equal(log[0].op.op, 'claim.remove');
-    assert.equal(log[0].inverse.op, 'claim.remove');
-    output('socket operation inverses paired by index rather than identity', { pairs });
+    // RE-RUN NOTE (re64, 2026-09-10): fixed. The socket path took the reverse
+    // diff and paired it with the forward one by *array position*; neither diff
+    // promises the matching inverse lands at the same index. Each inverse is now
+    // computed against the state its own operation saw, walking forward — the
+    // same thing runOps does. Production test: `src/store/project-store.test.ts`
+    // -> "a socket update is one action, and each inverse undoes its own op".
+    for (const c of log) {
+      const undone = applyOp(applyOp(formatProject(base), c.op), c.inverse);
+      assert.equal(JSON.parse(undone).claims.length, JSON.parse(formatProject(base)).claims.length);
+    }
+    assert.ok(log.every(c => c.session === undefined || typeof c.session === 'string'));
+    output('FIXED: each inverse undoes its own operation', { pairs });
   } finally { f.close(); }
 }
 {
