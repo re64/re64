@@ -218,7 +218,12 @@ over SSH, and a commit credits its assistant in a `Co-Authored-By` trailer. Code
 is authored by a person, issue and review activity is the bot. That is an honest
 split rather than a cosmetic one.
 
-## Tickets, branches, and landing
+## Tickets, branches, and review
+
+**This is an experiment, and none of it is a hard rule.** It exists to give a
+model review somewhere to land — not to put a person in the path of every change.
+Work that does not want it can still go straight to `main`, as most of this
+repository did.
 
 Every finding is an issue, and the issue number is the unit of work.
 
@@ -234,10 +239,33 @@ Every finding is an issue, and the issue number is the unit of work.
   reviewable a month later.
 - **`Closes #n` in the pull request body**, so landing closes the issue and the
   link survives.
-- **Open the pull request and stop.** A review surface you merge yourself is
-  theatre. Merging is the repository owner's.
+- **The pull request exists so something that is not the author reads the diff.**
+  Usually that is another model. Merge when the review is clean; the owner is not
+  a gate and should not have to be. Leave it open when the change turns on a
+  judgement rather than a defect — those are worth a person, and they are rare.
 
 **What this is not.** Phabricator's unit is the revision and stacks are
 first-class; GitHub's unit is the branch and stacked pull requests are painful —
 the base-branch dance, and review churn every time the parent rebases. So work
 that must land together goes on **one branch as several commits**, not a stack.
+
+### What the review is for
+
+Not style, and not a second opinion on the design — that argument belongs in the
+issue, before the branch exists. It is for **the class of mistake this codebase
+actually makes**, which is a wide mechanical edit over a surface the compiler
+cannot check:
+
+- A tool schema renamed while its handler still reads the old key. `tool()`
+  types its handler as `never`, so this compiles.
+- A sweep that hits the cases it was not meant to. One `sed` removed `target`
+  from thirty-one tools that need it; the schema test caught it, and nothing else
+  would have.
+- A value carried through five layers that no surface exposes — the F1 shape,
+  now at eleven instances.
+- An assertion that passes the defect. `concurrency.test.ts` checked that two
+  replicas *agreed* and called it a concurrency test; agreement was true of the
+  bug.
+
+A reviewer that did not write the change is much better at all four than the
+author re-reading their own diff, which is the whole argument for this.
