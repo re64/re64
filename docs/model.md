@@ -157,9 +157,22 @@ id. An id is three letters, an underscore and six of `[0-9a-z]`; `u8`, `u16be`,
 construction and asserted anyway, in `identity.test.ts`, because it would stop
 being true the moment a spelling with an underscore was added.
 
-Still breaking the rule, and named here rather than left to be discovered: a
-**capture refers to its bytes by filename**, mutably mapped to a hash — a defect
-the Codex review reproduced (R8) — and a **layer refers to its file by path**.
+**A binding is keyed by its site**, which is what the algebra always said it is:
+an address-to-id map, where binding again is how one is updated. It was keyed by
+a minted use id, so every bind added a competitor — two uses at one site, the
+loaded index keeping whichever sorted last by an id nobody chose, and unbinding
+leaving the other still resolving.
+
+**Open, and decided but not built.** A binding names an instruction's operand, so
+it should travel with its layer when the layer is relocated — and a target frame
+should be available as the escape hatch when relocation is wrong, exactly as a
+claim has one. Uses are stored inside a layer with an *absolute* address today,
+so they stay behind. That is the same `Frame` the claims carry and wants doing
+the same way.
+
+Still breaking the id rule, and named here rather than left to be discovered: a
+**capture refers to its bytes by filename** — R8 fixed which bytes a name means,
+not that a name is the reference — and a **layer refers to its file by path**.
 
 **Which arrangement a claim is about, and the default.** A claim on a byte no
 layer supplies — zero page, an I/O register, a KERNAL vector — is framed on the

@@ -128,6 +128,8 @@ export interface LabelUnbindOp {
   op: "labelUse.unbind";
   id: string;
   layerId: string;
+  /** The site, which is what a binding is keyed by. See `ConstantUnbindOp`. */
+  address: number;
 }
 
 /** Declare that a name exists for a value. **Always adds.** */
@@ -389,6 +391,14 @@ export interface ConstantUnbindOp {
   op: "constantUse.unbind";
   id: string;
   layerId: string;
+  /**
+   * The site, which is what a binding is keyed by.
+   *
+   * Carried because unbinding is "nothing means a constant *here*" — an id
+   * identifies which use record happened to be written, and there is only ever
+   * one per site now, so the site is the honest handle.
+   */
+  address: number;
 }
 
 /**

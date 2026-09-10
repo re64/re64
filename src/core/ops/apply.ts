@@ -686,7 +686,7 @@ export function invertOp(raw: string, op: Op): Op {
 
     case "labelUse.bind": {
       const found = findLabelUse(project, op.id);
-      if (!found) return { op: "labelUse.unbind", id: op.id, layerId: op.layerId };
+      if (!found) return { op: "labelUse.unbind", id: op.id, layerId: op.layerId, address: op.address };
       return {
         op: "labelUse.bind",
         id: op.id,
@@ -994,7 +994,7 @@ export function invertOp(raw: string, op: Op): Op {
 
     case "constantUse.bind": {
       const found = findConstantUse(project, op.id);
-      if (!found) return { op: "constantUse.unbind", id: op.id, layerId: op.layerId };
+      if (!found) return { op: "constantUse.unbind", id: op.id, layerId: op.layerId, address: op.address };
       return {
         op: "constantUse.bind",
         id: op.id,

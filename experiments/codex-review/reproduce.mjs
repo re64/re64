@@ -80,13 +80,21 @@ const alice = { userId: 'alice', label: 'Alice', sessionId: 'alice-session' };
     f.storage.putBlob('review.prg', new Uint8Array([0, 0x80, 0xa9, 1, 0x60]));
     f.workspace.bindConstant(alice, 0x8000, 'cst_a');
     f.workspace.bindConstant(alice, 0x8000, 'cst_b');
+    // RE-RUN NOTE (re64, 2026-09-10): fixed. A binding is an address-to-id map —
+    // `docs/algebra.md` always said so — and was keyed by a *minted use id*, so
+    // every bind added a competitor. Two uses sat at one site, the loaded index
+    // kept whichever the projection sorted last (by an id that is random), and
+    // unbinding removed one and left the other resolving. Keyed by the site now.
+    // Production test: `src/core/crdt/concurrency.test.ts` -> "a binding is
+    // keyed by its site".
     const bindings = projectFromDoc(f.store.document()).layers[0].constantUses;
-    assert.equal(bindings.length, 2);
+    assert.equal(bindings.length, 1);
     const beforeUnbind = f.workspace.program().loaded.constants.nameAt(0x8000);
+    assert.equal(beforeUnbind, 'WHITE');
     f.workspace.unbindConstant(alice, 0x8000);
     const afterUnbind = f.workspace.program().loaded.constants.nameAt(0x8000);
-    assert.ok(afterUnbind);
-    output('rebind accumulates uses and unbind leaves one active', { bindings, beforeUnbind, afterUnbind });
+    assert.ok(!afterUnbind);
+    output('FIXED: rebinding replaces, and unbinding clears the site', { bindings, beforeUnbind, afterUnbind });
   } finally { f.close(); }
 }
 {
