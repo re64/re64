@@ -11,6 +11,7 @@ import {
   projectFromDoc,
 } from "../core/crdt/index.js";
 import { diffProjects, parseProject } from "../core/index.js";
+import { derivedId } from "../core/project/identity.js";
 
 const PROJECT = `{
   "name": "Test",
@@ -903,6 +904,132 @@ describe("a document stored before fields had ids", () => {
     } finally {
       storage.close();
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("history written in the old type shapes", () => {
+  /**
+   * **The rows are JSON that nothing rewrites.** The document is migrated when
+   * the store opens it; the operations and inverses recorded against yesterday's
+   * shapes are not, because a row is applied to whatever state it meets. Two
+   * shapes have gone — `type.add` keyed its fields by offset, and `type.set`
+   * carried an offset-keyed child patch — and undo of either threw, or worse,
+   * reported success and changed nothing.
+   *
+   * Rows here are spelled exactly as `main` recorded them at `c0eeb4b`,
+   * including the inverses its `invertOp` computed. The document itself is
+   * built fresh from text, so this exercises the history boundary alone.
+   */
+  const text = (fields: Record<string, { id: string; name: string; type: string }>) =>
+    JSON.stringify({
+      name: "history",
+      layers: [{ id: "lay_a", type: "bytes", address: "$8000", bytes: "a9016000" }],
+      types: [{ id: "typ_a", name: "Sprite", size: 8, fields }],
+    });
+  const OLD_ADD = {
+    op: "type.add",
+    id: "typ_a",
+    name: "Sprite",
+    size: 8,
+    fields: {
+      0: { id: "fld_a", name: "x", type: "u8" },
+      4: { id: "fld_b", name: "y", type: "u8" },
+    },
+  };
+  const row = (op: unknown, inverse: unknown) =>
+    [{ op, inverse, author: "alice", session: "ses_old", at: 1, changeset: "cs_old" }] as unknown as Parameters<
+      SqliteStorage["appendOps"]
+    >[0];
+
+  const opened = (project: string) => {
+    const dir = mkdtempSync(join(tmpdir(), "re64-old-history-"));
+    const storage = new SqliteStorage(join(dir, "p.re64db"), "p");
+    storage.initialize(project, Date.now(), "history");
+    const store = new ProjectStore(storage);
+    store.document();
+    const fields = () =>
+      (projectFromDoc(store.document()).types?.[0]?.fields ?? []).map(
+        (f) => `${f.id}@${f.offset}:${f.name}`
+      );
+    const close = () => {
+      storage.close();
+      rmSync(dir, { recursive: true, force: true });
+    };
+    return { storage, store, fields, close };
+  };
+
+  it("undoes and redoes an old type.add", () => {
+    const f = opened(text({ 0: { id: "fld_a", name: "x", type: "u8" }, 4: { id: "fld_b", name: "y", type: "u8" } }));
+    try {
+      f.storage.appendOps(row(OLD_ADD, { op: "type.remove", id: "typ_a" }));
+      expect(f.store.undo("alice", "ses_old").undone).toBeTruthy();
+      expect(projectFromDoc(f.store.document()).types ?? []).toHaveLength(0);
+      expect(f.store.redo("alice", "ses_old").undone).toBeTruthy();
+      expect(f.fields()).toEqual(["fld_a@0:x", "fld_b@4:y"]);
+    } finally {
+      f.close();
+    }
+  });
+
+  it("undoes an old type.remove, whose inverse is an old type.add", () => {
+    const f = opened(JSON.stringify({ name: "h", layers: [{ id: "lay_a", type: "bytes", address: "$8000", bytes: "a9016000" }] }));
+    try {
+      f.storage.appendOps(row({ op: "type.remove", id: "typ_a" }, OLD_ADD));
+      expect(f.store.undo("alice", "ses_old").undone).toBeTruthy();
+      expect(f.fields()).toEqual(["fld_a@0:x", "fld_b@4:y"]);
+      expect(f.store.redo("alice", "ses_old").undone).toBeTruthy();
+      expect(projectFromDoc(f.store.document()).types ?? []).toHaveLength(0);
+    } finally {
+      f.close();
+    }
+  });
+
+  it("undoes an old type.set child patch, rather than reporting it done", () => {
+    const f = opened(text({ 0: { id: "fld_a", name: "changed", type: "u8" } }));
+    try {
+      f.storage.appendOps(
+        row(
+          { op: "type.set", id: "typ_a", fields: { fields: { 0: { id: "fld_a", name: "changed", type: "u8" } } } },
+          { op: "type.set", id: "typ_a", fields: { fields: { 0: { id: "fld_a", name: "old", type: "u8" } } } }
+        )
+      );
+      const undone = f.store.undo("alice", "ses_old");
+      expect(undone.undone).toBeTruthy();
+      expect(undone.skipped).toEqual([]);
+      expect(f.fields()).toEqual(["fld_a@0:old"]);
+      expect(f.store.redo("alice", "ses_old").undone).toBeTruthy();
+      expect(f.fields()).toEqual(["fld_a@0:changed"]);
+
+      // A `null` child removed whatever sat at the offset, and an entry with no
+      // id declared a field there; both still mean that. Its own changeset,
+      // and a state that matches it — the row records an action already done.
+      const declared = derivedId("fld", "typ_a", 4);
+      f.store.runOps(
+        [
+          { op: "field.remove", id: "fld_a", typeId: "typ_a" },
+          { op: "field.add", id: declared, typeId: "typ_a", offset: 4, name: "y", type: "u8" },
+        ],
+        "bob",
+        5
+      );
+      f.storage.appendOps(
+        [
+          {
+            op: { op: "type.set", id: "typ_a", fields: { fields: { 0: null, 4: { name: "y", type: "u8" } } } },
+            inverse: { op: "type.set", id: "typ_a", fields: { fields: { 0: { id: "fld_a", name: "changed", type: "u8" }, 4: null } } },
+            author: "alice",
+            session: "ses_two",
+            at: 6,
+            changeset: "cs_two",
+          },
+        ] as unknown as Parameters<SqliteStorage["appendOps"]>[0]
+      );
+      const second = f.store.undo("alice", "ses_two");
+      expect(second.skipped).toEqual([]);
+      expect(f.fields()).toEqual(["fld_a@0:changed"]);
+    } finally {
+      f.close();
     }
   });
 });

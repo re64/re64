@@ -3,6 +3,7 @@ import { applyOp, applyOps, invertOp } from "./apply.js";
 import { Op } from "./types.js";
 import { parseProject } from "../project/project.js";
 import { formatProject } from "../project/serialize.js";
+import { derivedId } from "../project/identity.js";
 
 const RAW = `{
   "name": "Test",
@@ -284,5 +285,42 @@ describe("the text writers key a binding by its site under either spelling", () 
       layerId: "lay_a",
     });
     expect(usesIn(byId)).toEqual(["cst_dup:cst_b"]);
+  });
+});
+
+describe("an old type.set child patch, read from history", () => {
+  /**
+   * `type.set` no longer carries children, and history still does. Each entry
+   * means what it meant: by the id it carries, else the field at its offset;
+   * `null` removes what sits there; an entry with no id declares a field.
+   */
+  const withType = formatProject(
+    parseProject(`{
+  "name": "Test",
+  "layers": [{ "id": "lay_a", "type": "prg", "path": "game.prg" }],
+  "types": [{ "id": "typ_a", "name": "Sprite", "size": 8, "fields": {
+    "0": { "id": "fld_a", "name": "x", "type": "u8" },
+    "4": { "id": "fld_b", "name": "y", "type": "u8" }
+  } }]
+}
+`)
+  );
+  const legacySet = (children: Record<string, unknown>): Op =>
+    ({ op: "type.set", id: "typ_a", fields: { fields: children } }) as unknown as Op;
+  const fieldsOf = (text: string) =>
+    parseProject(text).types![0].fields.map((f) => `${f.id}@${f.offset}:${f.name}`);
+
+  it("revises by id, removes by offset, declares without an id", () => {
+    const out = applyOp(
+      withType,
+      legacySet({ 0: { id: "fld_a", name: "renamed", type: "u8" }, 4: null, 6: { name: "z", type: "u8" } })
+    );
+    expect(fieldsOf(out)).toEqual(["fld_a@0:renamed", `${derivedId("fld", "typ_a", 6)}@6:z`]);
+  });
+
+  it("finds a moved field by its id rather than by the offset it left", () => {
+    const moved = applyOp(withType, { op: "field.set", id: "fld_a", typeId: "typ_a", fields: { offset: 2 } });
+    const out = applyOp(moved, legacySet({ 0: { id: "fld_a", name: "renamed", type: "u8" } }));
+    expect(fieldsOf(out)).toEqual(["fld_a@0:renamed", "fld_b@4:y"]);
   });
 });

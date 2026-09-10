@@ -60,6 +60,8 @@ import {
   deleteClaim,
 } from "../project/serialize.js";
 import { ClaimEdit, EvidenceSetOp, Op } from "./types.js";
+import { legacyChildTarget, legacyTypeSetChildren, typeAddFields } from "./legacy.js";
+import { derivedId } from "../project/identity.js";
 import { Claim, Provenance } from "../claims/model.js";
 import { ProjectClaim, ProjectEvidence, ProjectField, projectClaims } from "../project/project.js";
 
@@ -379,8 +381,9 @@ export function applyOp(raw: string, op: Op): string {
         size: op.size,
         ...(op.unit === undefined ? {} : { unit: op.unit }),
         // As given: every field carries its id and its offset, so nothing is
-        // derived here and nothing can collide on the way in.
-        fields: [...op.fields].sort((a, b) => a.offset - b.offset),
+        // derived here and nothing can collide on the way in. Old history
+        // spelled this as an object keyed by offset; see `legacy.ts`.
+        fields: [...typeAddFields(op)].sort((a, b) => a.offset - b.offset),
       });
 
     // **The record, not its parts.** Revising a type leaves its fields exactly
@@ -388,6 +391,25 @@ export function applyOp(raw: string, op: Op): string {
     // changes, by id.
     case "type.set": {
       const held = held0(project.types, op.id, "type", op.id);
+      // History only: see `legacy.ts`. A current operation carries none.
+      let fields = held.fields;
+      const children = legacyTypeSetChildren(op);
+      if (children) {
+        for (const [key, child] of Object.entries(children)) {
+          const offset = Number(key);
+          const target = legacyChildTarget(fields, offset, child);
+          if (child === null) {
+            if (target) fields = fields.filter((f) => f !== target);
+            continue;
+          }
+          const id = target?.id ?? child.id ?? derivedId("fld", op.id, offset);
+          const revised = { ...(target ?? {}), ...child, id, offset };
+          fields = target
+            ? fields.map((f) => (f === target ? revised : f))
+            : [...fields, revised];
+        }
+        fields = [...fields].sort((a, b) => a.offset - b.offset);
+      }
       return upsertType(raw, {
         id: op.id,
         name: op.fields.name ?? held.name,
@@ -395,7 +417,7 @@ export function applyOp(raw: string, op: Op): string {
         ...((op.fields.unit ?? held.unit) === undefined
           ? {}
           : { unit: op.fields.unit ?? held.unit }),
-        fields: held.fields,
+        fields,
       });
     }
 
