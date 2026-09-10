@@ -116,13 +116,22 @@ const alice = { userId: 'alice', label: 'Alice', sessionId: 'alice-session' };
   applyOpToDoc(doc, op);
   const crdt = projectFromDoc(doc).evidence[0];
   const text = JSON.parse(applyOp(formatProject(project), op)).evidence[0];
-  assert.equal(crdt.method, 'guessed');
+  // RE-RUN NOTE (re64, 2026-09-10): fixed — both adapters now clear.
+  assert.equal(crdt.method, undefined);
   assert.equal(text.method, undefined);
+  assert.equal(crdt.author, undefined);
   const f = fixture(project);
   try {
+    // RE-RUN NOTE (re64, 2026-09-10): fixed. `by` is one value rather than a
+    // patch of three — `Provenance` cannot exist without an author, so naming it
+    // replaces it and `by: null` withdraws it. The CRDT adapter mapped null to
+    // undefined, which `revise` skips because that is how it tells "leave alone"
+    // from "clear". Production tests: `roundtrip.test.ts` → "provenance means the
+    // same thing on both paths", and `transport.test.ts` → "clearing how you
+    // know".
     f.workspace.setClaim(alice, 'clm_a', { method: null });
-    assert.equal(projectFromDoc(f.store.document()).evidence[0].method, 'guessed');
-    output('evidence clear differs across adapters and edit_claim cannot clear method', { crdt, text });
+    assert.equal(projectFromDoc(f.store.document()).evidence[0].method, undefined);
+    output('FIXED: both adapters clear provenance the same way', { crdt, text });
   } finally { f.close(); }
 }
 {

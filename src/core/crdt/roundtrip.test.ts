@@ -725,3 +725,81 @@ describe("the operation algebra", () => {
     }
   });
 });
+
+describe("provenance means the same thing on both paths", () => {
+  /**
+   * **`by` is one value, not a patch of three, and the adapters disagreed.**
+   *
+   * `Provenance` cannot exist without an author, so naming it at all means
+   * replacing it: an absent `method` is a method cleared, and `by: null` is the
+   * whole account withdrawn. The text adapter read it that way. The CRDT adapter
+   * mapped `by: null` to `undefined` for each key — and `revise` *skips*
+   * undefined, since that is how it tells "leave alone" from "clear". So the
+   * same operation cleared three fields on one path and none on the other.
+   *
+   * The round-trip table above proves one payload per operation, which
+   * establishes that an operation *arrives*. It cannot establish that every
+   * patch variant means the same thing on both sides, and this is the variant
+   * that did not.
+   */
+  const withEvidence = (): string =>
+    applyOp(
+      BASE,
+      {
+        op: "evidence.set",
+        id: "evd_1",
+        fields: { by: { author: "amber", method: "guessed", when: 1720000000000 } },
+      } as Op
+    );
+
+  const bothPaths = (from: string, op: Op) => {
+    const throughText = parseProject(applyOp(from, op));
+    const doc = docFromProject(parseProject(from));
+    applyOpToDoc(doc, op, "harness");
+    return { text: throughText.evidence![0], crdt: projectFromDoc(doc).evidence![0] };
+  };
+
+  it("clears author, method and when on both paths when `by` is null", () => {
+    const { text, crdt } = bothPaths(withEvidence(), {
+      op: "evidence.set",
+      id: "evd_1",
+      fields: { by: null },
+    } as Op);
+
+    for (const [where, held] of [["text", text], ["crdt", crdt]] as const) {
+      expect(held.author, where).toBeUndefined();
+      expect(held.method, where).toBeUndefined();
+      expect(held.when, where).toBeUndefined();
+      // And the record itself survives: withdrawing an account is not
+      // withdrawing the evidence.
+      expect(held.kind, where).toBe("supports");
+    }
+  });
+
+  it("replaces rather than merges, so an omitted method is a cleared one", () => {
+    const { text, crdt } = bothPaths(withEvidence(), {
+      op: "evidence.set",
+      id: "evd_1",
+      fields: { by: { author: "beryl" } },
+    } as Op);
+
+    for (const [where, held] of [["text", text], ["crdt", crdt]] as const) {
+      expect(held.author, where).toBe("beryl");
+      expect(held.method, where).toBeUndefined();
+    }
+  });
+
+  it("leaves provenance alone when the patch does not name it", () => {
+    const { text, crdt } = bothPaths(withEvidence(), {
+      op: "evidence.set",
+      id: "evd_1",
+      fields: { note: "reworded" },
+    } as Op);
+
+    for (const [where, held] of [["text", text], ["crdt", crdt]] as const) {
+      expect(held.note, where).toBe("reworded");
+      expect(held.author, where).toBe("amber");
+      expect(held.method, where).toBe("guessed");
+    }
+  });
+});

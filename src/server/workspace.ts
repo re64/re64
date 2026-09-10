@@ -4218,7 +4218,17 @@ export class Workspace {
             {
               op: "evidence.set",
               id: mine.id,
-              fields: { by: { author: caller.userId, ...(raw.method === null ? {} : { method: raw.method }) } },
+              // `by` is one value: omitting `method` *is* clearing it, which is
+              // what `method: null` asks for. Building the object without the
+              // key used to read as "leave it alone" on one adapter, so
+              // clearing a `guessed` returned ok and left it `guessed`.
+              fields: {
+                by: {
+                  author: caller.userId,
+                  ...(raw.method === null ? {} : { method: raw.method }),
+                  ...(mine.when === undefined ? {} : { when: mine.when }),
+                },
+              },
             } as Op,
           ];
         }

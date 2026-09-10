@@ -2839,3 +2839,37 @@ describe("a number is a whole number or it is refused", () => {
     expect(good.isError, good.text).toBe(false);
   });
 });
+
+describe("clearing how you know", () => {
+  /**
+   * `edit_claim method: null` built provenance with the key **omitted** rather
+   * than cleared. Under replacement semantics that is the same thing — but only
+   * once both adapters agree, which they did not: it returned ok and left the
+   * method where it was.
+   */
+  it("takes back a method somebody set", async () => {
+    const made = await callTool("add_claim", {
+      address: "$8F80",
+      name: "Guessed",
+      method: "guessed",
+    });
+    expect(made.isError, made.text).toBe(false);
+    const claim = (made.value as { claims: { claim: string }[] }).claims[0].claim;
+
+    const before = (await callTool("claims_at", { address: "$8F80" })).value as {
+      claims: { id?: string; by?: { method?: string }[] }[];
+    };
+    expect(before.claims.find((c) => c.id === claim)?.by?.[0].method).toBe("guessed");
+
+    const cleared = await callTool("edit_claim", { id: claim, method: null });
+    expect(cleared.isError, cleared.text).toBe(false);
+
+    const after = (await callTool("claims_at", { address: "$8F80" })).value as {
+      claims: { id?: string; by?: { author: string; method?: string }[] }[];
+    };
+    const vouching = after.claims.find((c) => c.id === claim)?.by?.[0];
+    expect(vouching?.method).toBeUndefined();
+    // The vouching itself stays: who said it is not what was withdrawn.
+    expect(vouching?.author).toBeTruthy();
+  });
+});
