@@ -234,9 +234,16 @@ const alice = { userId: 'alice', label: 'Alice', sessionId: 'alice-session' };
     assert.throws(() => f.store.runOps([{ op: 'claim.set', id: 'clm_a', fields: { name: 'Uncommitted' } }], 'alice', 1), /injected/);
     const live = projectFromDoc(f.store.document()).claims[0].name;
     const recovered = projectFromDoc(new ProjectStore(f.storage).document()).claims[0].name;
-    assert.equal(live, 'Uncommitted');
+    // RE-RUN NOTE (re64, 2026-09-10): fixed. The write published to every peer
+    // and to the export from inside a transaction that could still roll back, so
+    // a caller got an error while readers had been told the edit happened and a
+    // restart rebuilt a document that disagreed with both. Publication now waits
+    // for the commit, and on failure the in-memory document is dropped and
+    // rebuilt from what actually committed. Production test:
+    // `src/store/project-store.test.ts` -> "a failed write is not served".
+    assert.equal(live, 'Original');
     assert.equal(recovered, 'Original');
-    output('SQL rollback leaves changed live document', { live, recovered });
+    output('FIXED: a rolled-back write is neither served nor published', { live, recovered });
   } finally { f.close(); }
 }
 {

@@ -1085,6 +1085,67 @@ describe("history written in the old type shapes", () => {
       expect(described(f.store)).toBeUndefined();
     } finally {
       f.close();
+  });
+});
+
+describe("a failed write is not served", () => {
+  /**
+   * **`runOps` published before it committed.**
+   *
+   * It mutated the live document, persisted the update event and notified every
+   * listener, and only then appended the operation log and committed. A SQL
+   * rollback cannot un-mutate a `Y.Doc` and cannot recall a notification — so a
+   * caller could be handed an error while readers and other clients had already
+   * been told the edit happened, and a restart then rebuilt a document that
+   * disagreed with both.
+   *
+   * Invariant A5 disclaims *distributed* transaction atomicity, and rightly.
+   * This is a local commit-ordering defect and a different thing.
+   *
+   * Publication now waits for the commit, because that is the one part a
+   * rollback genuinely cannot take back. On failure the in-memory document is
+   * dropped and rebuilt from what actually committed, so the server never keeps
+   * serving state no restart would reproduce.
+   */
+  const project = JSON.stringify({
+    name: "commit",
+    layers: [{ id: "lay_a", type: "bytes", address: "$8000", bytes: "a9016000" }],
+    claims: [{ id: "clm_a", at: "$8000", name: "Original", origin: "user" }],
+  });
+
+  it("neither serves nor publishes an edit whose write failed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "re64-commit-"));
+    const storage = new SqliteStorage(join(dir, "p.re64db"), "p");
+    storage.initialize(project, Date.now(), "commit");
+
+    // Fails at the last durable step, which is exactly where the ordering used
+    // to matter: everything before it had already been published.
+    const failing = Object.create(storage) as SqliteStorage;
+    failing.appendOps = () => {
+      throw new Error("injected appendOps failure");
+    };
+
+    const store = new ProjectStore(failing);
+    const seen: unknown[] = [];
+    store.document();
+    store.onUpdate(() => seen.push(1));
+
+    try {
+      expect(() =>
+        store.runOps([{ op: "claim.set", id: "clm_a", fields: { name: "Uncommitted" } }], "alice", 1)
+      ).toThrow(/injected/);
+
+      // Nobody was told.
+      expect(seen).toHaveLength(0);
+      // What is served is what committed...
+      expect(projectFromDoc(store.document()).claims![0].name).toBe("Original");
+      // ...and so is what a restart would rebuild.
+      expect(
+        projectFromDoc(new ProjectStore(storage).document()).claims![0].name
+      ).toBe("Original");
+    } finally {
+      storage.close();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });
