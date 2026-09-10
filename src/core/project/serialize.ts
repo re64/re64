@@ -784,6 +784,15 @@ export function deleteConstant(raw: string, id: string): string {
   return formatProject(project);
 }
 
+/**
+ * Bind a site to a constant, and release it.
+ *
+ * **Keyed by the site, in both adapters.** The document keys uses by address and
+ * this keyed them by use id, so a rebind here appended a second record while the
+ * same rebind through the CRDT replaced one — two adapters answering differently
+ * for one operation, which is what R13 was one root over. Binding again is how a
+ * binding is updated, so the record at the address is the one to overwrite.
+ */
 export function bindConstant(
   raw: string,
   layerIndex: number,
@@ -794,9 +803,9 @@ export function bindConstant(
   if (!layer) throw new Error(`No layer at index ${layerIndex} to own a constant use`);
 
   const uses = (layer.constantUses ??= []);
-  const at = uses.findIndex((u) => u.id === use.id);
+  const at = uses.findIndex((u) => u.address === use.address);
   if (at >= 0) {
-    if (uses[at].constant === use.constant && uses[at].address === use.address) return raw;
+    if (uses[at].constant === use.constant && uses[at].id === use.id) return raw;
     uses[at] = use;
   } else {
     uses.push(use);
@@ -804,12 +813,13 @@ export function bindConstant(
   return formatProject(project);
 }
 
-export function unbindConstant(raw: string, layerIndex: number, id: string): string {
+/** Release a site. By the address, for the reason `bindConstant` gives. */
+export function unbindConstant(raw: string, layerIndex: number, address: string): string {
   const project = parseProject(raw);
   const layer = project.layers[layerIndex];
-  if (!layer?.constantUses?.some((u) => u.id === id)) return raw;
+  if (!layer?.constantUses?.some((u) => u.address === address)) return raw;
 
-  layer.constantUses = layer.constantUses.filter((u) => u.id !== id);
+  layer.constantUses = layer.constantUses.filter((u) => u.address !== address);
   if (layer.constantUses.length === 0) delete layer.constantUses;
   return formatProject(project);
 }
@@ -822,9 +832,9 @@ export function bindLabel(raw: string, layerIndex: number, use: ProjectLabelUse)
   if (!layer) throw new Error(`No layer at index ${layerIndex} to own a label use`);
 
   const uses = (layer.labelUses ??= []);
-  const at = uses.findIndex((u) => u.id === use.id);
+  const at = uses.findIndex((u) => u.address === use.address);
   if (at >= 0) {
-    if (uses[at].label === use.label && uses[at].address === use.address) return raw;
+    if (uses[at].label === use.label && uses[at].id === use.id) return raw;
     uses[at] = use;
   } else {
     uses.push(use);
@@ -832,12 +842,12 @@ export function bindLabel(raw: string, layerIndex: number, use: ProjectLabelUse)
   return formatProject(project);
 }
 
-export function unbindLabel(raw: string, layerIndex: number, id: string): string {
+export function unbindLabel(raw: string, layerIndex: number, address: string): string {
   const project = parseProject(raw);
   const layer = project.layers[layerIndex];
-  if (!layer?.labelUses?.some((u) => u.id === id)) return raw;
+  if (!layer?.labelUses?.some((u) => u.address === address)) return raw;
 
-  layer.labelUses = layer.labelUses.filter((u) => u.id !== id);
+  layer.labelUses = layer.labelUses.filter((u) => u.address !== address);
   if (layer.labelUses.length === 0) delete layer.labelUses;
   return formatProject(project);
 }

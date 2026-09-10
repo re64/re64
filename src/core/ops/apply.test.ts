@@ -141,3 +141,91 @@ describe("errors", () => {
     expect(formatProject(parseProject(out))).toBe(out);
   });
 });
+
+describe("a binding's inverse restores what was at the site", () => {
+  /**
+   * **A bind mints a fresh use id, so on a rebind that id cannot exist in the
+   * state the inverse is computed against.** Looking the pre-state up by it
+   * found nothing, the inverse became `unbind`, and undoing a rebind cleared the
+   * site instead of putting back the constant that was there.
+   *
+   * The keying fix is what makes the answer available: a site holds one binding,
+   * so "what was here" is a question with one answer, and the inverse asks it by
+   * layer and address rather than by an id nobody had yet.
+   */
+  const withConstants = formatProject(
+    parseProject(`{
+  "name": "Test",
+  "layers": [{ "id": "lay_a", "type": "prg", "path": "game.prg" }],
+  "constants": [
+    { "id": "cst_a", "name": "ONE", "value": "$01" },
+    { "id": "cst_b", "name": "WHITE", "value": "$01" }
+  ],
+  "claims": [
+    { "id": "clm_1", "at": "$8000", "name": "Start", "root": "routine", "origin": "user" }
+  ]
+}
+`)
+  );
+
+  it("puts back the constant a rebind replaced", () => {
+    const first: Op = {
+      op: "constantUse.bind",
+      id: "cst_use1",
+      layerId: "lay_a",
+      address: 0x8000,
+      constantId: "cst_a",
+    };
+    const again: Op = {
+      op: "constantUse.bind",
+      id: "cst_use2",
+      layerId: "lay_a",
+      address: 0x8000,
+      constantId: "cst_b",
+    };
+
+    const bound = applyOp(withConstants, first);
+    const inverse = invertOp(bound, again);
+    const rebound = applyOp(bound, again);
+    expect(parseProject(rebound).layers[0].constantUses).toHaveLength(1);
+
+    // Undoing it is `ONE` again, not an empty site.
+    const undone = parseProject(applyOp(rebound, inverse));
+    expect(undone.layers[0].constantUses).toHaveLength(1);
+    expect(undone.layers[0].constantUses![0].constant).toBe("cst_a");
+  });
+
+  it("puts back the label a rebind replaced", () => {
+    const first: Op = {
+      op: "labelUse.bind",
+      id: "lbl_use1",
+      layerId: "lay_a",
+      address: 0x8010,
+      labelId: "clm_1",
+    };
+    const again: Op = {
+      op: "labelUse.bind",
+      id: "lbl_use2",
+      layerId: "lay_a",
+      address: 0x8010,
+      labelId: "clm_2",
+    };
+
+    const bound = applyOp(withConstants, first);
+    const inverse = invertOp(bound, again);
+    const undone = parseProject(applyOp(applyOp(bound, again), inverse));
+    expect(undone.layers[0].labelUses).toHaveLength(1);
+    expect(undone.layers[0].labelUses![0].label).toBe("clm_1");
+  });
+
+  it("clears a site that had nothing on it, as before", () => {
+    const fresh: Op = {
+      op: "constantUse.bind",
+      id: "cst_use1",
+      layerId: "lay_a",
+      address: 0x8020,
+      constantId: "cst_a",
+    };
+    expect(roundTrips(fresh, withConstants)).toBe(true);
+  });
+});

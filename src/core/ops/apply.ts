@@ -90,23 +90,39 @@ function findRegion(project: Project, id: string): Found<ProjectRegion> | undefi
   return undefined;
 }
 
-function findLabelUse(project: Project, id: string): Found<ProjectLabelUse> | undefined {
-  for (const [layerIndex, layer] of project.layers.entries()) {
-    const entry = layer.labelUses?.find((u) => u.id === id);
-    if (entry) return { layerIndex, entry };
-  }
-  return undefined;
+/**
+ * What is bound at a site, for the operation about to overwrite it.
+ *
+ * **By the site, not by the id in the operation.** A bind mints a fresh use id,
+ * so on a rebind that id cannot exist in the pre-state: looking it up found
+ * nothing, the inverse became `unbind`, and undoing a rebind cleared the site
+ * instead of putting back what was there. A site holds one binding now, which is
+ * what makes it the thing to ask about.
+ */
+function constantUseAt(
+  project: Project,
+  layerId: string,
+  address: number
+): Found<ProjectConstantUse> | undefined {
+  const layerIndex = project.layers.findIndex((l) => l.id === layerId);
+  if (layerIndex < 0) return undefined;
+  const entry = project.layers[layerIndex].constantUses?.find(
+    (u) => parseProjectAddress(u.address) === address
+  );
+  return entry ? { layerIndex, entry } : undefined;
 }
 
-function findConstantUse(
+function labelUseAt(
   project: Project,
-  id: string
-): Found<ProjectConstantUse> | undefined {
-  for (const [layerIndex, layer] of project.layers.entries()) {
-    const entry = layer.constantUses?.find((u) => u.id === id);
-    if (entry) return { layerIndex, entry };
-  }
-  return undefined;
+  layerId: string,
+  address: number
+): Found<ProjectLabelUse> | undefined {
+  const layerIndex = project.layers.findIndex((l) => l.id === layerId);
+  if (layerIndex < 0) return undefined;
+  const entry = project.layers[layerIndex].labelUses?.find(
+    (u) => parseProjectAddress(u.address) === address
+  );
+  return entry ? { layerIndex, entry } : undefined;
 }
 
 function findComment(project: Project, id: string): Found<ProjectComment> | undefined {
@@ -288,7 +304,9 @@ export function applyOp(raw: string, op: Op): string {
       });
 
     case "labelUse.unbind":
-      return unbindLabel(raw, layerIndexOf(project, op.layerId), op.id);
+      // The address, not the id: the site is the key, and both were `string`
+      // so nothing but this line says which one this is.
+      return unbindLabel(raw, layerIndexOf(project, op.layerId), addressHex(op.address));
 
     case "claim.add":
       return upsertClaim(raw, projectClaimOf(op.claim));
@@ -530,7 +548,7 @@ export function applyOp(raw: string, op: Op): string {
       });
 
     case "constantUse.unbind":
-      return unbindConstant(raw, layerIndexOf(project, op.layerId), op.id);
+      return unbindConstant(raw, layerIndexOf(project, op.layerId), addressHex(op.address));
 
     case "layer.add":
       return insertLayer(
@@ -685,11 +703,11 @@ export function invertOp(raw: string, op: Op): Op {
     }
 
     case "labelUse.bind": {
-      const found = findLabelUse(project, op.id);
+      const found = labelUseAt(project, op.layerId, op.address);
       if (!found) return { op: "labelUse.unbind", id: op.id, layerId: op.layerId, address: op.address };
       return {
         op: "labelUse.bind",
-        id: op.id,
+        id: found.entry.id!,
         layerId: project.layers[found.layerIndex].id!,
         address: parseProjectAddress(found.entry.address),
         labelId: found.entry.label,
@@ -697,11 +715,11 @@ export function invertOp(raw: string, op: Op): Op {
     }
 
     case "labelUse.unbind": {
-      const found = findLabelUse(project, op.id);
+      const found = labelUseAt(project, op.layerId, op.address);
       if (!found) return op;
       return {
         op: "labelUse.bind",
-        id: op.id,
+        id: found.entry.id!,
         layerId: project.layers[found.layerIndex].id!,
         address: parseProjectAddress(found.entry.address),
         labelId: found.entry.label,
@@ -993,11 +1011,11 @@ export function invertOp(raw: string, op: Op): Op {
     }
 
     case "constantUse.bind": {
-      const found = findConstantUse(project, op.id);
+      const found = constantUseAt(project, op.layerId, op.address);
       if (!found) return { op: "constantUse.unbind", id: op.id, layerId: op.layerId, address: op.address };
       return {
         op: "constantUse.bind",
-        id: op.id,
+        id: found.entry.id!,
         layerId: project.layers[found.layerIndex].id!,
         address: parseProjectAddress(found.entry.address),
         constantId: found.entry.constant,
@@ -1005,11 +1023,11 @@ export function invertOp(raw: string, op: Op): Op {
     }
 
     case "constantUse.unbind": {
-      const found = findConstantUse(project, op.id);
+      const found = constantUseAt(project, op.layerId, op.address);
       if (!found) return op;
       return {
         op: "constantUse.bind",
-        id: op.id,
+        id: found.entry.id!,
         layerId: project.layers[found.layerIndex].id!,
         address: parseProjectAddress(found.entry.address),
         constantId: found.entry.constant,
