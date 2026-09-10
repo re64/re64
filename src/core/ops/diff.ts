@@ -273,10 +273,24 @@ export function diffProjects(from: Project, to: Project): Op[] {
     if (!afterComments.has(id)) ops.push({ op: "comment.remove", id, layerId: owned.layerId });
   }
   for (const [id, owned] of beforeUses) {
-    if (!afterUses.has(id)) ops.push({ op: "constantUse.unbind", id, layerId: owned.layerId });
+    if (!afterUses.has(id)) {
+      ops.push({
+        op: "constantUse.unbind",
+        id,
+        layerId: owned.layerId,
+        address: parseProjectAddress(owned.entry.address),
+      });
+    }
   }
   for (const [id, owned] of beforeLabelUses) {
-    if (!afterLabelUses.has(id)) ops.push({ op: "labelUse.unbind", id, layerId: owned.layerId });
+    if (!afterLabelUses.has(id)) {
+      ops.push({
+        op: "labelUse.unbind",
+        id,
+        layerId: owned.layerId,
+        address: parseProjectAddress(owned.entry.address),
+      });
+    }
   }
   // Declarations go after the sites that meant them, so nothing is left
   // pointing at a constant that has already gone.

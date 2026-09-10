@@ -174,19 +174,22 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         break;
       }
 
+      // Keyed by the site, like every binding — see `constantUse.bind` for what
+      // keying by a minted use id cost.
       case "labelUse.bind": {
         const uses = childMap(layerById(doc, op.layerId), "labelUses");
-        let entry = uses.get(op.id);
+        const at = hex4(op.address);
+        let entry = uses.get(at);
         if (!entry) {
           entry = new Y.Map<unknown>();
-          uses.set(op.id, entry);
+          uses.set(at, entry);
         }
-        assign(entry, { id: op.id, address: hex4(op.address), label: op.labelId });
+        assign(entry, { id: op.id, address: at, label: op.labelId });
         break;
       }
 
       case "labelUse.unbind":
-        childMap(layerById(doc, op.layerId), "labelUses").delete(op.id);
+        childMap(layerById(doc, op.layerId), "labelUses").delete(hex4(op.address));
         break;
 
       case "constant.add": {
@@ -551,19 +554,30 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         doc.getMap<Y.Map<unknown>>("evidence").delete(op.id);
         break;
 
+      // **A binding is keyed by its site**, which is what `docs/algebra.md` has
+      // always said it is: an address-to-id map, where binding again is how a
+      // binding is updated.
+      //
+      // It was keyed by a *minted use id*, so every bind added a competitor
+      // rather than replacing one. Two uses then sat at one address, the loaded
+      // index kept whichever the projection sorted last — by id, which is
+      // random — and unbinding removed one and left the other still resolving.
+      // Which value showed depended on the ids, not on which bind happened
+      // later.
       case "constantUse.bind": {
         const uses = childMap(layerById(doc, op.layerId), "constantUses");
-        let entry = uses.get(op.id);
+        const at = hex4(op.address);
+        let entry = uses.get(at);
         if (!entry) {
           entry = new Y.Map<unknown>();
-          uses.set(op.id, entry);
+          uses.set(at, entry);
         }
-        assign(entry, { id: op.id, address: hex4(op.address), constant: op.constantId });
+        assign(entry, { id: op.id, address: at, constant: op.constantId });
         break;
       }
 
       case "constantUse.unbind":
-        childMap(layerById(doc, op.layerId), "constantUses").delete(op.id);
+        childMap(layerById(doc, op.layerId), "constantUses").delete(hex4(op.address));
         break;
 
       case "layer.set": {

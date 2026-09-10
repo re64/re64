@@ -4810,7 +4810,7 @@ export class Workspace {
       const layer = loaded.project.layers.find((l) => l.id === layerId);
       const use = layer?.labelUses?.find((u) => parseProjectAddress(u.address) === address);
       if (!use?.id) throw new Error(`No label is bound at ${hex4(address)}.`);
-      return [{ op: "labelUse.unbind", id: use.id, layerId }];
+      return [{ op: "labelUse.unbind", id: use.id, layerId, address }];
     });
   }
 
@@ -5146,7 +5146,7 @@ export class Workspace {
         (u) => parseProjectAddress(u.address) === address
       );
       if (!use?.id) throw new Error(`No constant is bound at ${hex4(address)}.`);
-      return [{ op: "constantUse.unbind", id: use.id, layerId }];
+      return [{ op: "constantUse.unbind", id: use.id, layerId, address }];
     });
   }
 

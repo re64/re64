@@ -188,14 +188,18 @@ const CASES: { [K in Op["op"]]: Case } = {
   "labelUse.bind": {
     op: { op: "labelUse.bind", id: "lbl_u2", layerId: "lay_a", address: 0x8000, labelId: "clm_1" },
   },
-  "labelUse.unbind": { op: { op: "labelUse.unbind", id: "lbl_u1", layerId: "lay_a" } },
+  "labelUse.unbind": {
+    op: { op: "labelUse.unbind", id: "lbl_u1", layerId: "lay_a", address: 0x8100 },
+  },
   "constant.add": { op: { op: "constant.add", id: "cst_2", name: "RED", value: 0x02 } },
   "constant.set": { op: { op: "constant.set", id: "cst_1", fields: { name: "RENAMED" } } },
   "constant.remove": { op: { op: "constant.remove", id: "cst_1" } },
   "constantUse.bind": {
     op: { op: "constantUse.bind", id: "cst_u2", layerId: "lay_a", address: 0x8100, constantId: "cst_1" },
   },
-  "constantUse.unbind": { op: { op: "constantUse.unbind", id: "cst_u1", layerId: "lay_a" } },
+  "constantUse.unbind": {
+    op: { op: "constantUse.unbind", id: "cst_u1", layerId: "lay_a", address: 0x8000 },
+  },
   "decoder.add": { op: { op: "decoder.add", id: "dec_2", name: "swap", source: "return bytes;" } },
   "decoder.set": { op: { op: "decoder.set", id: "dec_1", fields: { name: "renamed" } } },
   "decoder.remove": { op: { op: "decoder.remove", id: "dec_1" } },

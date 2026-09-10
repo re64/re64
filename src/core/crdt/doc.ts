@@ -42,6 +42,7 @@ import {
   ProjectLabelUse,
   ProjectLayer,
   ProjectRegion,
+  parseProjectAddress,
 } from "../project/project.js";
 
 /**
@@ -146,15 +147,20 @@ export function docFromProject(declared: Project): Y.Doc {
       }
       entry.set("comments", commentMap);
 
+      // **Keyed by the site, not by a minted use id.** A binding is an
+      // address-to-id map — binding again is how one is updated — and keying by
+      // the record's own id made every bind add a competitor instead. Two uses
+      // then sat at one address and the loaded index kept whichever sorted last,
+      // by an id that is random.
       const useMap = new Y.Map<Y.Map<unknown>>();
       for (const use of [...(constantUses ?? [])].sort(byId)) {
-        useMap.set(use.id!, mapFrom(use as unknown as Record<string, unknown>));
+        useMap.set(siteKey(use.address), mapFrom(use as unknown as Record<string, unknown>));
       }
       entry.set("constantUses", useMap);
 
       const labelUseMap = new Y.Map<Y.Map<unknown>>();
       for (const use of [...(labelUses ?? [])].sort(byId)) {
-        labelUseMap.set(use.id!, mapFrom(use as unknown as Record<string, unknown>));
+        labelUseMap.set(siteKey(use.address), mapFrom(use as unknown as Record<string, unknown>));
       }
       entry.set("labelUses", labelUseMap);
 
@@ -270,6 +276,12 @@ function typeMapFrom(type: ProjectType): Y.Map<unknown> {
   }
   map.set("fields", fields);
   return map;
+}
+
+/** A binding's key: the site it is about, spelled the way the file spells one. */
+function siteKey(address: number | string): string {
+  const at = typeof address === "number" ? address : parseProjectAddress(address);
+  return `$${at.toString(16).toUpperCase().padStart(4, "0")}`;
 }
 
 const byId = (a: { id?: string }, b: { id?: string }) =>

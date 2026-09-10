@@ -237,3 +237,77 @@ describe("a partial edit touches only what it names", () => {
     expect(after.encoding).toBeUndefined();
   });
 });
+
+describe("a binding is keyed by its site", () => {
+  /**
+   * **`docs/algebra.md` describes a binding as an address-to-id map** — bind and
+   * unbind by key, and binding again is how one is updated. The storage keyed it
+   * by a *minted use id* instead, so every bind added a competitor rather than
+   * replacing one.
+   *
+   * Two uses then sat at one site. The loaded index kept whichever the
+   * projection sorted last — by id, which is random — so *which value showed
+   * depended on the ids rather than on which bind happened later*. Unbinding
+   * removed one and left the other still resolving.
+   *
+   * This is the same family as the field storage above: a shape that does not
+   * implement the identity its verbs promise.
+   */
+  const BOUND: Project = {
+    layers: [{ id: "lay_a", type: "prg", path: "game.prg" }],
+    constants: [
+      { id: "cst_one", name: "ONE", value: "$01" },
+      { id: "cst_white", name: "WHITE", value: "$01" },
+    ],
+  };
+
+  const bind = (doc: CrdtDoc, constantId: string, id: string) =>
+    applyOpToDoc(doc, {
+      op: "constantUse.bind",
+      id,
+      layerId: "lay_a",
+      address: 0x8000,
+      constantId,
+    });
+
+  const usesOf = (doc: CrdtDoc) => projectFromDoc(doc).layers[0].constantUses ?? [];
+
+  it("replaces rather than accumulating when the same site is bound again", () => {
+    const doc = docFromProject(BOUND);
+    bind(doc, "cst_one", "cst_u1");
+    bind(doc, "cst_white", "cst_u2");
+
+    const held = usesOf(doc);
+    expect(held).toHaveLength(1);
+    expect(held[0].constant).toBe("cst_white");
+  });
+
+  it("clears the site when it is unbound", () => {
+    const doc = docFromProject(BOUND);
+    bind(doc, "cst_one", "cst_u1");
+    bind(doc, "cst_white", "cst_u2");
+    applyOpToDoc(doc, {
+      op: "constantUse.unbind",
+      id: "cst_u2",
+      layerId: "lay_a",
+      address: 0x8000,
+    });
+    expect(usesOf(doc)).toHaveLength(0);
+  });
+
+  it("settles two peers binding one site on one value", () => {
+    // Concurrent binds are a genuine conflict and last-writer-wins is the right
+    // answer — what was wrong was ending up with *both*, and picking between
+    // them by an id nobody chose.
+    const a = docFromProject(BOUND);
+    a.clientID = 1;
+    const b = docFromProject(BOUND);
+    b.clientID = 2;
+    bind(a, "cst_one", "cst_ua");
+    bind(b, "cst_white", "cst_ub");
+    syncAll(a, b);
+
+    expect(usesOf(a)).toHaveLength(1);
+    expect(usesOf(a)[0].constant).toBe(usesOf(b)[0].constant);
+  });
+});
