@@ -318,6 +318,17 @@ describe("an old type.set child patch, read from history", () => {
     expect(fieldsOf(out)).toEqual(["fld_a@0:renamed", `${derivedId("fld", "typ_a", 6)}@6:z`]);
   });
 
+  it("replaces the field, so an omitted description is a cleared one", () => {
+    const described = applyOp(withType, {
+      op: "field.set",
+      id: "fld_a",
+      typeId: "typ_a",
+      fields: { description: "says something" },
+    });
+    const out = applyOp(described, legacySet({ 0: { id: "fld_a", name: "x", type: "u8" } }));
+    expect(parseProject(out).types![0].fields[0].description).toBeUndefined();
+  });
+
   it("finds a moved field by its id rather than by the offset it left", () => {
     const moved = applyOp(withType, { op: "field.set", id: "fld_a", typeId: "typ_a", fields: { offset: 2 } });
     const out = applyOp(moved, legacySet({ 0: { id: "fld_a", name: "renamed", type: "u8" } }));

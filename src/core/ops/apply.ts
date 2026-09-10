@@ -403,7 +403,19 @@ export function applyOp(raw: string, op: Op): string {
             continue;
           }
           const id = target?.id ?? child.id ?? derivedId("fld", op.id, offset);
-          const revised = { ...(target ?? {}), ...child, id, offset };
+          // **A replacement, not a patch.** The old adapter wrote
+          // `fields[offset] = field`, so a child that omitted `description`
+          // removed one — and an inverse recorded then relies on that to take a
+          // description back. Spelled the way `field.add` spells a field, key
+          // for key, because the text keeps object order and a replay that
+          // changes nothing must produce the same bytes.
+          const revised = {
+            id,
+            offset,
+            name: child.name,
+            type: child.type,
+            ...(child.description === undefined ? {} : { description: child.description }),
+          };
           fields = target
             ? fields.map((f) => (f === target ? revised : f))
             : [...fields, revised];

@@ -382,9 +382,20 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
                 continue;
               }
               const id = target?.id ?? child.id ?? derivedId("fld", op.id, offset);
-              const was = fields.get(id);
-              if (was instanceof Y.Map) revise(was, { ...child, id, offset });
-              else fields.set(id, fieldMap({ ...child, id, offset }));
+              // **A replacement, not a patch**, because that is what the old
+              // adapter did: a child omitting `description` removed one, and an
+              // inverse recorded then relies on it. Revising only the keys the
+              // child names would keep what it meant to clear.
+              fields.set(
+                id,
+                fieldMap({
+                  id,
+                  offset,
+                  name: child.name,
+                  type: child.type,
+                  ...(child.description === undefined ? {} : { description: child.description }),
+                })
+              );
             }
           }
         }
