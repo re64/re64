@@ -102,3 +102,124 @@ today's work. `TRIAGE.md` is what happened and the order I would fix them in;
 - [x] **R6 residual** — done with R5 above. Duplicate target names are now
       refused when used to select, and named, rather than the first silently
       winning.
+
+---
+
+# 5. Local resolution, and the session as a replica
+
+The settled position, after getting it backwards once. Anything a caller writes
+that has to be **resolved** — a name meaning an id, an ambiguity — resolves
+against **that participant's own state**, never against the server's current
+global state. The resolved operation carries ids and merges whatever anyone else
+did. Two participants resolving one name to different ids is *correct*: the same
+shape as two readers naming one routine differently, which the model already
+tolerates and hygiene already reports.
+
+Asking the live document is the failure the offline rule names — *"an operation
+whose correctness depends on having seen what everyone else did fails the first
+direction"*. An MCP session is a proxy for a browser tab, and `src/client/
+session.ts` is the model that already does this right.
+
+**Freshness is not correctness.** An agent may work from an out-of-date view
+indefinitely, however online its connection is. Nothing forces a merge. An agent
+that never merges duplicates work and produces two names for one routine —
+which is the design working, not a bug, and worth expecting when a run does it.
+
+## Stage 1 — chat becomes a first-class entity
+
+Independent of the rest; can land first. **Two of `chat.ts`'s arguments hold and
+one does not**, which is what makes this smaller than it looks:
+
+- **Holds: a `Y.Array`, not an id-keyed map.** Ordering *is* the content of a
+  conversation, and the array CRDT converges it without anyone agreeing a clock.
+  This is the opposite of fields and bindings, where position was masquerading as
+  identity. Both properties are already there — the array orders, and each entry
+  is a `Y.Map` carrying an id — so **no storage change**.
+- **Holds: undo must not eat what somebody said.** Keep chat out of the undo
+  stack, deliberately and stated. Deleting a message is `remove_message`, an
+  explicit act — the same distinction `retire_claim` draws against a sweep.
+- **Does not hold: "deliberately not an operation … 'unsay that' is not a
+  computable inverse."** It plainly is: `message.add` inverts to
+  `message.remove`. The real objection was about undo, and undo is a separate
+  question from whether the vocabulary covers it.
+
+Work:
+
+- [ ] `message.add` / `message.set` / `message.remove`. Algebra 42 → 45. The
+      round-trip harness is keyed by `Op["op"]`, so it will not compile until
+      each has a case.
+- [ ] `post_message` **returns the id**. Messages have had ids since they
+      existed and no surface has ever exposed one. F1, again.
+- [ ] `edit_message` and `remove_message`, by id.
+- [ ] Undo skips message ops, as a stated rule with the reason.
+- [ ] Chat reaches `changes_since`, which is the point: it is how a session
+      peeks at what is waiting without merging it.
+
+**The fork this turns on, and it needs a decision.** `changes_since` is fed from
+the ops log, and the socket path derives ops by diffing *projections*. Chat is
+excluded from `projectFromDoc` by an explicit whitelist. So chat can only reach
+the changes feed if it reaches the projection — which means it reaches the
+exported `.re64` too.
+
+- **(A) Chat joins `Project`.** Exported, versioned, diffed, in the feed. One
+  mechanism, no special case, and a project carries its own discussion wherever
+  it goes. Costs: the file format grows a root, the golden hash moves, and every
+  message moves the version — which matters much less once `expectVersion` is
+  gone.
+- **(B) Chat stays out**, and reaches the feed by a second mechanism that the
+  socket path cannot see.
+
+**Recommended: (A).** (B) buys a parallel path for the one root that is small,
+and leaves a project's discussion behind when the file is handed to somebody.
+The argument it overturns — *"a message … has no place in a `.re64`"* — was made
+when chat was not first class.
+
+## Stage 2 — the changes feed becomes complete (R11)
+
+A prerequisite, because stage 3 makes the feed load-bearing as both the peek and
+the merge cursor. Today `PUT /api/project` reaches the document and adds **zero**
+rows, and undo changes state without advancing the cursor — so a session would be
+told nothing is pending when something is. A silent wrong answer in the place we
+are about to depend on.
+
+- [ ] Route every accepted write through one action recorder.
+- [ ] Undo appends an event referencing the original action, rather than only
+      flipping `undone`.
+
+## Stage 3 — the session replica
+
+- [ ] An MCP session holds a **pinned view** of the document. Reads answer from
+      the pin; writes apply and propagate immediately. Only the inbox is
+      deferred — a connected session has no reason to hold its own writes, so
+      there is no outbox and no offline write queue.
+- [ ] Name→id resolution moves to the pinned view. **Ambiguity becomes local**:
+      two `Creature`s in *my* view must be disambiguated; someone else's
+      concurrent second one must not change what my operation meant.
+- [ ] `pending` on every answer that has one, **absent when zero** — the
+      `hygiene` idiom, because a counter that says `0` ninety-five times trains a
+      reader to stop looking. Count and who; *what* is `changes_since`'s job and
+      already exists, so nothing to build there until a run asks for it.
+- [ ] An explicit `merge` tool. Explicit on purpose: it avoids a per-tool
+      classification of which calls sync, and the last two classifications each
+      caught tools misclassified in shipped code the moment a test existed.
+      A `merge=before` argument stays unbuilt until a run shows agents
+      forgetting — an argument on every tool is how `target` got where it was.
+- [ ] **`expectVersion` removed**, folded in here because this is what replaces
+      it. An offline participant can never supply a valid whole-document hash,
+      so it is a second mode by construction, and refusing a write because the
+      document moved is refusing to merge.
+
+## Stage 4 — sweep the model and the surface for consistency
+
+Two rules are now settled: **every reference in the document is an id**, and
+**everything resolvable resolves locally**. Check them everywhere rather than
+where we happened to look.
+
+- [ ] Every entity: three verbs, an id returned by whatever mints it, a
+      round-trip case. `post_message` returning no id is one instance; look for
+      the rest.
+- [ ] Every reference: capture → filename (R8), layer → path, and whatever the
+      sweep turns up.
+- [ ] Every resolution: anything that reads "current" state to decide what a
+      write means.
+- [ ] Fold the findings into the Codex queue rather than keeping two lists.
