@@ -1,5 +1,168 @@
 # Document model and MCP review — 2026-09-09
 
+## Follow-up review — 2026-09-10
+
+Reviewed current `main` at `29c9b29`, the ten repair pull requests
+[#16](https://github.com/re64/re64/pull/16) through
+[#25](https://github.com/re64/re64/pull/25), and the larger follow-up designs in
+[#26](https://github.com/re64/re64/issues/26) and
+[#27](https://github.com/re64/re64/issues/27). The original findings below are
+retained as the baseline; this section supersedes their implementation status.
+
+Eight findings are fixed on current `main`: **R1, R2, R5, R6, R10, R11, R12
+and R15**. Seven branches need changes before they close their findings: **R3,
+R4, R7, R8, R9, R13 and R14**. The review also found one P1 regression in the
+new session-replica design, tracked as
+[#28](https://github.com/re64/re64/issues/28).
+
+| Finding | Current disposition | Review result |
+|---|---|---|
+| R1 | [PR #21](https://github.com/re64/re64/pull/21), merged | **Resolved.** Caller, session, tool context and logging are captured per request before the body await. |
+| R2 | merged on `main` | **Resolved.** `claim.set` now touches only the named keys and keeps structured groups atomic. |
+| R3 | [PR #23](https://github.com/re64/re64/pull/23) | **Changes requested.** The id-keyed nested maps are right, but legacy id-less fields are dropped and `type.set` still provides an ambiguous offset-keyed child-edit route. |
+| R4 | [PR #24](https://github.com/re64/re64/pull/24) | **Changes requested.** Site keying fixes accumulation, but undoing a rebind clears the site instead of restoring its previous binding. |
+| R5 | merged on `main` | **Resolved.** Target frames use stable target ids and are filtered at projection. |
+| R6 | merged on `main` | **Resolved.** The name-based default was removed and target references use ids. |
+| R7 | [PR #20](https://github.com/re64/re64/pull/20) | **Changes requested.** The view and placement enter the key, but present ROM and character-ROM content do not. |
+| R8 | [PR #22](https://github.com/re64/re64/pull/22) | **Changes requested.** Workspace loading follows the document hash, but the HTTP blob route still follows the mutable SQL name during the upload/record gap; its claimed conditional ETag response is also absent. |
+| R9 | [PR #25](https://github.com/re64/re64/pull/25) | **Changes requested.** Publication waits for commit, but a listener exception after the commit is handled as a transaction failure and reported as though the durable write failed. |
+| R10 | [PR #19](https://github.com/re64/re64/pull/19), merged | **Resolved.** Each inverse is derived against its own rolling pre-state and socket actions retain session and changeset grouping. |
+| R11 | merged on `main` | **Resolved.** All accepted writes enter the feed and undo/redo append actions. |
+| R12 | merged on `main` | **Resolved with R11.** Appended undo actions give redo an explicit order. |
+| R13 | [PR #17](https://github.com/re64/re64/pull/17) | **Changes requested.** The adapters agree that `by` is a replacement, but `edit_evidence` still promises nullable clears while rejecting `method: null`. |
+| R14 | [PR #16](https://github.com/re64/re64/pull/16) | **Changes requested.** Selecting numeric or text comparison per pair creates a non-transitive comparator for legal mixed names, so ordering can still depend on insertion order. |
+| R15 | [PR #18](https://github.com/re64/re64/pull/18), merged | **Resolved.** A shared whole-number parser rejects suffixes while preserving the advertised spellings. |
+
+### What is now sound
+
+The merged fixes preserve the original architecture while bringing several
+storage contracts into line with it. Claim partial updates now have a genuinely
+partial CRDT write set. A target frame names a stable entity and cannot leak into
+another target. The changes feed is append-only across HTTP, socket, MCP and
+undo/redo paths. Those are substantive model repairs rather than patches around
+the probes.
+
+The approved changes are similarly narrow and complete. PR #21 removes the
+server-global identity closure from both execution and logging. PR #19 computes
+socket inverses by walking the same intermediate states as `runOps`, and also
+restores the action boundary the socket already knew. PR #18 accepts exactly the
+three documented integer spellings across address, byte and flag inputs. Focused
+validation passed for all three: 129 MCP transport tests for #21, 67 store tests
+for #19, 131 MCP transport tests for #18, and typechecking on each branch.
+
+### Repair branches that remain incomplete
+
+**R3 / PR #23.** Keying fields by id and storing each as a nested map is the
+correct physical model. The migration currently converts the old object to a
+list but does not give an id-less legacy field an identity; `typeMapFrom` then
+skips it. More fundamentally, `type.set.fields` survives as an offset-keyed
+second writer. Once two fields may share an offset, that operation cannot say
+which one it edits or removes. It also contradicts the updated model prose that
+parent edits do not carry children. Remove that route or make it explicitly
+id-keyed. `Workspace.editField` contains a mechanical remnant too: it applies
+`Object.entries` to the new array and compares array indices as offsets.
+
+**R4 / PR #24.** A site-keyed map makes rebind and unbind mean what the API says.
+The inverse still looks up the previous use by the newly minted use id. On a
+rebind that id cannot exist in the pre-state, so undo records `unbind` and loses
+the old value. Inversion must find the prior binding by layer and site, or the
+site itself must carry a stable identity. Both constant and label uses need the
+sequence bind A → bind B → undo pinned.
+
+**R7 / PR #20.** Adding target identity, placements and missing-ROM names fixes
+the reproduced cross-target collision. It is not yet a fingerprint of the
+effective machine: changing the bytes of a present BASIC, KERNAL or character
+ROM leaves the key unchanged. The character ROM can also change captured visual
+output without entering the key. Hash the actual external inputs rather than
+only their availability.
+
+**R8 / PR #22.** Resolving workspace bytes through the file hash recorded in the
+document and reconciling the SQL index after operations is correct. The HTTP
+route still calls `storage.blob(requested)`. An upload over an existing name can
+therefore serve unrecorded replacement bytes while the document still names the
+old hash. The route also always returns 200; setting an ETag alone does not
+provide the advertised cheap 304. The route must use the same document-first
+resolver and implement `If-None-Match`, or its contract and prose must be
+narrowed.
+
+**R9 / PR #25.** Deferring listeners and rebuilding the in-memory document after
+a storage failure closes the original live-state divergence. The transaction
+and notification loops share one `try/catch`, however. If a listener throws,
+the database has already committed, yet the method clears the document and
+throws a failure to the caller. That makes a durable success look retryable.
+Commit failure handling and post-commit notification failure handling need
+separate boundaries, with a throwing-listener test.
+
+**R13 / PR #17.** Treating provenance `by` as one replacement value is coherent
+with its required author and fixes both adapters. The public `edit_evidence`
+description says a named field can be cleared with `null`, but its `method`
+schema and workspace type still reject null. The same set/clear behavior should
+be reachable through the MCP surface and tested there.
+
+**R14 / PR #16.** Sorting textual roots is required, but the proposed comparator
+chooses numeric versus textual comparison from each pair. For legal names
+`"10"`, `"2x"`, and `"3"`, it can say `10 < 2x`, `2x < 3`, and `3 < 10`.
+That violates the comparator contract and can preserve the insertion-order
+dependence being repaired. Each root must select one comparator from its schema,
+with a locale-independent code-unit tie-breaker.
+
+### Follow-up design review
+
+[#26](https://github.com/re64/re64/issues/26) correctly makes an operand binding
+layer-relative by default, with a target frame for arrangement-specific meaning.
+The migration must convert coordinates, not merely add a default frame: an
+existing absolute use at `$8123` in a layer beginning at `$8000` becomes offset
+`$0123`. A framed site key also includes frame identity; a layer offset and a
+target address with the same number are not one site. Keeping target-framed uses
+nested under a layer deserves scrutiny because the parent would no longer own
+their coordinate or visibility.
+
+[#27](https://github.com/re64/re64/issues/27) is the right completion of R8: a
+file is an immutable content entity keyed by id, while names remain local aliases.
+The CRDT files root must move from name keys to id keys as part of that change.
+A layer path is sometimes a compound selector such as `disk.d64:ENTRY`, so the
+model needs a file id plus a separate member/selector; migration cannot replace
+the whole path with an id. Hash- or id-addressed blob URLs then make immutable
+caching true and remove mutable-name fallback from established document reads.
+
+### New finding · R16 / #28 · P1 — A session has two read documents and misses its own undo
+
+The session-replica restructuring intends every MCP read to stay stable until an
+explicit merge. `Workspace.document()` reads the replica, but `program()`,
+`load()`, cache keying and `version()` still read the shared room store. Another
+session's unmerged claim, comment, layer or byte edit is therefore immediately
+visible through view-bound tools while document-level tools retain the old state;
+the reported version can identify neither answer consistently.
+
+Own writes are also applied twice as semantic operations: once to the shared
+document and independently to the replica. Those create different CRDT items.
+Undo tombstones the shared item and `Workspace.undo()` sends no update to the
+replica, so the initiating session can see its supposedly undone value through
+document reads while view reads show it gone.
+
+**Fix:** make document reads, view construction, cache keys and response versions
+derive from one selected read document. Capture the shared document's state
+vector before a session write and apply the exact resulting Yjs delta to its
+replica; do the same for its undo. Explicit merge remains the only operation
+that imports other sessions. [Issue #28](https://github.com/re64/re64/issues/28)
+contains the required two-session transport cases.
+
+### Follow-up validation
+
+- Current `main`: `npm test` — **1,721 passed, five skipped** across 102 passing
+  test files and one skipped file; `npm run typecheck`, `npm run build`, and
+  `npm run build:ui` passed.
+- The original model/storage and transport probes were re-run before the three
+  approved branches landed. They confirmed the five fixes already on that
+  baseline and reproduced the other ten original findings; the transport server
+  used OS-assigned loopback port **53202** and was stopped. Focused branch tests
+  covered R1, R10 and R15 before merge.
+- Approved PR branches: the focused suites and typechecks listed above passed in
+  detached worktrees.
+- GitHub review state: #18, #19 and #21 merged after approval. Concrete change
+  requests were submitted on #16, #17, #20, #22, #23, #24 and #25.
+- Design feedback was posted on #26 and #27; the new replica defect is #28.
+
 The model has a sound organizing idea: preserve separate interpretations as claims, identify entities independently of their addresses, and derive analysis and presentation from a shared document. The implementation does not yet consistently preserve those semantics. I reproduced data loss under concurrent edits, incorrect caller attribution, incorrect target selection, false scenario results caused by caching, and divergence between recorded file content and the bytes actually served.
 
 These are implementation findings against the current working tree, not objections to using Yjs. Several can occur sequentially, without concurrent clients.
