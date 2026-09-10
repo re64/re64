@@ -900,7 +900,29 @@ export class ProjectStore {
     const doc = this.document();
     this.absorb(this.storage.readText());
     for (const op of ops) applyOpToDoc(doc, op, author);
+    this.reconcileBlobNames();
     this.writeFile();
+  }
+
+  /**
+   * Point each file name at the hash the **document** says it means.
+   *
+   * The `files` table is a derived index for reading by name, and it drifted:
+   * `putBlob` rewrites it whenever a name is reused, so recording a replacement
+   * and then undoing the record restored the document's hash and left every read
+   * of that name serving the replacement's bytes. A capture recorded earlier
+   * then fetched somebody else's output under its own name.
+   *
+   * Derived, therefore follows — including through undo, which is the case that
+   * exposed it.
+   */
+  private reconcileBlobNames(): void {
+    const point = (this.storage as { setBlobName?: (name: string, hash: string) => void })
+      .setBlobName;
+    if (!point) return;
+    for (const file of projectFromDoc(this.document()).files ?? []) {
+      if (file.name && file.hash) point.call(this.storage, file.name, file.hash);
+    }
   }
 
   /**

@@ -7,6 +7,8 @@ export {
   emptyDoc,
   projectFromDoc,
   programFromDoc,
+  stateVectorOf,
+  updateSince,
   encodeDoc,
   applyUpdate,
   clientsInUpdate,

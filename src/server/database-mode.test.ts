@@ -56,11 +56,18 @@ describe("a server given a database", () => {
     expect((await res.arrayBuffer()).byteLength).toBe(4098);
   });
 
-  it("labels it immutable, because the name maps to bytes that cannot change", async () => {
+  it("makes a client revalidate, because a name can be pointed at other bytes", async () => {
+    // **This asserted `immutable`**, on the ground that a name maps to bytes
+    // that cannot change under it. They can: uploading over a name repoints it,
+    // and undoing the record of one repoints it back. A year-long `immutable`
+    // on a mutable URL leaves every browser that fetched it holding the old
+    // content with no reason to ask again.
     const res = await fetch(`${base}/api/blob?path=gridrunner.prg&project=${project}`);
-    expect(res.headers.get("cache-control")).toContain("immutable");
-    // The tag is the content hash, so it is right by construction rather than
-    // by remembering to update it.
+    expect(res.headers.get("cache-control")).toContain("must-revalidate");
+    expect(res.headers.get("cache-control")).not.toContain("immutable");
+    // The tag is the content hash, so revalidating is cheap when nothing moved
+    // and correct when something did — right by construction rather than by
+    // remembering to update it.
     expect(res.headers.get("etag")).toMatch(/^"[0-9a-f]{64}"$/);
   });
 

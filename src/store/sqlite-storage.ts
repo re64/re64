@@ -356,6 +356,39 @@ export class SqliteStorage implements ProjectStorage {
     return hash;
   }
 
+  /**
+   * The bytes of one content hash, whatever anything currently calls them.
+   *
+   * **The read the document can trust.** `blob(name)` goes through the mutable
+   * `files` table, which `putBlob` overwrites when a name is reused — so the
+   * document could hold one hash while a read of the same name returned other
+   * bytes, and undoing a replacement restored the hash without restoring what
+   * was served.
+   */
+  blobByHash(hash: string): Uint8Array | undefined {
+    const row = this.db
+      .prepare("SELECT bytes FROM blobs WHERE hash = ?")
+      .get(hash) as { bytes: Uint8Array } | undefined;
+    return row ? new Uint8Array(row.bytes) : undefined;
+  }
+
+  /**
+   * Point a name at bytes the store already holds.
+   *
+   * **A derived index, brought back in line with the document.** The `files`
+   * table is a convenience for reading by name; the document is what says which
+   * hash a name means. They drifted whenever a name was reused — and undo,
+   * which restores the document, could not restore this.
+   */
+  setBlobName(name: string, hash: string): void {
+    this.db
+      .prepare(
+        "INSERT INTO files (id, project_id, name, hash) VALUES (?, ?, ?, ?) " +
+          "ON CONFLICT(project_id, name) DO UPDATE SET hash = excluded.hash"
+      )
+      .run(newId("fil"), this.projectId, normalizeBlobName(name), hash);
+  }
+
   /** The bytes a project name stands for, or undefined if it holds none. */
   blob(name: string): Uint8Array | undefined {
     const row = this.db

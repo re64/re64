@@ -730,6 +730,24 @@ export function encodeDoc(doc: Y.Doc): Uint8Array {
   return Y.encodeStateAsUpdate(doc);
 }
 
+/**
+ * Where a document has got to, for asking what has happened since.
+ *
+ * The pair below is how a replica gets **its own echo**: take a state vector,
+ * make the write, then apply the delta. Re-applying the same operation to two
+ * documents instead would make two independent CRDT items for one map key, and
+ * a delete of one would not touch the other — which is exactly how an undo
+ * stopped reaching a session's own copy.
+ */
+export function stateVectorOf(doc: Y.Doc): Uint8Array {
+  return Y.encodeStateVector(doc);
+}
+
+/** Everything this document has that the given state vector does not. */
+export function updateSince(doc: Y.Doc, since: Uint8Array): Uint8Array {
+  return Y.encodeStateAsUpdate(doc, since);
+}
+
 /** Merge an update into a document. */
 export function applyUpdate(doc: Y.Doc, update: Uint8Array, origin?: unknown): void {
   Y.applyUpdate(doc, update, origin);
