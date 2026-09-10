@@ -2386,8 +2386,13 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       kind: z.enum(["supports", "refutes", "retires"]).optional(),
       method: z
         .enum(["guessed", "transcribed", "read", "derived", "ran"])
+        .nullable()
         .optional()
-        .describe("How you know this. The author and time on the record are kept."),
+        .describe(
+          "How you know this. The author and time on the record are kept, and " +
+            "`null` clears the method while keeping them — somebody vouched for " +
+            "this even where how they knew is no longer worth stating."
+        ),
       scenario: z.string().nullable().optional(),
       capture: z.string().nullable().optional(),
       other: z.string().nullable().optional(),
@@ -2397,7 +2402,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       project?: string;
       id: string;
       kind?: "supports" | "refutes" | "retires";
-      method?: "guessed" | "transcribed" | "read" | "derived" | "ran";
+      method?: "guessed" | "transcribed" | "read" | "derived" | "ran" | null;
       scenario?: string | null;
       capture?: string | null;
       other?: string | null;
