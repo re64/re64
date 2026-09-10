@@ -352,34 +352,49 @@ export function diffProjects(from: Project, to: Project): Op[] {
     if (sameType(before, type)) continue;
     const beforeSize =
       typeof before.size === "string" ? parseProjectAddress(before.size) : before.size;
-    // Per offset: an offset present in neither is untouched, one that went is
-    // `null`. A whole-map write here is what would lose a field a concurrent
-    // reader added.
-    //
-    // Still `type.set` rather than the three `field.*` operations, and
-    // deliberately: this reconciles a *file* against a document, where a field
-    // has no id until it is read back and the honest unit of change is the
-    // offset that moved. `field.add`/`set`/`remove` are what a caller who holds
-    // an id uses; both land in the same place.
-    const fields: Record<number, TypeField | null> = {};
-    const wasAt = new Map(before.fields.map((f) => [f.offset, f] as const));
-    const nowAt = new Map(type.fields.map((f) => [f.offset, f] as const));
-    for (const offset of new Set([...wasAt.keys(), ...nowAt.keys()])) {
-      const was = wasAt.get(offset);
-      const now = nowAt.get(offset);
-      if (JSON.stringify(was) === JSON.stringify(now)) continue;
-      fields[offset] = now ? { ...now, id: now.id! } : null;
+    const revised = {
+      ...(before.name === type.name ? {} : { name: type.name }),
+      ...(beforeSize === size ? {} : { size }),
+      ...(before.unit === type.unit || type.unit === undefined ? {} : { unit: type.unit }),
+    };
+    if (Object.keys(revised).length) ops.push({ op: "type.set", id, fields: revised });
+
+    // **The fields, by id, through the three operations that own them.** This
+    // reconciles a *file* against a document, and the file used to be the reason
+    // `type.set` carried an offset-keyed patch of its own: a field in a file had
+    // no identity to name. It has one now — `fieldsOfType` derives it on the way
+    // in — so the reconciler stops being a second writer for the same storage.
+    const was = new Map(before.fields.map((f) => [f.id!, f] as const));
+    const now = new Map(type.fields.map((f) => [f.id!, f] as const));
+    for (const fieldId of was.keys()) {
+      if (!now.has(fieldId)) ops.push({ op: "field.remove", id: fieldId, typeId: id });
     }
-    ops.push({
-      op: "type.set",
-      id,
-      fields: {
-        ...(before.name === type.name ? {} : { name: type.name }),
-        ...(beforeSize === size ? {} : { size }),
-        ...(before.unit === type.unit || type.unit === undefined ? {} : { unit: type.unit }),
-        ...(Object.keys(fields).length ? { fields } : {}),
-      },
-    });
+    for (const [fieldId, field] of now) {
+      const had = was.get(fieldId);
+      if (!had) {
+        ops.push({
+          op: "field.add",
+          id: fieldId,
+          typeId: id,
+          offset: field.offset,
+          name: field.name,
+          type: field.type,
+          ...(field.description === undefined ? {} : { description: field.description }),
+        });
+        continue;
+      }
+      const patch = {
+        ...(had.name === field.name ? {} : { name: field.name }),
+        ...(had.type === field.type ? {} : { type: field.type }),
+        ...(had.offset === field.offset ? {} : { offset: field.offset }),
+        ...(had.description === field.description
+          ? {}
+          : { description: field.description ?? null }),
+      };
+      if (Object.keys(patch).length) {
+        ops.push({ op: "field.set", id: fieldId, typeId: id, fields: patch });
+      }
+    }
   }
 
   const beforeEvidence = new Map((from.evidence ?? []).filter((e) => e.id).map((e) => [e.id!, e]));

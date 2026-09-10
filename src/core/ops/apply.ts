@@ -392,24 +392,11 @@ export function applyOp(raw: string, op: Op): string {
         })),
       });
 
-    // Fields merge **by offset here**, because that is what `type.set`'s payload
-    // is keyed by: it is the older, whole-layout route and stays offset-shaped
-    // for its callers. `null` at an offset removes whatever sits there. The
-    // identity-preserving route is `field.set`, which names a field by its id.
+    // **The record, not its parts.** Revising a type leaves its fields exactly
+    // where they are; `field.add`, `field.set` and `field.remove` are how one
+    // changes, by id.
     case "type.set": {
       const held = held0(project.types, op.id, "type", op.id);
-      const byOffset = new Map(held.fields.map((f) => [f.offset, f] as const));
-      for (const [offset, field] of Object.entries(op.fields.fields ?? {})) {
-        const at = Number(offset);
-        if (field === null) byOffset.delete(at);
-        else
-          byOffset.set(at, {
-            ...field,
-            offset: at,
-            id: field.id ?? byOffset.get(at)?.id ?? derivedId("fld", op.id, offset),
-          });
-      }
-      const fields = [...byOffset.values()].sort((a, b) => a.offset - b.offset);
       return upsertType(raw, {
         id: op.id,
         name: op.fields.name ?? held.name,
@@ -417,7 +404,7 @@ export function applyOp(raw: string, op: Op): string {
         ...((op.fields.unit ?? held.unit) === undefined
           ? {}
           : { unit: op.fields.unit ?? held.unit }),
-        fields,
+        fields: held.fields,
       });
     }
 
@@ -854,13 +841,6 @@ export function invertOp(raw: string, op: Op): Op {
     case "type.set": {
       const found = project.types?.find((t) => t.id === op.id);
       if (!found) return op;
-      // Per offset, so undoing a merge restores exactly the fields it touched:
-      // one that was there comes back, one that was not is removed with `null`.
-      const fields: Record<number, TypeField | null> = {};
-      for (const offset of Object.keys(op.fields.fields ?? {})) {
-        const was = found.fields.find((f) => f.offset === Number(offset));
-        fields[Number(offset)] = was ? { ...was, id: was.id! } : null;
-      }
       return {
         op: "type.set",
         id: op.id,
@@ -869,7 +849,7 @@ export function invertOp(raw: string, op: Op): Op {
           ...(op.fields.size === undefined
             ? {}
             : { size: parseProjectAddress(found.size) }),
-          ...(op.fields.fields === undefined ? {} : { fields }),
+          ...(op.fields.unit === undefined ? {} : { unit: found.unit }),
         },
       };
     }

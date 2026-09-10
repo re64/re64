@@ -380,30 +380,6 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
             ...(op.fields.size === undefined ? {} : { size: op.fields.size }),
             ...(op.fields.unit === undefined ? {} : { unit: op.fields.unit }),
           });
-          if (op.fields.fields) {
-            // `type.set` speaks offsets — it is the whole-layout route, and its
-            // payload has always been keyed that way. Resolved to an id here, so
-            // the two routes write the same shape: a field already at that
-            // offset keeps its identity, and `null` removes whatever is there.
-            const fields = fieldsOf(entry);
-            const atOffset = (want: number): string | undefined =>
-              [...fields.keys()].find((k) => {
-                const held = fields.get(k);
-                return held instanceof Y.Map && held.get("offset") === want;
-              });
-            for (const [offset, field] of Object.entries(op.fields.fields)) {
-              const at = Number(offset);
-              const existing = atOffset(at);
-              if (field === null) {
-                if (existing) fields.delete(existing);
-                continue;
-              }
-              const id = field.id ?? existing ?? derivedId("fld", op.id, offset);
-              const held = fields.get(id);
-              if (held instanceof Y.Map) revise(held, { ...field, id, offset: at });
-              else fields.set(id, fieldMap({ ...field, id, offset: at }));
-            }
-          }
         }
         break;
       }

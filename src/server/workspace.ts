@@ -2566,20 +2566,10 @@ export class Workspace {
       size: number;
       fields: Record<string, { name: string; type: string; description?: string }>;
       unit?: "bytes" | "bits";
-      id?: string;
     }
   ): EditResult & { type: string } {
     const declared = this.document().types ?? [];
-    const existing =
-      type.id === undefined ? undefined : declared.find((t) => t.id === type.id);
-    if (type.id !== undefined && !existing) {
-      throw new Error(`No type ${type.id}. list_types shows what this project has.`);
-    }
-
-    // An edit that does not restate the unit keeps the one the type has. A
-    // bit record whose offsets started being read as bytes halfway through an
-    // edit would reject every field it already held.
-    const unit = type.unit ?? existing?.unit;
+    const unit = type.unit;
     // The one alias layer, shared with `add_field` and `edit_field` so the three
     // writers cannot drift: an id, or a name exactly one thing answers to, or
     // `name@id` when more than one does. See `fieldTypeNames`.
@@ -2651,11 +2641,7 @@ export class Workspace {
       // or `u8[CreatureCount]`; what is stored is `typ_…[42]` and `u8[cst_…]`,
       // because a name is a field somebody may change and a reference must not
       // change with it. The name is how it renders, resolved on the way out.
-      fields[offset] = {
-        ...field,
-        type: storedFieldType(parsed),
-        id: existing?.fields?.find((f) => f.offset === offset)?.id ?? newId("fld"),
-      };
+      fields[offset] = { ...field, type: storedFieldType(parsed), id: newId("fld") };
     }
 
     if (Object.keys(fields).length === 0 && Object.keys(type.fields).length > 0) {
@@ -2665,36 +2651,70 @@ export class Workspace {
       );
     }
 
-    // `add` mints and returns; `set` revises the id it was given and never
-    // creates one. Fields merge by offset, so revising a layout does not
-    // silently drop a field a collaborator added at another offset.
-    const id = existing?.id ?? newId("typ");
-    const result = this.editDocument(caller, () =>
-      existing
-        ? [
-            {
-              op: "type.set" as const,
-              id,
-              fields: {
-                name: type.name,
-                size: type.size,
-                ...(unit === undefined ? {} : { unit }),
-                fields,
-              },
-            },
-          ]
-        : [
-            {
-              op: "type.add" as const,
-              id,
-              name: type.name,
-              size: type.size,
-              ...(unit === undefined ? {} : { unit }),
-              fields,
-            },
-          ]
-    );
+    // **Declaring a record declares its parts**, which is why `type.add` carries
+    // fields and `type.set` does not. Correcting one is `edit_field` by its id;
+    // correcting the record itself is `reviseType` below.
+    const id = newId("typ");
+    const result = this.editDocument(caller, () => [
+      {
+        op: "type.add" as const,
+        id,
+        name: type.name,
+        size: type.size,
+        ...(unit === undefined ? {} : { unit }),
+        fields,
+      },
+    ]);
     return { ...result, type: id, ...(rejected.length ? { rejected } : {}) };
+  }
+
+  /**
+   * Correct the record itself — its name, its size, what its offsets count.
+   *
+   * **Not its fields.** `edit_type` used to require the whole layout back and
+   * merged it by offset, which is a second writer for storage that is keyed by
+   * id: once two fields may share an offset, which is now a legal state, that
+   * patch could not say which of them it meant and silently took the first it
+   * found. It also made renaming a record require restating its size.
+   */
+  reviseType(
+    caller: Caller,
+    id: string,
+    fields: { name?: string; size?: number; unit?: "bytes" | "bits" }
+  ): EditResult & { type: string } {
+    const held = (this.document().types ?? []).find((t) => t.id === id);
+    if (!held) throw new Error(`No type ${id}. list_types shows what this project has.`);
+
+    // A record cannot shrink out from under the fields it holds: the offsets
+    // stay where they are, so the ones past the new end would be unreadable
+    // with nothing saying so. A fact about the request, which is the kind of
+    // reason a write here may refuse for.
+    if (fields.size !== undefined) {
+      const unit = fields.unit ?? held.unit;
+      const bound = unit === "bits" ? fields.size * 8 : fields.size;
+      const past = held.fields.filter((f) => f.offset >= bound);
+      if (past.length) {
+        throw new Error(
+          `${held.name} holds ${past.length} field(s) at or past ${bound}` +
+            `${unit === "bits" ? " bits" : " bytes"}: ` +
+            past.map((f) => `+${f.offset} ${f.name}`).join(", ") +
+            ". remove_field or move them first."
+        );
+      }
+    }
+
+    const result = this.editDocument(caller, () => [
+      {
+        op: "type.set" as const,
+        id,
+        fields: {
+          ...(fields.name === undefined ? {} : { name: fields.name }),
+          ...(fields.size === undefined ? {} : { size: fields.size }),
+          ...(fields.unit === undefined ? {} : { unit: fields.unit }),
+        },
+      },
+    ]);
+    return { ...result, type: id };
   }
 
   /**
@@ -2766,16 +2786,18 @@ export class Workspace {
     const loaded = { project: this.document() };
     const held = (loaded.project.types ?? []).find((t) => t.id === typeId);
     if (!held) throw new Error(`No type ${typeId}. list_types shows what this project has.`);
-    if (!Object.values(held.fields).some((f) => f.id === id)) {
+    if (!held.fields.some((f) => f.id === id)) {
       throw new Error(`No field ${id} in ${held.name}. list_types shows its fields with ids.`);
     }
     const stored =
       fields.type === undefined ? fields : { ...fields, type: this.storedFrom(fields.type) };
+    // `held.fields` is a **list**, and `Object.entries` over a list hands back
+    // array indices — so this compared 0, 1, 2 against the requested offset for
+    // a record laid out at 0, 8 and $A0. Third time this project has been caught
+    // by that exact substitution while the offset key was being removed.
     if (fields.offset !== undefined) {
-      const taken = Object.entries(held.fields).find(
-        ([at, f]) => Number(at) === fields.offset && f.id !== id
-      );
-      if (taken) throw new Error(`+${fields.offset} of ${held.name} is already ${taken[1].name}.`);
+      const taken = held.fields.find((f) => f.offset === fields.offset && f.id !== id);
+      if (taken) throw new Error(`+${fields.offset} of ${held.name} is already ${taken.name}.`);
     }
     return this.editDocument(caller, () => [
       { op: "field.set", id, typeId, fields: stored } as Op,
@@ -2785,7 +2807,7 @@ export class Workspace {
   removeField(caller: Caller, typeId: string, id: string): EditResult {
     const held = (this.document().types ?? []).find((t) => t.id === typeId);
     if (!held) throw new Error(`No type ${typeId}. list_types shows what this project has.`);
-    if (!Object.values(held.fields).some((f) => f.id === id)) {
+    if (!held.fields.some((f) => f.id === id)) {
       throw new Error(`No field ${id} in ${held.name}. list_types shows its fields with ids.`);
     }
     return this.editDocument(caller, () => [{ op: "field.remove", id, typeId } as Op]);
@@ -2973,6 +2995,9 @@ export class Workspace {
           // Said out loud, because it changes what every offset below means.
           ...(type.unit === undefined ? {} : { unit: type.unit }),
           fields: laid.map(({ offset, field }) => ({
+            // The handle `edit_field` and `remove_field` take, and what the
+            // error messages have been telling callers to find here.
+            ...(field.id === undefined ? {} : { id: field.id }),
             offset: `+$${offset.toString(16).toUpperCase().padStart(2, "0")}`,
             name: field.name,
             type: formatFieldType(field.type, typeName, constantName),

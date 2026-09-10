@@ -222,18 +222,10 @@ const CASES: { [K in Op["op"]]: Case } = {
       },
     },
   },
-  // A rename and a field merge in one op, with a `null` removing an offset.
-  // The inverse has to put that field back *and* leave every other offset
-  // alone — which a whole-map write cannot do, and is why `fields` merges.
+  // The record, and not its parts: revising a type leaves every field it holds
+  // where it is. Changing one is `field.set`, by the field's own id.
   "type.set": {
-    op: {
-      op: "type.set",
-      id: "typ_1",
-      fields: {
-        name: "Renamed",
-        fields: { 0: null, 8: { id: "fld_c", name: "added", type: "u8" } },
-      },
-    },
+    op: { op: "type.set", id: "typ_1", fields: { name: "Renamed", size: 32 } },
   },
   "type.remove": { op: { op: "type.remove", id: "typ_1" } },
 

@@ -623,9 +623,11 @@ async function main() {
   //
   // The reviewer could not declare these as it wanted to. It replaced four
   // per-index columns with `u8[8]` arrays, the arrays appeared *and* the 28
-  // original fields stayed, and it had to revert — `edit_type` merges per offset
-  // and cannot un-declare another author's field. `add_field` exists because of
-  // that, and adding one field at a time is what it was always supposed to be.
+  // original fields stayed, and it had to revert — `edit_type` then took a whole
+  // layout and merged it per offset, so it could not un-declare another author's
+  // field. `add_field` exists because of that, and `edit_type` no longer carries
+  // fields at all: adding one field at a time is what it was always supposed to
+  // be.
   const typeIds = {};
   for (const t of (await call("list_types", {})).types ?? []) typeIds[t.name] = t.id;
   for (const f of eleven.fields) {

@@ -434,3 +434,54 @@ describe("migrating a stored document's bindings", () => {
     expect(migrateDoc(doc)).toBe(false);
   });
 });
+
+describe("a record written before fields had ids", () => {
+  /**
+   * **Converting the shape is not the migration; the identity is.**
+   *
+   * Fields used to be an object keyed by offset, and every `.re64` written then
+   * says so. `fieldsOfType` turned that object into a list — and stopped there,
+   * leaving each field without an id. `typeMapFrom` keys the inner map by id and
+   * skipped anything that had none, so a legacy record reached the document
+   * holding **no fields at all**, silently, on load.
+   *
+   * The id is derived rather than minted for the reason `derivedId` exists: two
+   * clients opening one un-migrated file have to agree, or the merge sees two
+   * fields where the file has one — which is the identity defect this whole
+   * change is about, reintroduced by its own migration.
+   */
+  const legacy = {
+    name: "old",
+    layers: [{ id: "lay_a", type: "prg" as const, path: "g.prg" }],
+    types: [
+      {
+        id: "typ_a",
+        name: "Sprite",
+        size: 4,
+        // As written on disk: keyed by offset, and not one id among them.
+        fields: { 0: { name: "x", type: "u8" }, 2: { name: "y", type: "u8" } },
+      },
+    ],
+  } as unknown as Project;
+
+  it("keeps its fields, and gives each one an identity", () => {
+    const fields = projectFromDoc(docFromProject(legacy)).types![0].fields;
+    expect(fields.map((f) => f.name)).toEqual(["x", "y"]);
+    expect(fields.map((f) => f.offset)).toEqual([0, 2]);
+    for (const field of fields) expect(field.id).toMatch(/^fld_/);
+  });
+
+  it("gives two readers of that file the same ids", () => {
+    const one = projectFromDoc(docFromProject(legacy)).types![0].fields;
+    const two = projectFromDoc(docFromProject(legacy)).types![0].fields;
+    expect(one.map((f) => f.id)).toEqual(two.map((f) => f.id));
+  });
+
+  it("tells the two fields apart, having no offset to key on", () => {
+    const doc = docFromProject(legacy);
+    const [x, y] = projectFromDoc(doc).types![0].fields;
+    applyOpToDoc(doc, { op: "field.remove", id: x.id!, typeId: "typ_a" });
+    const left = projectFromDoc(doc).types![0].fields;
+    expect(left.map((f) => f.id)).toEqual([y.id]);
+  });
+});

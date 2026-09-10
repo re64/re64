@@ -363,6 +363,7 @@ export function projectTypes(project: Project): TypeIndex {
           .map((field) => [
             field.offset,
             {
+              ...(field.id === undefined ? {} : { id: field.id }),
               name: field.name,
               // Unparseable is not an error here: a field naming a type that has
               // gone renders its bytes, exactly as a dangling constant renders

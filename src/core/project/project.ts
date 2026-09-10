@@ -1080,12 +1080,25 @@ export function projectRegionsToRegions(
  * points take a project from a file *and* from memory — `parseProject`,
  * `docFromProject`, `formatProject` and the loader. The key becomes the `offset`
  * property it always described; the next write persists a list.
+ *
+ * **And it gives the field an id**, which is the half that was missing and cost
+ * every field in such a file: `typeMapFrom` keys the inner map by id and skipped
+ * anything without one, so a legacy record reached the document with no fields at
+ * all. Converting the shape is not the migration — the identity is.
+ *
+ * Derived rather than minted, for the reason `derivedId` exists: two clients
+ * loading one un-migrated file must agree, or merge sees two fields where the
+ * file has one. `type.add` and the loader already derive `fld` from the same
+ * two parts, so a field converted here and the same field declared there are
+ * one identity rather than two.
  */
-export function fieldsOfType(type: { fields: unknown }): ProjectField[] {
+export function fieldsOfType(type: { id?: string; fields: unknown }): ProjectField[] {
   const held = type.fields;
-  if (Array.isArray(held)) return held as ProjectField[];
+  const withId = (field: ProjectField): ProjectField =>
+    field.id ? field : { ...field, id: derivedId("fld", type.id ?? "", field.offset) };
+  if (Array.isArray(held)) return (held as ProjectField[]).map(withId);
   return Object.entries((held ?? {}) as Record<string, ProjectField>)
-    .map(([offset, field]) => ({ ...field, offset: Number(offset) }))
+    .map(([offset, field]) => withId({ ...field, offset: Number(offset) }))
     .sort((a, b) => a.offset - b.offset);
 }
 
