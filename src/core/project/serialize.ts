@@ -33,6 +33,12 @@ import {
 import { parseProject, parseProjectAddress } from "./project.js";
 
 /** Serialize one object compactly on a single line: `{ "a": 1, "b": 2 }`. */
+/**
+ * Code units, not `localeCompare`: the file's order must not depend on the
+ * locale of whoever exported it. See `byCodeUnit` in `crdt/doc.ts`.
+ */
+const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
 function compactObject(obj: Record<string, unknown>): string {
   const parts = Object.entries(obj)
     .filter(([, v]) => v !== undefined)
@@ -165,7 +171,7 @@ export function formatProject(project: Project): string {
     const entries = [...project.claims]
       .sort((a, b) => {
         const at = parseProjectAddress(a.at) - parseProjectAddress(b.at);
-        return at !== 0 ? at : (a.id ?? "").localeCompare(b.id ?? "");
+        return at !== 0 ? at : byCodeUnit(a.id ?? "", b.id ?? "");
       })
       .map((c) => `    ${compactObject(c as unknown as Record<string, unknown>)}`)
       .join(",\n");
@@ -201,7 +207,7 @@ export function formatProject(project: Project): string {
         // producing unequal text, and undo compares text to decide whether a
         // recorded operation still holds.
         const fields = [...fieldsOfType(t)]
-          .sort((a, b) => a.offset - b.offset || (a.id ?? "").localeCompare(b.id ?? ""))
+          .sort((a, b) => a.offset - b.offset || byCodeUnit(a.id ?? "", b.id ?? ""))
           .map((f) => `        ${compactObject(inOrder(f as unknown as Record<string, unknown>, FIELD_KEYS))}`)
           .join(",\n");
         const head = [

@@ -417,6 +417,43 @@ describe("a field keeps its identity and its parts merge", () => {
     const at2 = fieldsOf(a).filter((f) => f.offset === 2);
     expect(at2.map((f) => f.name).sort()).toEqual(["fromA", "fromB"]);
   });
+
+  it("projects two fields at one offset in the same order on every peer", () => {
+    // **The tiebreak was `localeCompare`.** `fld_ä` sorts before `fld_z` in
+    // one locale and after it in another, so the same snapshot projected two
+    // ways on two machines — and the version hash is taken over the
+    // projection. Code units now: `z` (0x7A) is before `ä` (0xE4) everywhere.
+    const [a, b] = pair();
+    const add = (doc: CrdtDoc, id: string, name: string) =>
+      applyOpToDoc(doc, { op: "field.add", typeId: "typ_a", id, offset: 0, name, type: "u8" });
+    add(a, "fld_z", "fromA");
+    add(a, "fld_\u00e4", "fromA2");
+    add(b, "fld_\u00e4", "fromB");
+    add(b, "fld_z", "fromB2");
+    syncAll(a, b);
+
+    expect(JSON.stringify(projectFromDoc(a))).toBe(JSON.stringify(projectFromDoc(b)));
+    const at0 = fieldsOf(a).filter((f) => f.offset === 0).map((f) => f.id);
+    expect(at0).toEqual(["fld_a", "fld_z", "fld_\u00e4"]);
+  });
+
+  it("keeps two ids apart that a locale would call equal", () => {
+    // `fld_\u00e9` and `fld_e\u0301` are distinct strings — and under ICU's
+    // equivalence they compare *equal*, so `localeCompare` returned 0, the
+    // sort was left to insertion order, and two peers that added them the
+    // other way round projected them the other way round for ever.
+    const [a, b] = pair();
+    const add = (doc: CrdtDoc, id: string) =>
+      applyOpToDoc(doc, { op: "field.add", typeId: "typ_a", id, offset: 0, name: id, type: "u8" });
+    add(a, "fld_\u00e9");
+    add(a, "fld_e\u0301");
+    add(b, "fld_e\u0301");
+    add(b, "fld_\u00e9");
+    syncAll(a, b);
+
+    expect(JSON.stringify(projectFromDoc(a))).toBe(JSON.stringify(projectFromDoc(b)));
+    expect(fieldsOf(a).filter((f) => f.offset === 0)).toHaveLength(3);
+  });
 });
 
 describe("recreating a type keeps every field, including two at one offset", () => {
