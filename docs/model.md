@@ -163,16 +163,18 @@ a minted use id, so every bind added a competitor — two uses at one site, the
 loaded index keeping whichever sorted last by an id nobody chose, and unbinding
 leaving the other still resolving.
 
-**Open, and decided but not built.** A binding names an instruction's operand, so
-it should travel with its layer when the layer is relocated — and a target frame
-should be available as the escape hatch when relocation is wrong, exactly as a
-claim has one. Uses are stored inside a layer with an *absolute* address today,
-so they stay behind. That is the same `Frame` the claims carry and wants doing
-the same way.
+**Open, and decided but not built**, as
+[#26](https://github.com/re64/re64/issues/26). A binding names an instruction's
+operand, so it should travel with its layer when the layer is relocated — and a
+target frame should be available as the escape hatch when relocation is wrong,
+exactly as a claim has one. Uses are stored inside a layer with an *absolute*
+address today, so they stay behind. That is the same `Frame` the claims carry and
+wants doing the same way.
 
 Still breaking the id rule, and named here rather than left to be discovered: a
 **capture refers to its bytes by filename** — R8 fixed which bytes a name means,
 not that a name is the reference — and a **layer refers to its file by path**.
+Both are one missing id and are [#27](https://github.com/re64/re64/issues/27).
 
 **Which arrangement a claim is about, and the default.** A claim on a byte no
 layer supplies — zero page, an I/O register, a KERNAL vector — is framed on the
