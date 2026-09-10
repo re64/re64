@@ -467,3 +467,69 @@ describe("recreating a type keeps every field, including two at one offset", () 
     expect(restored.types![0].fields.filter((f) => f.offset === 0)).toHaveLength(2);
   });
 });
+
+describe("equal state projects the same way, whatever order it arrived in", () => {
+  /**
+   * **The comparator parsed every sort key as a number, and seven roots do not
+   * have one.**
+   *
+   * Decoder, type, target and scenario names, a capture's filename, a piece of
+   * evidence's claim id: `parseInt("Alpha")` is `NaN`, `NaN - NaN` is `NaN`, and
+   * `NaN !== 0` is **true** — so the comparator returned `NaN`, the id
+   * tiebreaker below it was never reached, and those arrays kept whatever order
+   * the `Y.Map` happened to be built in. Two peers that added the same two
+   * decoders in different orders projected them differently for ever.
+   *
+   * Not merely cosmetic: the version hash is taken over the projection, so equal
+   * logical state did not determine an equal version.
+   */
+  const withDecoders = (first: string, second: string): CrdtDoc => {
+    const doc = docFromProject(PROJECT);
+    for (const name of [first, second]) {
+      applyOpToDoc(doc, {
+        op: "decoder.add",
+        id: `dec_${name.toLowerCase()}`,
+        name,
+        source: "() => []",
+      });
+    }
+    return doc;
+  };
+
+  it("orders by name whichever peer added which first", () => {
+    const one = withDecoders("Alpha", "Beta");
+    const other = withDecoders("Beta", "Alpha");
+    syncAll(one, other);
+
+    const names = (doc: CrdtDoc) => (projectFromDoc(doc).decoders ?? []).map((d) => d.name);
+    expect(names(one)).toEqual(["Alpha", "Beta"]);
+    expect(names(other)).toEqual(["Alpha", "Beta"]);
+  });
+
+  it("gives them the same projection, and therefore the same version", () => {
+    const one = withDecoders("Alpha", "Beta");
+    const other = withDecoders("Beta", "Alpha");
+    syncAll(one, other);
+    expect(JSON.stringify(projectFromDoc(one))).toBe(JSON.stringify(projectFromDoc(other)));
+  });
+
+  it("sorts an address-keyed map too, since object keys keep insertion order", () => {
+    // `primaryLabels` is a plain object in the projection, and `JSON.stringify`
+    // preserves key order. Two peers binding the same two addresses in different
+    // orders serialised differently while holding identical state.
+    const bind = (doc: CrdtDoc, first: number, second: number) => {
+      for (const address of [first, second]) {
+        applyOpToDoc(doc, { op: "primary.bind", address, labelId: "lbl_1" });
+      }
+    };
+    const one = docFromProject(PROJECT);
+    const other = docFromProject(PROJECT);
+    bind(one, 0x8000, 0x9000);
+    bind(other, 0x9000, 0x8000);
+    syncAll(one, other);
+
+    expect(Object.keys(projectFromDoc(one).primaryLabels ?? {})).toEqual(
+      Object.keys(projectFromDoc(other).primaryLabels ?? {})
+    );
+  });
+});

@@ -443,6 +443,17 @@ function canonical(project: ReturnType<typeof parseProject>): string {
       ...(project.types ? { types: byKey(project.types, (t) => t.id ?? "") } : {}),
       ...(project.files ? { files: byKey(project.files, (f) => f.name) } : {}),
       ...(project.targets ? { targets: byKey(project.targets, (t) => t.name) } : {}),
+      // The rest of the roots, normalised for the same reason. They were left
+      // out because they *happened* to agree: both paths kept insertion order,
+      // one deliberately and one because the projection's comparator returned
+      // `NaN` for a non-numeric sort key and never sorted anything. Fixing the
+      // comparator made the document sort captures by filename while the line
+      // editor kept them where they were — a layout difference by design, which
+      // is exactly what this function exists to absorb.
+      ...(project.claims ? { claims: byKey(project.claims, (c) => c.id ?? "") } : {}),
+      ...(project.scenarios ? { scenarios: byKey(project.scenarios, (x) => x.id ?? "") } : {}),
+      ...(project.captures ? { captures: byKey(project.captures, (c) => c.id ?? "") } : {}),
+      ...(project.evidence ? { evidence: byKey(project.evidence, (e) => e.id ?? "") } : {}),
     }),
     null,
     1
