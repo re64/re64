@@ -591,6 +591,44 @@ export class Workspace {
     });
   }
 
+  /**
+   * What a run actually executes over, for keying a saved machine.
+   *
+   * **A document version is not an execution fingerprint**, and using one made a
+   * check report success against bytes it never ran on. Checkpoints are held per
+   * project and the key was `version()`, which says nothing about *which view*
+   * is being run: a scenario asserting `$8001 == 1` passed on one target, and
+   * then passed on a target supplying `2` there, because the cache could not
+   * tell the two executions apart. Cold, it failed. That is worse than a wrong
+   * answer — it is a *check* reporting success, and "point at a scenario and the
+   * evidence re-verifies" is the strongest thing the evidence model offers.
+   *
+   * So this names the things the machine can actually see:
+   *
+   * - the document, since a changed layer or claim changes the bytes;
+   * - the **view**, since two targets over one document are two machines;
+   * - where each layer landed and how long it is, which is what a target does
+   *   and is worth stating directly rather than trusting the view to imply;
+   * - the ROMs this host did **not** supply, because a project that asks for the
+   *   KERNAL executes differently on a machine that has it, at the same version.
+   *
+   * The step prefix is added by `prefixKey`, so resuming from step five is still
+   * cheap; this is only the "these bytes" half of that key.
+   */
+  private executionFingerprint(): string {
+    const loaded = this.program().loaded;
+    const stack = loaded.map
+      .getLayers()
+      .map((l) => `${l.id}@${l.start.toString(16)}:${l.end.toString(16)}`)
+      .join(",");
+    return [
+      this.version(),
+      loaded.selectedTarget?.id ?? "(implied)",
+      stack,
+      loaded.romsMissing.join("+"),
+    ].join("|");
+  }
+
   /** Content-addressed, for anything crossing a process boundary. */
   version(): string {
     return this.room.store.version();
@@ -2448,9 +2486,7 @@ export class Workspace {
       storage instanceof SqliteStorage ? nodeRomBytes()("characters") : undefined;
 
     const run = coreRunScenario(loaded.map, scenario, {
-      // The same fingerprint the analysis cache keys on, so a changed project
-      // can never read a stale machine.
-      fingerprint: this.version(),
+      fingerprint: this.executionFingerprint(),
       cache: this.room.machines,
       ...(characters ? { characters } : {}),
     });

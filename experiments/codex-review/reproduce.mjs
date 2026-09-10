@@ -177,10 +177,17 @@ const alice = { userId: 'alice', label: 'Alice', sessionId: 'alice-session' };
     const cachedB = f.workspace.view('B').runScenario(alice, 'scn_a');
     const fresh = new Workspace({ store: f.store, storage: f.storage, projectId: 'default', projectPath: '', target: 'B', machines: new CheckpointCache() });
     const freshB = fresh.runScenario(alice, 'scn_a');
+    // RE-RUN NOTE (re64, 2026-09-10): fixed. The checkpoint key was the document
+    // version, which says nothing about which view is being run — so two targets
+    // over one document were one execution to the cache. It now names the view,
+    // where each layer landed, and the ROMs this host did not supply. Production
+    // test: `src/server/building.test.ts` -> "a scenario is keyed on what it
+    // runs over".
     assert.equal(inA.passed, true);
-    assert.equal(cachedB.passed, true);
+    assert.equal(cachedB.passed, false);
     assert.equal(freshB.passed, false);
-    output('scenario cache reuses evidence from wrong target', { inA: inA.passed, cachedB: cachedB.passed, freshB: freshB.passed });
+    assert.equal(cachedB.passed, freshB.passed);
+    output('FIXED: a warm cache and a cold one agree across targets', { inA: inA.passed, cachedB: cachedB.passed, freshB: freshB.passed });
   } finally { f.close(); }
 }
 {

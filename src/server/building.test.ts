@@ -255,6 +255,39 @@ describe("building a project from a disk image", () => {
     expect(ran.notes?.join(" ")).toContain("3party/roms");
   });
 
+  it("keys a scenario on what it runs over, not on the document version", () => {
+    // **A check that reports success against bytes it never ran on is worse
+    // than a wrong answer.** Checkpoints are held per project and were keyed on
+    // `version()`, which says nothing about *which view* is being run — so the
+    // same steps over two targets were one execution to the cache.
+    //
+    // "Point at a scenario and the evidence re-verifies" is the strongest thing
+    // the evidence model offers, and this was the one defect that made it lie.
+    ws.createProject("phases");
+    const one = upload("phases", "one.prg", new Uint8Array([0x00, 0x80, 0x01]));
+    one.addByteLayer(builder, { type: "prg", path: "one.prg", name: "one" });
+    const two = upload("phases", "two.prg", new Uint8Array([0x00, 0x80, 0x02]));
+    two.addByteLayer(builder, { type: "prg", path: "two.prg", name: "two" });
+
+    const space = workspaceFor("phases").space;
+    const ids = Object.fromEntries(space.targets().layers.map((l) => [l.name, l.id]));
+    space.addTarget(builder, "isOne", [{ layer: ids.one }]);
+    space.addTarget(builder, "isTwo", [{ layer: ids.two }]);
+
+    const made = space
+      .view("isOne")
+      .addScenario(builder, "probe", [{ kind: "assert", memory: { "$8000": 1 } } as never]);
+
+    // Warm the cache on the view where it holds...
+    const inOne = space.view("isOne").runScenario(builder, made.scenario) as { passed?: boolean };
+    // ...then ask the view where it does not. Sharing a cache must not share an
+    // answer.
+    const inTwo = space.view("isTwo").runScenario(builder, made.scenario) as { passed?: boolean };
+
+    expect(inOne.passed).toBe(true);
+    expect(inTwo.passed).toBe(false);
+  });
+
   it("makes an empty project when no platform is named", () => {
     const made = ws.createProject("bare");
     expect(made.project).toBe("bare");
