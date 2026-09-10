@@ -58,10 +58,14 @@ try {
   console.log(JSON.stringify({ case: 'FIXED: an overlapped request keeps its own identity', requestUser: 'alice', recordedAuthor: written[0].author }));
 
   const malformed = await call('alice', 'add_claim', { address: '$8000+1', name: 'MalformedAddress' });
-  assert.equal(malformed.isError, false);
-  const last = storage.readOps().filter(c => c.op.op === 'claim.add').at(-1);
-  assert.equal(last.op.claim.at, 0);
-  console.log(JSON.stringify({ case: 'malformed address accepted after parsing only its prefix', requested: '$8000+1', storedOffset: last.op.claim.at, actualAddress: '$8000' }));
+  // RE-RUN NOTE (re64, 2026-09-10): fixed. `parseInt` stops at the first
+  // character it cannot use and returns what it had, so `$8000+1` parsed as
+  // `$8000` and the write succeeded at an address nobody asked for. Each
+  // spelling must now match completely. The production test is
+  // `src/server/mcp/transport.test.ts` -> "a number is a whole number or it is
+  // refused".
+  assert.equal(malformed.isError, true);
+  console.log(JSON.stringify({ case: 'FIXED: a malformed address is refused, not reinterpreted', requested: '$8000+1', refused: true }));
 
   const before = storage.readOps().length;
   const projectResponse = await fetch(`http://127.0.0.1:${server.port}/api/project`);

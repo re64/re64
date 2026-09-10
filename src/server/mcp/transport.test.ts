@@ -2665,3 +2665,53 @@ describe("two requests overlapping keep their own identities", () => {
     expect(naming!.by).toBe("usr_alice");
   });
 });
+
+describe("a number is a whole number or it is refused", () => {
+  /**
+   * **`parseInt` stops at the first character it cannot use and returns what it
+   * had.** So `$8000+1` parsed as `$8000`, and an `add_claim` for it *succeeded*
+   * — writing at an address the caller did not ask for and reporting success.
+   * Arithmetic is not offered here, and a caller who wrote some is much better
+   * told than quietly obeyed.
+   *
+   * The same shape was in the byte and flag transforms, so all three share one
+   * parser now. It stays separate from `parsePlace`, which handles
+   * `screen[10,2]` — that is a grammar, and folding it in is what would make
+   * arithmetic look supported.
+   */
+  it("refuses an address with anything after the number", async () => {
+    for (const address of ["$8000+1", "$8000 1", "0x8000-", "32768x", "$80.00", "$"]) {
+      const refused = await callTool("add_claim", { address, name: "ShouldNotLand" });
+      expect(refused.isError, `${address} was accepted`).toBe(true);
+    }
+
+    // And nothing landed at $8000 from the first of them.
+    const here = (await callTool("claims_at", { address: "$8000" })).value as {
+      claims: { name?: string }[];
+    };
+    expect(here.claims.some((c) => c.name === "ShouldNotLand")).toBe(false);
+  });
+
+  it("still takes every spelling it advertises", async () => {
+    const made = await callTool("add_claim", { address: "$8F90", name: "Dollar" });
+    expect(made.isError, made.text).toBe(false);
+    for (const [address, name] of [
+      ["0x8F91", "Hex"],
+      ["36754", "Decimal"],
+      [36755, "Number"],
+      [" $8F94 ", "Padded"],
+    ] as const) {
+      const ok = await callTool("add_claim", { address, name });
+      expect(ok.isError, `${String(address)}: ${ok.text}`).toBe(false);
+    }
+  });
+
+  it("refuses a byte and a flag the same way", async () => {
+    // `bind_constant` takes a byte-shaped value; a flag is 0 or 1 and took a
+    // prefix too.
+    const bad = await callTool("add_constant", { name: "BAD", value: "$2A+1" });
+    expect(bad.isError).toBe(true);
+    const good = await callTool("add_constant", { name: "GOOD", value: "$2A" });
+    expect(good.isError, good.text).toBe(false);
+  });
+});
