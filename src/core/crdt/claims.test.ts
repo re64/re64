@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import * as Y from "yjs";
-import { writeClaims, readClaims, applyClaimOp } from "./claims.js";
+import { writeClaims, readClaims } from "./claims.js";
+import { applyOpToDoc } from "./ops.js";
 import { Claim, compareClaims } from "../claims/model.js";
 import { ClaimSet, disagreements } from "../claims/set.js";
 
@@ -11,6 +12,12 @@ import { ClaimSet, disagreements } from "../claims/set.js";
  * about one. Each test does the same thing: build a shared base, split, edit both
  * copies with no communication, exchange updates in *both* directions, and check
  * the two peers agree and that nobody's work vanished.
+ *
+ * **Through `applyOpToDoc`, which is the path the server takes.** These ran
+ * against a prototype `applyClaimOp` for as long as R2 was live, and passed —
+ * the prototype had its own per-key semantics and the defect was in the live
+ * handler these never reached. A merge test that does not exercise the merging
+ * code is the R2 concurrency test all over again.
  */
 
 const claim = (over: Partial<Claim> & Pick<Claim, "id" | "at">): Claim => ({
@@ -41,7 +48,7 @@ describe("two peers on one claims root", () => {
   it("both survive when each declares the same span offline", () => {
     const [a, b] = split([]);
 
-    applyClaimOp(a, {
+    applyOpToDoc(a, {
       op: "claim.add",
       claim: claim({
         id: "clm_a", at: 0x1800, extent: 0x800, name: "spriteBank",
@@ -49,7 +56,7 @@ describe("two peers on one claims root", () => {
         origin: "user",
       }),
     }, "gfx");
-    applyClaimOp(b, {
+    applyOpToDoc(b, {
       op: "claim.add",
       claim: claim({
         id: "clm_b", at: 0x1800, extent: 0x800, name: "levelData",
@@ -74,8 +81,8 @@ describe("two peers on one claims root", () => {
       claim({ id: "clm_1", at: 0x8e00, extent: 0x200, name: "charSet", says: { is: "data" } }),
     ]);
 
-    applyClaimOp(a, { op: "claim.set", id: "clm_1", fields: { name: "characterSet" } }, "gfx");
-    applyClaimOp(b, {
+    applyOpToDoc(a, { op: "claim.set", id: "clm_1", fields: { name: "characterSet" } }, "gfx");
+    applyOpToDoc(b, {
       op: "claim.set", id: "clm_1", fields: { says: { is: "bitmap", view: "char:8" } },
     }, "lead");
 
@@ -91,8 +98,8 @@ describe("two peers on one claims root", () => {
   it("two peers revising the same field converge on one answer", () => {
     const [a, b] = split([claim({ id: "clm_1", at: 0x8e00, name: "charSet" })]);
 
-    applyClaimOp(a, { op: "claim.set", id: "clm_1", fields: { name: "characterSet" } }, "gfx");
-    applyClaimOp(b, { op: "claim.set", id: "clm_1", fields: { name: "glyphs" } }, "lead");
+    applyOpToDoc(a, { op: "claim.set", id: "clm_1", fields: { name: "characterSet" } }, "gfx");
+    applyOpToDoc(b, { op: "claim.set", id: "clm_1", fields: { name: "glyphs" } }, "lead");
     reconcile(a, b);
 
     // Last writer wins per field, which is all a CRDT offers. What matters is
@@ -106,8 +113,8 @@ describe("two peers on one claims root", () => {
       claim({ id: "clm_1", at: 0x8e00, extent: 0x200, name: "charSet", says: { is: "data" } }),
     ]);
 
-    applyClaimOp(a, { op: "claim.remove", id: "clm_1" }, "gfx");
-    applyClaimOp(b, { op: "claim.set", id: "clm_1", fields: { name: "characterSet" } }, "lead");
+    applyOpToDoc(a, { op: "claim.remove", id: "clm_1" }, "gfx");
+    applyOpToDoc(b, { op: "claim.set", id: "clm_1", fields: { name: "characterSet" } }, "lead");
     reconcile(a, b);
 
     expect(sorted(a)).toEqual(sorted(b));
@@ -130,11 +137,11 @@ describe("two peers on one claims root", () => {
       captureTimeout: 0,
     });
 
-    applyClaimOp(a, {
+    applyOpToDoc(a, {
       op: "claim.add",
       claim: claim({ id: "clm_gfx", at: 0x1800, name: "spriteBank", origin: "user" }),
     }, "gfx");
-    applyClaimOp(b, {
+    applyOpToDoc(b, {
       op: "claim.add",
       claim: claim({ id: "clm_lead", at: 0x2000, name: "levelData", origin: "user" }),
     }, "lead");

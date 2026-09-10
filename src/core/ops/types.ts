@@ -50,7 +50,20 @@ export interface ClaimAddOp {
   claim: Claim;
 }
 
-/** Revise named fields of a claim, leaving the rest alone. */
+/**
+ * Revise named fields of a claim, leaving the rest alone.
+ *
+ * **`at` is read in the claim's frame, and the two are separate keys.** A patch
+ * naming `at` alone moves the claim within the frame it has — an absolute one
+ * to another address, a layer-framed one to another offset in that layer. That
+ * is a legitimate move and not a defect, but a caller that means "this absolute
+ * address" for a claim that is layer-framed must send `frame` too, or the number
+ * lands as an offset. `placed()` in `ops/edits.ts` builds both from one
+ * address, which is why every current caller is safe; a raw `claim.set` is
+ * bound by this contract rather than by a group, because the alternative —
+ * reading the current frame back to fill one in — is the per-key read this
+ * operation was built to avoid.
+ */
 export interface ClaimSetOp {
   op: "claim.set";
   id: string;

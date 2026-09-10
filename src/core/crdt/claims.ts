@@ -21,7 +21,15 @@
  * written in the wrong directory and the allowlist caught it — which is the
  * assertion earning its keep rather than an inconvenience.
  *
- * Nothing here reaches the live document yet.
+ * **The operations are not here.** They were, as a prototype `applyClaimOp`,
+ * and it outlived its purpose by a long way: the live `claim.*` handlers in
+ * `ops.ts` grew the owned-key groups that R2 needed while the prototype kept
+ * its own per-key semantics — never writing `typeId`, clearing `layer` but not
+ * `target` — and six merge tests, including "two peers revising different
+ * fields of one claim both land", passed against the dead path for the whole
+ * time R2 was live. An assertion naming the right property and exercising the
+ * wrong code, which is the shape the R2 concurrency test had too. What stays is
+ * the encoding: how a claim is spelled in the document, used by the live path.
  */
 
 import * as Y from "yjs";
@@ -29,25 +37,6 @@ import { Claim, ClaimOrigin, Interpretation, RootKind } from "../claims/model.js
 import { parseProjectAddress } from "../project/project.js";
 
 export const ROOT_CLAIMS = "claims";
-
-/** The operations a claim needs. Three, where labels and regions needed four. */
-export type ClaimOp =
-  | { readonly op: "claim.add"; readonly claim: Claim }
-  | {
-      /**
-       * Revise fields of an existing claim.
-       *
-       * Partial by construction: an omitted field is left alone, so two peers
-       * revising different fields of one claim both survive. `set_region`
-       * replaced the whole region, which is why describing one silently reverted
-       * somebody's layer list until that was found and fixed — the same shape,
-       * one object along.
-       */
-      readonly op: "claim.set";
-      readonly id: string;
-      readonly fields: Partial<Omit<Claim, "id">>;
-    }
-  | { readonly op: "claim.remove"; readonly id: string };
 
 export function claimsRoot(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
   return doc.getMap<Y.Map<unknown>>(ROOT_CLAIMS);
@@ -134,61 +123,4 @@ export function readClaims(doc: Y.Doc): Claim[] {
   const out: Claim[] = [];
   for (const entry of claimsRoot(doc).values()) out.push(decodeClaim(entry));
   return out;
-}
-
-/**
- * Apply one operation.
- *
- * `origin` identifies who is editing and decides whose undo stack it lands on,
- * exactly as `applyOpToDoc` does today.
- */
-export function applyClaimOp(doc: Y.Doc, op: ClaimOp, origin: unknown = "local"): void {
-  doc.transact(() => {
-    const root = claimsRoot(doc);
-    switch (op.op) {
-      case "claim.add": {
-        // Always adds. An id already present means the same claim arriving twice
-        // — a retry, or a replayed op — never two people meaning different
-        // things, because ids are minted by the writer.
-        const entry = new Y.Map<unknown>();
-        const fields = encodeClaim(op.claim);
-        for (const key of Object.keys(fields).sort()) entry.set(key, fields[key]);
-        root.set(op.claim.id, entry);
-        break;
-      }
-      case "claim.set": {
-        const entry = root.get(op.id);
-        // A revision of a claim somebody else deleted concurrently does nothing,
-        // rather than resurrecting it with half its fields. Same rule as a
-        // dangling primaryLabels entry: the delete wins and nothing needs a sweep.
-        if (!entry) break;
-
-        // Scalars go straight through. The three structured fields are spread
-        // into the flat keys `encode` uses, so a revision touches exactly the
-        // keys it names and no others — which is what lets two peers revise
-        // different fields of one claim without either reverting the other.
-        const { says, frame, ...scalars } = op.fields;
-        for (const [key, value] of Object.entries(scalars)) {
-          if (value !== undefined) entry.set(key, value as unknown);
-        }
-        if (says !== undefined) {
-          entry.set("is", says.is);
-          entry.set("encoding", says.is === "text" ? says.encoding : undefined);
-          entry.set("view", says.is === "bitmap" ? says.view : undefined);
-          for (const key of ["encoding", "view"]) {
-            if (entry.get(key) === undefined) entry.delete(key);
-          }
-        }
-        if (frame !== undefined) {
-          if (frame.space === "layer") entry.set("layer", frame.layer);
-          else if (frame.space === "target") entry.set("target", frame.target);
-          else entry.delete("layer");
-        }
-        break;
-      }
-      case "claim.remove":
-        root.delete(op.id);
-        break;
-    }
-  }, origin);
 }
