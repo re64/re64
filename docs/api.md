@@ -795,7 +795,7 @@ Revise a piece of evidence by id. Omitted fields are left alone; `null` clears o
 |---|---|---|---|
 | `id` | `string` | **required** |  |
 | `kind` | `supports` \| `refutes` \| `retires` | optional |  |
-| `method` | `guessed` \| `transcribed` \| `read` \| `derived` \| `ran` | optional | How you know this. The author and time on the record are kept. |
+| `method` | `any` | optional | How you know this. The author and time on the record are kept, and `null` clears the method while keeping them — somebody vouched for this even where how they knew is no longer worth stating. |
 | `scenario` | `string,null` | optional |  |
 | `capture` | `string,null` | optional |  |
 | `other` | `string,null` | optional |  |

@@ -2274,7 +2274,8 @@ export class Workspace {
     id: string,
     fields: {
       kind?: EvidenceKind;
-      method?: ClaimMethod;
+      /** `null` clears it, leaving the author and the time. */
+      method?: ClaimMethod | null;
       scenario?: string | null;
       capture?: string | null;
       other?: string | null;
@@ -2314,7 +2315,11 @@ export class Workspace {
                   // what the type refuses and what the field is for.
                   author: previous.author ?? caller.userId,
                   ...(previous.when === undefined ? {} : { when: previous.when }),
-                  method,
+                  // **`null` clears the method and keeps the signature.** The
+                  // author is not clearable and the method is: "somebody vouched
+                  // for this" survives losing "and this is how they knew", which
+                  // is the whole reason the two are separable.
+                  ...(method === null ? {} : { method }),
                 },
               }),
         },

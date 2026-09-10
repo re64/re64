@@ -2203,6 +2203,45 @@ describe("evidence, and saying things about a claim", () => {
     expect(open.findings.some((f) => f.kind === "declared")).toBe(true);
   });
 
+  it("sets and clears a piece of evidence's method over the transport", async () => {
+    // **`edit_evidence` documented that `null` clears a field and its `method`
+    // schema rejected null**, so the one field whose clear semantics this whole
+    // change is about was the one the MCP surface could not clear. The document
+    // could express it; nothing above could reach it.
+    const made = await callTool("add_claim", { address: "$8F20", name: "maybeATable" });
+    const claim = (made.value as { claims: { claim: string }[] }).claims[0].claim;
+
+    const said = await callTool("add_evidence", {
+      claim,
+      kind: "supports",
+      method: "guessed",
+      note: "the stride looks like eight",
+    });
+    expect(said.isError, said.text).toBe(false);
+    const id = (said.value as { evidence: string }).evidence;
+
+    const shown = async () =>
+      (
+        (await callTool("list_evidence", { claim })).value as {
+          evidence: { id: string; method?: string; author?: string }[];
+        }
+      ).evidence.find((e) => e.id === id);
+
+    // Revised: the method moves and the signature stays.
+    const revised = await callTool("edit_evidence", { id, method: "read" });
+    expect(revised.isError, revised.text).toBe(false);
+    expect((await shown())?.method).toBe("read");
+    const signedBy = (await shown())?.author;
+    expect(signedBy).toBeTruthy();
+
+    // Cleared: the method goes and the signature still stays. "Somebody vouched
+    // for this" survives losing "and this is how they knew".
+    const cleared = await callTool("edit_evidence", { id, method: null });
+    expect(cleared.isError, cleared.text).toBe(false);
+    expect((await shown())?.method).toBeUndefined();
+    expect((await shown())?.author).toBe(signedBy);
+  });
+
   it("retires a settled reading out of the working set, and puts it back", async () => {
     // **Refuting was not enough, and this is the test that says why.** The test
     // above ends with both readings in `claims_at` and a declared disagreement
