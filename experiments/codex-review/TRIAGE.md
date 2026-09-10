@@ -1,4 +1,9 @@
-# The Codex review, re-run and triaged — 2026-09-09
+# The Codex review, re-run and triaged
+
+**Re-run 2026-09-09 (all fifteen reproduced) and again 2026-09-10 after five
+were fixed.** The table below carries both columns; everything after it is the
+2026-09-09 triage, kept as written because it is what the fixes were decided
+from.
 
 `REVIEW.md` is another model's review of the document model, with fifteen
 findings and a probe for each. This file is what happened when the probes were
@@ -12,41 +17,55 @@ finding was re-run.
 
 ## The result
 
-**Fifteen of fifteen reproduce.** Not one is a misreading. Two changed shape
-because of work landed today, and both are noted in the probe with a
-`RE-RUN NOTE`.
+**On 2026-09-09, fifteen of fifteen reproduced.** Not one was a misreading.
 
 ```
 node experiments/codex-review/reproduce.mjs   # 14 model/storage probes
 node experiments/codex-review/transport.mjs   # 3 over the real HTTP/MCP transport
 ```
 
-| | finding | re-run |
-|---|---|---|
-| R1 | overlapping MCP requests take another caller's identity | reproduces — a claim asked for by `alice` is recorded as `bob`, in bob's session |
-| R2 | `claim.set` rewrites every key, so a concurrent rename is lost | reproduces |
-| R3 | fields are stored by offset; a move duplicates the id | reproduces — **two fields with id `fld_a`**, and `field.remove` clears one |
-| R4 | rebinding adds a competitor; unbinding leaves one live | reproduces |
-| R5 | a target-framed claim is visible in another target | reproduces |
-| R6 | renaming the default target silently changes the map | **changed** — see below |
-| R7 | the scenario cache passes a probe that should fail | reproduces — `inA: true, cachedB: true, freshB: false` |
-| R8 | the document's file hash does not decide the bytes served | reproduces |
-| R9 | a failed transaction leaves the changed document live | reproduces — live says `Uncommitted`, a restart says `Original` |
-| R10 | socket history pairs operations with the wrong inverses | reproduces |
-| R11 | `changes_since` misses HTTP writes and undo | reproduces — a 200 that adds zero rows |
-| R12 | redo is stuck after two undos | reproduces |
-| R13 | evidence `by: null` clears on one adapter and not the other | reproduces |
-| R14 | equal CRDT state projects in different orders | reproduces |
-| R15 | `$8000+1` is accepted and written at `$8000` | reproduces |
+| | finding | 2026-09-09 | now |
+|---|---|---|---|
+| R1 | overlapping MCP requests take another caller's identity | reproduces | **reproduces** |
+| R2 | `claim.set` rewrites every key, losing a concurrent rename | reproduces | **fixed** |
+| R3 | fields stored by offset; a move duplicates the id | reproduces | **reproduces** |
+| R4 | rebinding adds a competitor; unbinding leaves one live | reproduces | **reproduces** |
+| R5 | a target-framed claim is visible in another target | reproduces | **fixed** |
+| R6 | renaming the default target silently changes the map | reproduces | **fixed** |
+| R7 | the scenario cache passes a probe that should fail | reproduces | **reproduces** |
+| R8 | the document's file hash does not decide the bytes served | reproduces | **reproduces** |
+| R9 | a failed transaction leaves the changed document live | reproduces | **reproduces** |
+| R10 | socket history pairs operations with the wrong inverses | reproduces | **reproduces** |
+| R11 | `changes_since` misses HTTP writes and undo | reproduces | **fixed** |
+| R12 | redo is stuck after two undos | reproduces | **fixed** |
+| R13 | evidence `by: null` clears on one adapter and not the other | reproduces | **reproduces** |
+| R14 | equal CRDT state projects in different orders | reproduces | **reproduces** |
+| R15 | `$8000+1` is accepted and written at `$8000` | reproduces | **reproduces** |
 
-**R6 is half fixed and half stands.** `defaultTarget` was removed today, so
-there is no default view to rename out from under a reader and
-`projectForTarget` refuses rather than falling through to every layer — the
-probe cannot even run in its original form. What remains is the half the fix did
-not touch: **a target is still referenced by name**, in claim frames and in the
-`target` argument. Rename a target and a reader that named it gets *"No target
-called A"*, and every target-framed claim is orphaned in silence. Duplicate
-target names are still admitted.
+**Five fixed, ten still current.** Every probe for a fixed one was flipped to
+assert the invariant instead, with a `RE-RUN NOTE` saying what changed, so the
+script still runs end to end and would catch a regression.
+
+## What the fixes had in common, which the review saw before I did
+
+> The declared algebra and physical storage disagree.
+
+R2, R5 and R6 were all that sentence. A claim frame stored a target's *name*; a
+partial patch wrote the whole record; a target-framed claim was never filtered to
+its target. R3 and R4 are the same family and are the largest thing left.
+
+R11 and R12 turned out to be one subject rather than two: undo flipped a flag and
+appended nothing, and once it appends an entry that entry is exactly what tells
+redo which action to put back — which is what it had been guessing at.
+
+**One finding changed shape rather than being fixed.** R6's original probe cannot
+run any more: `defaultTarget` is gone, so there is no default view to rename out
+from under a reader. What was left of it — that targets were referenced by name —
+was fixed with R5, since both were the same missing rule.
+
+---
+
+# The 2026-09-09 triage, as written
 
 ## Where the review is right about something bigger
 
@@ -69,11 +88,10 @@ storage-level. The verbs were built on top of a shape that cannot honour them.
 
 ## Where I would push back, or add something the review does not say
 
-- **R14's fix changes every version hash.** Version strings are
-  `JSON.stringify(projectFromDoc(...))`, and they are also what `expectVersion`
-  compares. Canonicalising map order is right and it means in-flight
-  `expectVersion` values stop matching. Cheap here — nothing holds one across a
-  restart — but it should be said before, not discovered.
+- **R14's fix changes every version hash.** Version strings are a hash of the
+  projection. Canonicalising map order is right and it moves every version.
+  *(Since: `expectVersion` is gone, so nothing compares one across a gap and
+  this costs less than it did when written.)*
 - **R3's migration is cheaper than the review assumes.** It calls for a
   persisted-schema migration; `.re64db` files are gitignored working databases
   and `.re64` files are re-exported from the document, so the cost is the
