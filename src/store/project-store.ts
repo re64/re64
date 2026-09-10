@@ -79,6 +79,14 @@ export class ProjectStore {
   private readonly authors = new Set<string>();
   private readonly listeners: ((update: Uint8Array, origin: unknown) => void)[] = [];
   /**
+   * Updates made inside a transaction, waiting for it to commit.
+   *
+   * Publication is the one thing a rollback cannot take back, so it is the one
+   * thing that waits for the commit.
+   */
+  private readonly held: [Uint8Array, unknown][] = [];
+  private publishing = false;
+  /**
    * How many times the document has changed in this process.
    *
    * A cache key, and deliberately not `version()`: that hashes the whole
@@ -144,7 +152,17 @@ export class ProjectStore {
       if (origin !== "migrate") this.record(update, origin);
       this.storage.appendUpdate(update);
       this.dirty = true;
-      for (const listener of this.listeners) listener(update, origin);
+
+      // **Held until the write commits.** This published straight to every peer
+      // and to the export, from inside a transaction that could still roll back
+      // — so a caller could be handed an error while readers and other clients
+      // had already been told the edit happened, and a restart then rebuilt a
+      // document that disagreed with both.
+      //
+      // A rollback cannot un-notify. So nothing is notified until there is
+      // something durable to notify about.
+      if (this.publishing) this.held.push([update, origin]);
+      else for (const listener of this.listeners) listener(update, origin);
     });
 
     // After the observer, so that it is persisted; see `migrateDoc` for why a
@@ -510,6 +528,41 @@ export class ProjectStore {
    * operation saw, so computing them up front would invert against the wrong
    * document.
    */
+  /**
+   * Run a durable write, and publish only if it commits.
+   *
+   * The document is mutated inside the transaction — a `Y.Doc` has no rollback,
+   * and staging one on a copy costs more than it buys while the failure being
+   * guarded is a storage error rather than a conflict. What is deferred is the
+   * part a rollback genuinely cannot undo: telling everybody.
+   *
+   * On failure the in-memory document is discarded and rebuilt from what
+   * actually committed, so the server never keeps serving state that no restart
+   * would reproduce.
+   */
+  private committing<T>(work: () => T): T {
+    if (this.publishing) return this.storage.transaction(work);
+    this.publishing = true;
+    try {
+      const result = this.storage.transaction(work);
+      for (const [update, origin] of this.held) {
+        for (const listener of this.listeners) listener(update, origin);
+      }
+      return result;
+    } catch (error) {
+      // Nothing was published, and the document is now ahead of the log. Drop
+      // it: `document()` rebuilds from the snapshot and the updates that
+      // committed, which is the state a restart would find.
+      this.held.length = 0;
+      this.doc = undefined;
+      this.lastProjection = undefined;
+      throw error;
+    } finally {
+      this.held.length = 0;
+      this.publishing = false;
+    }
+  }
+
   runOps(
     ops: readonly Op[],
     author: string,
@@ -539,7 +592,7 @@ export class ProjectStore {
     const changeset = `chg_${now.toString(36)}${(this.changesets++).toString(36)}`;
     if (ops.length === 0) return { applied: 0, descriptions: [], changeset };
 
-    return this.storage.transaction(() => {
+    return this.committing(() => {
       // Learn what anyone else did *before* applying ours, not after. Applying
       // first and reconciling second lets their change land on top of the edit
       // being made, because reconciliation cannot tell it from anything else
@@ -640,7 +693,7 @@ export class ProjectStore {
       return true;
     };
 
-    return this.storage.transaction(() => {
+    return this.committing(() => {
       const log = this.storage.readOps();
 
       // **Which action, and the two directions do not ask it the same way.**
