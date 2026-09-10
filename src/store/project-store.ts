@@ -86,7 +86,7 @@ export class ProjectStore {
    */
   private readonly held: [Uint8Array, unknown][] = [];
   private publishing = false;
-  /** Inside `storage.transaction`, so a write from within is a savepoint. */
+  /** Inside `storage.transaction`, so a write from within joins that transaction. */
   private transacting = false;
   /**
    * How many times the document has changed in this process.
@@ -551,8 +551,10 @@ export class ProjectStore {
    * hear about it, and both halves get said.
    */
   private committing<T>(work: () => T): T {
-    // Inside another transaction's own work: a savepoint, and the outer boundary
-    // owns the outcome. Nothing here is a publication question.
+    // Inside another transaction's own work: `storage.transaction` joins the
+    // one already open by calling the work directly, so this shares its
+    // outcome and the outer boundary owns it. Nothing here is a publication
+    // question.
     if (this.transacting) return this.storage.transaction(work);
 
     // **Two flags, because nesting and draining are different things.** One flag
