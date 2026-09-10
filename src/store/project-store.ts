@@ -86,6 +86,8 @@ export class ProjectStore {
    */
   private readonly held: [Uint8Array, unknown][] = [];
   private publishing = false;
+  /** Inside `storage.transaction`, so a write from within is a savepoint. */
+  private transacting = false;
   /**
    * How many times the document has changed in this process.
    *
@@ -161,7 +163,7 @@ export class ProjectStore {
       //
       // A rollback cannot un-notify. So nothing is notified until there is
       // something durable to notify about.
-      if (this.publishing) this.held.push([update, origin]);
+      if (this.transacting || this.publishing) this.held.push([update, origin]);
       else for (const listener of this.listeners) listener(update, origin);
     });
 
@@ -549,30 +551,47 @@ export class ProjectStore {
    * hear about it, and both halves get said.
    */
   private committing<T>(work: () => T): T {
-    if (this.publishing) return this.storage.transaction(work);
-    this.publishing = true;
+    // Inside another transaction's own work: a savepoint, and the outer boundary
+    // owns the outcome. Nothing here is a publication question.
+    if (this.transacting) return this.storage.transaction(work);
+
+    // **Two flags, because nesting and draining are different things.** One flag
+    // served both, and a listener's write — made while a committed update was
+    // being delivered — took the nested shortcut: no cleanup when its own
+    // transaction rolled back, so the live document kept the rolled-back edit
+    // and the drain delivered its queued update to every peer. R9 again, in the
+    // one path this boundary explicitly supports.
+    const mark = this.held.length;
+    this.transacting = true;
     let committed: T;
     try {
       committed = this.storage.transaction(work);
     } catch (error) {
-      // Nothing was published, and the document is now ahead of the log. Drop
-      // it: `document()` rebuilds from the snapshot and the updates that
+      // Only this transaction's updates are discarded; anything queued before
+      // it belongs to work that committed and is still delivered. The document
+      // is dropped: `document()` rebuilds from the snapshot and the updates that
       // committed, which is the state a restart would find.
-      this.held.length = 0;
+      this.held.splice(mark);
       this.doc = undefined;
       this.lastProjection = undefined;
-      this.publishing = false;
       throw error;
+    } finally {
+      this.transacting = false;
     }
+
+    // A listener's write, made during a drain: its updates are queued and the
+    // drain in progress delivers them. Nothing to start here.
+    if (this.publishing) return committed;
 
     // Committed. From here the write stands whatever happens, so the document is
     // never dropped and nothing is rethrown to the caller.
     //
     // **Drained rather than snapshotted**, because a listener may write. Its
-    // write sees `publishing` and commits inside this same boundary, queueing its
-    // own update here — which a snapshot taken before the loop would leave
-    // behind, published to nobody. A listener that writes on every notification
-    // does not terminate, which is true of any observer that feeds itself.
+    // write commits in its own transaction and queues its own update here — which
+    // a snapshot taken before the loop would leave behind, published to nobody.
+    // A listener that writes on every notification does not terminate, which is
+    // true of any observer that feeds itself.
+    this.publishing = true;
     try {
       while (this.held.length) {
         for (const [update, origin] of this.held.splice(0, this.held.length)) {
@@ -582,7 +601,7 @@ export class ProjectStore {
             } catch (error) {
               // Said rather than swallowed, and one listener's failure does not
               // cost the others their notification.
-              this.onPublishError?.(error, origin);
+              this.reportPublishError(error, origin);
             }
           }
         }
@@ -592,6 +611,20 @@ export class ProjectStore {
       this.publishing = false;
     }
     return committed;
+  }
+
+  /**
+   * The reporter is somebody else's code too. One that throws must not turn a
+   * committed write into a reported failure or cost the next listener its
+   * update — so it is isolated exactly as a listener is, and its own failure
+   * goes to the one place left.
+   */
+  private reportPublishError(error: unknown, origin: unknown): void {
+    try {
+      this.onPublishError?.(error, origin);
+    } catch (reporterError) {
+      console.error("re64: the publish-error reporter threw", reporterError, "while reporting", error);
+    }
   }
 
   /**
