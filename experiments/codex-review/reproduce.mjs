@@ -42,10 +42,16 @@ const alice = { userId: 'alice', label: 'Alice', sessionId: 'alice-session' };
   applyOpToDoc(a, { op: 'claim.set', id: 'clm_a', fields: { name: 'Renamed' } });
   applyOpToDoc(b, { op: 'claim.set', id: 'clm_a', fields: { root: 'location' } });
   sync(a, b);
+  // RE-RUN NOTE (re64, 2026-09-10): fixed. `claim.set` re-encoded the whole
+  // claim and wrote every key back, so a partial patch reasserted every field it
+  // did not name. It now touches only the keys the patch reaches, in groups
+  // where a value is spelled across several — which is what keeps clearing
+  // `encoding` part of setting `is` rather than a side effect of rewriting
+  // everything.
   const result = projectFromDoc(a).claims[0];
-  assert.equal(result.name, 'Original');
+  assert.equal(result.name, 'Renamed');
   assert.equal(result.root, 'location');
-  output('claim partial edits lose rename', { expectedName: 'Renamed', actual: result });
+  output('FIXED: both concurrent partial edits to one claim survive', { name: result.name, root: result.root });
 }
 {
   const [a, b] = peers();

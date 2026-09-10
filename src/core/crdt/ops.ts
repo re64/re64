@@ -625,20 +625,40 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         // dangling `primaryLabels` entry: the delete wins and nothing sweeps.
         if (!entry) break;
 
-        // Re-encoded whole from the merged claim rather than key by key, so the
-        // flat spelling of `says` and `by` stays consistent — setting an
-        // interpretation to `data` must clear the `encoding` a previous `text`
-        // left behind, which a per-key write would not do.
+        // **Only the keys this patch reaches.**
+        //
+        // This re-encoded the whole claim and wrote every key back, which was
+        // defended on the ground that `says` is spelled flat — setting an
+        // interpretation to `data` has to clear the `encoding` a previous `text`
+        // left behind, and a naive per-key write would not. True, and the cure
+        // was worse: a partial patch reasserted every field it did not name, so
+        // one peer changing `root` while another renamed the claim converged on
+        // the old name. The API said partial and the write set was the whole
+        // record.
+        //
+        // So the patch's fields are mapped to the storage keys they own, in
+        // *groups* where a value is spelled across several — that is what makes
+        // clearing `encoding` part of setting `is` rather than a side effect of
+        // rewriting everything.
+        const OWNS: Record<string, readonly string[]> = {
+          says: ["is", "encoding", "view", "typeId"],
+          frame: ["layer", "target"],
+        };
+        const touched = new Set<string>();
+        for (const key of Object.keys(op.fields as ClaimEdit)) {
+          for (const owned of OWNS[key] ?? [key]) touched.add(owned);
+        }
+
         const merged: Record<string, unknown> = { ...decodeClaim(entry) };
         for (const [key, value] of Object.entries(op.fields as ClaimEdit)) {
           if (value === null) delete merged[key];
           else merged[key] = value;
         }
         const fields = encodeClaim(merged as unknown as Claim);
-        for (const key of [...entry.keys()]) {
-          if (!(key in fields)) entry.delete(key);
+        for (const key of touched) {
+          if (key in fields) entry.set(key, fields[key]);
+          else entry.delete(key);
         }
-        for (const key of Object.keys(fields).sort()) entry.set(key, fields[key]);
         break;
       }
 

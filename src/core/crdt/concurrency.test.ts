@@ -185,3 +185,55 @@ describe("working apart and rejoining", () => {
     expect(projectFromDoc(present)).toEqual(projectFromDoc(away));
   });
 });
+
+describe("a partial edit touches only what it names", () => {
+  /**
+   * **The Codex review's thesis in one operation, and the test above it passed.**
+   *
+   * `claim.set` re-encoded the whole claim and wrote every key back into the
+   * `Y.Map`. So changing `root` reasserted the old `name`, the old extent and
+   * the old position: the API said partial and the write set was the whole
+   * record. Two peers, one renaming and one re-rooting, converged on the old
+   * name.
+   *
+   * The existing concurrency test checked that the replicas *agreed* and that
+   * `root` was defined — both true of the broken behaviour. Convergence was
+   * never the property in question; Yjs converges on whatever it is told.
+   *
+   * The whole-record write had a reason, and it survives as the group: `says` is
+   * spelled flat across `is`, `encoding`, `view` and `typeId`, so setting an
+   * interpretation to `data` must clear the `encoding` a previous `text` left.
+   * That is now part of setting `says` rather than a side effect of rewriting
+   * everything.
+   */
+  it("keeps both when two peers edit different fields of one claim", () => {
+    const a = participant(1);
+    const b = participant(2);
+    applyOpToDoc(a, { op: "claim.set", id: "lbl_1", fields: { name: "Renamed" } });
+    applyOpToDoc(b, { op: "claim.set", id: "lbl_1", fields: { root: "location" } });
+    syncAll(a, b);
+
+    for (const doc of [a, b]) {
+      const claim = projectFromDoc(doc).claims!.find((c) => c.id === "lbl_1")!;
+      expect(claim.name).toBe("Renamed");
+      expect(claim.root).toBe("location");
+    }
+  });
+
+  it("still clears a spelling the new interpretation does not use", () => {
+    // The group, doing the job the whole-record write was there for.
+    const a = participant(1);
+    applyOpToDoc(a, {
+      op: "claim.set",
+      id: "rgn_1",
+      fields: { says: { is: "text", encoding: "screen" } },
+    });
+    const held = () => projectFromDoc(a).claims!.find((c) => c.id === "rgn_1")!;
+    expect(held().encoding).toBe("screen");
+
+    applyOpToDoc(a, { op: "claim.set", id: "rgn_1", fields: { says: { is: "data" } } });
+    const after = held();
+    expect(after.is).toBe("data");
+    expect(after.encoding).toBeUndefined();
+  });
+});

@@ -63,11 +63,16 @@ today's work. `TRIAGE.md` is what happened and the order I would fix them in;
       So an unowned byte is now framed on the **address space** by default, true
       in every arrangement, and nothing emits a target frame. Which writes should
       be able to ask for one is undecided.
-- [ ] **R2** — `claim.set` writes every key back, so a partial edit reasserts
-      fields a collaborator just changed. This is the review's thesis in one
-      operation.
+- [x] **R2** — `claim.set` wrote every key back, so a partial edit reasserted
+      fields a collaborator had just changed. It now touches only the keys the
+      patch reaches, in groups where a value is spelled across several. The
+      existing concurrency test passed the broken behaviour: it checked that the
+      replicas *agreed*, and convergence was never the property in question.
 - [ ] **R1** — overlapping MCP requests resolve the caller through server-global
       mutable state, so a claim asked for by one user is recorded as another.
+      Adjacent to the replica work: the session is now part of a workspace's
+      identity, so a request that resolves the wrong caller reads the wrong
+      *copy* as well as recording the wrong author.
 - [ ] **R7** — the scenario cache is keyed on the document version, which does
       not include the target, so a check passes against bytes it never ran on.
       Fix before any experiment is told to use scenarios as evidence.
