@@ -831,3 +831,78 @@ describe("a document stored before bindings were keyed by site", () => {
     }
   });
 });
+
+describe("a document stored before fields had ids", () => {
+  /**
+   * **The text migration never reached a stored document.** A store restores a
+   * snapshot plus its updates through `docFromUpdates`, and neither path visits
+   * `fieldsOfType` or `docFromProject` — so a `.re64db` written yesterday still
+   * held fields keyed by offset as plain objects. The projection dropped the
+   * offsets, and `field.set` and `field.remove` looked up ids that were not
+   * keys and did nothing: a field that could be renamed and removed yesterday
+   * could be neither today, and nothing said so.
+   *
+   * Built by hand in the old shape rather than from a fixture on disk, because
+   * the shape is the point and a binary fixture goes stale in silence.
+   */
+  const text = JSON.stringify({
+    name: "legacy",
+    layers: [{ id: "lay_a", type: "bytes", address: "$8000", bytes: "a9016000" }],
+    types: [{ id: "typ_a", name: "Sprite", size: 16, fields: {} }],
+  });
+
+  // **Two updates in the old shape, as `main` wrote them at `c0eeb4b`.** The
+  // first is a snapshot holding `fld_a` under the key `"4"` as a plain object;
+  // the second, recorded after it, adds a field under `"12"` with no id at all,
+  // as the earliest files did. Bytes rather than a builder, because this test
+  // cannot name Yjs — the boundary test keeps it inside `src/core/crdt` — and
+  // the old shape is frozen history that no builder in this tree still writes.
+  // Cross-checked against `typeMapFrom` at that commit:
+  // `fields.set(key, type.fields[key])`, keyed by offset, values plain.
+  const SNAPSHOT = Buffer.from(
+    "AQaa0+7nCgAnAQV0eXBlcwV0eXBfYQEoAJrT7ucKAAJpZAF3BXR5cF9hKACa0+7nCgAEbmFtZQF3BlNwcml0ZSgAmtPu5woABHNpemUBfRAnAJrT7ucKAAZmaWVsZHMBKACa0+7nCgQBNAF2AwJpZHcFZmxkX2EEbmFtZXcBeAR0eXBldwJ1OAA=",
+    "base64"
+  );
+  const LATER = Buffer.from("AQGa0+7nCgYoAJrT7ucKBAIxMgF2AgRuYW1ldwF5BHR5cGV3AnU4AA==", "base64");
+
+  const fieldsOf = (store: ProjectStore) =>
+    projectFromDoc(store.document()).types![0].fields.map((f) => ({
+      id: f.id,
+      offset: f.offset,
+      name: f.name,
+    }));
+
+  it("keeps ids, offsets and later work, and takes edits by id again", () => {
+    const dir = mkdtempSync(join(tmpdir(), "re64-legacy-fields-"));
+    const storage = new SqliteStorage(join(dir, "p.re64db"), "p");
+    try {
+      storage.initialize(text, Date.now(), "legacy");
+      storage.writeSnapshot({ seqUpto: 0, update: new Uint8Array(SNAPSHOT) });
+      storage.appendUpdate(new Uint8Array(LATER));
+
+      const store = new ProjectStore(storage);
+      expect(fieldsOf(store)).toEqual([
+        { id: "fld_a", offset: 4, name: "x" },
+        { id: expect.stringMatching(/^fld_/), offset: 12, name: "y" },
+      ]);
+      const derived = fieldsOf(store)[1].id!;
+
+      store.runOps(
+        [{ op: "field.set", id: "fld_a", typeId: "typ_a", fields: { name: "renamed" } }],
+        "alice",
+        1
+      );
+      store.runOps([{ op: "field.remove", id: derived, typeId: "typ_a" }], "alice", 2);
+      expect(fieldsOf(store)).toEqual([{ id: "fld_a", offset: 4, name: "renamed" }]);
+
+      // Reopened: the migration was persisted, so the edits that named the
+      // migrated items are found again rather than held pending for ever.
+      const again = new ProjectStore(storage);
+      expect(fieldsOf(again)).toEqual([{ id: "fld_a", offset: 4, name: "renamed" }]);
+      expect(migrateDoc(again.document())).toBe(false);
+    } finally {
+      storage.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -220,6 +220,8 @@ export interface TargetSetOp {
  */
 export interface TypeField {
   id: string;
+  /** Where in the record, in the record's own unit. A property, not a key. */
+  offset: number;
   name: string;
   type: string;
   description?: string;
@@ -290,8 +292,16 @@ export interface TypeAddOp {
   size: number;
   /** What a field's offset counts. Bytes unless said otherwise. */
   unit?: "bytes" | "bits";
-  /** By offset. Two fields cannot share one, so the key is the identity. */
-  fields: Record<number, TypeField>;
+  /**
+   * A **list**, each field carrying its id and its offset.
+   *
+   * It was a map keyed by offset, and a map keyed by offset can hold one field
+   * per offset — so recreating a type that held two at one offset, which the
+   * document now allows, kept one and silently dropped the other. That reached
+   * two places: the file reconciler emitting `type.add` for a type it had not
+   * seen, and the inverse of `type.remove`, so undoing a removal lost a field.
+   */
+  fields: TypeField[];
 }
 
 /**

@@ -7,9 +7,12 @@ import {
   CrdtDoc,
 } from "./doc.js";
 import { applyOpToDoc } from "./ops.js";
-import { Project } from "../project/project.js";
 import { Op } from "../ops/types.js";
 import { newId } from "../project/identity.js";
+import { diffProjects } from "../ops/diff.js";
+import { applyOps, invertOp } from "../ops/apply.js";
+import { Project, parseProject } from "../project/project.js";
+import { formatProject } from "../project/serialize.js";
 
 /**
  * What happens when edits genuinely overlap.
@@ -413,5 +416,54 @@ describe("a field keeps its identity and its parts merge", () => {
 
     const at2 = fieldsOf(a).filter((f) => f.offset === 2);
     expect(at2.map((f) => f.name).sort()).toEqual(["fromA", "fromB"]);
+  });
+});
+
+describe("recreating a type keeps every field, including two at one offset", () => {
+  /**
+   * **A map keyed by offset holds one field per offset**, and `type.add`'s
+   * payload was one. Two readers disagreeing about what sits at `+0` is a state
+   * the document now keeps deliberately — and it reached two places that
+   * rebuild a type from scratch with one of the pair missing: the file
+   * reconciler emitting `type.add` for a type a peer had never seen, and the
+   * inverse of `type.remove`, so undoing a removal put back half the layout.
+   */
+  const disputed: Project = {
+    layers: [{ id: "lay_a", type: "prg", path: "game.prg" }],
+    types: [
+      {
+        id: "typ_a",
+        name: "Zone",
+        size: 8,
+        fields: [
+          { id: "fld_a", offset: 0, name: "fromA", type: "u8" },
+          { id: "fld_b", offset: 0, name: "fromB", type: "u16" },
+          { id: "fld_c", offset: 4, name: "agreed", type: "u8" },
+        ],
+      },
+    ],
+  };
+  const empty: Project = { layers: [{ id: "lay_a", type: "prg", path: "game.prg" }] };
+  const idsOf = (p: Project) => p.types![0].fields.map((f) => f.id).sort();
+  // The text writers take the file, not the project.
+  const asText = (p: Project) => formatProject(parseProject(JSON.stringify(p)));
+
+  it("reconciles a type a peer has not seen with both fields", () => {
+    const ops = diffProjects(empty, disputed);
+    const added = ops.find((op) => op.op === "type.add");
+    expect(added).toBeDefined();
+    expect(idsOf(parseProject(applyOps(asText(empty), ops)))).toEqual(["fld_a", "fld_b", "fld_c"]);
+
+    const doc = docFromProject(empty);
+    for (const op of ops) applyOpToDoc(doc, op);
+    expect(idsOf(projectFromDoc(doc))).toEqual(["fld_a", "fld_b", "fld_c"]);
+  });
+
+  it("undoes a removal with both fields", () => {
+    const remove: Op = { op: "type.remove", id: "typ_a" };
+    const inverse = invertOp(asText(disputed), remove);
+    const restored = parseProject(applyOps(applyOps(asText(disputed), [remove]), [inverse]));
+    expect(idsOf(restored)).toEqual(["fld_a", "fld_b", "fld_c"]);
+    expect(restored.types![0].fields.filter((f) => f.offset === 0)).toHaveLength(2);
   });
 });

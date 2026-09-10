@@ -15,6 +15,7 @@ import {
 } from "./doc.js";
 import { applyOpToDoc, applyOpsToDoc, undoManagerFor } from "./ops.js";
 import { Project } from "../project/project.js";
+import { derivedId } from "../project/identity.js";
 import { Op } from "../ops/types.js";
 
 /**
@@ -483,5 +484,59 @@ describe("a record written before fields had ids", () => {
     applyOpToDoc(doc, { op: "field.remove", id: x.id!, typeId: "typ_a" });
     const left = projectFromDoc(doc).types![0].fields;
     expect(left.map((f) => f.id)).toEqual([y.id]);
+  });
+});
+
+describe("migrating a stored document's fields", () => {
+  /**
+   * The shape a `.re64db` written before fields were keyed by id holds: an
+   * offset-keyed map of plain objects. `docFromProject` never sees one — a
+   * store restores a snapshot and its updates directly — so the text migration
+   * in `fieldsOfType` did nothing for it, and every stored project kept
+   * projecting its fields without offsets and taking no edits by id.
+   */
+  const legacy = () => {
+    const doc = emptyDoc();
+    const entry = new Y.Map<unknown>();
+    doc.getMap<Y.Map<unknown>>("types").set("typ_a", entry);
+    entry.set("id", "typ_a");
+    entry.set("name", "Sprite");
+    entry.set("size", 16);
+    const fields = new Y.Map<unknown>();
+    entry.set("fields", fields);
+    fields.set("4", { id: "fld_a", name: "x", type: "u8", description: "kept" });
+    fields.set("12", { name: "y", type: "u8" });
+    return doc;
+  };
+
+  it("keys each field by id, carrying the offset it was keyed by", () => {
+    const doc = legacy();
+    expect(migrateDoc(doc)).toBe(true);
+    const fields = projectFromDoc(doc).types![0].fields;
+    expect(fields.map((f) => [f.id, f.offset, f.name, f.description])).toEqual([
+      ["fld_a", 4, "x", "kept"],
+      [derivedId("fld", "typ_a", 12), 12, "y", undefined],
+    ]);
+  });
+
+  it("derives the same id the text migration does for a field without one", () => {
+    const doc = legacy();
+    migrateDoc(doc);
+    const throughText = projectFromDoc(
+      docFromProject({
+        layers: [],
+        types: [{ id: "typ_a", name: "Sprite", size: 16, fields: { 12: { name: "y", type: "u8" } } }],
+      } as unknown as Project)
+    );
+    expect(projectFromDoc(doc).types![0].fields[1].id).toBe(throughText.types![0].fields[0].id);
+  });
+
+  it("takes edits by id afterwards, and moves nothing twice", () => {
+    const doc = legacy();
+    migrateDoc(doc);
+    applyOpToDoc(doc, { op: "field.set", id: "fld_a", typeId: "typ_a", fields: { name: "renamed" } });
+    expect(projectFromDoc(doc).types![0].fields[0].name).toBe("renamed");
+    expect(migrateDoc(doc)).toBe(false);
+    expect(projectFromDoc(doc).types![0].fields[0].name).toBe("renamed");
   });
 });

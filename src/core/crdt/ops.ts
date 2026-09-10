@@ -13,7 +13,6 @@ import * as Y from "yjs";
 import { ClaimEdit, Op } from "../ops/types.js";
 import { Claim } from "../claims/model.js";
 import { encodeClaim, decodeClaim, claimsRoot } from "./claims.js";
-import { derivedId } from "../project/identity.js";
 
 const hex4 = (n: number) => "$" + n.toString(16).toUpperCase().padStart(4, "0");
 
@@ -351,27 +350,12 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
           ...(op.unit === undefined ? {} : { unit: op.unit }),
         });
         const fields = fieldsOf(entry);
-        // The op's payload is offset-keyed; the document keys fields by id.
-        for (const [offset, field] of Object.entries(op.fields)) {
-          // Derived rather than minted, so this path and the text path agree on
-          // a field the operation did not name.
-          const id = field.id ?? derivedId("fld", op.id, offset);
-          fields.set(id, fieldMap({ ...field, id, offset: Number(offset) }));
+        for (const field of op.fields) {
+          fields.set(field.id, fieldMap({ ...field }));
         }
         break;
       }
 
-      /**
-       * Revise a layout. Fields **merge by offset**; `null` removes one.
-       *
-       * The fields are a map of their own, written key by key, so two readers
-       * adding different fields to one record both survive. This used to delete
-       * any offset the operation did not mention — whole-value semantics
-       * reaching into the one structure that exists specifically not to have
-       * them, so a concurrent addition was lost the next time anybody renamed
-       * the type. Losing a field somebody proved from a copy routine is exactly
-       * the silent destruction this project has been caught by three times.
-       */
       case "type.set": {
         const entry = entryFor(doc.getMap<Y.Map<unknown>>("types"), op.id);
         if (entry) {

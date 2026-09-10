@@ -24,6 +24,7 @@
 
 import * as Y from "yjs";
 import { needsMigration, migrateToClaims } from "../claims/migrate.js";
+import { derivedId } from "../project/identity.js";
 import {
   ProjectType,
   Project,
@@ -642,28 +643,61 @@ export function docFromUpdates(updates: readonly Uint8Array[]): Y.Doc {
 /**
  * Bring a stored document up to the shape the operations expect.
  *
- * **A document written before bindings were keyed by site holds them keyed by
- * use id.** `docFromProject` never sees such a document — a store restores a
- * snapshot plus its updates directly — so rekeying the text import did nothing
- * for it, and an upgraded project kept the R4 behaviour exactly: binding again
- * added a second entry beside the id-keyed one, and unbinding removed the new
- * entry and left the old.
+/**
+ * Bring a stored document up to the shape the operations expect.
  *
- * Each use moves under the site it names. Where a legacy map holds two at one
- * site — the accumulation this change repairs — **the use whose id sorts last
- * is kept**, because that is the one every view was already showing: the loaded
- * index kept whichever sorted last by id. The migration preserves the answer
- * readers had rather than changing it, and it is the only deterministic choice
- * available, since the records carry no time. Idempotent; a use already under
- * its site is not touched.
+ * `docFromProject` never sees a stored document — a store restores a snapshot
+ * plus its updates directly — so a migration done at the file boundary does
+ * nothing for it, and a `.re64db` written yesterday keeps yesterday's shape and
+ * yesterday's defects. Two shapes have changed:
  *
- * Returns whether anything moved, because the caller has to persist a
- * migration that did — a later operation names items this created, and if they
- * are not in the log the next load cannot find them.
+ * **Fields were keyed by offset, as plain objects.** The projection dropped the
+ * offsets, and `field.set` and `field.remove` looked up ids that were not keys
+ * and did nothing. Each becomes a map of its own under its id, carrying the
+ * offset it was keyed by; one without an id is derived from the type id and the
+ * offset, the way `fieldsOfType` derives it, so the same legacy field reached
+ * through the file and through the store is one identity.
+ *
+ * **Bindings were keyed by use id.** Binding again added a second entry beside
+ * the id-keyed one, and unbinding removed the new entry and left the old — the
+ * R4 behaviour exactly, on every upgraded project. Each use moves under the
+ * site it names. Where a legacy map holds two at one site, **the use whose id
+ * sorts last is kept**, because that is the one every view was already showing:
+ * the loaded index kept whichever sorted last by id. The migration preserves
+ * the answer readers had rather than changing it, and it is the only
+ * deterministic choice available, since the records carry no time.
+ *
+ * Idempotent: anything already in the new shape is left exactly where it is.
+ * Returns whether anything moved, because the caller has to persist a migration
+ * that did — a later operation names items this created, and if they are not in
+ * the log the next load cannot find them.
  */
 export function migrateDoc(doc: Y.Doc): boolean {
   let moved = false;
+  const asMap = (held: Record<string, unknown>): Y.Map<unknown> => {
+    const inner = new Y.Map<unknown>();
+    for (const [k, v] of Object.entries(held)) if (v !== undefined) inner.set(k, v);
+    return inner;
+  };
+
   doc.transact(() => {
+    for (const [typeId, entry] of doc.getMap<Y.Map<unknown>>(ROOT_TYPES).entries()) {
+      const fields = entry.get("fields");
+      if (!(fields instanceof Y.Map)) continue;
+      const legacy = [...fields.entries()].filter(([key, value]) => {
+        if (!(value instanceof Y.Map)) return true;
+        return value.get("id") !== key || typeof value.get("offset") !== "number";
+      });
+      for (const [key, value] of legacy) {
+        const held = (value instanceof Y.Map ? value.toJSON() : value) as Record<string, unknown>;
+        const offset = typeof held.offset === "number" ? held.offset : Number(key);
+        const id = typeof held.id === "string" ? held.id : derivedId("fld", typeId, offset);
+        fields.delete(key);
+        fields.set(id, asMap({ ...held, id, offset }));
+        moved = true;
+      }
+    }
+
     for (const layer of doc.getArray<Y.Map<unknown>>(ROOT_LAYERS).toArray()) {
       for (const root of ["constantUses", "labelUses"] as const) {
         const uses = layer.get(root);
@@ -682,9 +716,7 @@ export function migrateDoc(doc: Y.Doc): boolean {
           const held = (value instanceof Y.Map ? value.toJSON() : value) as Record<string, unknown>;
           uses.delete(key);
           if (held.address === undefined) continue;
-          const inner = new Y.Map<unknown>();
-          for (const [k, v] of Object.entries(held)) if (v !== undefined) inner.set(k, v);
-          uses.set(siteKey(held.address as number | string), inner);
+          uses.set(siteKey(held.address as number | string), asMap(held));
           moved = true;
         }
       }

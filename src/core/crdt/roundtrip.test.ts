@@ -212,14 +212,14 @@ const CASES: { [K in Op["op"]]: Case } = {
       // A hole between the fields, which is the point of declaring `size`
       // rather than deriving it: a reader who has proved two fields of a
       // 200-byte record should not have to invent padding for the rest.
-      fields: {
-        0: { id: "fld_a", name: "kind", type: "u8" },
+      fields: [
+        { id: "fld_a", offset: 0, name: "kind", type: "u8" },
         // An array field, so the notation goes through all seven paths: it is
         // one string like every other field type, and that is exactly why it
         // needed no schema change anywhere below this line.
-        8: { id: "fld_c", name: "slots", type: "u8[8]" },
-        160: { id: "fld_b", name: "label", type: "char(40,screen)" },
-      },
+        { id: "fld_c", offset: 8, name: "slots", type: "u8[8]" },
+        { id: "fld_b", offset: 160, name: "label", type: "char(40,screen)" },
+      ],
     },
   },
   // The record, and not its parts: revising a type leaves every field it holds
@@ -550,10 +550,10 @@ describe("a bit record survives the round trip", () => {
     name: "VicControl1",
     size: 1,
     unit: "bits",
-    fields: {
-      0: { id: "fld_scroll", name: "yScroll", type: "bits(3)" },
-      7: { id: "fld_raster", name: "rasterBit8", type: "bits(1)" },
-    },
+    fields: [
+      { id: "fld_scroll", offset: 0, name: "yScroll", type: "bits(3)" },
+      { id: "fld_raster", offset: 7, name: "rasterBit8", type: "bits(1)" },
+    ],
   };
 
   it("keeps its unit through the text and the document alike", () => {
