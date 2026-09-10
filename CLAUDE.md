@@ -193,3 +193,51 @@ claude mcp add --transport http re64 http://127.0.0.1:5164/mcp \
 ```
 
 The user id is one from `list_projects`; the server does not verify it.
+
+---
+
+## Working on GitHub
+
+**Issues and pull requests go through `../re64-vault/re64-gh`.** It is `gh` with
+the identity swapped: it mints a fresh installation token for the **re64-claude**
+App on every call, uses it, and keeps none. Everything it does shows as
+`re64-claude[bot]`.
+
+```
+../re64-vault/re64-gh issue list
+../re64-vault/re64-gh pr create --fill
+```
+
+Plain `gh` still works and is **you**. It is for what the App is not permitted to
+do — the App's permissions are deliberately narrow and are widened by request and
+review rather than kept wide in advance. Prefer the wrapper: which identity is
+acting should be visible in the command rather than in an environment variable.
+
+**Commits stay yours.** The App neither authors nor pushes them; `git push` goes
+over SSH, and a commit credits its assistant in a `Co-Authored-By` trailer. Code
+is authored by a person, issue and review activity is the bot. That is an honest
+split rather than a cosmetic one.
+
+## Tickets, branches, and landing
+
+Every finding is an issue, and the issue number is the unit of work.
+
+- **A branch per issue**, named for it: `r14-projection-ordering`. Short-lived.
+- **Rebase onto `main`; never merge into.** If `main` moves while the branch is
+  open, rebase again. History here is linear and stays that way.
+- **One commit where the change is one thought** — which is the existing habit,
+  and the commit message is a large part of the artifact. Where a change is
+  genuinely several thoughts, keep them as several commits rather than one
+  muddled one.
+- **Land with rebase-and-merge**, never squash. Squashing destroys the individual
+  messages, and in this repository those carry the reasoning that makes a change
+  reviewable a month later.
+- **`Closes #n` in the pull request body**, so landing closes the issue and the
+  link survives.
+- **Open the pull request and stop.** A review surface you merge yourself is
+  theatre. Merging is the repository owner's.
+
+**What this is not.** Phabricator's unit is the revision and stacks are
+first-class; GitHub's unit is the branch and stacked pull requests are painful —
+the base-branch dance, and review churn every time the parent rebases. So work
+that must land together goes on **one branch as several commits**, not a stack.
