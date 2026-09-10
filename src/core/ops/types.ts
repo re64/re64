@@ -627,8 +627,23 @@ export type Op =
   | FileAddOp | FileRemoveOp
   | MetaSetOp;
 
+/**
+ * What kind of entry this is in the history.
+ *
+ * **The feed is append-only and undo is not the same question.** Taking a
+ * rename back is a thing a reader catching up needs to see — the state changed —
+ * so it is appended like any other change. But it must not itself become a
+ * candidate for undo, or a second undo would put the rename back rather than
+ * walking further into the past.
+ *
+ * Absent on rows written before this existed, which read as `edit`.
+ */
+export type ChangeKind = "edit" | "undo" | "redo";
+
 /** One edit, with enough context to undo it and to say who made it. */
 export interface Change {
+  /** `edit` unless this row records an undo or a redo. */
+  kind?: ChangeKind;
   /** What was done. */
   op: Op;
   /** What undoes it — computed against the state before `op` was applied. */

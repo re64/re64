@@ -101,6 +101,9 @@ CREATE TABLE IF NOT EXISTS ops (
   project_id TEXT NOT NULL,
   op         TEXT NOT NULL,
   inverse    TEXT NOT NULL,
+  -- 'edit', or 'undo'/'redo' for the record that one was taken back or put
+  -- back. Absent on rows written before this column, which read as edits.
+  kind       TEXT,
   author     TEXT,
   -- The session that made it, so undo is scoped the way the browser scopes it.
   session    TEXT,
@@ -195,6 +198,11 @@ function addMissingColumns(db: DatabaseSync): void {
     ["sessions", "codename", "TEXT"],
     ["ops", "session", "TEXT"],
     ["ops", "changeset", "TEXT"],
+    // What kind of entry this is: an edit somebody made, or the record that an
+    // edit was taken back. Both belong in the feed — a reader catching up needs
+    // to know a rename was reverted — and only an edit is a candidate for undo,
+    // or a second undo would undo the first.
+    ["ops", "kind", "TEXT"],
   ];
 
   for (const [table, column, type] of wanted) {

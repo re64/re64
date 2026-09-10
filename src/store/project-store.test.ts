@@ -497,7 +497,11 @@ describe.each(BACKENDS)("$name", (b) => {
       );
       s.undo("alice");
 
-      expect(s.debug().ops).toEqual({ total: 1, undone: 1 });
+      // Two rows: the edit, now flagged undone, and the entry recording that it
+      // was taken back. The flag is what redo walks; the entry is what a reader
+      // catching up sees, and a flag flipped on an old row says nothing to a
+      // cursor already past it.
+      expect(s.debug().ops).toEqual({ total: 2, undone: 1 });
     });
 
     it("says where the snapshot reaches, so a long log is visible", () => {
@@ -517,5 +521,95 @@ describe.each(BACKENDS)("$name", (b) => {
       expect(s.snapshot().length).toBeGreaterThan(0);
       expect(Buffer.from(s.snapshot())).toEqual(Buffer.from(encodeDoc(s.document())));
     });
+  });
+});
+
+describe("history is append-only, and redo walks it", () => {
+  /**
+   * **Two findings the Codex review reproduced, and they are one subject.**
+   *
+   * The feed was not append-only: undo flipped an `undone` flag on an old row
+   * and added nothing, so an agent holding a cursor past that row saw the state
+   * change and no entry explaining it. And redo picked the highest-numbered
+   * undone row rather than the action undone most recently — undo `Second` then
+   * `First` and both are flagged, while the one to put back is `First`. Redo
+   * chose `Second`, found its precondition gone, reported "changed by someone
+   * else since" with nobody else in sight, and stayed stuck for ever.
+   *
+   * The fix for the first is what makes the second answerable: the newest undo
+   * entry *names* the action that was taken back.
+   */
+  const project = JSON.stringify({
+    name: "history",
+    layers: [{ id: "lay_a", type: "bytes", address: "$8000", bytes: "a9016000" }],
+    claims: [{ id: "clm_a", at: "$8000", name: "Original", origin: "user" }],
+  });
+
+  const open = () => {
+    const dir = mkdtempSync(join(tmpdir(), "re64-history-"));
+    const storage = new SqliteStorage(join(dir, "p.re64db"), "p");
+    storage.initialize(project, Date.now(), "history");
+    return {
+      storage,
+      store: new ProjectStore(storage),
+      name: () => JSON.parse(storage.readText()).claims[0].name as string,
+      close: () => {
+        storage.close();
+        rmSync(dir, { recursive: true, force: true });
+      },
+    };
+  };
+
+  it("appends an entry for an undo, so a cursor past the edit still sees it", () => {
+    const f = open();
+    try {
+      f.store.runOps([{ op: "claim.set", id: "clm_a", fields: { name: "First" } }], "alice", 1, "s");
+      const cursor = f.storage.opsCursor();
+      f.store.undo("alice", "s");
+
+      expect(f.storage.opsCursor()).toBeGreaterThan(cursor);
+      const since = f.storage.readOps(cursor);
+      expect(since).toHaveLength(1);
+      expect(since[0].kind).toBe("undo");
+    } finally {
+      f.close();
+    }
+  });
+
+  it("redoes two undos in the order they were undone", () => {
+    const f = open();
+    try {
+      f.store.runOps([{ op: "claim.set", id: "clm_a", fields: { name: "First" } }], "alice", 1, "s1");
+      f.store.runOps([{ op: "claim.set", id: "clm_a", fields: { name: "Second" } }], "alice", 2, "s1");
+      expect(f.name()).toBe("Second");
+
+      f.store.undo("alice", "s1");
+      f.store.undo("alice", "s1");
+      expect(f.name()).toBe("Original");
+
+      expect(f.store.redo("alice", "s1").applied).toBe(1);
+      expect(f.name()).toBe("First");
+      expect(f.store.redo("alice", "s1").applied).toBe(1);
+      expect(f.name()).toBe("Second");
+    } finally {
+      f.close();
+    }
+  });
+
+  it("does not let a second undo take back the first", () => {
+    // The hazard the `kind` column exists for. An undo is in the feed as its own
+    // entry; if undo treated that as a candidate, undoing twice would put the
+    // rename back rather than walking further into the past.
+    const f = open();
+    try {
+      f.store.runOps([{ op: "claim.set", id: "clm_a", fields: { name: "First" } }], "alice", 1, "s1");
+      f.store.runOps([{ op: "claim.set", id: "clm_a", fields: { name: "Second" } }], "alice", 2, "s1");
+      f.store.undo("alice", "s1");
+      expect(f.name()).toBe("First");
+      f.store.undo("alice", "s1");
+      expect(f.name()).toBe("Original");
+    } finally {
+      f.close();
+    }
   });
 });

@@ -253,8 +253,19 @@ export class ProjectStore {
     // `runOps` records its own, with inverses computed before it applied them.
     if (this.recording || origin === "recorded") return;
 
-    const author = this.authorOf?.(origin);
-    if (author === undefined) return;
+    // Constructing the document from a file is not somebody editing it.
+    if (origin === "load") return;
+
+    // **An unattributed change is still a change.** This asked the relay who an
+    // origin belonged to and dropped the change when it did not know — and the
+    // relay knows sockets, so a `PUT /api/project` reached the document, moved
+    // the export, returned 200 and added *no* rows. An agent holding a cursor
+    // across one was told nothing had happened. The origin is an author's name
+    // where the relay has none to offer, and "unknown" where there is not even
+    // that, because the feed being complete matters more than every row being
+    // attributed.
+    const author =
+      this.authorOf?.(origin) ?? (typeof origin === "string" ? origin : "unknown");
 
     const before = this.lastProjection;
     const after = projectFromDoc(this.doc!);
@@ -535,7 +546,9 @@ export class ProjectStore {
    */
   undo(author?: string, session?: string): UndoOutcome {
     return this.step(
-      (c) => !c.undone,
+      // Edits only. An undo is in the feed as its own entry, and undoing that
+      // would put back what was just taken back rather than walking further.
+      (c) => !c.undone && (c.kind ?? "edit") === "edit",
       (c) => c.inverse,
       true,
       { author, session }
@@ -545,7 +558,7 @@ export class ProjectStore {
   /** Redo the most recently undone action, by the same scoping rule. */
   redo(author?: string, session?: string): UndoOutcome {
     return this.step(
-      (c) => c.undone === true,
+      (c) => c.undone === true && (c.kind ?? "edit") === "edit",
       (c) => c.op,
       false,
       { author, session }
@@ -579,7 +592,41 @@ export class ProjectStore {
 
     return this.storage.transaction(() => {
       const log = this.storage.readOps();
-      const newest = [...log].reverse().find((c) => wanted(c) && inScope(c));
+
+      // **Which action, and the two directions do not ask it the same way.**
+      //
+      // Undoing wants the newest edit still standing, which is a search over the
+      // edits themselves. Redoing wants the action undone *most recently*, and
+      // that is not the highest-numbered undone row: undo Second then First and
+      // both are flagged, while the one to put back is First. Reading it off the
+      // sequence number chose Second, whose precondition no longer held, so redo
+      // reported "changed by someone else since" with no collaborator in sight
+      // and did nothing — for ever.
+      //
+      // The undo entries the feed now carries answer it exactly: the newest one
+      // names the action that was taken back.
+      const newest = undone
+        ? [...log].reverse().find((c) => wanted(c) && inScope(c))
+        : (() => {
+            // Newest first, and skipping the ones already put back: redoing
+            // twice must walk two actions, and an undo entry whose action is no
+            // longer flagged has been redone already.
+            for (const entry of [...log].reverse()) {
+              if (entry.kind !== "undo" || !inScope(entry)) continue;
+              const action = [...log]
+                .reverse()
+                .find(
+                  (c) =>
+                    wanted(c) &&
+                    inScope(c) &&
+                    (entry.changeset === undefined
+                      ? true
+                      : c.changeset === entry.changeset)
+                );
+              if (action) return action;
+            }
+            return undefined;
+          })();
       if (!newest) return { undone: null, applied: 0, skipped: [] };
 
       // A row written before changesets existed is its own action.
@@ -594,7 +641,11 @@ export class ProjectStore {
       const skipped: UndoOutcome["skipped"] = [];
       const applying: StoredChange[] = [];
 
-      for (const change of [...group].reverse()) {
+      // **Backwards to undo, forwards to redo.** An action's operations depend
+      // on each other in the order they were made, so putting them back in
+      // reverse asks a later one to apply before the thing it needs. Undo is the
+      // mirror and does want reverse.
+      for (const change of undone ? [...group].reverse() : group) {
         // The op whose effect must still be present for the stored inverse to
         // mean anything: what was applied last time round. Undoing checks the
         // original op, redoing checks the inverse that undid it.
@@ -611,10 +662,37 @@ export class ProjectStore {
       }
 
       if (applying.length > 0) {
-        this.applyThroughDocument(
-          applying.map(direction),
-          newest.author ?? "unknown"
-        );
+        // **Appended, as well as flagged.** The `undone` column is what redo
+        // walks; it is not history. A reader catching up needs to know that a
+        // rename was reverted, and a flag flipped on an old row says nothing to
+        // a cursor already past it — so the reversal is recorded as its own
+        // entry, with `kind` marking it as one so a second undo walks further
+        // back rather than undoing this.
+        //
+        // Recorded before applying, because `applyThroughDocument` routes
+        // through the document and the projection diff would otherwise append a
+        // second, unmarked copy of the same thing.
+        this.recording = true;
+        try {
+          const at = Date.now();
+          this.storage.appendOps(
+            applying.map((change) => ({
+              op: direction(change),
+              inverse: undone ? change.op : change.inverse,
+              kind: undone ? ("undo" as const) : ("redo" as const),
+              ...(change.author === undefined ? {} : { author: change.author }),
+              ...(change.session === undefined ? {} : { session: change.session }),
+              ...(change.changeset === undefined ? {} : { changeset: change.changeset }),
+              at,
+            }))
+          );
+          this.applyThroughDocument(
+            applying.map(direction),
+            newest.author ?? "unknown"
+          );
+        } finally {
+          this.recording = false;
+        }
         for (const change of applying) this.storage.markUndone(change.seq, undone);
       }
 

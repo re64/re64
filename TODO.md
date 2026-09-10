@@ -76,8 +76,8 @@ today's work. `TRIAGE.md` is what happened and the order I would fix them in;
       item, and the one yesterday's `field.*` work sits on top of.
 - [ ] **R9**, then **R8** — publish only after commit; make the document's
       content hash decide the bytes served.
-- [ ] **R10, R11, R12** — the history feed: inverse pairing, append-only undo
-      events, redo order.
+- [ ] **R10** — socket history pairs operations with the wrong inverses.
+      R11 and R12 are done; see stage 2.
 - [ ] **R13, R14, R15** — provenance clear semantics, canonical projection
       order, strict numeric parsing.
 
@@ -182,9 +182,14 @@ rows, and undo changes state without advancing the cursor — so a session would
 told nothing is pending when something is. A silent wrong answer in the place we
 are about to depend on.
 
-- [ ] Route every accepted write through one action recorder.
-- [ ] Undo appends an event referencing the original action, rather than only
-      flipping `undone`.
+- [x] Route every accepted write through one action recorder. `record` asked
+      the relay who an origin belonged to and dropped the change when it did
+      not know; an unattributed change is still a change.
+- [x] Undo appends an event referencing the original action, rather than only
+      flipping `undone` — and that entry is what fixed **R12** too, since it
+      names the action redo must put back rather than leaving redo to guess
+      at the highest-numbered undone row. An `ops.kind` column keeps a
+      second undo from taking back the first.
 
 ## Stage 3 — the session replica
 

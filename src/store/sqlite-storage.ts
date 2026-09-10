@@ -208,7 +208,7 @@ export class SqliteStorage implements ProjectStorage {
   readOps(afterSeq = 0): StoredChange[] {
     const rows = this.db
       .prepare(
-        "SELECT seq, op, inverse, author, session, changeset, at, undone FROM ops " +
+        "SELECT seq, op, inverse, author, session, changeset, kind, at, undone FROM ops " +
           "WHERE project_id = ? AND seq > ? ORDER BY seq"
       )
       .all(this.projectId, afterSeq) as {
@@ -218,6 +218,7 @@ export class SqliteStorage implements ProjectStorage {
       author: string | null;
       session: string | null;
       changeset: string | null;
+      kind: string | null;
       at: number | null;
       undone: number;
     }[];
@@ -229,6 +230,7 @@ export class SqliteStorage implements ProjectStorage {
       ...(r.author === null ? {} : { author: r.author }),
       ...(r.session === null ? {} : { session: r.session }),
       ...(r.changeset === null ? {} : { changeset: r.changeset }),
+      ...(r.kind === null ? {} : { kind: r.kind as Change["kind"] }),
       ...(r.at === null ? {} : { at: r.at }),
       ...(r.undone ? { undone: true } : {}),
     }));
@@ -236,8 +238,8 @@ export class SqliteStorage implements ProjectStorage {
 
   appendOps(changes: readonly Change[]): void {
     const insert = this.db.prepare(
-      "INSERT INTO ops (project_id, op, inverse, author, session, changeset, at, undone) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO ops (project_id, op, inverse, author, session, changeset, kind, at, undone) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
     for (const c of changes) {
       insert.run(
@@ -247,6 +249,7 @@ export class SqliteStorage implements ProjectStorage {
         c.author ?? null,
         c.session ?? null,
         c.changeset ?? null,
+        c.kind ?? null,
         c.at ?? null,
         c.undone ? 1 : 0
       );

@@ -227,9 +227,16 @@ const alice = { userId: 'alice', label: 'Alice', sessionId: 'alice-session' };
     const cursor = f.storage.opsCursor();
     f.store.undo('alice', 'alice-session');
     f.store.undo('alice', 'alice-session');
-    const next = f.store.redo('alice', 'alice-session');
-    assert.equal(next.applied, 0);
-    assert.equal(f.storage.opsCursor(), cursor);
-    output('redo after two undos is stuck and undo does not advance history cursor', { cursor, afterUndoCursor: f.storage.opsCursor(), redo: next });
+    // RE-RUN NOTE (re64, 2026-09-10): both halves fixed, and they were one
+    // subject. Undo now appends an entry rather than only flipping a flag, so a
+    // cursor past the edit still sees that it was taken back — and that entry is
+    // what tells redo which action to put back, instead of guessing at the
+    // highest-numbered undone row.
+    const first = f.store.redo('alice', 'alice-session');
+    const second = f.store.redo('alice', 'alice-session');
+    assert.equal(first.applied, 1);
+    assert.equal(second.applied, 1);
+    assert.ok(f.storage.opsCursor() > cursor);
+    output('FIXED: undo advances the cursor and redo walks back in order', { cursor, afterCursor: f.storage.opsCursor(), redone: [first.applied, second.applied] });
   } finally { f.close(); }
 }

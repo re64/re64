@@ -836,24 +836,29 @@ describe("talking to whoever else is here", () => {
     expect(chat.messages.at(-1)!.from).toMatch(/^[a-z]+$/);
   });
 
-  it("leaves no history entry, because a conversation is not an edit", async () => {
+  it("shows in the history, which is how a session learns talk is waiting", async () => {
+    // **This asserted the opposite**, on the ground that a conversation is not
+    // an edit. It still is not — chat moves no version and re-analyses nothing —
+    // but it has to reach the feed, because the feed is how a session finds out
+    // that anything is waiting for it without merging first.
     const before = (await callTool("changes_since", {})).value as { cursor: number };
     await callTool("post_message", { text: "not an annotation" });
     const after = (await callTool("changes_since", { cursor: before.cursor })).value as {
-      changes: unknown[];
+      changes: { did: string }[];
     };
-    expect(after.changes).toEqual([]);
+    expect(after.changes.some((c) => c.did.includes("not an annotation"))).toBe(true);
   });
 
-  it("does not reach the exported project", async () => {
-    // The load-bearing property. Chat lives at a root `projectFromDoc` never
-    // looks at, so it cannot end up in the file somebody hands to someone else.
-    await callTool("post_message", { text: "keep-this-out-of-the-file" });
+  it("does not reach the listing or the analysis", async () => {
+    // What the old fifth-root design was protecting, kept: chat is in the file
+    // now, and it still describes no bytes — so it appears in no listing and
+    // nothing about the program is re-derived when somebody speaks.
+    await callTool("post_message", { text: "keep-this-out-of-the-listing" });
     const { value } = await callTool("export_listing", {});
-    expect(JSON.stringify(value)).not.toContain("keep-this-out-of-the-file");
+    expect(JSON.stringify(value)).not.toContain("keep-this-out-of-the-listing");
 
     const { value: described } = await callTool("describe_project", {});
-    expect(JSON.stringify(described)).not.toContain("keep-this-out-of-the-file");
+    expect(JSON.stringify(described)).not.toContain("keep-this-out-of-the-listing");
   });
 
   it("refuses an empty message rather than posting a blank row", async () => {

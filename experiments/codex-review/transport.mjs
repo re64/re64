@@ -65,8 +65,12 @@ try {
   const saved = await fetch(`http://127.0.0.1:${server.port}/api/project`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ raw: JSON.stringify(edited), baseVersion: snapshot.version }) });
   assert.equal(saved.status, 200);
   assert.equal(JSON.parse(storage.readText()).description, edited.description);
-  assert.equal(storage.readOps().length, before);
-  console.log(JSON.stringify({ case: 'HTTP project write missing from operation log', committed: true, addedOperations: storage.readOps().length - before }));
+  // RE-RUN NOTE (re64, 2026-09-10): fixed. `record` asked the relay who an
+  // origin belonged to and dropped the change when it did not know — and the
+  // relay knows sockets, so an HTTP write reached the document, moved the
+  // export and added no rows. An unattributed change is still a change.
+  assert.ok(storage.readOps().length > before);
+  console.log(JSON.stringify({ case: 'FIXED: HTTP project write reaches the operation log', addedOperations: storage.readOps().length - before }));
 } finally {
   await server.close();
   storage.close();
