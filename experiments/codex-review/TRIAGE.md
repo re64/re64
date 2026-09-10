@@ -24,23 +24,26 @@ node experiments/codex-review/reproduce.mjs   # 14 model/storage probes
 node experiments/codex-review/transport.mjs   # 3 over the real HTTP/MCP transport
 ```
 
+**Each is an issue**, numbered to match: R*n* is
+[re64/re64#*n*](https://github.com/re64/re64/issues).
+
 | | finding | 2026-09-09 | now |
 |---|---|---|---|
-| R1 | overlapping MCP requests take another caller's identity | reproduces | **reproduces** |
-| R2 | `claim.set` rewrites every key, losing a concurrent rename | reproduces | **fixed** |
-| R3 | fields stored by offset; a move duplicates the id | reproduces | **reproduces** |
-| R4 | rebinding adds a competitor; unbinding leaves one live | reproduces | **reproduces** |
-| R5 | a target-framed claim is visible in another target | reproduces | **fixed** |
-| R6 | renaming the default target silently changes the map | reproduces | **fixed** |
-| R7 | the scenario cache passes a probe that should fail | reproduces | **reproduces** |
-| R8 | the document's file hash does not decide the bytes served | reproduces | **reproduces** |
-| R9 | a failed transaction leaves the changed document live | reproduces | **reproduces** |
-| R10 | socket history pairs operations with the wrong inverses | reproduces | **reproduces** |
-| R11 | `changes_since` misses HTTP writes and undo | reproduces | **fixed** |
-| R12 | redo is stuck after two undos | reproduces | **fixed** |
-| R13 | evidence `by: null` clears on one adapter and not the other | reproduces | **reproduces** |
-| R14 | equal CRDT state projects in different orders | reproduces | **reproduces** |
-| R15 | `$8000+1` is accepted and written at `$8000` | reproduces | **reproduces** |
+| [R1](https://github.com/re64/re64/issues/1) | overlapping MCP requests take another caller's identity | reproduces | **reproduces** |
+| [R2](https://github.com/re64/re64/issues/2) | `claim.set` rewrites every key, losing a concurrent rename | reproduces | **fixed** |
+| [R3](https://github.com/re64/re64/issues/3) | fields stored by offset; a move duplicates the id | reproduces | **reproduces** |
+| [R4](https://github.com/re64/re64/issues/4) | rebinding adds a competitor; unbinding leaves one live | reproduces | **reproduces** |
+| [R5](https://github.com/re64/re64/issues/5) | a target-framed claim is visible in another target | reproduces | **fixed** |
+| [R6](https://github.com/re64/re64/issues/6) | renaming the default target silently changes the map | reproduces | **fixed** |
+| [R7](https://github.com/re64/re64/issues/7) | the scenario cache passes a probe that should fail | reproduces | **reproduces** |
+| [R8](https://github.com/re64/re64/issues/8) | the document's file hash does not decide the bytes served | reproduces | **reproduces** |
+| [R9](https://github.com/re64/re64/issues/9) | a failed transaction leaves the changed document live | reproduces | **reproduces** |
+| [R10](https://github.com/re64/re64/issues/10) | socket history pairs operations with the wrong inverses | reproduces | **reproduces** |
+| [R11](https://github.com/re64/re64/issues/11) | `changes_since` misses HTTP writes and undo | reproduces | **fixed** |
+| [R12](https://github.com/re64/re64/issues/12) | redo is stuck after two undos | reproduces | **fixed** |
+| [R13](https://github.com/re64/re64/issues/13) | evidence `by: null` clears on one adapter and not the other | reproduces | **reproduces** |
+| [R14](https://github.com/re64/re64/issues/14) | equal CRDT state projects in different orders | reproduces | **reproduces** |
+| [R15](https://github.com/re64/re64/issues/15) | `$8000+1` is accepted and written at `$8000` | reproduces | **reproduces** |
 
 **Five fixed, ten still current.** Every probe for a fixed one was flipped to
 assert the invariant instead, with a `RE-RUN NOTE` saying what changed, so the

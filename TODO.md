@@ -42,6 +42,10 @@ in the one place agents read.
 
 ## 3. The Codex review — confirmed, and what it costs
 
+**Tracked as issues now**: R*n* is [re64/re64#*n*](https://github.com/re64/re64/issues),
+numbered to match. Five are closed with the commit that fixed them; the ten below
+stay here only until this file is retired in favour of the issues.
+
 `experiments/codex-review/` — another model's review of the document model.
 Re-run against this tree: **fifteen of fifteen reproduce**, one changed shape by
 today's work. `TRIAGE.md` is what happened and the order I would fix them in;
