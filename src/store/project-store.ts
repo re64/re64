@@ -249,6 +249,8 @@ export class ProjectStore {
    * millisecond on the reference project, once per action rather than per
    * keystroke, so the cost is not worth avoiding.
    */
+  private sessionOf?: (origin: unknown) => string | undefined;
+
   private record(_update: Uint8Array, origin: unknown): void {
     // `runOps` records its own, with inverses computed before it applied them.
     if (this.recording || origin === "recorded") return;
@@ -266,6 +268,7 @@ export class ProjectStore {
     // attributed.
     const author =
       this.authorOf?.(origin) ?? (typeof origin === "string" ? origin : "unknown");
+    const session = this.sessionOf?.(origin);
 
     const before = this.lastProjection;
     const after = projectFromDoc(this.doc!);
@@ -275,13 +278,39 @@ export class ProjectStore {
     const ops = diffProjects(before, after);
     if (ops.length === 0) return;
 
-    // The inverse is the diff read backwards, which is exactly what undoing it
-    // means and costs nothing extra to compute.
-    const back = diffProjects(after, before);
+    // **Each inverse against the state its own operation saw**, walking forward
+    // — the same thing `runOps` does, and for the same reason.
+    //
+    // This took the reverse diff and paired it with the forward one *by array
+    // position*. Both diffs order operations by entity and category, and neither
+    // promises the matching inverse lands at the same index: one update that
+    // removed `clm_a` and added `clm_b` paired "remove clm_a" with "remove
+    // clm_b", and "add clm_b" with "add clm_a". Undoing either restored or
+    // deleted the wrong entity, and the log looked entirely reasonable.
+    //
+    // The layout of this text does not matter; it is only ever read to derive an
+    // inverse from.
+    let text = formatProject(before);
     const at = Date.now();
-    this.storage.appendOps(
-      ops.map((op, index) => ({ op, inverse: back[index] ?? op, author, at }))
-    );
+    // One update is one action, so one changeset covers all of its operations.
+    const changeset = `chg_${at.toString(36)}${(this.changesets++).toString(36)}`;
+    const changes: Change[] = [];
+    for (const op of ops) {
+      changes.push({
+        op,
+        inverse: invertOp(text, op),
+        author,
+        at,
+        // **One update is one action.** The relay knows which session a socket
+        // belongs to, and these rows carried neither it nor a changeset — so
+        // group boundaries vanished on this path and undo took back a single
+        // operation of a multi-operation click.
+        ...(session === undefined ? {} : { session }),
+        changeset,
+      });
+      text = applyOp(text, op);
+    }
+    this.storage.appendOps(changes);
   }
 
   /**
@@ -292,7 +321,19 @@ export class ProjectStore {
    * origin rather than its contents, so it does not depend on anything else
    * having run first.
    */
-  attributeWith(resolve: (origin: unknown) => string | undefined): void {
+  attributeWith(
+    resolve: (origin: unknown) => string | undefined,
+    /**
+     * Which session an update came from, where the relay knows.
+     *
+     * It always did — it holds the socket and the socket carries a session — and
+     * simply was not asked. Without it a socket edit reached the history with no
+     * session and no changeset, so undo could not tell one click's operations
+     * from another's and took back part of a decision.
+     */
+    resolveSession?: (origin: unknown) => string | undefined
+  ): void {
+    this.sessionOf = resolveSession;
     this.authorOf = resolve;
   }
 

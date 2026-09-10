@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileStorage, ProjectStorage, ProjectStore, SqliteStorage, pathsFor } from "./index.js";
-import { applyOpToDoc, encodeDoc, projectFromDoc } from "../core/crdt/index.js";
+import { applyOpToDoc, docFromProject, encodeDoc, projectFromDoc } from "../core/crdt/index.js";
 import { diffProjects, parseProject } from "../core/index.js";
 
 const PROJECT = `{
@@ -608,6 +608,97 @@ describe("history is append-only, and redo walks it", () => {
       expect(f.name()).toBe("First");
       f.store.undo("alice", "s1");
       expect(f.name()).toBe("Original");
+    } finally {
+      f.close();
+    }
+  });
+});
+
+describe("a socket update is one action, and each inverse undoes its own op", () => {
+  /**
+   * **The socket path paired forward and reverse diffs by array position.**
+   *
+   * Both diffs order operations by entity and category, and neither promises
+   * the matching inverse lands at the same index. One update that removed
+   * `clm_a` and added `clm_b` paired *remove clm_a* with *remove clm_b*, and
+   * *add clm_b* with *add clm_a* — so undoing either restored or deleted the
+   * wrong entity, and nothing about the log looked wrong.
+   *
+   * Each inverse is now computed against the state its own operation saw,
+   * walking forward: the same thing `runOps` does, for the same reason.
+   *
+   * The rows also carried no session and no changeset, though the relay knows
+   * both — so a multi-operation click could not be undone as one thing.
+   */
+  const project = JSON.stringify({
+    name: "socket",
+    layers: [{ id: "lay_a", type: "bytes", address: "$8000", bytes: "a9016000" }],
+    claims: [{ id: "clm_a", at: "$8000", name: "Original", root: "routine", origin: "user" }],
+  });
+
+  const open = () => {
+    const dir = mkdtempSync(join(tmpdir(), "re64-socket-"));
+    const storage = new SqliteStorage(join(dir, "p.re64db"), "p");
+    storage.initialize(project, Date.now(), "socket");
+    return {
+      storage,
+      store: new ProjectStore(storage),
+      close: () => {
+        storage.close();
+        rmSync(dir, { recursive: true, force: true });
+      },
+    };
+  };
+
+  it("gives each operation the inverse that undoes it", () => {
+    const f = open();
+    try {
+      f.store.attributeWith(
+        (origin) => (origin === "socket" ? "alice" : undefined),
+        (origin) => (origin === "socket" ? "ses_socket" : undefined)
+      );
+      const peer = docFromProject(parseProject(project));
+      applyOpToDoc(peer, { op: "claim.remove", id: "clm_a" });
+      applyOpToDoc(peer, {
+        op: "claim.add",
+        claim: { id: "clm_b", at: 0x8000, name: "Replacement", origin: "user" },
+      });
+      f.store.merge(encodeDoc(peer), "socket");
+
+      const log = f.storage.readOps();
+      expect(log.length).toBe(2);
+
+      // Every pair is self-consistent: the inverse names the entity its own
+      // operation named. Pairing by index gave two rows that each named the
+      // other's.
+      for (const change of log) {
+        const named = (op: (typeof change)["op"]): string =>
+          "id" in op ? op.id : "claim" in op ? op.claim.id : "";
+        expect(named(change.inverse)).toBe(named(change.op));
+      }
+    } finally {
+      f.close();
+    }
+  });
+
+  it("records the session and groups the update as one changeset", () => {
+    const f = open();
+    try {
+      f.store.attributeWith(
+        (origin) => (origin === "socket" ? "alice" : undefined),
+        (origin) => (origin === "socket" ? "ses_socket" : undefined)
+      );
+      const peer = docFromProject(parseProject(project));
+      applyOpToDoc(peer, { op: "claim.set", id: "clm_a", fields: { name: "Renamed" } });
+      applyOpToDoc(peer, {
+        op: "claim.add",
+        claim: { id: "clm_c", at: 0x8002, name: "Second", origin: "user" },
+      });
+      f.store.merge(encodeDoc(peer), "socket");
+
+      const log = f.storage.readOps();
+      expect(log.every((c) => c.session === "ses_socket")).toBe(true);
+      expect(new Set(log.map((c) => c.changeset)).size).toBe(1);
     } finally {
       f.close();
     }

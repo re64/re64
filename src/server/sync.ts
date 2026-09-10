@@ -136,8 +136,9 @@ export class SyncServer {
 
     // Only this layer can say who an update came from: it holds the socket, the
     // socket carries a session, and the session claims a user.
-    options.store.attributeWith((origin) =>
-      origin instanceof WebSocket ? this.userOf.get(origin) : undefined
+    options.store.attributeWith(
+      (origin) => (origin instanceof WebSocket ? this.userOf.get(origin) : undefined),
+      (origin) => (origin instanceof WebSocket ? this.sessionOf.get(origin) : undefined)
     );
 
     // Presence, relayed but never persisted. Who is looking at what is not part
