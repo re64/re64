@@ -198,15 +198,20 @@ The user id is one from `list_projects`; the server does not verify it.
 
 ## Working on GitHub
 
-**Issues and pull requests go through `../re64-vault/re64-gh`.** It is `gh` with
-the identity swapped: it mints a fresh installation token for the **re64-claude**
-App on every call, uses it, and keeps none. Everything it does shows as
-`re64-claude[bot]`.
+**Issues and pull requests go through `../re64-vault/re64-claude-gh`.** It is
+`gh` with the identity swapped: it mints a fresh installation token for the
+**re64-claude** App on every call, uses it, and keeps none. Everything it does
+shows as `re64-claude[bot]`.
 
 ```
-../re64-vault/re64-gh issue list
-../re64-vault/re64-gh pr create --fill
+../re64-vault/re64-claude-gh issue list
+../re64-vault/re64-claude-gh pr create --fill
 ```
+
+`re64-codex-gh` is the same thing for the **re64-codex** App, which is the one
+that reviews. Both are thin wrappers over `re64-gh-as`; each finds its own key by
+the app's name, so two apps can live in the vault without either guessing which
+key is theirs. A private key never leaves that directory.
 
 Plain `gh` still works and is **you**. It is for what the App is not permitted to
 do — the App's permissions are deliberately narrow and are widened by request and
