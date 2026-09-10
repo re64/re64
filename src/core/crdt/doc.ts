@@ -352,12 +352,12 @@ export function projectFromDoc(doc: Y.Doc): Project {
 
       const layer = inOrder<ProjectLayer>(scalars, LAYER_FIELDS);
       const labelList = labels
-        ? sortedValues<ProjectLabel>(labels, "address").map((l) =>
+        ? sortedValues<ProjectLabel>(labels, "address", "number").map((l) =>
             inOrder<ProjectLabel>(l as unknown as Record<string, unknown>, LABEL_FIELDS)
           )
         : [];
       const regionList = regions
-        ? sortedValues<ProjectRegion>(regions, "start").map((r) =>
+        ? sortedValues<ProjectRegion>(regions, "start", "number").map((r) =>
             inOrder<ProjectRegion>(r as unknown as Record<string, unknown>, REGION_FIELDS)
           )
         : [];
@@ -365,7 +365,7 @@ export function projectFromDoc(doc: Y.Doc): Project {
       // address, and the order has to be identical on every peer without
       // anyone coordinating.
       const commentList = comments
-        ? sortedValues<ProjectComment>(comments, "address").map((c) =>
+        ? sortedValues<ProjectComment>(comments, "address", "number").map((c) =>
             inOrder<ProjectComment>(c as unknown as Record<string, unknown>, COMMENT_FIELDS)
           )
         : [];
@@ -373,14 +373,14 @@ export function projectFromDoc(doc: Y.Doc): Project {
       if (labelList.length) layer.labels = labelList;
       if (regionList.length) layer.regions = regionList;
       const useList = uses
-        ? sortedValues<ProjectConstantUse>(uses, "address").map((u) =>
+        ? sortedValues<ProjectConstantUse>(uses, "address", "number").map((u) =>
             inOrder<ProjectConstantUse>(u as unknown as Record<string, unknown>, USE_FIELDS)
           )
         : [];
 
       if (commentList.length) layer.comments = commentList;
       const labelUseList = labelUses
-        ? sortedValues<ProjectLabelUse>(labelUses, "address").map((u) =>
+        ? sortedValues<ProjectLabelUse>(labelUses, "address", "number").map((u) =>
             inOrder<ProjectLabelUse>(u as unknown as Record<string, unknown>, LABEL_USE_FIELDS)
           )
         : [];
@@ -406,24 +406,24 @@ export function projectFromDoc(doc: Y.Doc): Project {
     project.primaryLabels = Object.fromEntries(primaryKeys.map((k) => [k, primaryJson[k]]));
   }
 
-  const constantList = sortedValues<ProjectConstant>(constants, "value").map((c) =>
+  const constantList = sortedValues<ProjectConstant>(constants, "value", "number").map((c) =>
     inOrder<ProjectConstant>(c as unknown as Record<string, unknown>, CONSTANT_FIELDS)
   );
   if (constantList.length) project.constants = constantList;
 
-  const claimList = sortedValues<ProjectClaim>(claims, "at").map((c) =>
+  const claimList = sortedValues<ProjectClaim>(claims, "at", "number").map((c) =>
     inOrder<ProjectClaim>(c as unknown as Record<string, unknown>, CLAIM_FIELDS)
   );
   if (claimList.length) project.claims = claimList;
 
-  const decoderList = sortedValues<ProjectDecoder>(decoders, "name").map((d) =>
+  const decoderList = sortedValues<ProjectDecoder>(decoders, "name", "text").map((d) =>
     inOrder<ProjectDecoder>(d as unknown as Record<string, unknown>, DECODER_FIELDS)
   );
   if (decoderList.length) project.decoders = decoderList;
 
   // By name, like decoders and constants: an id sorts by nothing a reader cares
   // about, and a `.re64` should read the way somebody would have written it.
-  const typeList = sortedValues<ProjectType>(types, "name").map((t) => {
+  const typeList = sortedValues<ProjectType>(types, "name", "text").map((t) => {
     const ordered = inOrder<ProjectType>(t as unknown as Record<string, unknown>, TYPE_FIELDS);
     // The document keys fields by id; the projection is a list in layout order,
     // because that is how a record reads and because an offset-keyed object
@@ -435,12 +435,12 @@ export function projectFromDoc(doc: Y.Doc): Project {
   });
   if (typeList.length) project.types = typeList;
 
-  const fileList = sortedValues<ProjectFile>(files, "name").map((f) =>
+  const fileList = sortedValues<ProjectFile>(files, "name", "text").map((f) =>
     inOrder<ProjectFile>(f as unknown as Record<string, unknown>, FILE_FIELDS)
   );
   if (fileList.length) project.files = fileList;
 
-  const targetList = sortedValues<ProjectTarget>(targets, "name").map((t) =>
+  const targetList = sortedValues<ProjectTarget>(targets, "name", "text").map((t) =>
     inOrder<ProjectTarget>(t as unknown as Record<string, unknown>, TARGET_FIELDS)
   );
   if (targetList.length) project.targets = targetList;
@@ -448,7 +448,8 @@ export function projectFromDoc(doc: Y.Doc): Project {
   // Steps come back out of the one JSON value they went in as.
   const scenarioList = sortedValues<Record<string, unknown>>(
     doc.getMap<Y.Map<unknown>>(ROOT_SCENARIOS),
-    "name"
+    "name",
+    "text"
   ).map((entry) => {
     const ordered = inOrder<Record<string, unknown>>(entry, SCENARIO_FIELDS);
     return {
@@ -460,13 +461,15 @@ export function projectFromDoc(doc: Y.Doc): Project {
 
   const captureList = sortedValues<ProjectCapture>(
     doc.getMap<Y.Map<unknown>>(ROOT_CAPTURES),
-    "file"
+    "file",
+    "text"
   ).map((c) => inOrder<ProjectCapture>(c as unknown as Record<string, unknown>, CAPTURE_FIELDS));
   if (captureList.length) project.captures = captureList;
 
   const evidenceList = sortedValues<ProjectEvidence>(
     doc.getMap<Y.Map<unknown>>(ROOT_EVIDENCE),
-    "claim"
+    "claim",
+    "text"
   ).map((e) => inOrder<ProjectEvidence>(e as unknown as Record<string, unknown>, EVIDENCE_FIELDS));
   if (evidenceList.length) project.evidence = evidenceList;
 
@@ -601,7 +604,27 @@ function inOrder<T>(source: Record<string, unknown>, fields: readonly string[]):
  * between clients that inserted concurrently. Sorting by address keeps the
  * written file stable, so the same state always serialises the same way.
  */
-function sortedValues<T>(map: Y.Map<Y.Map<unknown>>, key: string): T[] {
+/**
+ * How a root's sort key is read: as a number, or as text.
+ *
+ * **Declared per root rather than decided per pair**, which is the whole of the
+ * fix. Choosing from the values in hand makes the comparator non-transitive as
+ * soon as one of them does not parse — `"9"` before `"$10"` numerically, `"$10"`
+ * before `"$ZZ"` as text, `"$ZZ"` before `"9"` as text — and a comparator with a
+ * cycle in it sorts to whatever order it started from, which is the defect this
+ * is repairing rather than a smaller version of it.
+ *
+ * A root knows which it is: an address, a start, a value and a claim's `at` are
+ * numbers, and a name, a filename and a referenced id are text. Nothing has to
+ * guess.
+ */
+type SortKind = "number" | "text";
+
+function sortedValues<T>(
+  map: Y.Map<Y.Map<unknown>>,
+  key: string,
+  kind: SortKind
+): T[] {
   const parseAddress = (value: unknown): number => {
     if (typeof value === "number") return value;
     const text = String(value ?? "").trim();
@@ -610,14 +633,18 @@ function sortedValues<T>(map: Y.Map<Y.Map<unknown>>, key: string): T[] {
     return parseInt(text, 10);
   };
 
+  // **Code units, not `localeCompare`.** Two peers must project a document to
+  // the same bytes, and the version hash is taken over that projection — so an
+  // order that depends on the reader's locale, or on which ICU their runtime
+  // ships, makes equal state produce unequal versions on different machines.
+  const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
   return [...map.values()]
     .map((entry) => entry.toJSON() as T)
     .sort((a, b) => {
       const left = (a as Record<string, unknown>)[key];
       const right = (b as Record<string, unknown>)[key];
 
-      // **Numbers by value, everything else as text.**
-      //
       // This parsed every sort key as a number, and seven of the roots sort by
       // one that is not: decoder, type, target and scenario names, a capture's
       // filename, a piece of evidence's claim id. `parseInt("Alpha")` is `NaN`,
@@ -630,14 +657,24 @@ function sortedValues<T>(map: Y.Map<Y.Map<unknown>>, key: string): T[] {
       // That is not only a cosmetic difference in the file. The version hash is
       // taken over the projection, so equal logical state did not determine
       // equal versions.
-      const byNumber = parseAddress(left) - parseAddress(right);
-      const delta = Number.isNaN(byNumber)
-        ? String(left ?? "").localeCompare(String(right ?? ""))
-        : byNumber;
+      let delta: number;
+      if (kind === "number") {
+        const byNumber = parseAddress(left) - parseAddress(right);
+        // A number that does not parse cannot order against one that does. It
+        // sorts as text among its own kind and after every real number, rather
+        // than silently landing wherever `NaN` puts it.
+        delta = Number.isNaN(byNumber)
+          ? Number.isNaN(parseAddress(left)) && Number.isNaN(parseAddress(right))
+            ? byText(String(left ?? ""), String(right ?? ""))
+            : Number.isNaN(parseAddress(left))
+              ? 1
+              : -1
+          : byNumber;
+      } else {
+        delta = byText(String(left ?? ""), String(right ?? ""));
+      }
 
-      return delta !== 0
-        ? delta
-        : String((a as { id?: string }).id).localeCompare(String((b as { id?: string }).id));
+      return delta !== 0 ? delta : byText(String((a as { id?: string }).id), String((b as { id?: string }).id));
     });
 }
 
