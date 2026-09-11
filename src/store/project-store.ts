@@ -93,6 +93,7 @@ import {
   applyOp,
   applyOps,
   diffProjects,
+  type FileContentRejection,
   describeOp,
   formatProject,
   invertOp,
@@ -507,6 +508,24 @@ export class ProjectStore {
     };
   }
 
+  private fileRejections: FileContentRejection[] = [];
+
+  /**
+   * Rejected proposals from the last incoming text, retained across exports.
+   * This is process-local reconciliation feedback, not shared document state.
+   */
+  rejectedFileChanges(): readonly FileContentRejection[] {
+    return this.fileRejections;
+  }
+
+  /** Reconcile incoming text without making immutable content a write veto. */
+  diffIncoming(incoming: Project, base = projectFromDoc(this.document())): Op[] {
+    const rejected: FileContentRejection[] = [];
+    const ops = diffProjects(asClaims(base), asClaims(incoming), rejected);
+    this.fileRejections = rejected;
+    return ops;
+  }
+
   writeFile(): Op[] {
     const doc = this.document();
     // The file can disappear under a live session — moved, deleted, or on a
@@ -527,8 +546,11 @@ export class ProjectStore {
     // something to maintain — and it was actively wrong here, because the ops
     // are computed against the migrated text and were being applied to the raw
     // one, so a write to a file still in the old shape landed nowhere at all.
-    const ops = diffProjects(asClaims(parseProject(text)), projectFromDoc(doc));
-    if (ops.length > 0) {
+    const rejected: FileContentRejection[] = [];
+    const ops = diffProjects(asClaims(parseProject(text)), projectFromDoc(doc), rejected);
+    // Even a rejected-only input needs its export restored to accepted content.
+    // Keep the incoming diagnostic: this reverse diff is not a new proposal.
+    if (ops.length > 0 || rejected.length > 0) {
       let updated: string;
       try {
         updated = formatProject(projectFromDoc(doc));
@@ -574,10 +596,7 @@ export class ProjectStore {
       return;
     }
 
-    const external = diffProjects(
-      asClaims(parseProject(this.lastWritten)),
-      asClaims(parseProject(text))
-    );
+    const external = this.diffIncoming(parseProject(text), parseProject(this.lastWritten));
     for (const op of external) applyOpToDoc(this.document(), op, "external");
     this.lastWritten = text;
     if (external.length > 0) {

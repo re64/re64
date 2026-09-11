@@ -132,7 +132,19 @@ const sameRegion = (a: ProjectRegion, b: ProjectRegion) =>
 /** Two stored claims, field for field. */
 const sameClaim = (a: ProjectClaim, b: ProjectClaim) => JSON.stringify(a) === JSON.stringify(b);
 
-export function diffProjects(from: Project, to: Project): Op[] {
+/** A proposed content replacement that cannot be represented by a file operation. */
+export interface FileContentRejection {
+  file: string;
+  retained: { hash?: string; size?: number };
+  rejected: { hash?: string; size?: number };
+}
+
+/** Collect rejected content separately so valid edits can still be reconciled. */
+export function diffProjects(
+  from: Project,
+  to: Project,
+  rejected?: FileContentRejection[]
+): Op[] {
   from = filesWithIds(from);
   to = filesWithIds(to);
   const ops: Op[] = [];
@@ -166,7 +178,13 @@ export function diffProjects(from: Project, to: Project): Op[] {
         ops.push({ op: "file.add", name: file.name, hash: file.hash, size: file.size });
         continue;
       }
-      throw new Error(`File ${id} is immutable. Add a new file id for different bytes.`);
+      rejected?.push({
+        file: id,
+        retained: { hash: before.hash, size: before.size },
+        rejected: { hash: file.hash, size: file.size },
+      });
+      if (before.name !== file.name) ops.push({ op: "file.set", id, fields: { name: file.name } });
+      continue;
     }
     ops.push({ op: "file.add", id, name: file.name, hash: file.hash, size: file.size });
   }

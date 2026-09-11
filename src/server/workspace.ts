@@ -46,7 +46,6 @@ import {
   encodePng,
   encodeApng,
   encodeWav,
-  blobPaths,
   isBitmapView,
   buildMemoryMap,
   describeOp,
@@ -434,24 +433,12 @@ export class Workspace {
   // --- freshness ------------------------------------------------------
 
   /**
-   * What the cache is keyed on.
-   *
-   * The document counter covers edits; the blob fingerprint covers the bytes
-   * underneath, which the document knows nothing about. Under SQLite those are
-   * content-addressed and immutable per name, so the hash is exact; on a plain
-   * file someone can replace the PRG on disk, and mtime is the best available.
+   * Recorded file hashes already belong to the document projection. Only ROM
+   * content needs a separate fingerprint because it lives outside the project.
    */
   private key(): string {
-    const { store, storage } = this.room;
+    const { store } = this.room;
     const project = projectFromDoc(this.reading());
-
-    const fingerprint = blobPaths(project)
-      .map((name) =>
-        storage instanceof SqliteStorage
-          ? (storage.blobHash(name) ?? "?")
-          : name
-      )
-      .join(",");
 
     // `docVersion` moves whenever the *document* does, and not everything that
     // moves the document moves the project: chat lives at a root the projection
@@ -480,7 +467,7 @@ export class Workspace {
     // execution fingerprint, read fresh, named the new. A checkpoint then
     // recorded a check against bytes the key said it had not run on. Hashing
     // three images per key is the price of the key being honest.
-    return `${this.projectVersion}:${fingerprint}:${romFingerprint(nodeRomBytes())}`;
+    return `${this.projectVersion}:${romFingerprint(nodeRomBytes())}`;
   }
 
   /**
@@ -763,6 +750,14 @@ export class Workspace {
     const program = this.program();
     const { loaded } = program;
     const exportStatus = this.room.store.exportStatus();
+    const hygiene = [
+      ...program.hygiene,
+      ...this.room.store.rejectedFileChanges().map((rejection) => ({
+        kind: "rejected-file-content",
+        message: `Ignored a content change to ${rejection.file}; its recorded hash and size remain unchanged. Add a new file id for different bytes.`,
+        subjects: [{ id: rejection.file }],
+      })),
+    ];
     const auto = program.labels.filter({ origin: "auto" });
     // Supplied by re64 rather than decided by anyone: the built-in C64 symbol
     // table, and the entry point a PRG layer labels from its load address.
@@ -820,7 +815,7 @@ export class Workspace {
       ...(retiredClaimIds(loaded.project.evidence).size
         ? { retired: retiredClaimIds(loaded.project.evidence).size }
         : {}),
-      ...(program.hygiene.length ? { hygiene: [...program.hygiene] } : {}),
+      ...(hygiene.length ? { hygiene } : {}),
       // Said rather than left to be inferred from a layer that supplies nothing:
       // every answer that would have used those bytes is short by an unknown
       // amount, and an unexplained short answer is the failure this project

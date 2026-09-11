@@ -30,6 +30,15 @@ investigation tasks.
    metadata without retargeting layers or captures. A filename works as an alias
    only when unique in your session; repeated upload names require ids.
 
+When replacing project text, a changed hash or size under an existing modern
+file id is rejected; valid renames and other edits still apply. HTTP
+`PUT /api/project` includes `rejected` entries with the file id and the retained
+and proposed content fields. `describe_project` also reports these in hygiene.
+File-mode reconciliation restores the export to accepted content even when the
+rejected fields were its only changes. Diagnostics belong to the running store:
+they survive export regeneration, are replaced by the next incoming text
+comparison, and are not retained across restart or copied into the shared CRDT.
+
 A packed executable, decrunched memory and a patched variant can require
 different targets. Choose the arrangement the question concerns; the same
 address can contain different bytes in each.
