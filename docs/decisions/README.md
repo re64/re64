@@ -90,9 +90,9 @@ Related reasoning lives in [document](document.md), [claims](claims.md),
 [types](types.md) and [machine](machine.md) decisions; the repair round and probes
 remain in the [review record](../../experiments/codex-review/REVIEW.md).
 
-The [shared architecture discussion](https://chatgpt.com/share/6aa4512f-ff50-83eb-8091-0f044396e0af)
-helped identify these boundaries. Its proposed sync contract is not adopted as
-a second rulebook. Local duplicate names remain legal under A2; only ambiguous
+The boundary proposal separates domain concepts, replica ownership and storage
+representation, and gives each documented fact one primary home. It does not
+establish a second sync rulebook. Local duplicate names remain legal under A2; only ambiguous
 selector resolution is refused. Retained blobs and operation history have
 separate authority, and a local transaction does not establish distributed
 atomicity. `Target` and `projection` remain the current terms, with their
