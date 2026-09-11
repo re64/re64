@@ -128,9 +128,10 @@ a field edit. Add and remove is complete for an immutable thing.
 on the project itself, not a collection. It is the degenerate case of Shape 2
 with a closed key set, and an absent value clears.
 
-Target selection is request/client context, not project metadata. The document
-also preserves `entryPoints`, but the current `MetaSetOp` does not expose that
-field. See the [model reference](05-model.md#2-document-roots).
+Target selection is request/client context, not project metadata, and so are
+entry points: a root `entryPoints` list is migrated into a target on the way in
+and a target's list is edited with `target.set`. See the
+[model reference](05-model.md#2-document-roots).
 
 ---
 

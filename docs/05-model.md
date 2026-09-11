@@ -48,7 +48,7 @@ for their fields unless stated otherwise.
 | `types` | Map by type id; nested field maps keyed by field id | `types: ProjectType[]`, each with a field list |
 | `files` | Map by filename | `files: {name, hash, size}[]` |
 | `primaryLabels` | Map from address key to claim id | `primaryLabels: Record<string, string>` |
-| `meta` | Project scalars: name, description, entryPoints | Corresponding top-level properties |
+| `meta` | Project scalars: name, description | Corresponding top-level properties |
 | `scenarios` | Map by scenario id; steps stored as one JSON string value | Scenarios with ordered step lists |
 | `captures` | Map by capture id | `captures: ProjectCapture[]` |
 | `evidence` | Map by evidence id | `evidence: ProjectEvidence[]` |
@@ -59,15 +59,16 @@ their stored order. S3 defines the ordering obligation. The `meta.set`
 operation exposes only name and description; a stored scalar is not necessarily
 editable through every surface.
 
-Project-level `entryPoints` is an active compatibility field, not unused data:
-`withSyntheticTarget` copies it into the implied target when no targets are
-declared, and analysis reads those entries as decode starts. An explicit target
-uses its own entries instead. The tracked Gridrunner reference and experiment
-4's run1 project still carry non-empty root lists. Changes to that root list
-are not emitted by `diffProjects`, and `meta.set`
-cannot express one. [#39](https://github.com/re64/re64/issues/39) tracks the
-decision between exposing that mutation and migrating the state into explicit
-targets while retaining old-file compatibility; neither change is implemented.
+A project-level `entryPoints` list is legacy input only. It predates targets,
+and it was a target's field stored in the wrong place: the loader copied it into
+the implied target on every load and no operation could write it. It is now
+migrated on the way in, wherever a project enters — `parseProject`,
+`docFromProject`, `formatProject`, `buildMemoryMap`, and `migrateDoc` for a
+stored snapshot's `meta` — by `entryPointsIntoTarget`: a project with no targets
+gains one holding the list, linking its byte layers under the ids the loader
+derives; a project that declares targets keeps theirs and the root list is
+dropped. Nothing writes the field back out. In memory, `Project.entryPoints` is
+the *selected* target's list as `projectForTarget` sets it for analysis.
 
 Presence is maintained by [participants.ts](../src/core/crdt/participants.ts)
 outside the project projection. Chat survives project export but is removed

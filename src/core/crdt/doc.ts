@@ -24,8 +24,9 @@
 
 import * as Y from "yjs";
 import { needsMigration, migrateToClaims } from "../claims/migrate.js";
-import { derivedId } from "../project/identity.js";
+import { derivedId, layerIdOf } from "../project/identity.js";
 import {
+  entryPointsIntoTarget,
   ProjectType,
   Project,
   ProjectComment,
@@ -97,7 +98,9 @@ const ROOT_CLAIMS = "claims";
 const ROOT_CHAT = "chat";
 
 /** Scalars a project carries outside its layers. */
-const META_KEYS = ["name", "description", "entryPoints"] as const;
+// No `entryPoints`: a root list is a target's and is migrated into one on the
+// way in; a stored document still carrying one is moved by `migrateDoc`.
+const META_KEYS = ["name", "description"] as const;
 
 function mapFrom(record: Record<string, unknown>): Y.Map<unknown> {
   const map = new Y.Map<unknown>();
@@ -132,7 +135,8 @@ export function docFromProject(declared: Project): Y.Doc {
   // converting, the document held legacy layers while the loaded view held
   // claims, so an edit naming a migrated claim's id found nothing in the
   // document and did nothing at all — accepted, reported, and lost.
-  const project = needsMigration(declared) ? migrateToClaims(declared).project : declared;
+  const migrated = needsMigration(declared) ? migrateToClaims(declared).project : declared;
+  const project = entryPointsIntoTarget(migrated);
 
   const doc = new Y.Doc(DOC_OPTIONS);
   doc.clientID = BASE_CLIENT_ID;
@@ -756,6 +760,30 @@ export function migrateDoc(doc: Y.Doc): boolean {
   };
 
   doc.transact(() => {
+    // **A root `entryPoints` list is a target's.** It lived under `meta` before
+    // targets existed; nothing could write it and the loader copied it into the
+    // implied target on every load. The same move `entryPointsIntoTarget`
+    // makes for a file: a document with no targets gains one holding the list,
+    // one with targets keeps theirs, and the meta key goes either way.
+    const meta = doc.getMap<unknown>(ROOT_META);
+    const rootPoints = meta.get("entryPoints") as (number | string)[] | undefined;
+    if (rootPoints !== undefined) {
+      const targets = doc.getMap<Y.Map<unknown>>("targets");
+      if (rootPoints.length && targets.size === 0) {
+        const name = String(meta.get("name") ?? "project");
+        const layers = doc
+          .getArray<Y.Map<unknown>>(ROOT_LAYERS)
+          .toArray()
+          .map((l, index) => ({ decl: l.toJSON() as { id?: string; type: string; path?: string; name?: string }, index }))
+          .filter(({ decl }) => decl.type !== "symbols")
+          .map(({ decl, index }) => layerIdOf(decl, index));
+        const id = derivedId("tgt", "entryPoints", name);
+        targets.set(id, mapFrom({ id, name, layers, entryPoints: rootPoints }));
+      }
+      meta.delete("entryPoints");
+      moved = true;
+    }
+
     for (const [typeId, entry] of doc.getMap<Y.Map<unknown>>(ROOT_TYPES).entries()) {
       const fields = entry.get("fields");
       if (!(fields instanceof Y.Map)) continue;

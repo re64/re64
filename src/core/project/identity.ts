@@ -54,6 +54,19 @@ export function derivedId(prefix: IdPrefix, ...parts: (string | number)[]): stri
   return `${prefix}_${hash.toString(36).padStart(ID_LENGTH, "0").slice(-ID_LENGTH)}`;
 }
 
+/**
+ * A layer's id, or the one every client derives for a layer that has none.
+ *
+ * Shared by the loader and the entry-point migration, so a target made for a
+ * legacy file links the same layer ids the loader will hand out for it.
+ */
+export function layerIdOf(
+  decl: { id?: string; type: string; path?: string; name?: string },
+  index: number
+): string {
+  return decl.id ?? derivedId("lay", index, decl.type, decl.path ?? decl.name ?? "");
+}
+
 /** True for ids this module could have produced. */
 export function isId(value: unknown): value is string {
   return typeof value === "string" && /^(lbl|rgn|lay|cmt|cst|fil|dec|clm|typ)_[0-9a-z]+$/.test(value);

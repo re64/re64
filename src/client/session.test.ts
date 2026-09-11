@@ -115,11 +115,12 @@ describe("choosing which target to read", () => {
   const openTwo = () =>
     ProjectSession.open({ origin: twoOrigin, project: twoProject, author: "tester" });
 
-  it("offers no choice on a project that declares none", async () => {
-    // Gridrunner itself is one file and declares no targets — the ordinary
-    // small project, and the case the control hides itself for.
+  it("offers no choice on a project that declares one", async () => {
+    // Gridrunner declares exactly one target — the one its entry-point list
+    // was migrated into — which is the ordinary small project, and the case
+    // the control hides itself for: one arrangement is not a choice.
     const session = await open();
-    expect(session.targets()).toEqual([]);
+    expect(session.targets().map((t) => t.name)).toEqual(["Gridrunner"]);
     session.close();
   });
 

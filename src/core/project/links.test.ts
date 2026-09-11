@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildMemoryMap, projectForTarget, withSyntheticTarget } from "./loader.js";
-import { Project } from "./project.js";
+import {
+  entryPointsIntoTarget, Project } from "./project.js";
 import { makeFileLoader } from "./file-source.js";
 
 /**
@@ -108,11 +109,15 @@ describe("every project has a target, so there is one way to get a stack", () =>
     expect(withOne.targets![0].layers).toEqual(["lay_a", "lay_b"]);
   });
 
-  it("carries the project's entry points onto it, rather than dropping them", () => {
-    // A target's list *replaces* the project's, so leaving them behind would
-    // silently lose every entry point the moment a default target existed —
-    // which on the reference project is the one address the walk starts from.
-    expect(withSyntheticTarget(bare()).targets![0].entryPoints).toEqual(["$1000"]);
+  it("has no entry points of its own: a root list became a target before this", () => {
+    // The root list is a target's field that predates targets. It is migrated
+    // into an explicit target at every boundary a project enters — so by the
+    // time a project reaches here with none, it has none to imply, and the
+    // synthetic target carries nothing the file did not say.
+    const migrated = entryPointsIntoTarget(bare());
+    expect(migrated.entryPoints).toBeUndefined();
+    expect(migrated.targets![0].entryPoints).toEqual(["$1000"]);
+    expect(withSyntheticTarget({ ...bare(), entryPoints: undefined }).targets![0].entryPoints).toBeUndefined();
   });
 
   it("changes nothing about what the stack is", () => {
