@@ -1,3 +1,4 @@
+import { fileId } from "../project/files.js";
 /**
  * Applying operations to project text, and computing their inverses.
  *
@@ -293,10 +294,16 @@ export function applyOp(raw: string, op: Op): string {
       return setProjectMeta(raw, op.key, op.value);
 
     case "file.add":
-      return upsertFile(raw, { name: op.name, hash: op.hash, size: op.size });
+      if (op.id && project.files?.some(f => f.id === op.id && f.hash !== undefined)) return raw;
+      return upsertFile(raw, { id: op.id ?? fileId(op.name), name: op.name, hash: op.hash, size: op.size });
+
+    case "file.set": {
+      const held = project.files?.find(f => f.id === op.id);
+      return held ? upsertFile(raw, { ...held, ...op.fields }) : raw;
+    }
 
     case "file.remove":
-      return deleteFile(raw, op.name);
+      return deleteFile(raw, op.id ?? fileId(op.name!));
 
     case "target.add":
       return addTarget(raw, {
@@ -607,6 +614,8 @@ export function applyOp(raw: string, op: Op): string {
           type: op.layerType,
           name: op.name,
           ...(op.path === undefined ? {} : { path: op.path }),
+          ...(op.file === undefined ? {} : { file: op.file }),
+          ...(op.member === undefined ? {} : { member: op.member }),
           ...(op.address === undefined ? {} : { address: addressHex(op.address) }),
           // A byte layer's contents come from its file; only a symbols layer
           // starts with an empty label list to put names in.
@@ -690,19 +699,24 @@ export function invertOp(raw: string, op: Op): Op {
     case "meta.set":
       return { op: "meta.set", key: op.key, value: project[op.key] };
 
+    case "file.set": {
+      const held = project.files?.find(f => f.id === op.id);
+      return { op: "file.set", id: op.id, fields: { name: held?.name } };
+    }
+
     case "file.add": {
-      const held = project.files?.find((f) => f.name === op.name);
+      const held = project.files?.find((f) => f.id === (op.id ?? fileId(op.name!)));
       // Restoring the previous entry rather than removing, so re-adding a file
       // under a name already in use is undone to what was there before.
       return held
-        ? { op: "file.add", name: held.name, hash: held.hash, size: held.size }
-        : { op: "file.remove", name: op.name };
+        ? { op: "file.add", ...(op.id === undefined ? {} : { id: held.id }), name: held.name, hash: held.hash, size: held.size }
+        : { op: "file.remove", id: op.id ?? fileId(op.name!) };
     }
 
     case "file.remove": {
-      const held = project.files?.find((f) => f.name === op.name);
-      if (!held) return { op: "file.remove", name: op.name };
-      return { op: "file.add", name: held.name, hash: held.hash, size: held.size };
+      const held = project.files?.find((f) => f.id === (op.id ?? fileId(op.name!)));
+      if (!held) return { op: "file.remove", id: op.id ?? fileId(op.name!) };
+      return { op: "file.add", id: held.id, name: held.name, hash: held.hash, size: held.size };
     }
 
     case "target.add":

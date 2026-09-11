@@ -30,6 +30,7 @@ import {
   ProjectLabelUse,
   ProjectLayer,
 } from "./project.js";
+import { filesWithIds, fileId } from "./files.js";
 import { entryPointsIntoTarget, parseProject, parseProjectAddress } from "./project.js";
 
 /** Serialize one object compactly on a single line: `{ "a": 1, "b": 2 }`. */
@@ -85,7 +86,7 @@ const EVIDENCE_KEYS = [
 /** Serialize a project in the hand-maintained house style. */
 export function formatProject(project: Project): string {
   // Never written at the root: a list still there belongs to a target.
-  project = entryPointsIntoTarget(project);
+  project = filesWithIds(entryPointsIntoTarget(project));
   const lines: string[] = ["{"];
   const body: string[] = [];
 
@@ -153,9 +154,7 @@ export function formatProject(project: Project): string {
   }
 
   if (project.files?.length) {
-    // Before layers in the file, because a layer's `path` refers to one by
-    // name: a reader meets the binary and its hash before anything points at
-    // them.
+    // File identities keep resource references separate from display names.
     const entries = project.files
       .map((f) => `    ${compactObject(f as unknown as Record<string, unknown>)}`)
       .join(",\n");
@@ -607,12 +606,13 @@ export function deleteTarget(raw: string, id: string): string {
 
 const hexAddr = (a: number) => "$" + a.toString(16).toUpperCase().padStart(4, "0");
 
-export function upsertFile(raw: string, file: { name: string; hash: string; size: number }): string {
+export function upsertFile(raw: string, file: { id?: string; name: string; hash?: string; size?: number }): string {
   const project = parseProject(raw);
   const files = (project.files ??= []);
-  const at = files.findIndex((f) => f.name === file.name);
+  file = { ...file, id: file.id ?? fileId(file.name) };
+  const at = files.findIndex((f) => f.id === file.id);
   if (at >= 0) {
-    if (files[at].hash === file.hash && files[at].size === file.size) return raw;
+    if (files[at].name === file.name && files[at].hash === file.hash && files[at].size === file.size) return raw;
     files[at] = file;
   } else {
     files.push(file);
@@ -620,10 +620,10 @@ export function upsertFile(raw: string, file: { name: string; hash: string; size
   return formatProject(project);
 }
 
-export function deleteFile(raw: string, name: string): string {
+export function deleteFile(raw: string, id: string): string {
   const project = parseProject(raw);
-  if (!project.files?.some((f) => f.name === name)) return raw;
-  project.files = project.files.filter((f) => f.name !== name);
+  if (!project.files?.some((f) => f.id === id)) return raw;
+  project.files = project.files.filter((f) => f.id !== id);
   if (project.files.length === 0) delete project.files;
   return formatProject(project);
 }

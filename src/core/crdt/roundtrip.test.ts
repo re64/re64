@@ -43,7 +43,8 @@ const BASE = `{
     {
       "id": "lay_a",
       "type": "prg",
-      "path": "game.prg",
+      "file": "fil_game",
+      "member": "GAME",
       "address": "$8000",
       "comments": [
         { "id": "cmt_1", "address": "$8000", "text": "the entry point" }
@@ -82,7 +83,7 @@ const BASE = `{
       }
     }
   ],
-  "files": [{ "name": "game.prg", "hash": "abc123", "size": 16 }],
+  "files": [{ "id": "fil_game", "name": "game.prg", "hash": "abc123", "size": 16 }],
   "targets": [{ "id": "tgt_1", "name": "loader", "layers": [{ "id": "lnk_1", "layer": "lay_a" }] }],
   "scenarios": [
     {
@@ -272,9 +273,10 @@ const CASES: { [K in Op["op"]]: Case } = {
   "primary.bind": { op: { op: "primary.bind", address: 0x8100, labelId: "lbl_2" } },
   "primary.unbind": { op: { op: "primary.unbind", address: 0x8000 } },
   "file.add": {
-    op: { op: "file.add", name: "extra.prg", hash: "def456", size: 32 },
+    op: { op: "file.add", id: "fil_extra", name: "extra.prg", hash: "def456", size: 32 },
   },
-  "file.remove": { op: { op: "file.remove", name: "game.prg" } },
+  "file.set": { op: { op: "file.set", id: "fil_game", fields: { name: "renamed.prg" } } },
+  "file.remove": { op: { op: "file.remove", id: "fil_game" } },
   "target.add": {
     op: {
       op: "target.add",
@@ -318,10 +320,10 @@ const CASES: { [K in Op["op"]]: Case } = {
       scenario: "scn_1",
       step: "stp_1",
       kind: "frames",
-      file: "playing.gif.prg",
+      file: "fil_playing",
     },
   },
-  "capture.set": { op: { op: "capture.set", id: "cap_1", fields: { file: "renamed.prg" } } },
+  "capture.set": { op: { op: "capture.set", id: "cap_1", fields: { file: "fil_renamed" } } },
   "capture.remove": { op: { op: "capture.remove", id: "cap_1" } },
   // A refutation that shares no bytes with what it refutes — the shape
   // `disagreements()` sweeps for and can never find, because `$8DF9` holding
@@ -441,7 +443,7 @@ function canonical(project: ReturnType<typeof parseProject>): string {
       ...(project.constants ? { constants: byKey(project.constants, (c) => c.id ?? "") } : {}),
       ...(project.decoders ? { decoders: byKey(project.decoders, (d) => d.id ?? "") } : {}),
       ...(project.types ? { types: byKey(project.types, (t) => t.id ?? "") } : {}),
-      ...(project.files ? { files: byKey(project.files, (f) => f.name) } : {}),
+      ...(project.files ? { files: byKey(project.files, (f) => f.id!) } : {}),
       ...(project.targets ? { targets: byKey(project.targets, (t) => t.name) } : {}),
       // The rest of the roots, normalised for the same reason. They were left
       // out because they *happened* to agree: both paths kept insertion order,
@@ -464,7 +466,7 @@ describe("every operation reaches every path", () => {
   it("covers the whole vocabulary", () => {
     // The table is exhaustive by type; this only reports the count, so a
     // vocabulary that grows is visible in the output rather than only in a diff.
-    expect(kinds.length).toBe(45);
+    expect(kinds.length).toBe(46);
   });
 
   for (const kind of kinds) {
@@ -624,6 +626,7 @@ describe("a layer of every kind reaches the file", () => {
 describe("the operation algebra", () => {
   /** Has an id, lives in a collection: add mints, set revises, remove takes back. */
   const ENTITIES = [
+    "file",
     "claim",
     "comment",
     "constant",
@@ -648,8 +651,6 @@ describe("the operation algebra", () => {
   /** A key-to-id map. Binding a key again is how a binding is updated. */
   const BINDINGS = ["labelUse", "constantUse", "primary"] as const;
 
-  /** Content-addressed, so there is nothing to revise. */
-  const ATTACHMENTS = ["file"] as const;
 
   const verbsOf = (noun: string) =>
     kinds.filter((k) => k.startsWith(`${noun}.`)).map((k) => k.split(".")[1]).sort();
@@ -683,12 +684,6 @@ describe("the operation algebra", () => {
     expect(verbsOf("labelUse")).toEqual(["bind", "unbind"]);
   });
 
-  it("gives an immutable attachment add and remove, and no update", () => {
-    for (const noun of ATTACHMENTS) {
-      expect(verbsOf(noun)).toEqual(["add", "remove"]);
-    }
-  });
-
   it("uses one word for taking something back, not two", () => {
     // `claim.remove` and `comment.delete` were the same verb spelled two ways,
     // split down no principle at all.
@@ -698,7 +693,7 @@ describe("the operation algebra", () => {
 
   it("accounts for every operation, so nothing sits outside the shapes", () => {
     const claimed = new Set<string>();
-    for (const noun of [...ENTITIES, ...BINDINGS, ...ATTACHMENTS]) {
+    for (const noun of [...ENTITIES, ...BINDINGS]) {
       for (const kind of kinds) if (kind.startsWith(`${noun}.`)) claimed.add(kind);
     }
     // `meta.set` is the project's own scalars — a closed key set rather than a
@@ -727,9 +722,7 @@ describe("the operation algebra", () => {
       // spelling, not a second rule, and it is asserted here rather than left
       // to be discovered.
       const identity =
-        kind === "file.add"
-          ? op.name
-          : kind === "claim.add"
+        kind === "claim.add"
             ? (op.claim as { id?: string }).id
             : op.id;
       expect({ kind, keyed: typeof identity === "string" }).toEqual({ kind, keyed: true });

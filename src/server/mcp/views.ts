@@ -61,6 +61,9 @@ export const VIEWLESS: ReadonlySet<string> = new Set([
   "add_rom_layer",
   "remove_layer",
   "prepare_upload",
+  "rename_file",
+  "list_files",
+  "remove_file",
   "list_disk_files",
 
   // The project as a whole.

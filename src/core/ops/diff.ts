@@ -1,3 +1,4 @@
+import { filesWithIds, fileId } from "../project/files.js";
 /**
  * The operations that turn one project into another.
  *
@@ -132,6 +133,8 @@ const sameRegion = (a: ProjectRegion, b: ProjectRegion) =>
 const sameClaim = (a: ProjectClaim, b: ProjectClaim) => JSON.stringify(a) === JSON.stringify(b);
 
 export function diffProjects(from: Project, to: Project): Op[] {
+  from = filesWithIds(from);
+  to = filesWithIds(to);
   const ops: Op[] = [];
 
   // Name and description, which had an operation and an inverse and no way to
@@ -147,15 +150,25 @@ export function diffProjects(from: Project, to: Project): Op[] {
   const fromTargets = new Map((from.targets ?? []).filter((t) => t.id).map((t) => [t.id!, t]));
   const toTargets = new Map((to.targets ?? []).filter((t) => t.id).map((t) => [t.id!, t]));
 
-  // Files, before layers: a layer may reference one by name, so the file has to
+  // Files, before layers: a layer may reference one by id, so the file has to
   // be in the export before anything points at it. The same ordering rule that
   // layers and their labels already follow.
-  const fromFiles = new Map((from.files ?? []).map((f) => [f.name, f]));
-  const toFiles = new Map((to.files ?? []).map((f) => [f.name, f]));
-  for (const [name, file] of toFiles) {
-    const before = fromFiles.get(name);
-    if (before && before.hash === file.hash && before.size === file.size) continue;
-    ops.push({ op: "file.add", name, hash: file.hash, size: file.size });
+  const fromFiles = new Map((from.files ?? []).map((f) => [f.id!, f]));
+  const toFiles = new Map((to.files ?? []).map((f) => [f.id!, f]));
+  for (const [id, file] of toFiles) {
+    const before = fromFiles.get(id);
+    if (before && before.hash === file.hash && before.size === file.size) {
+      if (before.name !== file.name) ops.push({ op: "file.set", id, fields: { name: file.name } });
+      continue;
+    }
+    if (before?.hash !== undefined) {
+      if (id === fileId(before.name)) {
+        ops.push({ op: "file.add", name: file.name, hash: file.hash, size: file.size });
+        continue;
+      }
+      throw new Error(`File ${id} is immutable. Add a new file id for different bytes.`);
+    }
+    ops.push({ op: "file.add", id, name: file.name, hash: file.hash, size: file.size });
   }
 
   const beforeClaims = new Map((from.claims ?? []).map((c) => [c.id!, c]));
@@ -189,6 +202,8 @@ export function diffProjects(from: Project, to: Project): Op[] {
       name: layer.name ?? id,
       ...(layer.rom === undefined ? {} : { rom: layer.rom }),
       ...(layer.path === undefined ? {} : { path: layer.path }),
+      ...(layer.file === undefined ? {} : { file: layer.file }),
+      ...(layer.member === undefined ? {} : { member: layer.member }),
       ...(layer.address === undefined
         ? {}
         : { address: parseProjectAddress(layer.address) }),
@@ -663,7 +678,7 @@ export function diffProjects(from: Project, to: Project): Op[] {
   }
 
   for (const name of fromFiles.keys()) {
-    if (!toFiles.has(name)) ops.push({ op: "file.remove", name });
+    if (!toFiles.has(name)) ops.push({ op: "file.remove", id: name });
   }
 
   // Any kind, not only symbols. The filter here was the twin of the one on

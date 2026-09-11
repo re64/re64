@@ -2063,7 +2063,7 @@ describe("running a scenario over the wire", () => {
 
     expect(run.did.map((d) => d.kind)).toEqual(["start", "run", "capture"]);
     expect(run.captured).toHaveLength(1);
-    expect(run.captured![0].file).toBe("screen.prg");
+    expect(run.captured![0].file).toMatch(/^fil_/);
     // Where the bytes actually are. The route has existed since the browser
     // needed binaries and nothing told a caller about it — which is experiment
     // 4's `save_project` finding repeating.
@@ -2075,7 +2075,7 @@ describe("running a scenario over the wire", () => {
       scenarios: { id: string; captures: { file: string }[] }[];
     };
     const found = listed.scenarios.find((x) => x.id === id)!;
-    expect(found.captures.map((c) => c.file)).toEqual(["screen.prg"]);
+    expect(found.captures.map((c) => c.file)).toEqual([run.captured![0].file]);
   });
 
   it("mints an id for every step, so a capture can name the one that made it", async () => {
@@ -2925,5 +2925,101 @@ describe("clearing how you know", () => {
     expect(vouching?.method).toBeUndefined();
     // The vouching itself stays: who said it is not what was withdrawn.
     expect(vouching?.author).toBeTruthy();
+  });
+});
+
+describe('file identity at the participant boundary', () => {
+  const asSession = async (session: string, name: string, args: Record<string, unknown> = {}) => {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "x-re64-user": "usr_agent",
+        "x-re64-session": session,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name, arguments: args },
+      }),
+    });
+    const text = await res.text();
+    const line = text.split("\n").find((l) => l.startsWith("data: ")) ?? text;
+    const reply = JSON.parse(line.replace(/^data: /, "")) as {
+      result: { content: { text: string }[]; isError?: boolean };
+    };
+    const body = reply.result.content[0].text;
+    const isError = reply.result.isError === true;
+    return { isError, text: body, value: (isError ? undefined : JSON.parse(body)) as never };
+  };
+
+  async function upload(name: string, bytes: Uint8Array) {
+    const prepared = await callTool('prepare_upload', { name });
+    expect(prepared.isError, prepared.text).toBe(false);
+    const response = await fetch((prepared.value as {url:string}).url, { method:'PUT', body:bytes });
+    expect(response.status).toBe(200);
+    return await response.json() as {file:string; name:string};
+  }
+  it('keeps duplicate filenames distinct and resolves names only when locally unambiguous', async () => {
+    const first = await upload('same.prg',new Uint8Array([0,128,96]));
+    const second = await upload('same.prg',new Uint8Array([0,128,234,96]));
+    expect(first.file).not.toBe(second.file);
+    const refused = await callTool('add_byte_layer',{type:'prg',path:'same.prg'});
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain(first.file); expect(refused.text).toContain(second.file);
+    const made = await callTool('add_byte_layer',{type:'prg',path:first.file});
+    expect(made.isError,made.text).toBe(false);
+    const renamed = await callTool('rename_file',{file:first.file,name:'original.prg'});
+    expect(renamed.isError,renamed.text).toBe(false);
+    const exported = JSON.parse(((await callTool('export_project')).value as {text:string}).text);
+    expect(exported.layers.some((l:{file?:string})=>l.file===first.file)).toBe(true);
+    const bytes = await fetch(`${endpoint.replace(/\/mcp$/, '')}/api/blob?file=${first.file}`);
+    expect([...new Uint8Array(await bytes.arrayBuffer())]).toEqual([0,128,96]);
+    const listed = (await callTool('list_files')).value as {files:{id:string;name:string}[]};
+    expect(listed.files.find(f=>f.id===first.file)?.name).toBe('original.prg');
+  });
+  it("resolves an alias against the caller's replica, including its own uploaded file", async () => {
+    const prepared = await asSession("ses_first", "prepare_upload", {name:"local.prg"});
+    expect(prepared.isError, prepared.text).toBe(false);
+    const put = await fetch((prepared.value as {url:string}).url, {method:"PUT",body:new Uint8Array([0,128,96])});
+    expect(put.status).toBe(200);
+    const first = await put.json() as {file:string};
+    // This session is seeded before the second upload introduces ambiguity.
+    await asSession("ses_reader", "list_files");
+    const second = await upload("local.prg",new Uint8Array([0,128,234,96]));
+    const made = await asSession("ses_reader", "add_byte_layer", {type:"prg",path:"local.prg"});
+    expect(made.isError,made.text).toBe(false);
+    const own = await asSession("ses_first", "list_files");
+    expect((own.value as {files:{id:string}[]}).files.map(f=>f.id)).toContain(first.file);
+    expect((own.value as {files:{id:string}[]}).files.map(f=>f.id)).not.toContain(second.file);
+    const merged = await asSession("ses_reader", "merge");
+    expect(merged.isError,merged.text).toBe(false);
+    const refused = await asSession("ses_reader", "add_byte_layer", {type:"prg",path:"local.prg"});
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain(first.file);
+    expect(refused.text).toContain(second.file);
+  });
+  it('retains each scenario capture when a later run uses the same output name', async () => {
+    const made = await callTool('add_scenario',{name:'snapshot',steps:[
+      {kind:'set',memory:{'$0400':17}},
+      {kind:'capture',what:'ram',from:'$0400',to:'$0401',name:'reused.prg'}
+    ]});
+    expect(made.isError,made.text).toBe(false);
+    const id=(made.value as {scenario:string}).scenario;
+    const one = await callTool('run_scenario',{id});
+    expect(one.isError,one.text).toBe(false);
+    const first=(one.value as {captured:{id:string;file:string;url:string}[]}).captured[0];
+    const before=new Uint8Array(await (await fetch(first.url)).arrayBuffer());
+    // An upload under the same filename is a different immutable file too.
+    await upload('reused.prg',new Uint8Array([0,4,99]));
+    const two=await callTool('run_scenario',{id});
+    expect(two.isError,two.text).toBe(false);
+    const second=(two.value as {captured:{file:string}[]}).captured[0];
+    expect(second.file).not.toBe(first.file);
+    expect(new Uint8Array(await (await fetch(first.url)).arrayBuffer())).toEqual(before);
+    const listed=(await callTool('list_scenarios')).value as {scenarios:{id:string;captures:{id:string;file:string}[]}[]};
+    expect(listed.scenarios.find(s=>s.id===id)!.captures.find(c=>c.id===first.id)!.file).toBe(first.file);
   });
 });

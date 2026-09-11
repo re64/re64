@@ -1,3 +1,4 @@
+import { filesWithIds } from "../project/files.js";
 import { describe, it, expect } from "vitest";
 import * as Y from "yjs";
 import {
@@ -68,7 +69,7 @@ describe("deterministic construction", () => {
 
 describe("round trip", () => {
   it("reads back the project it was built from", () => {
-    expect(projectFromDoc(docFromProject(PROJECT))).toEqual(entryPointsIntoTarget(PROJECT));
+    expect(projectFromDoc(docFromProject(PROJECT))).toEqual(filesWithIds(entryPointsIntoTarget(PROJECT)));
   });
 
   it("reads back a document reconstructed from an update", () => {
@@ -77,7 +78,7 @@ describe("round trip", () => {
     // project.
     const fresh = new Y.Doc();
     applyUpdate(fresh, encodeDoc(docFromProject(PROJECT)));
-    expect(projectFromDoc(fresh)).toEqual(entryPointsIntoTarget(PROJECT));
+    expect(projectFromDoc(fresh)).toEqual(filesWithIds(entryPointsIntoTarget(PROJECT)));
   });
 
   it("orders entries by address regardless of insertion order", () => {

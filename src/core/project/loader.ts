@@ -1,3 +1,5 @@
+import { filesWithIds } from "./files.js";
+import type { ProjectFile } from "./project.js";
 /**
  * Builds a MemoryMap from a parsed project.
  *
@@ -45,7 +47,7 @@ import { Claim, Interpretation, arrayExtent, resolveAt } from "../claims/model.j
 
 /** How the loader gets at file bytes, so core stays free of node:fs. */
 export interface FileLoader {
-  (path: string, explicitStart?: number): {
+  (path: string, explicitStart?: number, member?: string, file?: ProjectFile): {
     start: number;
     data: Uint8Array;
     isPrg: boolean;
@@ -382,7 +384,7 @@ export function buildMemoryMap(
 ): LoadedProject {
   // A root `entryPoints` list becomes a target here as everywhere else a
   // project enters, so an in-memory project gets what a file gets.
-  declared = entryPointsIntoTarget(declared);
+  declared = filesWithIds(entryPointsIntoTarget(declared));
   // One form below, whatever the file holds. A project still written with labels
   // and regions is converted here, exactly as `re64 migrate` converts it on disk
   // — the precedent `identity.ts` already records for ids: "files without ids
@@ -434,7 +436,10 @@ export function buildMemoryMap(
   const romsMissing: string[] = [];
 
   project.layers.forEach((decl, index) => {
-    const name = layerName(decl, index);
+    const file = decl.file === undefined ? undefined : project.files?.find(f => f.id === decl.file);
+    if (decl.file && !file) throw new Error(`Layer ${decl.id} refers to missing file ${decl.file}.`);
+    const path = file ? file.name + (decl.member === undefined ? "" : `:${decl.member}`) : decl.path;
+    const name = layerName({ ...decl, path }, index);
     // Derived from position and source when absent: stable for a given file,
     // replaced by a real id on the next write.
     const layerId = layerIdOf(decl, index);
@@ -442,16 +447,17 @@ export function buildMemoryMap(
 
     if (decl.type === "prg") {
       const { start, data, isPrg } = loadFile(
-        decl.path!,
-        decl.address === undefined ? undefined : parseProjectAddress(decl.address)
+        file?.name ?? decl.path!,
+        decl.address === undefined ? undefined : parseProjectAddress(decl.address),
+        decl.member, file
       );
       const suppressEntry = decl.noAutoEntry ?? false;
-      layer = new FileLayer(name, decl.path!, start, data, undefined, isPrg, suppressEntry, layerId);
+      layer = new FileLayer(name, path!, start, data, undefined, isPrg, suppressEntry, layerId);
       if (isPrg && !suppressEntry) prgEntries.push(start);
     } else if (decl.type === "raw") {
       const addr = parseProjectAddress(decl.address!);
-      const { data } = loadFile(decl.path!, addr);
-      layer = new FileLayer(name, decl.path!, addr, data, decl.length, false, false, layerId);
+      const { data } = loadFile(file?.name ?? decl.path!, addr, decl.member, file);
+      layer = new FileLayer(name, path!, addr, data, decl.length, false, false, layerId);
     } else if (decl.type === "rom") {
       // The machine's bytes, not this project's, so they come from wherever the
       // host keeps ROMs rather than from the project's files. A host that has

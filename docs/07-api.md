@@ -111,7 +111,7 @@ what was declined in `rejected`, and fail only when nothing was applicable.
 
 ## The tools
 
-97 tools.
+100 tools.
 
 ### Orienting
 
@@ -845,7 +845,7 @@ From a binary to something disassemblable. Bytes go over HTTP rather than throug
 
 #### `create_project`
 
-Start a project. The first step when you have been handed a binary and no project. Follow it with prepare_upload to put the file in, list_disk_files if it is a .d64, and add_layer to make something disassemblable. `platform: "c64"` declares the KERNAL, BASIC and character ROMs so the machine is there to resolve through — what $FFD2 is, what a JSR into $E000 returns, and an emulator that can run a KERNAL call instead of falling into unmapped memory. They are *declared*, not linked from whatever this host happens to have on disk, so the project says the same thing everywhere and one without the bytes reports romsMissing and opens anyway. A ROM is read through rather than read: it costs no listing and no coverage. Omit it for a project that is not a C64 program at all.
+Start a project. The first step when you have been handed a binary and no project. Follow it with prepare_upload to put the file in, list_disk_files if it is a .d64, and add_byte_layer to make something disassemblable. `platform: "c64"` declares the KERNAL, BASIC and character ROMs so the machine is there to resolve through — what $FFD2 is, what a JSR into $E000 returns, and an emulator that can run a KERNAL call instead of falling into unmapped memory. They are *declared*, not linked from whatever this host happens to have on disk, so the project says the same thing everywhere and one without the bytes reports romsMissing and opens anyway. A ROM is read through rather than read: it costs no listing and no coverage. Omit it for a project that is not a C64 program at all.
 
 | argument | type | | |
 |---|---|---|---|
@@ -854,28 +854,50 @@ Start a project. The first step when you have been handed a binary and no projec
 
 #### `prepare_upload`
 
-Get a URL to PUT a binary to. Bytes go over HTTP rather than through a tool argument, because a disk image is ~175KB and base64 of it would be tens of thousands of tokens for a file you never need to read. The URL is good once and expires. The name is what layers will refer to it by.
+Get a URL to PUT a binary to. Bytes go over HTTP rather than through a tool argument, because a disk image is ~175KB and base64 of it would be tens of thousands of tokens for a file you never need to read. The URL is good once and expires. The response carries a new file id for layer references; names are display metadata.
 
 | argument | type | | |
 |---|---|---|---|
-| `name` | `string` | **required** | What layers will call it, e.g. "revenge.d64" |
+| `name` | `string` | **required** | Display name, e.g. "revenge.d64"; duplicates are allowed |
+
+#### `list_files`
+
+Files in this participant's document, with ids, names and recorded content hashes.
+
+#### `rename_file`
+
+Rename a file by id (or a locally unique name), keeping its bytes and every reference unchanged.
+
+| argument | type | | |
+|---|---|---|---|
+| `file` | `string` | **required** |  |
+| `name` | `string` | **required** |  |
+
+#### `remove_file`
+
+Remove a file record by id or locally unique name. References remain dangling; bytes are retained.
+
+| argument | type | | |
+|---|---|---|---|
+| `file` | `string` | **required** |  |
 
 #### `list_disk_files`
 
-The directory of a .d64 disk image this project holds — what is on the disk, and the path to give add_layer for each entry.
+The directory of a .d64 disk image this project holds — what is on the disk, with the file id and member selector to give add_byte_layer.
 
 | argument | type | | |
 |---|---|---|---|
-| `name` | `string` | **required** | The image, as uploaded |
+| `name` | `string` | **required** | File id or locally unique name of the uploaded image |
 
 #### `add_byte_layer`
 
-Add a layer over bytes — which is what turns an uploaded binary into something to disassemble. `path` is the file's name, or "image.d64:FILE" for one inside a disk image. A .prg carries its load address in its first two bytes; a raw layer needs one given. Type "bytes" takes the bytes inline instead of a file, at an address you give: a patch, a poked value, a hand-assembled shim. Link the layer into a target with set_target, or nothing reads it.
+Add a layer over bytes — which is what turns an uploaded binary into something to disassemble. `path` accepts a file id or locally unique name; `member` selects a D64 entry. Legacy image.d64:FILE is also accepted. A .prg carries its load address in its first two bytes; a raw layer needs one given. Type "bytes" takes the bytes inline instead of a file, at an address you give: a patch, a poked value, a hand-assembled shim. Link the layer into a target with set_target, or nothing reads it.
 
 | argument | type | | |
 |---|---|---|---|
 | `type` | `prg` \| `raw` \| `bytes` | **required** |  |
-| `path` | `string` | optional | The file, for prg and raw |
+| `path` | `string` | optional | File id or locally unique name, for prg and raw; legacy image.d64:ENTRY also accepted |
+| `member` | `string` | optional | Entry within a D64 file; separate from its id |
 | `bytes` | `string` | optional | For type "bytes": hex, spaces optional — "A9 01 8D 20 D0" |
 | `name` | `string` | optional | Defaults to the file's name |
 | `address` | `string,number` | optional | Required for raw and bytes, ignored for prg |

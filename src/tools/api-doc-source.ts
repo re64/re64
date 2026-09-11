@@ -181,6 +181,9 @@ export const SECTIONS: { title: string; blurb: string; tools: string[] }[] = [
     tools: [
       "create_project",
       "prepare_upload",
+      "list_files",
+      "rename_file",
+      "remove_file",
       "list_disk_files",
       "add_byte_layer",
       "add_layer",

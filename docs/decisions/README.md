@@ -5,6 +5,7 @@ argument and the history that used to live in `CLAUDE.md`.
 
 | | |
 |---|---|
+| [`file-identity.md`](file-identity.md) | stable file references, immutable content and legacy history |
 | [`document.md`](document.md) | the CRDT, storage, sessions, undo, chat, collaboration |
 | [`claims.md`](claims.md) | the model — one noun, and every case that shaped it |
 | [`agents.md`](agents.md) | the MCP surface, and what each experiment moved |

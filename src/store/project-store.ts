@@ -1,3 +1,4 @@
+import { SqliteStorage } from "./sqlite-storage.js";
 /**
  * The live document for a project, shared by everyone editing it.
  *
@@ -189,6 +190,14 @@ export class ProjectStore {
     // After the observer, so that it is persisted; see `migrateDoc` for why a
     // migration that is not is worse than none.
     if (migrateDoc(this.doc)) this.lastProjection = projectFromDoc(this.doc);
+    const registry = projectFromDoc(this.doc).files ?? [];
+    for (const file of registry) {
+      if (file.hash || !(this.storage instanceof SqliteStorage)) continue;
+      const hash = this.storage.blobHash(file.name);
+      const bytes = hash ? this.storage.blobByHash(hash) : undefined;
+      if (hash && bytes) applyOpToDoc(this.doc, { op: "file.add", ...file, hash, size: bytes.length }, "migrate");
+    }
+    this.lastProjection = projectFromDoc(this.doc);
 
     return this.doc;
   }

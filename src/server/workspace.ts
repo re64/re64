@@ -1,3 +1,4 @@
+import { resolveFile, splitFilePath } from "../core/project/files.js";
 /**
  * One project, analysed and editable, for consumers that are not a browser.
  *
@@ -678,6 +679,7 @@ export class Workspace {
 
   describe(): {
     project: string;
+    files: Project["files"];
     description?: string;
     version: string;
     /**
@@ -748,6 +750,7 @@ export class Workspace {
 
     return {
       project: this.room.projectId,
+      files: this.document().files ?? [],
       ...(loaded.project.description ? { description: loaded.project.description } : {}),
       version: this.version(),
       entryPoints: (loaded.project.entryPoints?.length
@@ -1046,9 +1049,9 @@ export class Workspace {
     name: string
   ): { url: string; token: string; expiresAt: string; maxBytes: number; method: string; note: string } {
     const clean = name.trim();
-    if (!clean) throw new Error("Give the file a name — the one layers will use for it.");
+    if (!clean) throw new Error("Give the file a display name.");
 
-    const prepared = uploadTokens.issue(this.room.projectId, clean, caller.label ?? caller.userId);
+    const prepared = uploadTokens.issue(this.room.projectId, clean, caller.userId, caller.sessionId);
     return {
       method: "PUT",
       url: `${this.room.baseUrl ?? ""}/api/upload/${prepared.token}`,
@@ -1062,8 +1065,21 @@ export class Workspace {
   }
 
   /** Record an uploaded binary in the document, so it is attributed and exported. */
-  noteUploadedFile(caller: Caller, name: string, hash: string, size: number): EditResult {
-    return this.editDocument(caller, () => [{ op: "file.add", name, hash, size } as Op]);
+  noteUploadedFile(caller: Caller, name: string, hash: string, size: number): EditResult & { file: string } {
+    const id = newId("fil");
+    return { ...this.editDocument(caller, () => [{ op: "file.add", id, name, hash, size } as Op]), file: id };
+  }
+
+  files() { return { files: this.document().files ?? [] }; }
+
+  removeFile(caller: Caller, reference: string): EditResult {
+    const file = resolveFile(this.document().files ?? [], reference);
+    return this.editDocument(caller, () => [{ op: "file.remove", id: file.id! }]);
+  }
+
+  renameFile(caller: Caller, id: string, name: string): EditResult {
+    const file = resolveFile(this.document().files ?? [], id);
+    return this.editDocument(caller, () => [{ op: "file.set", id: file.id!, fields: { name } }]);
   }
 
   /**
@@ -1076,10 +1092,11 @@ export class Workspace {
   diskFiles(name: string): {
     image: string;
     total: number;
-    files: { name: string; type: string; blocks: number; approxBytes: number; path: string }[];
+    files: { name: string; type: string; blocks: number; approxBytes: number; path: string; file: string; member: string }[];
   } {
     const storage = this.room.storage;
-    const bytes = storage instanceof SqliteStorage ? storage.blob(name) : undefined;
+    const source = resolveFile(this.document().files ?? [], name);
+    const bytes = storage instanceof SqliteStorage ? databaseFileBytes(storage, this.document().files)(source.id!) : undefined;
     if (!bytes) {
       throw new Error(
         `No file called "${name}" in this project. prepare_upload puts one here.`
@@ -1098,7 +1115,8 @@ export class Workspace {
         // the next one. Approximate because the last sector is partly used.
         approxBytes: entry.sizeInSectors * 254,
         // What a layer's `path` takes, so the next call can be copied from here.
-        path: `${name}:${entry.filename}`,
+        path: `${source.name}:${entry.filename}`,
+        file: source.id!, member: entry.filename,
       })),
     };
   }
@@ -1450,13 +1468,14 @@ export class Workspace {
       ...reported,
       ...(notes.length ? { notes } : {}),
       captured: {
-        file: name,
+        file: noted.file,
+        name,
         start: hex4(start),
         end: hex4(to - 1),
         bytes: bytes.length,
         hash,
         version: noted.version,
-        next: `add_byte_layer type:"prg" path:"${name}" — then mark_function where it starts.`,
+        next: `add_byte_layer type:"prg" path:"${noted.file}" — then mark_function where it starts.`,
       },
     };
   }
@@ -2191,10 +2210,10 @@ export class Workspace {
    * through a tool result is tens of thousands of tokens for something the
    * caller is going to hand to an image library anyway.
    */
-  private blobUrl(name: string): string {
+  private blobUrl(name: string, hash?: string): string {
     return (
       `${this.room.baseUrl ?? ""}/api/blob?project=${encodeURIComponent(this.room.projectId)}` +
-      `&path=${encodeURIComponent(name)}`
+      (hash ? `&hash=${encodeURIComponent(hash)}&name=${encodeURIComponent(name)}` : `&file=${encodeURIComponent(name)}`)
     );
   }
 
@@ -2530,15 +2549,16 @@ export class Workspace {
       for (const capture of run.captures) {
         const hash = storage.putBlob(capture.name, capture.bytes);
         const captureId = newId("cap");
+        const file = newId("fil");
         ops.push(
-          { op: "file.add", name: capture.name, hash, size: capture.bytes.length },
+          { op: "file.add", id: file, name: capture.name, hash, size: capture.bytes.length },
           {
             op: "capture.add",
             id: captureId,
             scenario: id,
             step: capture.step,
             kind: capture.kind,
-            file: capture.name,
+            file,
             when: Date.now(),
           }
         );
@@ -2546,9 +2566,9 @@ export class Workspace {
           id: captureId,
           step: capture.step,
           kind: capture.kind,
-          file: capture.name,
+          file,
           bytes: capture.bytes.length,
-          url: this.blobUrl(capture.name),
+          url: this.blobUrl(capture.name, hash),
         });
       }
       this.edit(caller, () => ops);
@@ -3354,7 +3374,7 @@ export class Workspace {
     if (!(storage instanceof SqliteStorage)) {
       throw new Error("Playing needs a database; this server holds one file.");
     }
-    const bytes = storage.blob(found.file);
+    const bytes = databaseFileBytes(storage, this.document().files)(found.file);
     if (!bytes) throw new Error(`The bytes of ${found.file} are not in this database.`);
 
     const writes = JSON.parse(new TextDecoder().decode(bytes)) as SidWrite[];
@@ -3369,7 +3389,7 @@ export class Workspace {
       notes: audio.gated,
       seconds: Number(audio.duration.toFixed(2)),
       sampleRate: audio.sampleRate,
-      url: this.blobUrl(name),
+      url: this.blobUrl(name, hash),
       hash,
       exact: "when each note starts and stops, and its pitch — both read from the log",
       approximated: audio.approximated,
@@ -3654,7 +3674,7 @@ export class Workspace {
       width: picture.width,
       height: picture.height,
       ...(as === "frames" ? { frames: cells, delayMs } : {}),
-      url: this.blobUrl(name),
+      url: this.blobUrl(name, hash),
       hash,
       ...(request.claim === undefined ? {} : { claim: request.claim }),
       ...(named === undefined ? {} : { name: named }),
@@ -5511,6 +5531,7 @@ export class Workspace {
     options: {
       type: "prg" | "raw" | "bytes";
       path?: string;
+      member?: string;
       bytes?: string;
       name?: string;
       address?: number;
@@ -5526,6 +5547,8 @@ export class Workspace {
     }
 
     let hex: string | undefined;
+    let file: string | undefined;
+    let member = options.member;
     let name = options.name;
     if (type === "bytes") {
       if (options.path !== undefined) {
@@ -5554,16 +5577,12 @@ export class Workspace {
             'lists what this project holds; use type "bytes" to give bytes inline.'
         );
       }
-      const held = this.program().loaded.project.files ?? [];
-      const path = options.path;
-      const image = path.includes(":") ? path.slice(0, path.indexOf(":")) : path;
-      if (!held.some((f) => f.name === image)) {
-        throw new Error(
-          `This project holds no file called "${image}". describe_project lists ` +
-            `what it has, and prepare_upload adds one.`
-        );
-      }
-      name ??= image;
+      const source = splitFilePath(options.path);
+      const held = resolveFile(this.document().files ?? [], source.name);
+      file = held.id!;
+      member ??= source.member;
+      name ??= held.name;
+
     }
 
     // The stack is declared bottom-up and a byte layer is the foundation, so a
@@ -5576,7 +5595,8 @@ export class Workspace {
         id: newId("lay"),
         layerType: type,
         name,
-        ...(options.path === undefined ? {} : { path: options.path }),
+        ...(file === undefined ? {} : { file }),
+        ...(member === undefined ? {} : { member }),
         ...(hex === undefined ? {} : { bytes: hex }),
         ...(options.address === undefined ? {} : { address: options.address }),
         ...(options.length === undefined ? {} : { length: options.length }),

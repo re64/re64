@@ -9,6 +9,7 @@ import { LabelType } from "../memory/label-type.js";
 import { LabelUse, createLabelUse } from "../claims/names.js";
 import { TEXT_ENCODINGS, TextEncoding } from "../c64/text.js";
 import { LayerDefault } from "../memory/region.js";
+import { filesWithIds } from "./files.js";
 import { derivedId, layerIdOf } from "./identity.js";
 import {
   Claim,
@@ -67,7 +68,10 @@ export interface ProjectLayer {
    * a ROM is for here, and false for everything else.
    */
   reference?: boolean;
-  /** File path (for prg/raw) */
+  /** Immutable file reference; member selects an entry within a D64. */
+  file?: string;
+  member?: string;
+  /** Legacy import only. */
   path?: string;
   /** Load address (for raw, optional override for prg) */
   address?: number | string;
@@ -197,26 +201,18 @@ export interface ProjectRegion {
   view?: string;
 }
 
-/** Project file structure */
 /**
- * A file the project uses, by the name its layers refer to.
- *
- * Bytes live in the blob store, content-addressed and shared between projects;
- * this is the project-local name for one, and the hash is what makes the
- * export say *which* bytes the annotations were made against. Without it a
- * `.re64` reads `"path": "gridrunner.prg"` and cannot tell you whether the
- * binary beside it is the one somebody named these addresses in.
- *
- * Project level rather than per-layer, for the same reason a constant
- * declaration is: several layers can read the same disk image, and a file
- * describes no addresses of its own.
+ * Project-local identity for immutable content. Layers and captures reference
+ * the id; the name is editable metadata and need not be unique.
  */
 export interface ProjectFile {
-  /** What layers call it: `revenge.d64`, and `revenge.d64:NAME` inside one. */
+  /** Optional only on legacy imports; all new files carry an id. */
+  id?: string;
+  /** Display name and filesystem import location; never a document reference. */
   name: string;
-  /** Content hash of the bytes, as the blob store holds them. */
-  hash: string;
-  size: number;
+  /** Immutable content hash; absent only for unresolved legacy imports. */
+  hash?: string;
+  size?: number;
 }
 
 /**
@@ -1159,7 +1155,7 @@ export function parseProject(json: string): Project {
       throw new Error("Each layer must have a 'type' field");
     }
     if (layer.type === "prg" || layer.type === "raw") {
-      if (!layer.path) {
+      if (!layer.path && !layer.file) {
         throw new Error(`Layer type '${layer.type}' requires a 'path' field`);
       }
     }
@@ -1272,7 +1268,7 @@ export function parseProject(json: string): Project {
     }
   }
 
-  return project;
+  return filesWithIds(project);
 }
 
 /**

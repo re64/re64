@@ -4,10 +4,8 @@
  * The file is the exported form: what goes in git, what gets handed to someone
  * else, what a `disasm` reads directly. The database is where editing happens.
  *
- * Both directions move the text **verbatim**. Nothing here may reparse and
- * re-serialize — `formatProject` regenerates layout from content and would
- * silently drop the blank lines that group labels and reorder hand-declared
- * regions, turning a one-line change into a whole-file diff.
+ * Complete canonical imports keep their text layout. Legacy imports migrate
+ * identities and record available file hashes before the database is created.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -50,15 +48,6 @@ export interface ImportResult {
  * Any history sitting beside the file comes too, so importing does not quietly
  * discard the record of who did what.
  */
-/** A recorded name that will not normalise is matched as written rather than refused. */
-function normalizedOrRaw(name: string): string {
-  try {
-    return normalizeBlobName(name);
-  } catch {
-    return name;
-  }
-}
-
 export function importProject(
   projectPath: string,
   databasePath = databasePathFor(projectPath),
@@ -77,38 +66,21 @@ export function importProject(
   // Reserialised only when something was actually missing: an import must not
   // rewrite a file that was already complete, and layout is not worth
   // preserving here because the export is regenerated anyway.
-  const project = withIds(parsed);
+  let project = withIds(parsed);
 
   // Read the binaries before the database exists, so a missing one fails the
   // import rather than leaving a database that cannot be disassembled.
   const baseDir = dirname(projectPath);
-  const wanted = blobPaths(project).map((name) => ({
-    name: normalizeBlobName(name),
-    bytes: new Uint8Array(readFileSync(resolve(baseDir, name))),
+  const needed = new Set(blobPaths(project));
+  const wanted = (project.files ?? []).filter(f => needed.has(f.id!) || existsSync(resolve(baseDir, f.name))).map(file => ({
+    file, name: normalizeBlobName(file.name),
+    bytes: new Uint8Array(readFileSync(resolve(baseDir, file.name))),
   }));
-
-  // **And record them, so the document knows which bytes each name means.**
-  // The blobs were stored and nothing said so, which left every imported project
-  // resolving names through the mutable SQL table for ever — the fallback that
-  // exists for the window between an upload and its `file.add`, standing open
-  // permanently instead. Recorded here for the same reason ids are minted here:
-  // the document carries it from its first snapshot.
-  //
-  // **Added to the registry, never replacing it.** `wanted` is the layer
-  // sources only — a capture or anything else the project recorded is not among
-  // them — and assigning the registry from it threw those records away on
-  // import. A record the file already carries is kept as written, its hash
-  // included: the file is the authority on what it recorded, and a hash that
-  // no longer matches the bytes beside it is a fact to surface, not to repair
-  // silently here.
-  const existing = project.files ?? [];
-  const known = new Set(existing.map((f) => normalizedOrRaw(f.name)));
-  const added = wanted
-    .filter((file) => !known.has(file.name))
-    .map((file) => ({ name: file.name, hash: hashBytes(file.bytes), size: file.bytes.length }));
-  if (added.length) project.files = [...existing, ...added];
-
-  const text = project === parsed && !added.length ? raw : formatProject(project);
+  for (const { file, bytes } of wanted) {
+    // Existing recorded hashes are authoritative, even when the adjacent file changed.
+    if (!file.hash) { file.hash = hashBytes(bytes); file.size = bytes.length; }
+  }
+  const text = JSON.stringify(JSON.parse(raw)) === JSON.stringify(project) ? raw : formatProject(project);
 
   const storage = new SqliteStorage(databasePath, projectId);
   storage.initialize(text, Date.now(), projectId);

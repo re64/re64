@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { RomLoader } from "./core/project/loader.js";
 /**
  * Reading project bytes under Node.
@@ -30,8 +31,13 @@ import {
  * relative to wherever the user is standing.
  */
 export function nodeFileBytes(baseDir?: string): FileBytes {
-  return (path) =>
-    new Uint8Array(readFileSync(baseDir === undefined ? path : resolve(baseDir, path)));
+  return (path, file) => {
+    const bytes = new Uint8Array(readFileSync(baseDir === undefined ? path : resolve(baseDir, path)));
+    if (file?.hash && createHash("sha256").update(bytes).digest("hex") !== file.hash) {
+      throw new Error(`File ${file.id} (${file.name}) does not match its recorded content hash.`);
+    }
+    return bytes;
+  };
 }
 
 /**

@@ -256,14 +256,25 @@ export interface TargetRemoveOp {
 
 export interface FileAddOp {
   op: "file.add";
+  /** Optional only for recorded history from before file identity. */
+  id?: string;
   name: string;
-  hash: string;
-  size: number;
+  hash?: string;
+  size?: number;
 }
 
 export interface FileRemoveOp {
   op: "file.remove";
-  name: string;
+  id?: string;
+  /** Legacy history only. */
+  name?: string;
+}
+
+/** Rename metadata without retargeting any reference or changing the bytes. */
+export interface FileSetOp {
+  op: "file.set";
+  id: string;
+  fields: { name?: string };
 }
 
 /** Carry a decoder in the project. **Always adds.** */
@@ -456,6 +467,9 @@ export interface LayerAddOp {
   rom?: "basic" | "kernal" | "characters";
   name: string;
   /** For a byte layer: the file it reads, as `name` or `disk.d64:NAME`. */
+  file?: string;
+  member?: string;
+  /** Legacy history only. */
   path?: string;
   /** For a `raw` or `bytes` layer, which carries no load address of its own. */
   address?: number;
@@ -666,7 +680,7 @@ export type Op =
   | ConstantBindOp | ConstantUnbindOp
   | PrimaryBindOp | PrimaryUnbindOp
   // Immutable attachments, and the project's own scalars
-  | FileAddOp | FileRemoveOp
+  | FileAddOp | FileRemoveOp | FileSetOp
   | MetaSetOp;
 
 /**
@@ -825,6 +839,8 @@ export function describeOp(op: Op, resolve?: AddressResolver): string {
 
     case "file.add":
       return `add file ${op.name} (${op.size} bytes)`;
+    case "file.set":
+      return `rename file ${op.id} to ${op.fields.name}`;
     case "file.remove":
       return `remove file ${op.name}`;
 

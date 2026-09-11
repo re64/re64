@@ -1,93 +1,30 @@
-/**
- * Building a memory map from a database.
- *
- * The byte source stays keyed by the name the project uses, exactly as the
- * filesystem one is. That is what keeps content addressing invisible to
- * everything above: the loader, the D64 handling, `FileLayer`, and the browser
- * client all work unchanged, because a project still says `gridrunner.prg` and
- * something below resolves it.
- *
- * Rewriting layer paths into hashes would not be a storage detail. A path also
- * derives the layer's id, its display name, and the name of its entry label, so
- * the disassembly itself would change.
- */
-
-import {
-  FileBytes,
-  LoadedProject,
-  buildMemoryMap,
-  makeFileLoader,
-  parseProject,
-} from "../core/index.js";
+/** Build a memory map using the document's immutable file records. */
+import { ProjectStore } from "./project-store.js";
+import { projectFromDoc } from "../core/crdt/index.js";
+import { FileBytes, LoadedProject, buildMemoryMap, makeFileLoader } from "../core/index.js";
+import type { ProjectFile } from "../core/project/project.js";
+import { resolveFile } from "../core/project/files.js";
 import { SqliteStorage } from "./sqlite-storage.js";
-import { normalizeBlobName } from "./blobs.js";
 
-/**
- * The bytes a project's files hold, with the **document** deciding which.
- *
- * A blob is stored by content hash, but the read went through a separate,
- * mutable SQL name-to-hash mapping that `putBlob` rewrites whenever a name is
- * reused. The document records its own hash per file and `file.add` is
- * undoable — so undoing a replacement restored the hash in the document and left
- * the read serving the replacement's bytes. A capture recorded earlier then
- * fetched somebody else's output under its own name.
- *
- * So the document's hash is authoritative and the name table is a fallback, for
- * a file uploaded but not yet recorded — which is a real window, since the
- * upload and the `file.add` are two steps.
- */
+/** No mutable name-table fallback: missing recorded content stays missing. */
 export function databaseFileBytes(
   storage: SqliteStorage,
-  files: readonly { name: string; hash: string }[] = []
+  files: readonly ProjectFile[] = []
 ): FileBytes {
-  return (name) => {
-    const hash = recordedHash(files, name);
-    const bytes = hash !== undefined ? storage.blobByHash(hash) : storage.blob(name);
+  return (name, source) => {
+    const file = source ?? resolveFile(files, name);
+    if (!file.hash) {
+      throw new Error(`File ${file.id} (${file.name}) has no recorded content hash. Import its bytes first.`);
+    }
+    const bytes = storage.blobByHash(file.hash);
     if (!bytes) {
-      // Two different absences. A name the document records whose bytes are not
-      // held is content this project promised and cannot produce — saying "no
-      // file called" would send somebody looking for a typo.
-      if (hash !== undefined) {
-        throw new Error(
-          `This project records "${name}" as ${hash.slice(0, 12)}… and does not hold ` +
-            `those bytes. The recorded content must be uploaded again, or the record ` +
-            `pointed at what is held.`
-        );
-      }
-      const held = storage.blobNames();
       throw new Error(
-        `This project holds no file called "${name}".` +
-          (held.length ? ` It has: ${held.join(", ")}` : " It has no files at all.")
+        `This project records "${name}" as ${file.hash.slice(0, 12)}… and does not hold ` +
+          `those bytes. The recorded content must be uploaded again.`
       );
     }
     return bytes;
   };
-}
-
-/**
- * The hash the document records for a name, however the name is spelled.
- *
- * `storage.blob` normalises the name it is given and the document lookup did
- * not, so `./game.prg` walked past the recorded entry for `game.prg` and read
- * the mutable name table instead — the bypass this whole change closes, open
- * again under a different spelling. Both sides are normalised here, and this is
- * the one place that decides whether a document entry exists.
- */
-export function recordedHash(
-  files: readonly { name: string; hash: string }[] | undefined,
-  name: string
-): string | undefined {
-  const want = normalizeBlobName(name);
-  return files?.find((f) => normalizedOrRaw(f.name) === want)?.hash;
-}
-
-/** A recorded name that will not normalise is matched as written rather than refused. */
-function normalizedOrRaw(name: string): string {
-  try {
-    return normalizeBlobName(name);
-  } catch {
-    return name;
-  }
 }
 
 export function loadProjectFromDatabase(
@@ -99,9 +36,10 @@ export function loadProjectFromDatabase(
     projectId ?? new SqliteStorage(databasePath).projects()[0]?.id
   );
   try {
+    const project = projectFromDoc(new ProjectStore(storage).document());
     return buildMemoryMap(
-      parseProject(storage.readText()),
-      makeFileLoader(databaseFileBytes(storage))
+      project,
+      makeFileLoader(databaseFileBytes(storage, project.files))
     );
   } finally {
     storage.close();

@@ -1,3 +1,4 @@
+import { filesWithIds, fileId } from "../project/files.js";
 /**
  * The CRDT adapter: a project as a Yjs document.
  *
@@ -136,7 +137,7 @@ export function docFromProject(declared: Project): Y.Doc {
   // claims, so an edit naming a migrated claim's id found nothing in the
   // document and did nothing at all — accepted, reported, and lost.
   const migrated = needsMigration(declared) ? migrateToClaims(declared).project : declared;
-  const project = entryPointsIntoTarget(migrated);
+  const project = filesWithIds(entryPointsIntoTarget(migrated));
 
   const doc = new Y.Doc(DOC_OPTIONS);
   doc.clientID = BASE_CLIENT_ID;
@@ -216,7 +217,7 @@ export function docFromProject(declared: Project): Y.Doc {
 
     const files = doc.getMap<Y.Map<unknown>>(ROOT_FILES);
     for (const file of [...(project.files ?? [])].sort((a, b) => byCodeUnit(a.name, b.name))) {
-      files.set(file.name, mapFrom(file as unknown as Record<string, unknown>));
+      files.set(file.id!, mapFrom(file as unknown as Record<string, unknown>));
     }
 
     // Keyed by id and flat, not nested in a layer: a claim is one entry edited
@@ -572,7 +573,7 @@ export const CLAIM_FIELDS = [
   "description",
   "origin",
 ] as const;
-const FILE_FIELDS = ["name", "hash", "size"] as const;
+const FILE_FIELDS = ["id", "name", "hash", "size"] as const;
 export const TARGET_FIELDS = ["id", "name", "layers", "entryPoints", "order", "description"] as const;
 const SCENARIO_FIELDS = ["id", "name", "description", "steps"] as const;
 const CAPTURE_FIELDS = ["id", "scenario", "step", "kind", "file", "when"] as const;
@@ -593,6 +594,8 @@ const LAYER_FIELDS = [
   "type",
   "rom",
   "reference",
+  "file",
+  "member",
   "path",
   "address",
   "bytes",
@@ -781,6 +784,37 @@ export function migrateDoc(doc: Y.Doc): boolean {
         targets.set(id, mapFrom({ id, name, layers, entryPoints: rootPoints }));
       }
       meta.delete("entryPoints");
+      moved = true;
+    }
+
+    const beforeFiles = projectFromDoc(doc);
+    const migratedFiles = filesWithIds(beforeFiles);
+    const filesRoot = doc.getMap<Y.Map<unknown>>(ROOT_FILES);
+    if (migratedFiles !== beforeFiles || [...filesRoot].some(([key, value]) => key !== value.get("id"))) {
+      for (const [key, value] of [...filesRoot]) {
+        const id = String(value.get("id") ?? fileId(String(value.get("name") ?? key)));
+        if (key !== id) {
+          const record = { ...value.toJSON(), id };
+          filesRoot.delete(key);
+          filesRoot.set(id, mapFrom(record));
+        }
+      }
+      for (const file of migratedFiles.files ?? []) {
+        if (!filesRoot.has(file.id!)) filesRoot.set(file.id!, mapFrom(file as unknown as Record<string, unknown>));
+      }
+      const layers = doc.getArray<Y.Map<unknown>>(ROOT_LAYERS).toArray();
+      migratedFiles.layers.forEach((layer, i) => {
+        if (!layers[i].has("path") || !layer.file) return;
+        layers[i].delete("path");
+        layers[i].set("id", layer.id);
+        layers[i].set("file", layer.file);
+        if (layer.member !== undefined) layers[i].set("member", layer.member);
+      });
+      const captures = doc.getMap<Y.Map<unknown>>("captures");
+      for (const c of migratedFiles.captures ?? []) {
+        const held = captures.get(c.id!);
+        if (held && held.get("file") !== c.file) held.set("file", c.file);
+      }
       moved = true;
     }
 

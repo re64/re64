@@ -42,6 +42,7 @@ export interface PreparedUpload {
   name: string;
   /** Who asked, so the resulting edit is attributed to them and not to nobody. */
   author: string;
+  sessionId?: string;
   expiresAt: number;
 }
 
@@ -56,13 +57,14 @@ export class UploadTokens {
     return (this.options.now ?? Date.now)();
   }
 
-  issue(projectId: string, name: string, author: string): PreparedUpload {
+  issue(projectId: string, name: string, author: string, sessionId?: string): PreparedUpload {
     this.sweep();
     const prepared: PreparedUpload = {
       token: randomBytes(24).toString("hex"),
       projectId,
       name,
       author,
+      ...(sessionId === undefined ? {} : { sessionId }),
       expiresAt: this.now + (this.options.ttlMs ?? DEFAULT_TTL_MS),
     };
     this.held.set(prepared.token, prepared);

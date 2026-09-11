@@ -114,13 +114,19 @@ Two verbs is the complete algebra for a map, because "update" and "create" are
 the same operation on a key. Nothing is missing here — this shape was already
 right, and `primary` is renamed into it rather than changed.
 
-## Immutable attachments
+## Files: immutable content, editable names
 
-**`file.add` / `file.remove`.** A file is content-addressed — `{name, hash,
-size}` — and layers reference it by name in their `path`. There is no `file.set`
-because there is nothing to update: the hash *is* the content, and renaming one
-would have to rewrite every layer that points at it, which is a refactor and not
-a field edit. Add and remove is complete for an immutable thing.
+**`file.add` / `file.set` / `file.remove`.** A file is an entity with an id.
+`file.add` creates `{id, name, hash, size}`; replaying an add against an existing
+content-bearing id does not replace it. `file.set` revises only `name`. A new
+upload gets a new id, so layers and captures keep referring to the same bytes
+through renames and later uploads. Removing a record does not rewrite references.
+
+Legacy recorded operations without ids retain their original name-keyed add /
+replacement / removal semantics, targeting the deterministic migrated file id.
+This compatibility branch exists for history replay and inversion; new API
+producers always mint ids. Missing legacy hashes may be filled once from imported
+bytes. See [the migration decision](decisions/file-identity.md).
 
 ## The project's own fields
 
@@ -183,6 +189,7 @@ decoder.add      decoder.set      decoder.remove
 evidence.add     evidence.set     evidence.remove
 message.add      message.set      message.remove
 field.add        field.set        field.remove
+file.add         file.set         file.remove
 layer.add        layer.set        layer.remove
 scenario.add     scenario.set     scenario.remove
 target.add       target.set       target.remove
@@ -192,12 +199,11 @@ labelUse.bind    labelUse.unbind
 constantUse.bind constantUse.unbind
 primary.bind     primary.unbind
 
-file.add         file.remove
 meta.set
 ```
 
-Twelve entities × three verbs, three bindings × two, one attachment × two, one
-singleton. There is nothing else, and `src/core/crdt/roundtrip.test.ts` asserts
+Thirteen entities × three verbs, three bindings × two, one singleton: 46
+operations. There is nothing else, and `src/core/crdt/roundtrip.test.ts` asserts
 it: the shapes, the verbs, that no operation spells removal as `delete`, that
 every `set` carries its changes under `fields`, that every `add` mints an
 identity, and that no operation sits outside a shape.
