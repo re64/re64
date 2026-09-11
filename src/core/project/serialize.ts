@@ -30,7 +30,7 @@ import {
   ProjectLabelUse,
   ProjectLayer,
 } from "./project.js";
-import { parseProject, parseProjectAddress } from "./project.js";
+import { entryPointsIntoTarget, parseProject, parseProjectAddress } from "./project.js";
 
 /** Serialize one object compactly on a single line: `{ "a": 1, "b": 2 }`. */
 /**
@@ -84,6 +84,8 @@ const EVIDENCE_KEYS = [
 
 /** Serialize a project in the hand-maintained house style. */
 export function formatProject(project: Project): string {
+  // Never written at the root: a list still there belongs to a target.
+  project = entryPointsIntoTarget(project);
   const lines: string[] = ["{"];
   const body: string[] = [];
 
@@ -135,10 +137,6 @@ export function formatProject(project: Project): string {
     })
     .join(",\n");
   body.push(`  "layers": [\n${layers}\n  ]`);
-
-  if (project.entryPoints?.length) {
-    body.push(`  "entryPoints": [${project.entryPoints.map((e) => JSON.stringify(e)).join(", ")}]`);
-  }
 
   if (project.constants?.length) {
     const entries = project.constants

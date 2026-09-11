@@ -386,12 +386,16 @@ describe("a layer nobody links supplies nothing", () => {
     // layer as linked into nothing. Read from the document, the condition is
     // what it always meant: a project that declares targets, and a layer no
     // declared target links. That case is the test below, which builds one.
+    //
+    // And Gridrunner *is* that case now: its root entry-point list was migrated
+    // into an explicit target, which links the layers the file had and not a
+    // layer added afterwards. The advice fires here, and this time it is right.
     const made = await callTool("add_rom_layer", { rom: "characters" });
     // The ROM may be absent on this machine; the advice must not depend on it.
     if (made.isError) return;
     const value = made.value as { note?: string; linkedInto?: string[] };
-    expect(value.linkedInto).toBeUndefined();
-    expect(value.note).toBeUndefined();
+    expect(value.linkedInto).toEqual([]);
+    expect(value.note).toContain("linked into no target");
   });
 
   it("names the ROMs a new view leaves out, since it will boot into zeros", async () => {
@@ -1417,10 +1421,10 @@ describe("editing as an agent", () => {
       name: "collision patch",
     });
     expect(made.isError).toBe(false);
-    // No advice about linking: this project declares no targets, so the loader
-    // implies one over the whole stack and the new layer is in it. The note is
-    // for a project that declares views and a layer none of them links.
-    expect((made.value as { note?: string }).note).toBeUndefined();
+    // Advice about linking: this project's entry-point list was migrated into
+    // an explicit target, which links the layers the file had and not this
+    // one. The note says so, which is what it is for.
+    expect((made.value as { note?: string }).note).toContain("linked into no target");
 
     const listed = (await callTool("list_targets", {})).value as {
       layers: { id: string; name: string }[];

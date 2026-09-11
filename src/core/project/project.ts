@@ -9,7 +9,7 @@ import { LabelType } from "../memory/label-type.js";
 import { LabelUse, createLabelUse } from "../claims/names.js";
 import { TEXT_ENCODINGS, TextEncoding } from "../c64/text.js";
 import { LayerDefault } from "../memory/region.js";
-import { derivedId } from "./identity.js";
+import { derivedId, layerIdOf } from "./identity.js";
 import {
   Claim,
   ClaimMethod,
@@ -327,10 +327,12 @@ export interface Project {
   /** The binaries this project reads, by the name its layers use. */
   files?: ProjectFile[];
   /**
-   * Manual entry points (addresses).
-   *
-   * The default target's list. A project that declares targets puts them there
-   * instead, so the same field does not mean two things.
+   * **Never stored.** Entry points belong to a target; this is where they lived
+   * before targets existed, and a file or document still carrying a list here
+   * is migrated on the way in — `entryPointsIntoTarget` gives a project with no
+   * targets one that holds them, and drops the list where explicit targets
+   * already own theirs. In memory it is the *selected* target's list, set by
+   * `projectForTarget` for analysis to read, and nothing writes it back out.
    */
   entryPoints?: (number | string)[];
   /** Named views over the layer stack. */
@@ -1102,8 +1104,44 @@ export function fieldsOfType(type: { id?: string; fields: unknown }): ProjectFie
     .sort((a, b) => a.offset - b.offset);
 }
 
+/**
+ * A project-level `entryPoints` list becomes a target's.
+ *
+ * The root list predates targets. `withSyntheticTarget` copied it into the
+ * implied target on every load, `describe_project` read it, and no operation
+ * could write it — data with readers and no verb, which is F1 from the other
+ * end. It was a target's field stored in the wrong place, so this puts it in the
+ * right one rather than giving it a second home: a project with no targets gains
+ * one holding the list, linking every byte layer in declaration order under the
+ * same derived ids the loader hands out; a project that declares targets keeps
+ * theirs and the root list is dropped, since an explicit target already used its
+ * own. Reached from every boundary a project enters through, like the field
+ * migration, so an in-memory project built by a test gets the same treatment as
+ * a file.
+ */
+export function entryPointsIntoTarget(project: Project): Project {
+  const { entryPoints, ...rest } = project;
+  if (!entryPoints?.length) return entryPoints === undefined ? project : rest;
+  if (project.targets?.length) return rest;
+  const name = project.name ?? "project";
+  return {
+    ...rest,
+    targets: [
+      {
+        id: derivedId("tgt", "entryPoints", name),
+        name,
+        layers: project.layers
+          .map((l, index) => ({ decl: l, id: layerIdOf(l, index) }))
+          .filter(({ decl }) => decl.type !== "symbols")
+          .map(({ id }) => id),
+        entryPoints,
+      },
+    ],
+  };
+}
+
 export function parseProject(json: string): Project {
-  const project = JSON.parse(json) as Project;
+  const project = entryPointsIntoTarget(JSON.parse(json) as Project);
 
   // **A record's fields used to be an object keyed by offset.** Every file
   // written before they were keyed by id says so, and they stay loadable: the

@@ -21,6 +21,7 @@ import { CommentIndex } from "../memory/comment.js";
 import { ConstantIndex } from "../memory/constant.js";
 import { createC64PlatformLayer } from "../c64/symbols.js";
 import {
+  entryPointsIntoTarget,
   Project,
   ProjectLayer,
   parseProjectAddress,
@@ -38,7 +39,7 @@ import {
   ProjectTarget,
   targetLinks,
 } from "./project.js";
-import { derivedId } from "./identity.js";
+import { derivedId, layerIdOf } from "./identity.js";
 import { needsMigration, migrateToClaims } from "../claims/migrate.js";
 import { Claim, Interpretation, arrayExtent, resolveAt } from "../claims/model.js";
 
@@ -175,9 +176,6 @@ function layerName(layer: ProjectLayer, index: number): string {
  * Deterministic, so every client loading the same file agrees — the same
  * property the id derivation has everywhere else here.
  */
-function layerIdOf(decl: ProjectLayer, index: number): string {
-  return decl.id ?? derivedId("lay", index, decl.type, decl.path ?? decl.name ?? "");
-}
 
 /**
  * The one target a project with none implies.
@@ -212,10 +210,9 @@ export function withSyntheticTarget(project: Project): Project {
           .map((l, index) => ({ decl: l, id: layerIdOf(l, index) }))
           .filter(({ decl }) => decl.type !== "symbols")
           .map(({ id }) => id),
-        // Moved, not copied: `projectForTarget` lets a target's list *replace*
-        // the project's, so leaving them behind would silently drop every entry
-        // point the moment a target existed.
-        ...(project.entryPoints === undefined ? {} : { entryPoints: project.entryPoints }),
+        // No entry points: a project that had a root list was given a target
+        // for it by `entryPointsIntoTarget` before this ran, so a project with
+        // none here has none to imply.
       },
     ],
   };
@@ -383,6 +380,9 @@ export function buildMemoryMap(
   loadFile: FileLoader,
   options: { platform?: boolean; loadRom?: RomLoader; target?: string } = {}
 ): LoadedProject {
+  // A root `entryPoints` list becomes a target here as everywhere else a
+  // project enters, so an in-memory project gets what a file gets.
+  declared = entryPointsIntoTarget(declared);
   // One form below, whatever the file holds. A project still written with labels
   // and regions is converted here, exactly as `re64 migrate` converts it on disk
   // — the precedent `identity.ts` already records for ids: "files without ids

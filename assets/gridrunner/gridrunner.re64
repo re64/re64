@@ -140,5 +140,7 @@
       ]
     }
   ],
-  "entryPoints": ["$8011"]
+  "targets": [
+    { "id": "tgt_atrs94", "name": "Gridrunner", "layers": ["lay_kdhw6h"], "entryPoints": ["$8011"] }
+  ]
 }

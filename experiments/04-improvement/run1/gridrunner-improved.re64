@@ -4338,9 +4338,6 @@
       ]
     }
   ],
-  "entryPoints": [
-    "$8011"
-  ],
   "constants": [
     {
       "id": "cst_3nx6cb",
@@ -4672,5 +4669,8 @@
     "$0002": "lbl_ab2x56",
     "$0003": "lbl_c4avum",
     "$000A": "lbl_pvzwfe"
-  }
+  },
+  "targets": [
+    { "id": "tgt_rjzn83", "name": "gridrunner-improved", "layers": ["lay_kdhw6h"], "entryPoints": ["$8011"] }
+  ]
 }

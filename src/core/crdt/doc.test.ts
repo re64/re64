@@ -14,7 +14,7 @@ import {
   stateVector,
 } from "./doc.js";
 import { applyOpToDoc, applyOpsToDoc, undoManagerFor } from "./ops.js";
-import { Project } from "../project/project.js";
+import { Project, entryPointsIntoTarget } from "../project/project.js";
 import { derivedId } from "../project/identity.js";
 import { Op } from "../ops/types.js";
 
@@ -68,7 +68,7 @@ describe("deterministic construction", () => {
 
 describe("round trip", () => {
   it("reads back the project it was built from", () => {
-    expect(projectFromDoc(docFromProject(PROJECT))).toEqual(PROJECT);
+    expect(projectFromDoc(docFromProject(PROJECT))).toEqual(entryPointsIntoTarget(PROJECT));
   });
 
   it("reads back a document reconstructed from an update", () => {
@@ -77,7 +77,7 @@ describe("round trip", () => {
     // project.
     const fresh = new Y.Doc();
     applyUpdate(fresh, encodeDoc(docFromProject(PROJECT)));
-    expect(projectFromDoc(fresh)).toEqual(PROJECT);
+    expect(projectFromDoc(fresh)).toEqual(entryPointsIntoTarget(PROJECT));
   });
 
   it("orders entries by address regardless of insertion order", () => {
@@ -538,5 +538,51 @@ describe("migrating a stored document's fields", () => {
     expect(projectFromDoc(doc).types![0].fields[0].name).toBe("renamed");
     expect(migrateDoc(doc)).toBe(false);
     expect(projectFromDoc(doc).types![0].fields[0].name).toBe("renamed");
+  });
+});
+
+describe("migrating a stored document's entry points", () => {
+  /**
+   * A root `entryPoints` list lived under `meta` before targets existed, and a
+   * stored snapshot still holding one never passes through the file migration.
+   * Same move `entryPointsIntoTarget` makes for a file: a target for a document
+   * with none, nothing for one with targets, and the meta key goes either way.
+   */
+  const legacy = (withTarget: boolean) => {
+    const doc = emptyDoc();
+    const layer = new Y.Map<unknown>();
+    doc.getArray<Y.Map<unknown>>("layers").push([layer]);
+    layer.set("id", "lay_p");
+    layer.set("type", "prg");
+    layer.set("path", "g.prg");
+    const meta = doc.getMap<unknown>("meta");
+    meta.set("name", "Old");
+    meta.set("entryPoints", ["$8011"]);
+    if (withTarget) {
+      const t = new Y.Map<unknown>();
+      t.set("id", "tgt_a"); t.set("name", "runtime"); t.set("layers", ["lay_p"]); t.set("entryPoints", ["$0801"]);
+      doc.getMap<Y.Map<unknown>>("targets").set("tgt_a", t);
+    }
+    return doc;
+  };
+
+  it("gives a document with no targets one holding the list", () => {
+    const doc = legacy(false);
+    expect(migrateDoc(doc)).toBe(true);
+    const project = projectFromDoc(doc);
+    expect(project.entryPoints).toBeUndefined();
+    expect(project.targets).toEqual([
+      { id: derivedId("tgt", "entryPoints", "Old"), name: "Old", layers: ["lay_p"], entryPoints: ["$8011"] },
+    ]);
+    expect(doc.getMap<unknown>("meta").has("entryPoints")).toBe(false);
+    expect(migrateDoc(doc)).toBe(false);
+  });
+
+  it("drops the list where the document already declares targets", () => {
+    const doc = legacy(true);
+    expect(migrateDoc(doc)).toBe(true);
+    const project = projectFromDoc(doc);
+    expect(project.targets!.map((t) => t.entryPoints)).toEqual([["$0801"]]);
+    expect(doc.getMap<unknown>("meta").has("entryPoints")).toBe(false);
   });
 });
