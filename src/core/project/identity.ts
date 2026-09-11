@@ -92,8 +92,15 @@ export function withIds(project: Project, mint: (prefix: IdPrefix) => string = n
     return { ...item, id: mint(prefix) };
   };
 
-  const layers = project.layers.map((layer) => {
+  // **A link made before the layer had an id follows the id it gets.** The
+  // entry-point migration runs at the file boundary, before this, and links
+  // its target to the ids the loader would derive for id-less layers; minting
+  // real ones here without following those links left every one dangling, and
+  // `projectForTarget` dropped the whole stack as unknown.
+  const relinked = new Map<string, string>();
+  const layers = project.layers.map((layer, index) => {
     const withId = give(layer, "lay");
+    if (withId.id !== layer.id) relinked.set(layerIdOf(layer, index), withId.id!);
     return {
       ...withId,
       ...(layer.labels ? { labels: layer.labels.map((l) => give(l, "lbl")) } : {}),
@@ -131,12 +138,15 @@ export function withIds(project: Project, mint: (prefix: IdPrefix) => string = n
   const captures = project.captures?.map((c) => give(c, "cap"));
   const evidence = project.evidence?.map((e) => give(e, "evd"));
 
+  const follow = (layer: string): string => relinked.get(layer) ?? layer;
   const targets = project.targets?.map((t) => {
     const withId = give(t, "tgt");
     return {
       ...withId,
       layers: withId.layers.map((link) =>
-        typeof link === "string" ? { id: mint("lnk"), layer: link } : give(link, "lnk")
+        typeof link === "string"
+          ? { id: mint("lnk"), layer: follow(link) }
+          : give({ ...link, layer: follow(link.layer) }, "lnk")
       ),
     };
   });
