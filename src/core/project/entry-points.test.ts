@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { entryPointsIntoTarget, parseProject, Project } from "./project.js";
 import { formatProject } from "./serialize.js";
-import { derivedId, layerIdOf } from "./identity.js";
+import { derivedId, layerIdOf, withIds } from "./identity.js";
 
 /**
  * **A root `entryPoints` list was a target's field stored in the wrong place.**
@@ -47,6 +47,23 @@ describe("a root entry-point list becomes a target", () => {
     expect(out.targets).toEqual([
       { id: "tgt_a", name: "runtime", layers: ["lay_p"], entryPoints: ["$0801"] },
     ]);
+  });
+
+  it("keeps its links when the layers are given real ids afterwards", () => {
+    // The migration links a target to the ids the loader would derive for
+    // id-less layers; `withIds` then mints real ones at import and must carry
+    // the links across, or every one dangles and the stack loads empty.
+    const idless: Project = {
+      name: "Old",
+      layers: [{ type: "prg", path: "game.prg" }, { type: "raw", path: "extra.bin", address: "$C000" }],
+      entryPoints: ["$8011"],
+    };
+    const migrated = entryPointsIntoTarget(idless);
+    const minted = withIds(migrated, (prefix) => `${prefix}_minted`);
+    const ids = minted.layers.map((l) => l.id);
+    expect(ids).toEqual(["lay_minted", "lay_minted"]);
+    const links = minted.targets![0].layers.map((l) => (typeof l === "string" ? l : l.layer));
+    expect(links).toEqual(["lay_minted", "lay_minted"]);
   });
 
   it("leaves a project without one exactly as it was", () => {

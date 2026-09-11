@@ -195,6 +195,27 @@ describe("a project that carries its own binaries", () => {
     }
   });
 
+  it("imports a file whose layers have no ids and whose entry points are at the root", () => {
+    // The two legacy shapes together, which is how the oldest files look. The
+    // migration links a target to derived layer ids and the import then mints
+    // real ones; the links have to follow, or the selected target links nothing
+    // and the stack loads empty — which is what a review reproduced.
+    const projectPath = join(dir, "oldest.re64");
+    copyFileSync("assets/gridrunner/gridrunner.prg", join(dir, "gridrunner.prg"));
+    writeFileSync(
+      projectPath,
+      JSON.stringify({ name: "Oldest", layers: [{ type: "prg", path: "gridrunner.prg" }], entryPoints: ["$8011"] }),
+      "utf-8"
+    );
+    const { databasePath } = importProject(projectPath);
+    const loaded = loadProjectFromDatabase(databasePath);
+    expect(loaded.map.getLayers().filter((l) => l.hasBytes)).toHaveLength(1);
+    expect(loaded.project.entryPoints).toEqual(["$8011"]);
+    expect(loaded.project.targets![0].layers.map((l) => (typeof l === "string" ? l : l.layer))).toEqual([
+      loaded.project.layers[0].id,
+    ]);
+  });
+
   it("says what it holds when asked for something else", () => {
     const projectPath = join(dir, "gridrunner.re64");
     copyFileSync("assets/gridrunner/gridrunner.re64", projectPath);
