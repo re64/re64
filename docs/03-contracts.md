@@ -87,15 +87,18 @@ When a document records a content hash, a missing blob is missing content, not
 permission to substitute the latest bytes with the same name. Cached analysis
 and scenario checkpoints must account for their actual target, resources, ROMs
 and rendering inputs. Changing an input must not preserve a stale passing check.
-The immutable-reference design is still #27; a document version alone is not an
-execution fingerprint.
+Layers and captures reference file ids; reusing or renaming a display name must
+not retarget their bytes. Resolve convenience names against the participant
+replica and reject ambiguous aliases before emitting an operation. A document
+version alone is not an execution fingerprint.
 *Origin:* R7 ([#20](https://github.com/re64/re64/pull/20)): replacing a ROM
 changed the execution fingerprint while a reused workspace still ran its old
 memory map. R8 ([#22](https://github.com/re64/re64/pull/22)): a missing recorded
 blob fell through to a filename lookup, serving different bytes under the
 recorded hash's ETag.
 *Verification:* `store/blobs.test.ts`, `server/database-mode.test.ts`,
-`server/building.test.ts`, `core/machine/scenario.test.ts`.
+`server/building.test.ts`, `server/mcp/transport.test.ts`,
+`core/crdt/file-identity.test.ts`, `core/machine/scenario.test.ts`.
 
 ## P. Editorial and publication contracts
 

@@ -1,3 +1,4 @@
+import { fileId, splitFilePath } from "../project/files.js";
 /**
  * Applying operations to a document.
  *
@@ -147,6 +148,17 @@ export function applyOpsToDoc(doc: Y.Doc, ops: readonly Op[], origin: unknown = 
   doc.transact(() => {
     for (const op of ops) applyOpInTransaction(doc, op);
   }, origin);
+}
+
+function captureFile(doc: Y.Doc, reference: string): string {
+  const files = doc.getMap<Y.Map<unknown>>("files");
+  if (files.has(reference) || /^fil_[a-z0-9]+$/.test(reference)) return reference;
+  const matches = [...files.values()].filter(f => f.get("name") === reference);
+  if (matches.length === 1) return String(matches[0].get("id"));
+  if (matches.length > 1) throw new Error(`Ambiguous legacy file ${reference}`);
+  const id = fileId(reference);
+  const entry = new Y.Map<unknown>(); entry.set("id", id); entry.set("name", reference); files.set(id, entry);
+  return id;
 }
 
 function applyOpInTransaction(doc: Y.Doc, op: Op): void {
@@ -303,17 +315,25 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
 
       case "file.add": {
         const files = doc.getMap<Y.Map<unknown>>("files");
-        let entry = files.get(op.name);
+        const id = op.id ?? fileId(op.name);
+        let entry = files.get(id);
+        if (op.id !== undefined && entry?.get("hash") !== undefined) break;
         if (!entry) {
           entry = new Y.Map<unknown>();
-          files.set(op.name, entry);
+          files.set(id, entry);
         }
-        assign(entry, { name: op.name, hash: op.hash, size: op.size });
+        assign(entry, { id, name: op.name, hash: op.hash, size: op.size });
+        break;
+      }
+
+      case "file.set": {
+        const entry = doc.getMap<Y.Map<unknown>>("files").get(op.id);
+        if (entry) revise(entry, op.fields);
         break;
       }
 
       case "file.remove": {
-        doc.getMap<Y.Map<unknown>>("files").delete(op.name);
+        doc.getMap<Y.Map<unknown>>("files").delete(op.id ?? fileId(op.name!));
         break;
       }
 
@@ -503,7 +523,7 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
           scenario: op.scenario,
           step: op.step,
           kind: op.kind,
-          file: op.file,
+          file: captureFile(doc, op.file),
           when: op.when,
         });
         break;
@@ -511,7 +531,7 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
 
       case "capture.set": {
         const entry = entryFor(doc.getMap<Y.Map<unknown>>("captures"), op.id);
-        if (entry) revise(entry, { ...op.fields });
+        if (entry) revise(entry, { ...op.fields, ...(op.fields.file === undefined ? {} : { file: captureFile(doc, op.fields.file) }) });
         break;
       }
 
@@ -655,7 +675,16 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         entry.set("type", op.layerType);
         if (op.rom !== undefined) entry.set("rom", op.rom);
         entry.set("name", op.name);
-        if (op.path !== undefined) entry.set("path", op.path);
+        if (op.file !== undefined) entry.set("file", op.file);
+        if (op.member !== undefined) entry.set("member", op.member);
+        if (op.path !== undefined && op.file === undefined) {
+          const source = splitFilePath(op.path);
+          const id = fileId(source.name);
+          const files = doc.getMap<Y.Map<unknown>>("files");
+          if (!files.has(id)) { const f = new Y.Map<unknown>(); f.set("id", id); f.set("name", source.name); files.set(id, f); }
+          entry.set("file", id);
+          if (source.member !== undefined) entry.set("member", source.member);
+        }
         if (op.address !== undefined) entry.set("address", hex4(op.address));
         if (op.bytes !== undefined) entry.set("bytes", op.bytes);
         if (op.length !== undefined) entry.set("length", op.length);

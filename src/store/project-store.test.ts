@@ -681,7 +681,7 @@ describe("a socket update is one action, and each inverse undoes its own op", ()
       // other's.
       for (const change of log) {
         const named = (op: (typeof change)["op"]): string =>
-          "id" in op ? op.id : "claim" in op ? op.claim.id : "";
+          "id" in op ? op.id ?? "" : "claim" in op ? op.claim.id : "";
         expect(named(change.inverse)).toBe(named(change.op));
       }
     } finally {

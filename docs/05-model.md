@@ -46,7 +46,7 @@ for their fields unless stated otherwise.
 | `constants` | Map by constant id | `constants: ProjectConstant[]` |
 | `decoders` | Map by decoder id | `decoders: ProjectDecoder[]` |
 | `types` | Map by type id; nested field maps keyed by field id | `types: ProjectType[]`, each with a field list |
-| `files` | Map by filename | `files: {name, hash, size}[]` |
+| `files` | Map by id | `files: {id, name, hash, size}[]` |
 | `primaryLabels` | Map from address key to claim id | `primaryLabels: Record<string, string>` |
 | `meta` | Project scalars: name, description | Corresponding top-level properties |
 | `scenarios` | Map by scenario id; steps stored as one JSON string value | Scenarios with ordered step lists |
@@ -82,8 +82,8 @@ reference flag, annotations and uses:
 
 | Type | Source and placement |
 |---|---|
-| `prg` | File at `path`; its first two bytes provide the load address |
-| `raw` | File at `path`, with declared `address` |
+| `prg` | File referenced by `file`; its first two bytes provide the load address |
+| `raw` | File referenced by `file`, with declared `address` |
 | `bytes` | Inline hex `bytes`, declared address and optional repeated `length` |
 | `symbols` | Annotations without bytes or an occupied range |
 | `rom` | Host-supplied BASIC, KERNAL or character ROM at its hardware address |
@@ -220,10 +220,23 @@ explorer. The synchronous listing does not execute arbitrary decoder source.
 
 Constant and label use sites still store absolute addresses within their layer;
 relocation-aware binding frames are [#26](https://github.com/re64/re64/issues/26).
-Files are `{name, hash, size}` records keyed by name. Layers reference paths
-and captures reference filenames, while blob content is keyed by hash.
-Stable file identity is [#27](https://github.com/re64/re64/issues/27).
-A content hash does not turn the filename referring to it into an immutable id.
+
+### Files
+
+Files are `{id, name, hash, size}` records keyed by id. `hash` identifies immutable
+blob content; `name` is editable display metadata and need not be unique. Each
+upload or retained capture gets a new file id, even when it reuses a name.
+Layers reference `file: id`. A D64 layer additionally carries `member`, the disk
+directory entry selector, separate from the resource identity. Captures also
+reference file ids. Removing a file record may leave references dangling; readers
+report the missing record or content rather than substituting a same-name file.
+
+At the participant boundary a unique name can be used as an alias; ambiguity is
+an error listing the candidate ids. Established document references use ids.
+Legacy `path: "disk.d64:GAME"` and capture filenames migrate deterministically,
+preserving layer ids. Stored CRDT snapshots migrate as well as exports. A legacy
+file with no content record has no `hash` or `size` until its bytes can be imported;
+migration never fabricates either. Database readers require a recorded hash.
 
 ## 6. Scenarios and captures
 
@@ -244,7 +257,7 @@ id, scenario, step, kind, file, when?
 ```
 
 `scenario` and `step` identify the source; `kind` is ram, screen, frames,
-trace, sid or devices. `file` names the retained bytes. Captures are separate
+trace, sid or devices. `file` identifies the file record holding the retained bytes. Captures are separate
 document entities referencing scenarios, not children embedded in the scenario
 record. Removing a scenario keeps its captures.
 

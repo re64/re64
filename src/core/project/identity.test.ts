@@ -89,7 +89,7 @@ describe("giving a project ids whatever shape it arrived in", () => {
   it("returns the very same object when nothing was missing", () => {
     // How a caller tells whether reserialising is warranted: an import must
     // not rewrite a file that was already complete.
-    const original = { layers: [{ id: "lay_a", type: "prg" as const, path: "game.prg" }] };
+    const original = { layers: [{ id: "lay_a", type: "prg" as const, file: "fil_game" }], files: [{ id: "fil_game", name: "game.prg", hash: "h", size: 3 }] };
     expect(withIds(original)).toBe(original);
   });
 

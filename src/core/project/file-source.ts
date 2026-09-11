@@ -12,10 +12,10 @@
 
 import { extractFile, findFile, listDirectory } from "../c64/d64.js";
 import { FileLoader } from "./loader.js";
-import { Project } from "./project.js";
+import { Project, ProjectFile } from "./project.js";
 
 /** Supplies the raw bytes of a whole file, however the caller gets them. */
-export type FileBytes = (path: string) => Uint8Array;
+export type FileBytes = (path: string, file?: ProjectFile) => Uint8Array;
 
 /** Split `disk.d64:filename` into its parts, or return null for a plain path. */
 export function splitD64Path(path: string): { image: string; entry: string } | null {
@@ -36,20 +36,21 @@ export function splitD64Path(path: string): { image: string; entry: string } | n
 export function blobPaths(project: Project): string[] {
   const paths = new Set<string>();
   for (const layer of project.layers) {
-    if (!layer.path) continue;
-    paths.add(splitD64Path(layer.path)?.image ?? layer.path);
+    const path = layer.file ?? layer.path;
+    if (!path) continue;
+    paths.add(layer.file ?? splitD64Path(path)?.image ?? path);
   }
   return [...paths];
 }
 
 /** Build a `FileLoader` over a byte reader. */
 export function makeFileLoader(read: FileBytes): FileLoader {
-  return (path, explicitStart) => {
-    const d64 = splitD64Path(path);
+  return (path, explicitStart, member, file) => {
+    const d64 = member === undefined ? splitD64Path(path) : { image: path, entry: member };
     let fullData: Uint8Array;
 
     if (d64) {
-      const image = read(d64.image);
+      const image = read(d64.image, file);
       const entry = findFile(image, d64.entry);
       if (!entry) {
         const available = listDirectory(image)
@@ -61,7 +62,7 @@ export function makeFileLoader(read: FileBytes): FileLoader {
       }
       fullData = extractFile(image, entry);
     } else {
-      fullData = read(path);
+      fullData = read(path, file);
     }
 
     if (explicitStart !== undefined) {

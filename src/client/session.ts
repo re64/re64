@@ -213,18 +213,21 @@ export class ProjectSession {
   }
 
   private async fetchMissingBlobs(project: Project): Promise<void> {
-    const wanted = blobPaths(project).filter((p) => !this.blobs.has(p));
+    const wanted = blobPaths(project).map(id => {
+      const hash = project.files?.find(f => f.id === id)?.hash;
+      return { id, hash, key: hash ?? id };
+    }).filter(({ key }) => !this.blobs.has(key));
     await Promise.all(
-      wanted.map(async (path) => {
+      wanted.map(async ({ id, hash, key }) => {
         const res = await fetch(
-          `${this.origin}/api/blob?path=${encodeURIComponent(path)}` +
+          `${this.origin}/api/blob?${hash ? "hash" : "file"}=${encodeURIComponent(hash ?? id)}` +
             (this.project ? `&project=${encodeURIComponent(this.project)}` : "")
         );
         if (!res.ok) {
           const detail = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(detail.error ?? `could not load ${path}`);
+          throw new Error(detail.error ?? `could not load ${id}`);
         }
-        this.blobs.set(path, new Uint8Array(await res.arrayBuffer()));
+        this.blobs.set(key, new Uint8Array(await res.arrayBuffer()));
       })
     );
   }
@@ -300,8 +303,8 @@ export class ProjectSession {
     try {
       return buildMemoryMap(
         projectFromDoc(this.client.doc),
-        makeFileLoader((path) => {
-          const bytes = this.blobs.get(path);
+        makeFileLoader((path, file) => {
+          const bytes = this.blobs.get(file?.hash ?? file?.id ?? path);
           if (!bytes) throw new Error(`no bytes fetched for ${path}`);
           return bytes;
         }),

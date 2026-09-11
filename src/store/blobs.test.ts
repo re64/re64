@@ -216,7 +216,7 @@ describe("a project that carries its own binaries", () => {
     ]);
   });
 
-  it("says what it holds when asked for something else", () => {
+  it("keeps loading recorded bytes after their display name changes", () => {
     const projectPath = join(dir, "gridrunner.re64");
     copyFileSync("assets/gridrunner/gridrunner.re64", projectPath);
     copyFileSync("assets/gridrunner/gridrunner.prg", join(dir, "gridrunner.prg"));
@@ -226,8 +226,6 @@ describe("a project that carries its own binaries", () => {
     storage.writeText(storage.readText().replace("gridrunner.prg", "renamed.prg"));
     storage.close();
 
-    expect(() => loadProjectFromDatabase(databasePath)).toThrow(
-      /holds no file called "renamed\.prg".*It has: gridrunner\.prg/s
-    );
+    expect(loadProjectFromDatabase(databasePath).map.readByte(0x8011)).toBeDefined();
   });
 });

@@ -27,3 +27,5 @@ export {
 } from "./serialize.js";
 export { resolveOwningLayer } from "./ownership.js";
 export { IdPrefix, newId, derivedId, isId, withIds } from "./identity.js";
+
+export { fileId, filesWithIds, resolveFile, splitFilePath } from "./files.js";

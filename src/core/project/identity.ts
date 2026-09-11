@@ -1,3 +1,4 @@
+import { filesWithIds } from "./files.js";
 /**
  * Stable identity for annotations.
  *
@@ -151,7 +152,7 @@ export function withIds(project: Project, mint: (prefix: IdPrefix) => string = n
     };
   });
 
-  return minted
+  return filesWithIds(minted
     ? {
         ...project,
         layers,
@@ -164,7 +165,7 @@ export function withIds(project: Project, mint: (prefix: IdPrefix) => string = n
         ...(captures ? { captures } : {}),
         ...(evidence ? { evidence } : {}),
       }
-    : project;
+    : project);
 }
 
 /**

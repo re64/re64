@@ -57,7 +57,7 @@ describe("joining a project", () => {
     // The order is the opposite of what it was: the browser cannot know which
     // files a project references until the document has arrived.
     const session = await open();
-    expect(session.debug().blobs.map((b) => b.path)).toEqual(["gridrunner.prg"]);
+    expect(session.debug().blobs.map((b) => b.path)).toEqual([session.loaded.project.files?.find(f => f.id === session.loaded.project.layers.find(l => l.file)?.file)?.hash]);
     session.close();
   });
 

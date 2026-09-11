@@ -174,9 +174,9 @@ describe("building a project from a disk image", () => {
 
     const exported = JSON.parse(camels.exportProject().text);
     expect(exported.files).toEqual([
-      { name: "tiny.prg", hash: expect.any(String), size: 5 },
+      { id: expect.any(String), name: "tiny.prg", hash: expect.any(String), size: 5 },
     ]);
-    expect(exported.layers[0]).toMatchObject({ type: "prg", path: "tiny.prg" });
+    expect(exported.layers[0]).toMatchObject({ type: "prg", file: exported.files[0].id });
   });
 
   it("puts a rom layer in the export too", () => {

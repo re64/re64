@@ -23,8 +23,12 @@ investigation tasks.
    range before adding an interpretation. Read reported scope and warnings as
    part of the result.
 4. For a new binary, start with `create_project`, `prepare_upload` and
-   `add_layer`; use `list_disk_files` to select a member of a disk image.
-   Follow the upload instructions returned by the API.
+   `add_byte_layer`. Follow the upload instructions returned by the API, then
+   pass the upload response's `file` id as the layer's `path` argument.
+   `list_disk_files` accepts a file id and returns a separate `member` selector
+   for a D64 layer. `list_files` discovers ids; `rename_file` changes display
+   metadata without retargeting layers or captures. A filename works as an alias
+   only when unique in your session; repeated upload names require ids.
 
 A packed executable, decrunched memory and a patched variant can require
 different targets. Choose the arrangement the question concerns; the same

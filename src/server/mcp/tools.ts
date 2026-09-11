@@ -2541,7 +2541,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     "create_project",
     "Start a project. The first step when you have been handed a binary and no " +
       "project. Follow it with prepare_upload to put the file in, " +
-      "list_disk_files if it is a .d64, and add_layer to make something " +
+      "list_disk_files if it is a .d64, and add_byte_layer to make something " +
       "disassemblable.\n" +
       "`platform: \"c64\"` declares the KERNAL, BASIC and character ROMs so the " +
       "machine is there to resolve through — what $FFD2 is, what a JSR into " +
@@ -2567,10 +2567,10 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     "Get a URL to PUT a binary to. Bytes go over HTTP rather than through a " +
       "tool argument, because a disk image is ~175KB and base64 of it would be " +
       "tens of thousands of tokens for a file you never need to read. The URL " +
-      "is good once and expires. The name is what layers will refer to it by.",
+      "is good once and expires. The response carries a new file id for layer references; names are display metadata.",
     {
       project,
-      name: z.string().min(1).describe('What layers will call it, e.g. "revenge.d64"'),
+      name: z.string().min(1).describe('Display name, e.g. "revenge.d64"; duplicates are allowed'),
     },
     ({ project: id, name  }: { project?: string; name: string  }) => {
       const { workspace, caller } = context();
@@ -2579,10 +2579,30 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   );
 
   tool(
+    "list_files", "Files in this participant's document, with ids, names and recorded content hashes.",
+    { project }, ({ project: id }: { project?: string }) => context().workspace(id).files());
+  tool(
+    "remove_file", "Remove a file record by id or locally unique name. References remain dangling; bytes are retained.",
+    { project, file: z.string().min(1) }, ({ project: id, file }: { project?: string; file: string }) => {
+      const { workspace, caller } = context();
+      return workspace(id).removeFile(caller, file);
+    });
+
+  tool(
+    "rename_file",
+    "Rename a file by id (or a locally unique name), keeping its bytes and every reference unchanged.",
+    { project, file: z.string().min(1), name: z.string().min(1) },
+    ({ project: id, file, name }: { project?: string; file: string; name: string }) => {
+      const { workspace, caller } = context();
+      return workspace(id).renameFile(caller, file, name);
+    }
+  );
+
+  tool(
     "list_disk_files",
     "The directory of a .d64 disk image this project holds — what is on the " +
-      "disk, and the path to give add_layer for each entry.",
-    { project, name: z.string().min(1).describe("The image, as uploaded") },
+      "disk, with the file id and member selector to give add_byte_layer.",
+    { project, name: z.string().min(1).describe("File id or locally unique name of the uploaded image") },
     ({ project: id, name  }: { project?: string; name: string  }) =>
       context().workspace(id).diskFiles(name)
   );
@@ -2590,8 +2610,8 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   tool(
     "add_byte_layer",
     "Add a layer over bytes — which is what turns an uploaded binary into " +
-      "something to disassemble. `path` is the file's name, or " +
-      '"image.d64:FILE" for one inside a disk image. A .prg carries its load ' +
+      "something to disassemble. `path` accepts a file id or locally unique name; " +
+      "`member` selects a D64 entry. Legacy image.d64:FILE is also accepted. A .prg carries its load " +
       "address in its first two bytes; a raw layer needs one given. Type " +
       '"bytes" takes the bytes inline instead of a file, at an address you ' +
       "give: a patch, a poked value, a hand-assembled shim. Link the layer " +
@@ -2599,7 +2619,8 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     {
       project,
       type: z.enum(["prg", "raw", "bytes"]),
-      path: z.string().min(1).optional().describe("The file, for prg and raw"),
+      path: z.string().min(1).optional().describe("File id or locally unique name, for prg and raw; legacy image.d64:ENTRY also accepted"),
+      member: z.string().min(1).optional().describe("Entry within a D64 file; separate from its id"),
       bytes: z
         .string()
         .optional()
@@ -2617,6 +2638,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       project?: string;
       type: "prg" | "raw" | "bytes";
       path?: string;
+      member?: string;
       bytes?: string;
       name?: string;
       address?: number;
@@ -2627,6 +2649,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       return space.addByteLayer(caller, {
         type: args.type,
         ...(args.path === undefined ? {} : { path: args.path }),
+        ...(args.member === undefined ? {} : { member: args.member }),
         ...(args.bytes === undefined ? {} : { bytes: args.bytes }),
         ...(args.name === undefined ? {} : { name: args.name }),
         ...(args.address === undefined ? {} : { address: args.address }),
