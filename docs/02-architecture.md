@@ -120,7 +120,10 @@ atomic, and receiving an update is not the same event as committing it durably.
 and the server records user/session attribution. **Unresolved:** a consistent
 visibility policy across every MCP read, edit and undo path is tracked in
 [#28](https://github.com/re64/re64/issues/28). Existing session behavior must not
-be treated as a settled specification. The next document states the sync and
+be treated as a settled specification. [#35](https://github.com/re64/re64/pull/35)
+proposes a repair; when it lands, update this section, the status table below
+and contract S1 to describe the merged behavior and its verification.
+The next document states the sync and
 durability obligations using these terms.
 
 ## 6. Status and design boundaries
