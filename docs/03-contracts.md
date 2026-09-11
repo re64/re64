@@ -23,6 +23,12 @@ selected target and any resolved references belong to that operation's context.
 A concurrent request must not replace them. A session's read/merge policy must
 be explicit and consistent across reads, edits and undo; #28 tracks the current
 gap. This does not choose automatic versus deferred receipt of others' edits.
+*Origin:* R1 ([#21](https://github.com/re64/re64/pull/21)): caller identity was
+a server-global closure reassigned per request, so overlapping requests could
+record one user's claim under another user. [#28](https://github.com/re64/re64/issues/28)
+found a second split: `document()` read the session replica while `program()`,
+`load()` and `version()` read the room. [#35](https://github.com/re64/re64/pull/35)
+proposes the session repair; it is not yet merged.
 *Verification:* `server/mcp/transport.test.ts`, `core/claims/offline.test.ts`;
 complete session consistency remains open.
 
@@ -31,18 +37,32 @@ An offline edit can exist locally before the server persists it. A successful
 durable-write receipt must describe committed work. A rolled-back write must
 not remain the served state or be delivered as a committed update; a failing
 subscriber must not turn a committed write into a reported failure.
+*Origin:* R9 ([#25](https://github.com/re64/re64/pull/25)): `runOps` published
+before commit, so rollback could not recall the update. Follow-up review found
+that a listener throwing after commit reported a failed write, and that a
+listener's own failed transaction could publish its rolled-back update.
 *Verification:* `store/project-store.test.ts`, `server/write-paths.test.ts`.
 
 **S3 · Equal replicated state has one canonical projection.** Arrival order,
 locale and presentation preferences must not change serialized state used for
 versions. Sequences whose order is part of the data retain that order. This is
 independent of whether two participants agree with the interpretations stored.
+*Origin:* R14 ([#16](https://github.com/re64/re64/pull/16)): `NaN - NaN` left
+seven roots in insertion order. Choosing numeric or textual comparison per pair
+then produced a cycle (`9 < $10 < $ZZ < 9`). Finally, `localeCompare` ordered
+`fld_ä` and `fld_z` differently across locales and treated distinct composed and
+decomposed Unicode ids as equal, preserving their arrival order.
 *Verification:* `core/crdt/concurrency.test.ts`, `core/crdt/roundtrip.test.ts`.
 
 **S4 · Undo reverses an action without inventing a conflict or hiding a real one.**
 Action grouping and attribution must survive every write path. Undo and redo
 preserve unrelated edits, report operations they skip and compare values rather
 than incidental object-key order. They do not rewind the entire shared document.
+*Origin:* R10 ([#19](https://github.com/re64/re64/pull/19)): socket history
+paired forward and inverse operations by array index and lost session/action
+grouping. R13 ([#17](https://github.com/re64/re64/pull/17)) also exposed undo
+refusing unchanged provenance as another writer's edit: replay had only moved
+an object key, but text comparison treated it as a conflict.
 *Verification:* `store/project-store.test.ts`, `server/mcp/transport.test.ts`.
 
 **S5 · Migration preserves identity, contributions and usable history.** A
@@ -50,6 +70,13 @@ stored snapshot needs migration just as an imported file does. Later operations
 must be able to reference migrated entities after restart. Compatibility rules
 for recorded operations must be explicit; a new shape cannot silently reinterpret
 old undo history.
+*Origin:* the field and binding repairs
+([#23](https://github.com/re64/re64/pull/23),
+[#24](https://github.com/re64/re64/pull/24)) initially migrated imported files
+without migrating persisted database snapshots. Existing fields and bindings
+therefore remained unreachable through the new operation shapes after restart.
+Older history rows also failed under the new shapes; compatibility had to
+preserve their original operation semantics, including child replacement.
 *Verification:* `core/crdt/doc.test.ts`, `core/crdt/roundtrip.test.ts`,
 `store/project-store.test.ts`.
 
@@ -60,6 +87,11 @@ and scenario checkpoints must account for their actual target, resources, ROMs
 and rendering inputs. Changing an input must not preserve a stale passing check.
 The immutable-reference design is still #27; a document version alone is not an
 execution fingerprint.
+*Origin:* R7 ([#20](https://github.com/re64/re64/pull/20)): replacing a ROM
+changed the execution fingerprint while a reused workspace still ran its old
+memory map. R8 ([#22](https://github.com/re64/re64/pull/22)): a missing recorded
+blob fell through to a filename lookup, serving different bytes under the
+recorded hash's ETag.
 *Verification:* `store/blobs.test.ts`, `server/database-mode.test.ts`,
 `server/building.test.ts`, `core/machine/scenario.test.ts`.
 
@@ -141,7 +173,7 @@ is gone"), `core/project/links.test.ts`, `server/building.test.ts`, and
 is taken away").
 
 **A7 · The domain never sees a CRDT type.** `yjs` in `src/core/crdt` only;
-`y-websocket` in `src/ui/doc-client.ts` only. That last one is what keeps the
+`y-websocket` in `src/client/doc-client.ts` only. That last one is what keeps the
 transport replaceable.
 *Pinned:* `core/crdt/boundary.test.ts`.
 
