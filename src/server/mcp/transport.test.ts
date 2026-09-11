@@ -2763,6 +2763,119 @@ describe("a session reads its own copy of the document", () => {
   });
 });
 
+describe("one document behind every read a session makes", () => {
+  /**
+   * **`document()` read the session's copy; `program()`, `load()`, the cache key
+   * and `version()` read the room's.** So a document-level answer was stable
+   * while a view-bound one — `claims_at`, the listing, the machine — showed
+   * everyone's unmerged work at once, and the version in an answer named
+   * neither. And a session's own writes were replayed into its copy as
+   * independent items, so the store's undo tombstoned the room's item and the
+   * copy kept its own: a session could undo and go on seeing what it had taken
+   * back. Both halves are one rule now — one selected document, and writes
+   * that go through the copy first so both documents hold the same items.
+   */
+  const as = async (session: string, name: string, args: Record<string, unknown> = {}) => {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "x-re64-user": "usr_agent",
+        "x-re64-session": session,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name, arguments: args },
+      }),
+    });
+    const text = await res.text();
+    const line = text.split("\n").find((l) => l.startsWith("data: ")) ?? text;
+    const reply = JSON.parse(line.replace(/^data: /, "")) as {
+      result: { content: { text: string }[]; isError?: boolean };
+    };
+    const body = reply.result.content[0].text;
+    const isError = reply.result.isError === true;
+    return { isError, text: body, value: (isError ? undefined : JSON.parse(body)) as never };
+  };
+  const namesAt = async (session: string, address: string) =>
+    ((await as(session, "claims_at", { address })).value as { claims: { name?: string }[] }).claims
+      .map((c) => c.name)
+      .filter((n) => n !== undefined);
+  const typeNames = async (session: string) =>
+    ((await as(session, "list_types", {})).value as { types: { name: string }[] }).types.map(
+      (t) => t.name
+    );
+
+  it("keeps a view-bound read as stable as a document-level one", async () => {
+    await as("ses_bob1", "list_types", {});
+    const claim = await as("ses_alice1", "add_claim", { address: "$8F30", name: "AliceOnly" });
+    expect(claim.isError, claim.text).toBe(false);
+    const type = await as("ses_alice1", "add_type", { name: "AliceType", size: 2, fields: {} });
+    expect(type.isError, type.text).toBe(false);
+
+    // Neither kind of read shows Bob what Alice did until Bob asks.
+    expect(await namesAt("ses_bob1", "$8F30")).not.toContain("AliceOnly");
+    expect(await typeNames("ses_bob1")).not.toContain("AliceType");
+    // Alice sees both at once, being her own.
+    expect(await namesAt("ses_alice1", "$8F30")).toContain("AliceOnly");
+    expect(await typeNames("ses_alice1")).toContain("AliceType");
+
+    await as("ses_bob1", "merge", {});
+    expect(await namesAt("ses_bob1", "$8F30")).toContain("AliceOnly");
+    expect(await typeNames("ses_bob1")).toContain("AliceType");
+  });
+
+  it("shows a session its own undo everywhere, without importing anyone else's work", async () => {
+    await as("ses_alice2", "list_types", {});
+    const bobs = await as("ses_bob2", "add_claim", { address: "$8F40", name: "BobPending" });
+    expect(bobs.isError, bobs.text).toBe(false);
+
+    const mine = await as("ses_alice2", "add_claim", { address: "$8F50", name: "AliceUndone" });
+    expect(mine.isError, mine.text).toBe(false);
+    expect(await namesAt("ses_alice2", "$8F50")).toContain("AliceUndone");
+
+    const undone = await as("ses_alice2", "undo", {});
+    expect(undone.isError, undone.text).toBe(false);
+    // The whole action — the claim and the `supports` record `add_claim` minted
+    // with it — and nothing left alone as "changed by someone else".
+    const outcome = undone.value as { undone: string | null; skipped: unknown[] };
+    expect(outcome.undone).toBeTruthy();
+    expect(outcome.skipped).toEqual([]);
+
+    // Gone from the view-bound read and from the document-level one alike...
+    expect(await namesAt("ses_alice2", "$8F50")).not.toContain("AliceUndone");
+    const listed = await as("ses_alice2", "list_claims", {});
+    expect(listed.isError, listed.text).toBe(false);
+    expect(listed.text).not.toContain("AliceUndone");
+    // ...and Bob's work is still waiting rather than having been folded in.
+    expect(await namesAt("ses_alice2", "$8F40")).not.toContain("BobPending");
+    const still = (await as("ses_alice2", "list_types", {})).value as {
+      pending?: { operations: number };
+    };
+    expect(still.pending?.operations).toBeGreaterThan(0);
+  });
+
+  it("names, in every answer, the state that answer was derived from", async () => {
+    const before = (await as("ses_bob3", "describe_project", {})).value as { version: string };
+    const wrote = (await as("ses_alice3", "add_claim", { address: "$8F60", name: "Versioned" }))
+      .value as { version: string };
+    const alice = (await as("ses_alice3", "describe_project", {})).value as { version: string };
+    const bob = (await as("ses_bob3", "describe_project", {})).value as { version: string };
+
+    // Alice's write and Alice's next read name one state; Bob's read names his.
+    expect(alice.version).toBe(wrote.version);
+    expect(bob.version).toBe(before.version);
+    expect(bob.version).not.toBe(alice.version);
+
+    await as("ses_bob3", "merge", {});
+    const after = (await as("ses_bob3", "describe_project", {})).value as { version: string };
+    expect(after.version).toBe(alice.version);
+  });
+});
+
 describe("two requests overlapping keep their own identities", () => {
   /**
    * **The caller was a server-global closure**, reassigned at the top of each

@@ -85,6 +85,7 @@ import {
   projectFromDoc,
   stateVectorOf,
   updateSince,
+  applyOpsToDoc,
 } from "../core/crdt/index.js";
 import { runDecoder } from "../sandbox/run.js";
 import { renderTextWith } from "../sandbox/sync.js";
@@ -154,7 +155,13 @@ export interface ClaimInput {
  * directly, which is what the rest of this should eventually do too.
  */
 
-import { FileStorage, ProjectStore, SqliteStorage } from "../store/index.js";
+import {
+  FileStorage,
+  ProjectStore,
+  SqliteStorage,
+  versionOf,
+  type WriteThrough,
+} from "../store/index.js";
 import { nodeFileBytes, nodeRomBytes } from "../node-files.js";
 import { MAX_UPLOAD_BYTES, uploadTokens } from "./uploads.js";
 import { runProgram } from "../core/il/program.js";
@@ -237,6 +244,12 @@ export interface SessionReplica {
   cursor: number;
   /** Whose it is, so its own writes never read as waiting for it. */
   session: string;
+  /**
+   * Moves whenever this copy does — its own writes and its merges alike. The
+   * analysis cache is keyed on it the way a room-level workspace keys on the
+   * store's counter, so a stale answer cannot outlive the state it came from.
+   */
+  changed: number;
 }
 
 export interface Room {
@@ -428,7 +441,7 @@ export class Workspace {
    */
   private key(): string {
     const { store, storage } = this.room;
-    const project = projectFromDoc(store.document());
+    const project = projectFromDoc(this.reading());
 
     const fingerprint = blobPaths(project)
       .map((name) =>
@@ -446,8 +459,12 @@ export class Workspace {
     // Confirming costs a `JSON.stringify` of the projection, and only when the
     // counter has moved — the hit path stays free, which is the whole reason
     // the counter was preferred to a content hash in the first place.
-    if (store.docVersion !== this.seenVersion) {
-      this.seenVersion = store.docVersion;
+    // The counter of whichever document this workspace answers from: a
+    // session's own copy moves on its writes and its merges, a room-level
+    // workspace on the store's.
+    const docVersion = this.room.replica?.changed ?? store.docVersion;
+    if (docVersion !== this.seenVersion) {
+      this.seenVersion = docVersion;
       const projection = JSON.stringify(project);
       if (projection !== this.seenProjection) {
         this.seenProjection = projection;
@@ -575,13 +592,14 @@ export class Workspace {
 
 
   private load(): LoadedProject {
-    const { store, storage, projectPath } = this.room;
-    // **The room's document, not this session's copy** — and that is a known
-    // inconsistency rather than a decision. `document()` answers from the
-    // replica, so a document-level read is stable while a view-bound one is not.
-    // Closing it needs every path that mutates the room to reach the replica,
-    // which undo did not, and it is stage-3 work rather than this change's.
-    const project = projectFromDoc(store.document());
+    const { storage, projectPath } = this.room;
+    // **The document this session answers from, for the view as much as for the
+    // document.** This read the room's document while `document()` read the
+    // session's copy, so a document-level answer was stable and a view-bound
+    // one — `claims_at`, the listing, the machine — showed everyone's unmerged
+    // work at once, and the version in the answer named neither. One selected
+    // document now, everywhere: `reading()`.
+    const project = projectFromDoc(this.reading());
     // Blobs come from wherever this project keeps them; a plain project file
     // names files on disk beside it, a database carries them. The document's
     // hash decides which bytes a name stands for — the SQL name table is
@@ -651,11 +669,14 @@ export class Workspace {
     );
   }
 
-
-
-  /** Content-addressed, for anything crossing a process boundary. */
+  /**
+   * Content-addressed, for anything crossing a process boundary.
+   *
+   * Of the document this workspace answers from — so a session's answer names
+   * the state it was derived from, not whatever the room held at the time.
+   */
   version(): string {
-    return this.room.store.version();
+    return versionOf(this.reading());
   }
 
   // --- reads ----------------------------------------------------------
@@ -870,7 +891,7 @@ export class Workspace {
     const tag = {
       name: trimmed,
       cursor: storage.opsCursor(),
-      version: this.room.store.version(),
+      version: this.version(),
       at: Date.now(),
       ...(caller.label ? { author: caller.label } : {}),
       ...(note ? { note } : {}),
@@ -904,7 +925,7 @@ export class Workspace {
     if (!(storage instanceof SqliteStorage)) return { total: 0, tags: [] };
 
     const now = storage.opsCursor();
-    const version = this.room.store.version();
+    const version = this.version();
     const tags = storage.tags().map((tag) => ({
       name: tag.name,
       at: new Date(tag.at).toISOString(),
@@ -6049,15 +6070,15 @@ export class Workspace {
   /**
    * Take back this session's most recent action.
    *
-   * The store applies the inverses to the room's document, so the session's own
-   * copy has to be told — it is *this* caller's undo, and a caller that could
-   * not see its own undo would be the one thing a deferred inbox must never do.
-   * Rather than replay the inverses here, the replica takes everything the room
-   * now has: undoing is an explicit act, so folding in whatever else arrived
-   * alongside is the honest reading of it rather than a surprise.
+   * Through the session's own copy, like any other write of its own — it is
+   * *this* caller's undo, and a caller that could not see its own undo would be
+   * the one thing a deferred inbox must never do. It used not to reach the
+   * replica at all: the store tombstoned the room's item, the replica held an
+   * independent one, and the session went on seeing what it had just taken
+   * back through every document-level read.
    */
   undo(caller: Caller): { undone: string | null; version: string } {
-    const outcome = this.room.store.undo(caller.userId, caller.sessionId);
+    const outcome = this.room.store.undo(caller.userId, caller.sessionId, this.through());
     return { ...outcome, version: this.version() };
   }
 
@@ -6165,27 +6186,39 @@ export class Workspace {
       ops,
       caller.userId,
       Date.now(),
-      caller.sessionId
+      caller.sessionId,
+      undefined,
+      this.through()
     );
-    this.alsoToReplica(ops);
     return { ok: true, version: this.version(), did: descriptions };
   }
 
   /**
-   * Put this session's own writes into its own copy.
+   * How this session's writes reach the shared document: through its own copy.
    *
-   * **Only the inbox is deferred.** A write applies here and propagates at once,
-   * so "add a constant, then use it" batches — the session knows what it just
-   * made. What it does *not* do is take in anybody else's work, which is the
-   * whole point: a name resolves against what this participant knows, and that
-   * must not move under it between two calls of one action.
+   * **Only the inbox is deferred.** A write applies to the session's copy first
+   * and the exact update that produced is what the store merges, so "add a
+   * constant, then use it" batches — the session knows what it just made — and
+   * the two documents hold the *same* items, which is what lets an undo of the
+   * room's item reach the copy. Replaying the operations into each separately
+   * made two items for one key, and a delete of one never touched the other.
+   * What it does *not* do is take in anybody else's work: a name resolves
+   * against what this participant knows, and that must not move under it
+   * between two calls of one action.
+   *
+   * Absent for a workspace with no session — the CLI, a test — which writes
+   * the room's document directly, as before.
    */
-  private alsoToReplica(ops: readonly Op[]): void {
+  private through(): WriteThrough | undefined {
     const replica = this.room.replica;
-    if (!replica) return;
-    for (const op of ops) applyOpToDoc(replica.doc, op, replica.session);
-    this.cached = undefined;
-    this.cachedRows = undefined;
+    if (!replica) return undefined;
+    return (ops) => {
+      const before = stateVectorOf(replica.doc);
+      applyOpsToDoc(replica.doc, ops, replica.session);
+      this.cached = undefined;
+      this.cachedRows = undefined;
+      return updateSince(replica.doc, before);
+    };
   }
 
   private edit(
@@ -6206,9 +6239,9 @@ export class Workspace {
       caller.sessionId,
       // The layer starts this workspace already resolved, so a receipt can say
       // the address the caller passed rather than the offset it was stored at.
-      new Map(loaded.map.getLayers().map((l): [string, number] => [l.id, l.start]))
+      new Map(loaded.map.getLayers().map((l): [string, number] => [l.id, l.start])),
+      this.through()
     );
-    this.alsoToReplica(ops);
     const after = this.program().instructions.size;
 
     // What this edit broke, if it broke anything.
