@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Workspace, Caller } from "./workspace.js";
@@ -69,6 +69,69 @@ function upload(projectId: string, name: string, bytes: Uint8Array): Workspace {
   space.noteUploadedFile(builder, name, hash, bytes.length);
   return space;
 }
+
+describe("a replaced ROM reaches the next run", () => {
+  /**
+   * **The fingerprint named the new ROM while the map was built over the old.**
+   * `executionFingerprint` reread the host's files, but `program()` served a map
+   * cached under a key that knew nothing about ROM content — so replacing a
+   * KERNAL changed the checkpoint key without changing the machine, and a new
+   * checkpoint recorded a check that passed against bytes it never ran on. A
+   * fresh workspace over the same store disagreed, which is how it showed.
+   *
+   * A synthetic KERNAL in a temporary working directory, since the real ones are
+   * not in this repository and must not be touched.
+   */
+  it("fails a check the old bytes passed, in the same workspace and a fresh one alike", () => {
+    const home = process.cwd();
+    const host = mkdtempSync(join(tmpdir(), "re64-rom-fresh-"));
+    const romDir = join(host, "3party", "roms");
+    mkdirSync(romDir, { recursive: true });
+    const romPath = join(romDir, "kernal.901227-03.bin");
+    const image = (first: number) => {
+      const bytes = new Uint8Array(8192);
+      bytes[0] = first;
+      return bytes;
+    };
+    writeFileSync(romPath, image(1));
+    process.chdir(host);
+    let fresh: { space: Workspace; storage: SqliteStorage } | undefined;
+    try {
+      ws.createProject("romfresh");
+      const space = workspaceFor("romfresh").space;
+      space.addRomLayer(builder, "kernal");
+      const made = space.addScenario(builder, "first byte", [
+        { kind: "assert", memory: { "$E000": 1 } } as never,
+      ]);
+      const passed = () =>
+        (space.runScenario(builder, made.scenario) as { passed?: boolean }).passed;
+      expect(passed()).toBe(true);
+
+      // The host's KERNAL changes; the document, view and placements do not.
+      writeFileSync(romPath, image(2));
+      expect(passed()).toBe(false);
+
+      // And a workspace with no cache to be stale agrees.
+      const storage2 = new SqliteStorage(databasePath, "romfresh");
+      fresh = {
+        space: new Workspace({
+          store: new ProjectStore(storage2),
+          storage: storage2,
+          projectId: "romfresh",
+          projectPath: databasePath,
+        }),
+        storage: storage2,
+      };
+      expect(
+        (fresh.space.runScenario(builder, made.scenario) as { passed?: boolean }).passed
+      ).toBe(false);
+    } finally {
+      process.chdir(home);
+      fresh?.storage.close();
+      rmSync(host, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("building a project from a disk image", () => {
   it("goes from nothing to a decoding program", () => {
