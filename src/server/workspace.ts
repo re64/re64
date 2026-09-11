@@ -85,6 +85,7 @@ import {
   stateVectorOf,
   updateSince,
   applyOpsToDoc,
+  docFromUpdates,
 } from "../core/crdt/index.js";
 import { runDecoder } from "../sandbox/run.js";
 import { renderTextWith } from "../sandbox/sync.js";
@@ -159,6 +160,7 @@ import {
   ProjectStore,
   SqliteStorage,
   versionOf,
+  type UndoOutcome,
   type WriteThrough,
 } from "../store/index.js";
 import { nodeFileBytes, nodeRomBytes } from "../node-files.js";
@@ -6057,7 +6059,7 @@ export class Workspace {
    * independent one, and the session went on seeing what it had just taken
    * back through every document-level read.
    */
-  undo(caller: Caller): { undone: string | null; version: string } {
+  undo(caller: Caller): UndoOutcome & { version: string } {
     const outcome = this.room.store.undo(caller.userId, caller.sessionId, this.through());
     return { ...outcome, version: this.version() };
   }
@@ -6192,12 +6194,29 @@ export class Workspace {
   private through(): WriteThrough | undefined {
     const replica = this.room.replica;
     if (!replica) return undefined;
-    return (ops) => {
-      const before = stateVectorOf(replica.doc);
-      applyOpsToDoc(replica.doc, ops, replica.session);
-      this.cached = undefined;
-      this.cachedRows = undefined;
-      return updateSince(replica.doc, before);
+    return {
+      document: () => replica.doc,
+      stage: (ops) => {
+        // **On a clone, so a failed write leaves the copy exactly as it was.**
+        // The clone is the copy's state under the copy's own client id, so the
+        // items it makes are the ones the copy would have made, and applying
+        // them to the copy afterwards continues its own clock. Encoding the
+        // copy per write is the cost; a shadow clone kept in step would remove
+        // it, and is not worth building until a run says so.
+        const clone = docFromUpdates([encodeDoc(replica.doc)]);
+        clone.clientID = replica.doc.clientID;
+        const before = stateVectorOf(clone);
+        applyOpsToDoc(clone, ops, replica.session);
+        const update = updateSince(clone, before);
+        return {
+          update,
+          commit: () => {
+            applyUpdate(replica.doc, update, replica.session);
+            this.cached = undefined;
+            this.cachedRows = undefined;
+          },
+        };
+      },
     };
   }
 
