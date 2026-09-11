@@ -234,9 +234,15 @@ address order".
 *Pinned:* `core/analysis/blocks.test.ts` — "keeps the second reading as its own stream", "does not call a main-decode block an alternate".
 
 **B6 · Scope is derived, never chosen.** The topmost layer in the current target
-supplying that byte, else the target. Total, so no write can fail on it.
+supplying that byte owns a newly placed claim; without one, the current default
+is address-space scope. Explicit target frames remain representable. See the
+[model reference](05-model.md#4-claims-and-frames) for the coordinate shapes and
+the open question of exposing explicit target framing to writers.
 *Origin:* the only reachable power of a `scope:` argument is to bind a claim to a
 layer that does not supply those bytes — the exact bug layer ownership prevents.
+The former target fallback was superseded: names for unowned bytes such as
+zero-page variables disappeared from other arrangements of the same program.
+`placed` now uses address-space scope when there is no byte owner.
 *Pinned:* `server/mcp/transport.test.ts` — "says what a claim belongs to, without being asked to choose".
 
 **B7 · Claims are stored relative to their layer; offsets never cross the wire.**

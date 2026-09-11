@@ -37,12 +37,16 @@ its content — the opposite of a field or a binding, where position was
 masquerading as identity.
 
 **Being nested does not make something a lesser entity.** A field lives inside a
-type and a capture inside a scenario, but each has its own id and its own three
-verbs, because the alternative is what `edit_type` used to do: carry the whole
-field list, so two writers editing different fields of the same record lose one
+type; a capture references a scenario from its own collection. Each has its own
+id and its own three verbs, because the alternative is what `edit_type` used
+to do: carry the whole field list, so two writers editing different fields of the same record lose one
 of the edits, and a caller who omits a field cannot be distinguished from one
 who meant to remove it. The containing entity's `set` therefore never carries
-its children — it names the parent's own fields and nothing else.
+its independently editable children — it names the parent's own fields.
+An ordered value can have a different boundary: `scenario.set.steps` replaces
+the complete script. Step ids identify capture sources but do not establish
+independent step edit operations. See the
+[scenario representation](05-model.md#6-scenarios-and-captures).
 
 **Every meaningful entity has an id, and the id is the only handle.** No
 exceptions, including targets. A name is a field somebody chose and may change;
@@ -120,9 +124,13 @@ a field edit. Add and remove is complete for an immutable thing.
 
 ## The project's own fields
 
-**`meta.set`.** `name`, `description`, `defaultTarget` — a fixed set of scalars
+**`meta.set`.** `name`, `description` — a fixed set of scalars
 on the project itself, not a collection. It is the degenerate case of Shape 2
 with a closed key set, and an absent value clears.
+
+Target selection is request/client context, not project metadata. The document
+also preserves `entryPoints`, but the current `MetaSetOp` does not expose that
+field. See the [model reference](05-model.md#2-document-roots).
 
 ---
 

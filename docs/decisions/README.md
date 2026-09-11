@@ -71,3 +71,31 @@ that treated the developer guide as the first specification to read.
 
 This archive retains its subject filenames and historical arguments. Links were
 updated for the new paths; those navigation edits do not revise earlier decisions.
+
+## Reference boundaries — 2026-09-11
+
+The first numbering pass still left two introductions to the model: the guide
+listed roots, schemas and laws, while the reference mixed those with workflows
+and repair narratives. That made the reader reconcile repeated statements about
+frames, session visibility and target selection before using the system.
+
+The developer guide now owns worked tasks. The model reference owns current
+data shapes, representation mappings and readers. Architecture owns vocabulary,
+replica ownership and the documentation ownership table. Contracts retain their
+stable identifiers and short bug origins; the algebra owns edit semantics.
+The older long-form [guide](https://github.com/re64/re64/blob/8754cbe/docs/04-developer-guide.md)
+and [model reference](https://github.com/re64/re64/blob/8754cbe/docs/05-model.md)
+remain available at that revision as historical accounts, not current specifications.
+Related reasoning lives in [document](document.md), [claims](claims.md),
+[types](types.md) and [machine](machine.md) decisions; the repair round and probes
+remain in the [review record](../../experiments/codex-review/REVIEW.md).
+
+The [shared architecture discussion](https://chatgpt.com/share/6aa4512f-ff50-83eb-8091-0f044396e0af)
+helped identify these boundaries. Its proposed sync contract is not adopted as
+a second rulebook. Local duplicate names remain legal under A2; only ambiguous
+selector resolution is refused. Retained blobs and operation history have
+separate authority, and a local transaction does not establish distributed
+atomicity. `Target` and `projection` remain the current terms, with their
+meanings clarified rather than renamed. Human concepts need not become CRDT
+entities. Mechanical enforcement and broader mutation-path audits remain work
+to scope separately; this pass changes documentation, not the implementation.

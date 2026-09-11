@@ -39,8 +39,8 @@ person reading the same code see each other's work as it happens.
 | [01 · Manifest](docs/01-purpose.md) | goals and both outputs |
 | [02 · Architecture and vocabulary](docs/02-architecture.md) | concepts, components and design status |
 | [03 · Contracts](docs/03-contracts.md) | sync rules and other obligations, with verification points |
-| [04 · Developer guide](docs/04-developer-guide.md) | practical workflows |
-| [05 · Model reference](docs/05-model.md) | data shapes and known tensions |
+| [04 · Developer guide](docs/04-developer-guide.md) | investigation, editorial and implementation workflows |
+| [05 · Model reference](docs/05-model.md) | current data shapes, representation mappings and readers |
 | [06 · Operation algebra](docs/06-algebra.md) | edit semantics |
 | [07 · MCP API](docs/07-api.md) | generated reference; edit its generator, then regenerate |
 | [08 · Experiments](docs/08-experiments.md) | observations from investigations and editorial work |
@@ -49,6 +49,10 @@ person reading the same code see each other's work as it happens.
 Read 01–03 in order before changing a design contract. Use the later references
 for the subsystem being changed. A planned capability or historical decision
 is not a statement that the implementation already supports it.
+
+Follow the documentation ownership table in 02: examples belong in 04, current
+shapes in 05, obligations in 03 and edit semantics in 06. Link across those
+boundaries instead of writing a second specification of the same fact.
 
 `docs/decisions/` is where the reasoning went. It is **append-only history**: an
 entry keeps its text and gains a note when superseded, because the value of a

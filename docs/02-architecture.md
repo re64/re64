@@ -39,6 +39,21 @@ whether article drafts belong in the project CRDT, separate documents or files.
 
 ## 2. Concepts and names
 
+The vocabulary spans several concerns. Naming a concept does not imply that it
+needs a new entity, persistent id or CRDT root:
+
+| Concern | Terms used here | Where their details belong |
+|---|---|---|
+| Purpose and product | Software archaeology, investigation, article, published edition | Manifest and product direction in this architecture |
+| Domain knowledge | Project, layer, target, claim, evidence, type | Concept definitions here; current data shapes in the model reference |
+| Collaboration | Participant, replica, operation, changeset, merge | Ownership here; obligations in the contracts |
+| Runtime and representation | MCP session, browser tab, room, workspace, Y.Doc, Project projection | Components and ownership here; storage mappings in the model reference |
+
+An article is a product concept with an unresolved representation. A replica is
+an independently editable copy, not an extra entity within the knowledge it
+holds. A project is the domain body of knowledge; a Y.Doc represents one copy
+of its shared state. Those meanings should not be used interchangeably.
+
 | Concept | Meaning |
 |---|---|
 | **Artifact** | Material being investigated: a program file, disk image, memory dump or related historical source. |
@@ -61,6 +76,11 @@ whether article drafts belong in the project CRDT, separate documents or files.
 Use **target** for the selected memory arrangement. The existing claim field
 named `view` means a rendering format, such as `char:8` or `sprite`; it does not
 select a target. Avoid using an unqualified “view” where either meaning fits.
+Targets may distinguish shipped, decrunched, loader-stage or patched program
+images; these can contain different bytes, rather than merely present the same
+bytes differently. Keep `Target` as the current model/API term. “Program image”
+is a useful description of some arrangements, not a schema rename or an entity
+that this document introduces.
 
 ## 3. State and representations
 
@@ -82,6 +102,15 @@ database history or every external input. A document version identifies a
 projection; it is not by itself an execution fingerprint or a publication
 version. Derived caches are disposable, while a capture deliberately retained
 as evidence is a persistent artifact.
+
+Use **projection** for the plain data derived from a document, **database
+snapshot** for persisted CRDT state used in reconstruction, and **machine
+checkpoint** for cached execution state. Calling all three a snapshot would
+hide their different inputs and persistence requirements. The shared document
+is authoritative for mergeable knowledge; blobs and durable operation history
+have separate persistence responsibilities. They cannot all be reconstructed
+from the current project projection. Disposable caches must be distinguished
+from these retained resources.
 
 ## 4. Components and responsibilities
 
@@ -109,6 +138,21 @@ attributes contributions. A **session** identifies one period or channel of
 work; it is not a user, a target or a saved machine. A **replica** is a local
 copy of shared state. A server **room** coordinates access to one project, and
 a **workspace** provides domain workflows with a particular request context.
+
+The current ownership relationships are:
+
+| Owner/context | State held | Implementation anchor |
+|---|---|---|
+| Browser/client session | Local document replica and synchronization connection | `src/client/session.ts`, `src/client/doc-client.ts` |
+| MCP session, per project | Server-held session replica, shared by its target-specific workspaces | `replicaFor` in `src/server/index.ts` |
+| Project room | Store's shared document and synchronization service | `src/server/index.ts`, `src/server/sync.ts` |
+| Workspace | Request context and derived caches; references the room and optional session replica | `src/server/workspace.ts` |
+
+One participant can have several sessions and replicas. A user id does not
+identify a unique replica, and changing targets within an MCP session does not
+create an independent copy of the project. Workspaces without a session replica
+read the room. This ownership table does not imply uniform visibility across
+all session paths; the known gap is stated below.
 
 An **operation** expresses one domain edit. A **changeset** groups operations
 as one user action. A **CRDT update** transports mergeable state changes. A
@@ -149,6 +193,24 @@ The numbered files establish a reading order: purpose, architecture, contracts,
 developer workflows, model reference, operation reference, API reference and
 experiments. `decisions/` is an append-only historical archive; its filenames
 identify subjects rather than a required reading sequence.
+
+Each kind of information has one primary documentation home:
+
+| Question | Owner | Other documents should |
+|---|---|---|
+| Why does re64 exist, and what does it produce? | [01 · Manifest](01-purpose.md) | Link to the goal |
+| What do the terms mean, who owns state, and what is planned? | This architecture | Use its vocabulary and status |
+| What must hold, and what verifies it? | [03 · Contracts](03-contracts.md) | Cite the contract identifier |
+| How do I carry out a task or implement a change? | [04 · Developer guide](04-developer-guide.md) | Link to the worked workflow |
+| What data is represented, and what reads it? | [05 · Model reference](05-model.md) | Link to its shape and implementation anchors |
+| What does an edit mean? | [06 · Operation algebra](06-algebra.md) | Cite its mutation/replacement boundary |
+| What arguments does a tool accept? | [07 · Generated API](07-api.md) | Give small examples, not duplicate schemas |
+| What happened in a run, or why did a design change? | [08 · Experiments](08-experiments.md), [decision archive](decisions/README.md) | Link to dated evidence |
+
+Short reminders and examples are useful; parallel specifications are not.
+Keep repair narratives in the archive and short bug origins with their
+contracts. The model reference should describe the current representation
+without requiring a reader to reconstruct its history.
 
 When changing a concept or component boundary, update this architecture. When
 changing an obligation, update its contract and verification. Generate the API
