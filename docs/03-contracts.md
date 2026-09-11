@@ -22,7 +22,9 @@ occurs; editorial requirements below are examples.
 selected target and any resolved references belong to that operation's context.
 A concurrent request must not replace them. A session's read/merge policy must
 be explicit and consistent across reads, edits and undo; #28 tracks the current
-gap. This does not choose automatic versus deferred receipt of others' edits.
+gap. The architecture's [collaboration policy](02-architecture.md#5-collaboration-vocabulary)
+specifies deferred receipt for MCP sessions; current consistency gaps do not
+make a forced refresh before writing an acceptable correctness mechanism.
 *Origin:* R1 ([#21](https://github.com/re64/re64/pull/21)): caller identity was
 a server-global closure reassigned per request, so overlapping requests could
 record one user's claim under another user. [#28](https://github.com/re64/re64/issues/28)
