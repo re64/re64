@@ -32,19 +32,41 @@ import { HistoryEntry, ProjectStorage, StoredChange, revOf } from "./storage.js"
  * only "undone" would believe the whole action had gone.
  */
 /**
- * Where a session's write is applied before the shared document sees it.
+ * A session's own copy, as the store sees it: where a write is staged, and
+ * what undo reads.
  *
- * A session with a replica writes **replica-first**: the operations go into its
- * own copy, and what comes back is the exact Yjs update that produced — which
- * the store then merges into the shared document. The other way round, writing
- * the shared document and echoing the delta back, leaves the session's own
- * write *pending* in its replica whenever somebody else touched the same key
- * unmerged, because the echo's items would reference structs the replica has
- * not seen. Replica-first never does: the shared document holds everything the
- * replica holds, so the update always integrates. This is how a browser tab
- * writes, and an MCP session is a proxy for one.
+ * A session with a replica writes **replica-first**: the operations are staged
+ * on its copy and what comes back is the exact Yjs update that produced, which
+ * the store merges into the shared document. The other way round — writing the
+ * shared document and echoing the delta back — leaves the session's own write
+ * *pending* in its copy whenever somebody else touched the same key unmerged,
+ * because the echo's items reference structs the copy has not seen.
+ * Replica-first never does: the shared document holds everything the copy
+ * holds, so the update always integrates. It is how a browser tab writes, and an
+ * MCP session is a proxy for one.
+ *
+ * **Staged, then committed.** The copy itself is not touched until the durable
+ * write has committed: `stage` computes the update on a throwaway clone and
+ * `commit` applies it to the real copy afterwards. Mutating the copy first left
+ * it holding items the room had rolled back, and the *next* write's items then
+ * referenced structs the room would never have — so a failed write broke every
+ * write after it.
+ *
+ * **And undo reads the copy.** An inverse is what the *writer* saw before the
+ * write, and whether the write still holds is a question about the writer's
+ * view; both were being answered from the room, so an undo could restore a
+ * value from somebody else's unmerged edit — importing what the session had
+ * never merged — or refuse the session's own edit as "changed by someone else"
+ * because the room's last-writer-wins had gone the other way. Session-local
+ * undo is a new write of the old value, and it competes in the room like any
+ * other; the copy's view is the one it answers for.
  */
-export type WriteThrough = (ops: readonly Op[]) => Uint8Array;
+export interface WriteThrough {
+  /** The session's copy: inverses and undo preconditions are read here. */
+  document(): CrdtDoc;
+  /** Stage the operations; `update` is what the store merges, `commit` what the copy takes once durable. */
+  stage(ops: readonly Op[]): { update: Uint8Array; commit(): void };
+}
 
 /** Bytes of a program's projection: the version a reader of `doc` answers with. */
 export function versionOf(doc: CrdtDoc): string {
@@ -717,7 +739,8 @@ export class ProjectStore {
     const changeset = `chg_${now.toString(36)}${(this.changesets++).toString(36)}`;
     if (ops.length === 0) return { applied: 0, descriptions: [], changeset };
 
-    return this.committing(() => {
+    let commitToReplica: (() => void) | undefined;
+    const result = this.committing(() => {
       // Learn what anyone else did *before* applying ours, not after. Applying
       // first and reconciling second lets their change land on top of the edit
       // being made, because reconciliation cannot tell it from anything else
@@ -730,7 +753,12 @@ export class ProjectStore {
       // already stale — and undo would then restore something nobody chose.
       // The layout does not matter here: an inverse is an operation, and this
       // text is only ever read to derive one.
-      let text = formatProject(projectFromDoc(this.document()));
+      //
+      // **From the writer's copy where there is one.** An inverse is what the
+      // writer saw before the write, not what the room held: read from the
+      // room it named somebody else's unmerged value, and undo then imported
+      // what the session had never merged.
+      let text = formatProject(projectFromDoc(through?.document() ?? this.document()));
       const changes: Change[] = [];
       for (const op of ops) {
         changes.push({ op, inverse: invertOp(text, op), author, at: now, session, changeset });
@@ -740,7 +768,7 @@ export class ProjectStore {
       this.addAuthor(author);
       this.recording = true;
       try {
-        this.applyThroughDocument(ops, author, through);
+        commitToReplica = this.applyThroughDocument(ops, author, through);
       } finally {
         this.recording = false;
         this.lastProjection = projectFromDoc(this.document());
@@ -757,6 +785,10 @@ export class ProjectStore {
         changeset,
       };
     });
+    // Durable now, so the session's copy may take what it staged. A failure
+    // above threw past this and the copy was never touched.
+    commitToReplica?.();
+    return result;
   }
 
   /**
@@ -821,7 +853,8 @@ export class ProjectStore {
       return true;
     };
 
-    return this.committing(() => {
+    let commitToReplica: (() => void) | undefined;
+    const outcome = this.committing(() => {
       const log = this.storage.readOps();
 
       // **Which action, and the two directions do not ask it the same way.**
@@ -865,7 +898,12 @@ export class ProjectStore {
         ? log.filter((c) => c.changeset === newest.changeset && wanted(c) && inScope(c))
         : [newest];
 
-      let text = formatProject(projectFromDoc(this.document()));
+      // The writer's copy where there is one: whether an operation still holds
+      // is a question about the view it was made in. Asked of the room, an undo
+      // was refused as "changed by someone else" because the room's
+      // last-writer-wins had gone the other way on a key the session still saw
+      // its own value on.
+      let text = formatProject(projectFromDoc(through?.document() ?? this.document()));
       // Addresses, not offsets — an undo report is read for the same reason a
       // write's `did` is: to check that what happened is what was meant.
       const absolute = addressesOf(text);
@@ -923,7 +961,7 @@ export class ProjectStore {
               at,
             }))
           );
-          this.applyThroughDocument(
+          commitToReplica = this.applyThroughDocument(
             applying.map(direction),
             newest.author ?? "unknown",
             through
@@ -948,6 +986,8 @@ export class ProjectStore {
         skipped,
       };
     });
+    commitToReplica?.();
+    return outcome;
   }
 
   /**
@@ -960,15 +1000,24 @@ export class ProjectStore {
     ops: readonly Op[],
     author: string,
     through?: WriteThrough
-  ): void {
+  ): (() => void) | undefined {
     const doc = this.document();
     this.absorb(this.storage.readText());
     // Replica-first when the caller has one — the update is what its own copy
     // produced, and merges here as a peer's would — and straight in otherwise.
-    if (through) applyUpdate(doc, through(ops), author);
-    else for (const op of ops) applyOpToDoc(doc, op, author);
+    // What comes back is the copy's own commit, for the caller to run once the
+    // write is durable and not before.
+    let commit: (() => void) | undefined;
+    if (through) {
+      const staged = through.stage(ops);
+      applyUpdate(doc, staged.update, author);
+      commit = staged.commit;
+    } else {
+      for (const op of ops) applyOpToDoc(doc, op, author);
+    }
     this.reconcileBlobNames();
     this.writeFile();
+    return commit;
   }
 
   /**
