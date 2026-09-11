@@ -90,6 +90,7 @@ import { renderTextWith } from "../sandbox/sync.js";
 import { databaseFileBytes } from "../store/load.js";
 import { hashBytes } from "../store/blobs.js";
 import type { RomLoader } from "../core/project/loader.js";
+import { BytesLayer } from "../core/memory/layer.js";
 import { CommentPlacement, TextEncoding, describeWarning } from "../core/index.js";
 import { MAX_MESSAGE_LENGTH } from "../core/crdt/chat.js";
 import { TypeField } from "../core/ops/types.js";
@@ -453,7 +454,13 @@ export class Workspace {
       }
     }
 
-    return `${this.projectVersion}:${fingerprint}`;
+    // **The ROMs are an input too.** They come from the host rather than the
+    // document, so nothing above sees them move — and a replaced KERNAL left
+    // `program()` serving the map it built over the old one, while the
+    // execution fingerprint, read fresh, named the new. A checkpoint then
+    // recorded a check against bytes the key said it had not run on. Hashing
+    // three images per key is the price of the key being honest.
+    return `${this.projectVersion}:${fingerprint}:${romFingerprint(nodeRomBytes())}`;
   }
 
   /**
@@ -621,18 +628,26 @@ export class Workspace {
    * The step prefix is added by `prefixKey`, so resuming from step five is still
    * cheap; this is only the "these bytes" half of that key.
    */
-  private executionFingerprint(): string {
-    const loaded = this.program().loaded;
+  private executionFingerprint(loaded: LoadedProject, characters: Uint8Array | undefined): string {
     const stack = loaded.map
       .getLayers()
       .map((l) => `${l.id}@${l.start.toString(16)}:${l.end.toString(16)}`)
       .join(",");
-    return [
-      this.version(),
-      loaded.selectedTarget?.id ?? "(implied)",
-      stack,
-      romFingerprint(nodeRomBytes()),
-    ].join("|");
+    // **The bytes this run is handed, not the files on disk.** Rereading the
+    // host's ROMs here could name bytes the map was not built over; the map's
+    // own ROM layers and the character image passed to the renderer are what
+    // the machine actually sees, so they are what the key says.
+    const inMap = (rom: "basic" | "kernal" | "characters"): Uint8Array | undefined => {
+      if (rom === "characters") return characters;
+      const declared = loaded.project.layers.find(
+        (l) => l.type === "rom" && (l.rom ?? "kernal") === rom
+      );
+      const layer = declared && loaded.map.getLayers().find((l) => l.id === declared.id);
+      return layer instanceof BytesLayer ? layer.data : undefined;
+    };
+    return [this.version(), loaded.selectedTarget?.id ?? "(implied)", stack, romFingerprint(inMap)].join(
+      "|"
+    );
   }
 
 
@@ -2494,7 +2509,7 @@ export class Workspace {
       storage instanceof SqliteStorage ? nodeRomBytes()("characters") : undefined;
 
     const run = coreRunScenario(loaded.map, scenario, {
-      fingerprint: this.executionFingerprint(),
+      fingerprint: this.executionFingerprint(loaded, characters),
       cache: this.room.machines,
       ...(characters ? { characters } : {}),
     });
@@ -6451,7 +6466,7 @@ function holdsBits(type: FieldType): boolean {
 }
 
 /**
- * The machine's own bytes, hashed, for a scenario's execution key.
+ * The machine's own bytes, hashed.
  *
  * **Which ROMs are missing is not enough.** A KERNAL is a file on the host that
  * this project neither carries nor versions, so swapping one for a patched build
@@ -6460,12 +6475,14 @@ function holdsBits(type: FieldType): boolean {
  * it never ran on. The character ROM counts twice, because it is handed to the
  * renderer separately and decides what a capture looks like.
  *
- * A ROM the host does not have is named as absent rather than left out: absent
- * and present are different machines, and a check that cannot see something says
- * so rather than dropping it from the key.
+ * A ROM that is not there is named as absent rather than left out: absent and
+ * present are different machines, and a check that cannot see something says so
+ * rather than dropping it from the key.
  *
- * Once per scenario run, not per step — `prefixKey` adds the step — which is
- * what makes hashing three images affordable.
+ * Two callers with two sources, on purpose. The analysis cache key asks the
+ * **host** — so the map is rebuilt when a file changes — and the execution key
+ * asks the **loaded map**, so it names the bytes the run was handed and nothing
+ * else. Same function, so the two cannot spell the answer differently.
  */
 export function romFingerprint(load: RomLoader): string {
   return (["basic", "kernal", "characters"] as const)
