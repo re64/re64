@@ -59,6 +59,16 @@ their stored order. S3 defines the ordering obligation. The `meta.set`
 operation exposes only name and description; a stored scalar is not necessarily
 editable through every surface.
 
+Project-level `entryPoints` is an active compatibility field, not unused data:
+`withSyntheticTarget` copies it into the implied target when no targets are
+declared, and analysis reads those entries as decode starts. An explicit target
+uses its own entries instead. The tracked Gridrunner reference and experiment
+4's run1 project still carry non-empty root lists. Changes to that root list
+are not emitted by `diffProjects`, and `meta.set`
+cannot express one. [#39](https://github.com/re64/re64/issues/39) tracks the
+decision between exposing that mutation and migrating the state into explicit
+targets while retaining old-file compatibility; neither change is implemented.
+
 Presence is maintained by [participants.ts](../src/core/crdt/participants.ts)
 outside the project projection. Chat survives project export but is removed
 from the program projection used for the program version. Chat is excluded from

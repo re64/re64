@@ -160,6 +160,22 @@ as one user action. A **CRDT update** transports mergeable state changes. A
 different units: grouping operations does not make their distributed execution
 atomic, and receiving an update is not the same event as committing it durably.
 
+**Design requirement: freshness is not correctness.** An MCP session may keep
+working from its existing replica without first receiving other sessions'
+changes. Being connected does not require a merge before every read or write;
+the session explicitly decides when to import that work. Names resolve against
+what the author knows, and the resulting operation carries that meaning into
+the merge. Working from an older copy may duplicate investigation effort or
+produce competing names for one routine. Preserving those contributions is
+expected behavior, not grounds to reject the operation or discard a claim.
+The session's own successful edits must remain visible to it.
+
+This is the intended MCP receipt policy, not a promise that current paths all
+implement it. Browser clients can receive updates continuously. Neither this
+policy nor the offline contract promises that a server-side MCP session lease
+or replica survives indefinitely after disconnection. The outstanding session
+repair below must make reads, edits and undo consistent with this requirement.
+
 **Implemented:** the browser/client and MCP session machinery use replicas,
 and the server records user/session attribution. **Unresolved:** a consistent
 visibility policy across every MCP read, edit and undo path is tracked in

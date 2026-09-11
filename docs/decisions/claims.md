@@ -1336,3 +1336,24 @@ And it is **counted**. `describe_project` reports how many claims are retired,
 because hiding is itself a confident answer, and a document that looks tidier
 than it is has told the reader something false. `list_retired` says which, and
 what took each out.
+
+## Rejected: an `asserts` evidence kind — recorded 2026-09-11
+
+The guide/reference split removed this reasoning from the live reference;
+[#39](https://github.com/re64/re64/issues/39) identified that it had not reached
+the decision archive. It is preserved from the model at revision `8754cbe`.
+
+`asserts` was proposed to distinguish creating a claim from supporting one
+that already existed. The distinction describes arrival order, not a different
+kind of account: the operations log already records creation, and supporting
+evidence records who vouched and how.
+
+Two participants working independently can each originate the same finding.
+Reconciling their contributions should preserve both accounts, not require
+reclassifying one as `supports` merely because it arrived second. A separate
+verb would make that incidental order part of the evidence's meaning without
+adding a useful reader or question.
+
+Claim creation therefore records supporting evidence, just as a later account
+can. `supports`, `refutes` and `retires` distinguish the semantic acts; no
+`asserts` kind or special evidence mutation is introduced.
