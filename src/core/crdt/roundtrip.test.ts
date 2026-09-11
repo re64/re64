@@ -48,15 +48,15 @@ const BASE = `{
       "address": "$8000",
       "comments": [
         { "id": "cmt_1", "address": "$8000", "text": "the entry point" }
-      ],
-      "labelUses": [
-        { "id": "lbl_u1", "address": "$8100", "label": "clm_3" }
-      ],
-      "constantUses": [
-        { "id": "cst_u1", "address": "$8000", "constant": "cst_1" }
       ]
     },
     { "id": "lay_b", "type": "symbols", "name": "zp" }
+  ],
+  "labelUses": [
+    { "id": "lbl_u1", "at": "$0100", "layer": "lay_a", "label": "clm_3" }
+  ],
+  "constantUses": [
+    { "id": "cst_u1", "at": "$0000", "layer": "lay_a", "constant": "cst_1" }
   ],
   "claims": [
     {
@@ -186,20 +186,34 @@ const CASES: { [K in Op["op"]]: Case } = {
   },
   "comment.remove": { op: { op: "comment.remove", id: "cmt_1", layerId: "lay_a" } },
   "meta.set": { op: { op: "meta.set", key: "description", value: "a harness project" } },
+  // Framed on the layer, as `placed()` frames every binding on owned bytes: an
+  // offset, so the binding moves with the bytes it names.
   "labelUse.bind": {
-    op: { op: "labelUse.bind", id: "lbl_u2", layerId: "lay_a", address: 0x8000, labelId: "clm_1" },
+    op: {
+      op: "labelUse.bind",
+      id: "lbl_u2",
+      frame: { space: "layer", layer: "lay_a" },
+      at: 0x0000,
+      labelId: "clm_1",
+    },
   },
   "labelUse.unbind": {
-    op: { op: "labelUse.unbind", id: "lbl_u1", layerId: "lay_a", address: 0x8100 },
+    op: { op: "labelUse.unbind", id: "lbl_u1", frame: { space: "layer", layer: "lay_a" }, at: 0x0100 },
   },
   "constant.add": { op: { op: "constant.add", id: "cst_2", name: "RED", value: 0x02 } },
   "constant.set": { op: { op: "constant.set", id: "cst_1", fields: { name: "RENAMED" } } },
   "constant.remove": { op: { op: "constant.remove", id: "cst_1" } },
   "constantUse.bind": {
-    op: { op: "constantUse.bind", id: "cst_u2", layerId: "lay_a", address: 0x8100, constantId: "cst_1" },
+    op: {
+      op: "constantUse.bind",
+      id: "cst_u2",
+      frame: { space: "layer", layer: "lay_a" },
+      at: 0x0100,
+      constantId: "cst_1",
+    },
   },
   "constantUse.unbind": {
-    op: { op: "constantUse.unbind", id: "cst_u1", layerId: "lay_a", address: 0x8000 },
+    op: { op: "constantUse.unbind", id: "cst_u1", frame: { space: "layer", layer: "lay_a" }, at: 0x0000 },
   },
   "decoder.add": { op: { op: "decoder.add", id: "dec_2", name: "swap", source: "return bytes;" } },
   "decoder.set": { op: { op: "decoder.set", id: "dec_1", fields: { name: "renamed" } } },
@@ -444,6 +458,8 @@ function canonical(project: ReturnType<typeof parseProject>): string {
       ...(project.decoders ? { decoders: byKey(project.decoders, (d) => d.id ?? "") } : {}),
       ...(project.types ? { types: byKey(project.types, (t) => t.id ?? "") } : {}),
       ...(project.files ? { files: byKey(project.files, (f) => f.id!) } : {}),
+      ...(project.constantUses ? { constantUses: byKey(project.constantUses, (u) => u.id ?? "") } : {}),
+      ...(project.labelUses ? { labelUses: byKey(project.labelUses, (u) => u.id ?? "") } : {}),
       ...(project.targets ? { targets: byKey(project.targets, (t) => t.name) } : {}),
       // The rest of the roots, normalised for the same reason. They were left
       // out because they *happened* to agree: both paths kept insertion order,

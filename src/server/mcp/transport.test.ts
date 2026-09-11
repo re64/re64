@@ -3231,3 +3231,67 @@ describe("clear versus omit across edit tools (#29)", () => {
     expect(refused.isError).toBe(true);
   });
 });
+
+describe("a binding's escape hatch: framed on the target", () => {
+  /**
+   * A binding on owned bytes is framed on its layer and moves with the bytes.
+   * `scope: "target"` pins it to this arrangement at this address instead —
+   * for when relocation is wrong — and it is honoured on the way in and
+   * filtered on the way out like a target-framed claim.
+   */
+  it("binds a site to this arrangement only, and unbinds it by address", async () => {
+    const sites = (
+      (await callTool("find_immediates", { value: "$01" })).value as { sites: { address: string }[] }
+    ).sites;
+    expect(sites.length).toBeGreaterThan(0);
+    const at = sites[0].address;
+    const made = await callTool("add_constant", { name: "PINNED_ONE", value: "$01" });
+    const constant = (made.value as { constant: string }).constant;
+
+    const bound = await callTool("bind_constant", { address: at, constant, scope: "target" });
+    expect(bound.isError, bound.text).toBe(false);
+
+    // Stored framed on the target, by id — and there is exactly one to be about.
+    const targets = (await callTool("list_targets", {})).value as { targets: { id: string }[] };
+    const exported = JSON.parse(((await callTool("export_project", {})).value as { text: string }).text) as {
+      constantUses?: { constant: string; target?: string; layer?: string }[];
+    };
+    const use = exported.constantUses?.find((u) => u.constant === constant);
+    expect(use?.target).toBe(targets.targets[0].id);
+    expect(use?.layer).toBeUndefined();
+
+    // Found by the address it resolves to in this view, whatever frame it has.
+    const cleared = await callTool("unbind_constant", { address: at });
+    expect(cleared.isError, cleared.text).toBe(false);
+    const after = JSON.parse(((await callTool("export_project", {})).value as { text: string }).text) as {
+      constantUses?: { constant: string }[];
+    };
+    expect(after.constantUses?.some((u) => u.constant === constant) ?? false).toBe(false);
+  });
+
+  it("refuses the target scope where no target was selected to be about", async () => {
+    // A project with no targets has one implied arrangement, and a binding
+    // framed on "this arrangement" would name nothing.
+    const project = (await callTool("create_project", { name: "unframed" })).value as { project: string };
+    const layer = await callTool("add_byte_layer", {
+      project: project.project,
+      type: "bytes",
+      address: "$8000",
+      bytes: "A9 01 60",
+    });
+    expect(layer.isError, layer.text).toBe(false);
+    // Inline bytes decode from a root, and nothing declared one yet.
+    const rooted = await callTool("add_claim", { project: project.project, address: "$8000", root: "routine" });
+    expect(rooted.isError, rooted.text).toBe(false);
+    const made = await callTool("add_constant", { project: project.project, name: "ONE", value: "$01" });
+    const constant = (made.value as { constant: string }).constant;
+    const refused = await callTool("bind_constant", {
+      project: project.project,
+      address: "$8000",
+      constant,
+      scope: "target",
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain("selected none");
+  });
+});

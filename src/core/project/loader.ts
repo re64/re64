@@ -23,6 +23,7 @@ import { CommentIndex } from "../memory/comment.js";
 import { ConstantIndex } from "../memory/constant.js";
 import { createC64PlatformLayer } from "../c64/symbols.js";
 import {
+  usesToRoot,
   entryPointsIntoTarget,
   Project,
   ProjectLayer,
@@ -384,7 +385,7 @@ export function buildMemoryMap(
 ): LoadedProject {
   // A root `entryPoints` list becomes a target here as everywhere else a
   // project enters, so an in-memory project gets what a file gets.
-  declared = filesWithIds(entryPointsIntoTarget(declared));
+  declared = usesToRoot(filesWithIds(entryPointsIntoTarget(declared)));
   // One form below, whatever the file holds. A project still written with labels
   // and regions is converted here, exactly as `re64 migrate` converts it on disk
   // — the precedent `identity.ts` already records for ids: "files without ids
@@ -491,11 +492,6 @@ export function buildMemoryMap(
     }
     userLabels.addLabels(labels);
     comments.addAll(projectCommentsToComments(decl, layerId));
-    constants.bindAll(projectConstantUses(decl, layerId));
-    for (const use of projectLabelUses(decl, layerId)) {
-      userLabels.bindUse(use.address, use.labelId);
-      labelUses.push(use);
-    }
 
     layers.push(layer);
     map.addLayer(layer);
@@ -572,6 +568,18 @@ export function buildMemoryMap(
 
   for (const [address, labelId] of Object.entries(project.primaryLabels ?? {})) {
     map.primaryLabels.set(parseProjectAddress(address), labelId);
+  }
+
+  // **Bindings resolve like claims, once every layer has landed.** A
+  // layer-framed use is at its layer's placement plus its offset and is absent
+  // when the layer is not linked; a target-framed one is present only in that
+  // target; an address-framed one is where it says.
+  const startOf = (id: string): number | undefined => layerStart.get(id);
+  const viewId = chosen === undefined ? undefined : (chosen.id ?? chosen.name);
+  constants.bindAll(projectConstantUses(project, startOf, viewId));
+  for (const use of projectLabelUses(project, startOf, viewId)) {
+    userLabels.bindUse(use.address, use.labelId);
+    labelUses.push(use);
   }
 
   // Onto the map, not onto an index it hands out: `getLabels()` builds a fresh

@@ -13,6 +13,9 @@ import { filesWithIds, fileId } from "../project/files.js";
  */
 
 import {
+  usesToRoot,
+  useFrame,
+  useKey,
   Project,
   ProjectClaim,
   ProjectComment,
@@ -79,32 +82,19 @@ const sameLabel = (a: ProjectLabel, b: ProjectLabel) =>
   (a.type ?? "address") === (b.type ?? "address") &&
   a.extent === b.extent;
 
-function usesById(project: Project): Map<string, Owned<ProjectConstantUse>> {
-  const out = new Map<string, Owned<ProjectConstantUse>>();
-  for (const layer of project.layers) {
-    for (const entry of layer.constantUses ?? []) {
-      if (entry.id) out.set(entry.id, { layerId: layer.id!, entry });
-    }
-  }
-  return out;
+function usesById(project: Project): Map<string, ProjectConstantUse> {
+  return new Map((project.constantUses ?? []).filter((u) => u.id).map((u) => [u.id!, u]));
 }
 
-function labelUsesById(project: Project): Map<string, Owned<ProjectLabelUse>> {
-  const out = new Map<string, Owned<ProjectLabelUse>>();
-  for (const layer of project.layers) {
-    for (const entry of layer.labelUses ?? []) {
-      if (entry.id) out.set(entry.id, { layerId: layer.id!, entry });
-    }
-  }
-  return out;
+function labelUsesById(project: Project): Map<string, ProjectLabelUse> {
+  return new Map((project.labelUses ?? []).filter((u) => u.id).map((u) => [u.id!, u]));
 }
 
 const sameLabelUse = (a: ProjectLabelUse, b: ProjectLabelUse) =>
-  parseProjectAddress(a.address) === parseProjectAddress(b.address) && a.label === b.label;
+  useKey(a) === useKey(b) && a.label === b.label;
 
 const sameUse = (a: ProjectConstantUse, b: ProjectConstantUse) =>
-  parseProjectAddress(a.address) === parseProjectAddress(b.address) &&
-  a.constant === b.constant;
+  useKey(a) === useKey(b) && a.constant === b.constant;
 
 const sameConstant = (a: ProjectConstant, b: ProjectConstant) =>
   a.name === b.name && parseProjectAddress(a.value) === parseProjectAddress(b.value);
@@ -146,8 +136,8 @@ export function diffProjects(
   to: Project,
   rejected?: FileContentRejection[]
 ): Op[] {
-  from = filesWithIds(from);
-  to = filesWithIds(to);
+  from = usesToRoot(filesWithIds(from));
+  to = usesToRoot(filesWithIds(to));
   const ops: Op[] = [];
 
   // Name and description, which had an operation and an inverse and no way to
@@ -306,24 +296,14 @@ export function diffProjects(
   for (const [id, owned] of beforeComments) {
     if (!afterComments.has(id)) ops.push({ op: "comment.remove", id, layerId: owned.layerId });
   }
-  for (const [id, owned] of beforeUses) {
+  for (const [id, use] of beforeUses) {
     if (!afterUses.has(id)) {
-      ops.push({
-        op: "constantUse.unbind",
-        id,
-        layerId: owned.layerId,
-        address: parseProjectAddress(owned.entry.address),
-      });
+      ops.push({ op: "constantUse.unbind", id, frame: useFrame(use), at: parseProjectAddress(use.at) });
     }
   }
-  for (const [id, owned] of beforeLabelUses) {
+  for (const [id, use] of beforeLabelUses) {
     if (!afterLabelUses.has(id)) {
-      ops.push({
-        op: "labelUse.unbind",
-        id,
-        layerId: owned.layerId,
-        address: parseProjectAddress(owned.entry.address),
-      });
+      ops.push({ op: "labelUse.unbind", id, frame: useFrame(use), at: parseProjectAddress(use.at) });
     }
   }
   // Declarations go after the sites that meant them, so nothing is left
@@ -622,29 +602,27 @@ export function diffProjects(
     if (Object.keys(fields).length) ops.push({ op: "claim.set", id, fields });
   }
 
-  for (const [id, owned] of afterLabelUses) {
+  for (const [id, use] of afterLabelUses) {
     const before = beforeLabelUses.get(id);
-    if (before && before.layerId === owned.layerId && sameLabelUse(before.entry, owned.entry)) {
-      continue;
-    }
+    if (before && sameLabelUse(before, use)) continue;
     ops.push({
       op: "labelUse.bind",
       id,
-      layerId: owned.layerId,
-      address: parseProjectAddress(owned.entry.address),
-      labelId: owned.entry.label,
+      frame: useFrame(use),
+      at: parseProjectAddress(use.at),
+      labelId: use.label,
     });
   }
 
-  for (const [id, owned] of afterUses) {
+  for (const [id, use] of afterUses) {
     const before = beforeUses.get(id);
-    if (before && before.layerId === owned.layerId && sameUse(before.entry, owned.entry)) continue;
+    if (before && sameUse(before, use)) continue;
     ops.push({
       op: "constantUse.bind",
       id,
-      layerId: owned.layerId,
-      address: parseProjectAddress(owned.entry.address),
-      constantId: owned.entry.constant,
+      frame: useFrame(use),
+      at: parseProjectAddress(use.at),
+      constantId: use.constant,
     });
   }
 

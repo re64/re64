@@ -16,6 +16,7 @@
 
 import { derivedId } from "../project/identity.js";
 import type { TypeAddOp, TypeField, TypeSetOp } from "./types.js";
+import type { Frame } from "../claims/model.js";
 
 /** A child as an old `type.set` patch spelled it: id optional, offset in the key. */
 export interface LegacyChild {
@@ -76,4 +77,23 @@ export function legacyChildTarget<F extends { id?: string; offset: number }>(
   }
   const here = fields.filter((f) => f.offset === offset);
   return here.length === 1 ? here[0] : undefined;
+}
+
+/**
+ * The site a bind or unbind means, whichever spelling it arrived in.
+ *
+ * A current operation carries a frame and a coordinate. One recorded before
+ * uses had frames carries `layerId` and an absolute `address` — and it meant
+ * "this site, wherever the bytes came from", which is the address frame. One
+ * older still carries only an id, which `siteKeyFor` in the adapters resolves
+ * by scanning for it.
+ */
+export function bindSite(op: {
+  frame?: Frame;
+  at?: number;
+  address?: number;
+}): { frame: Frame; at: number } | undefined {
+  if (op.frame !== undefined && op.at !== undefined) return { frame: op.frame, at: op.at };
+  if (op.address !== undefined) return { frame: { space: "address" }, at: op.address };
+  return undefined;
 }

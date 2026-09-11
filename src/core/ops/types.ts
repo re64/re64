@@ -18,7 +18,7 @@ import { CommentPlacement } from "../memory/comment.js";
 import { LabelType } from "../memory/label-type.js";
 import { TextEncoding } from "../c64/text.js";
 import { LayerDefault } from "../memory/region.js";
-import { Claim, Provenance } from "../claims/model.js";
+import { Claim, Frame, Provenance } from "../claims/model.js";
 import { EvidenceKind, ProjectCapture, ProjectStep } from "../project/project.js";
 
 
@@ -128,20 +128,41 @@ export interface MetaSetOp {
   value?: string;
 }
 
-/** Say that the operand at an address means one particular label. */
+/**
+ * Say that the operand at a site means one particular label.
+ *
+ * **A site is a frame and a coordinate**, exactly as a claim's is: an offset
+ * into a layer for a layer-framed use, so the binding moves with the bytes it
+ * names; an absolute address on a target for a use that is a fact about one
+ * arrangement — the escape hatch when relocation is wrong; an absolute address
+ * on the address space otherwise. Binding a site again is how a binding is
+ * updated.
+ *
+ * `layerId` and `address` are **history only**: an operation recorded before
+ * uses carried a frame, read as an address-framed site at that address, which
+ * is what the record meant.
+ */
 export interface LabelBindOp {
   op: "labelUse.bind";
   id: string;
-  layerId: string;
-  address: number;
+  frame: Frame;
+  at: number;
   labelId: string;
+  /** @deprecated history only */
+  layerId?: string;
+  /** @deprecated history only */
+  address?: number;
 }
 
 export interface LabelUnbindOp {
   op: "labelUse.unbind";
   id: string;
-  layerId: string;
-  /** The site, which is what a binding is keyed by. See `ConstantUnbindOp`. */
+  /** The site. Absent only on history from before sites were keys; see `ConstantUnbindOp`. */
+  frame?: Frame;
+  at?: number;
+  /** @deprecated history only */
+  layerId?: string;
+  /** @deprecated history only */
   address?: number;
 }
 
@@ -415,32 +436,39 @@ export interface ConstantRemoveOp {
   id: string;
 }
 
-/** Say that the operand at an address means a constant. */
+/** Say that the operand at a site means a constant. See `LabelBindOp` for the site. */
 export interface ConstantBindOp {
   op: "constantUse.bind";
   id: string;
-  layerId: string;
-  address: number;
+  frame: Frame;
+  at: number;
   constantId: string;
+  /** @deprecated history only */
+  layerId?: string;
+  /** @deprecated history only */
+  address?: number;
 }
 
 export interface ConstantUnbindOp {
   op: "constantUse.unbind";
   id: string;
-  layerId: string;
   /**
    * The site, which is what a binding is keyed by.
    *
    * Carried because unbinding is "nothing means a constant *here*" — an id
    * identifies which use record happened to be written, and there is only ever
-   * one per site now, so the site is the honest handle.
+   * one per site, so the site is the honest handle.
    *
    * **Optional only for history.** Every operation written since the site
-   * became the key carries it. The ones stored before — forward ops for redo
-   * and inverses for undo, as JSON rows that nothing rewrites — do not, and
-   * they are resolved through the use id against the state they are applied
-   * to. A missing address on a fresh operation is a bug, not a spelling.
+   * became the key carries it. Older ones carry `address` alone, or nothing but
+   * the id, and are resolved through what they do carry against the state they
+   * are applied to. A missing site on a fresh operation is a bug, not a spelling.
    */
+  frame?: Frame;
+  at?: number;
+  /** @deprecated history only */
+  layerId?: string;
+  /** @deprecated history only */
   address?: number;
 }
 
@@ -754,6 +782,13 @@ export interface Change {
  */
 export type AddressResolver = (claim: { at: number; frame?: Claim["frame"] }) => number | undefined;
 
+/** A binding's site as a reader spells it: an offset into a layer, or an address. */
+function siteText(op: { frame?: Frame; at?: number; address?: number }): string {
+  const at = op.at ?? op.address ?? 0;
+  const hex4 = `$${at.toString(16).toUpperCase().padStart(4, "0")}`;
+  return op.frame?.space === "layer" ? `+${hex4} in ${op.frame.layer}` : hex4;
+}
+
 export function describeOp(op: Op, resolve?: AddressResolver): string {
   const hex = (n: number) => `$${n.toString(16).toUpperCase().padStart(4, "0")}`;
   switch (op.op) {
@@ -771,7 +806,7 @@ export function describeOp(op: Op, resolve?: AddressResolver): string {
     case "meta.set":
       return op.value === undefined ? `clear the project ${op.key}` : `set the project ${op.key}`;
     case "labelUse.bind":
-      return `read ${hex(op.address)} as one particular label`;
+      return `read ${siteText(op)} as one particular label`;
     case "labelUse.unbind":
       return `read ${op.id} by the usual rule again`;
     // Read as the action, because these become undo descriptions and history
@@ -868,7 +903,7 @@ export function describeOp(op: Op, resolve?: AddressResolver): string {
     case "type.remove":
       return `remove type ${op.id}`;
     case "constantUse.bind":
-      return `read ${hex(op.address)} as a constant`;
+      return `read ${siteText(op)} as a constant`;
     case "constantUse.unbind":
       return `read ${op.id} as a literal again`;
     case "scenario.add":

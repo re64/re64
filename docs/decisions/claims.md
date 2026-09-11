@@ -1357,3 +1357,41 @@ adding a useful reader or question.
 Claim creation therefore records supporting evidence, just as a later account
 can. `supports`, `refutes` and `retires` distinguish the semantic acts; no
 `asserts` kind or special evidence mutation is introduced.
+
+## A binding carries a frame — 2026-09-12
+
+Issue #26, and the second half of R4. A constant or label use was nested in
+the layer that supplied its bytes, with an absolute address — so relocating the
+layer left every binding behind, and a use that was a fact about one
+arrangement had nowhere to live. The owner's ruling on R4 was the design: *"a
+binding for something on the zero page would not travel with any layer, but a
+binding that says 'this constant at this address in the layer is a color' should
+travel with the layer. Bindings refer to instruction operands, so they move
+with the instruction. But they need an origin like claims so they can also
+attach to a target instead"* — *"the escape hatch if relocation is wrong."*
+
+**So a use is framed exactly as a claim is**, with the same `Frame` and the same
+`resolveAt`: layer-relative on owned bytes, address-space on unowned ones,
+target-framed on request. Uses moved to the **root** for the reason the review
+gave when it read the issue: once a use can be target-framed, the layer owns
+neither its coordinate nor its visibility, and nesting says it does. The site
+key carries the frame — `layer:lay_a:$0123` and `target:tgt_b:$8123` are two
+sites with one number — because keying on the number alone is how a relocated
+binding would silently overwrite a different one.
+
+**Not converted: a migrated use is framed on the address space.** The review
+asked for the coordinate conversion — `$8123` in a layer beginning at `$8000`
+becoming `+$0123` — and it is the right conversion where it can be made. It
+cannot be made at the boundaries a migration runs at: a `.prg` layer's placement
+is in its bytes, which `parseProject` and a stored snapshot's `migrateDoc` do not
+have, and converting only where bytes happen to be available would make one
+document mean two things depending on which boundary opened it first — the
+identity defect this whole round was about, reintroduced by a migration. The
+address frame says exactly what the old record said. Every new binding made
+through the workspace is layer-framed by `placed()`, so the debt is bounded to
+history and shrinks with every rebind.
+
+**`scope: "target"` on the binding tools** is the escape hatch, honoured on the
+way in and filtered on the way out like a target-framed claim, and refused
+where no target was selected to be about. Which *claim* writes should get the
+same argument remains the open question in #31.

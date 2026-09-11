@@ -13,6 +13,8 @@ import { filesWithIds } from "./files.js";
 import { derivedId, layerIdOf } from "./identity.js";
 import {
   Claim,
+  Frame,
+  resolveAt,
   ClaimMethod,
   ClaimOrigin,
   Interpretation,
@@ -104,8 +106,20 @@ export interface ProjectLayer {
  */
 export interface ProjectLabelUse {
   id?: string;
-  address: number | string;
+  /**
+   * Where the operand is, **in the use's frame** — an offset into the layer
+   * for a layer-framed use, an absolute address otherwise. Exactly as a claim's
+   * `at`, and for the same reason: a binding names an instruction's operand,
+   * and an instruction moves with its bytes.
+   */
+  at: number | string;
+  /** The layer this use is an offset into, or... */
+  layer?: string;
+  /** ...the target it is a fact about. Neither: the address space. */
+  target?: string;
   label: string;
+  /** Legacy input only: an absolute address, from before uses carried a frame. */
+  address?: number | string;
 }
 
 /**
@@ -130,9 +144,14 @@ export interface ProjectDecoder {
 
 export interface ProjectConstantUse {
   id?: string;
-  address: number | string;
+  /** See `ProjectLabelUse.at`. */
+  at: number | string;
+  layer?: string;
+  target?: string;
   /** The declared constant's id. Dangling means "render the literal". */
   constant: string;
+  /** Legacy input only. */
+  address?: number | string;
 }
 
 /**
@@ -353,6 +372,16 @@ export interface Project {
    * Which one an operand means is recorded per site, in the owning layer.
    */
   constants?: ProjectConstant[];
+  /**
+   * Which constant each operand site means, and which label. **At the root,
+   * framed like a claim.** They lived inside the layer that supplied the
+   * bytes, with absolute addresses, so relocating a layer left every binding
+   * behind at the old address — and a use that is a fact about one arrangement
+   * had no layer to live in at all. A layer-nested list is legacy input now,
+   * migrated by `usesToRoot` on the way in.
+   */
+  constantUses?: ProjectConstantUse[];
+  labelUses?: ProjectLabelUse[];
   /**
    * Claims, at project level rather than nested in a layer.
    *
@@ -1001,21 +1030,42 @@ export function projectCommentsToComments(
   return comments;
 }
 
-/** Convert a layer's constant uses to ConstantUse objects. */
-export function projectConstantUses(layer: ProjectLayer, layerId: string): ConstantUse[] {
-  return (layer.constantUses ?? []).map((u) => {
-    const address = parseProjectAddress(u.address);
-    return createConstantUse(u.id ?? derivedId("cst", layerId, address, "use"), address, u.constant);
-  });
+/** The constant uses in a view, as the index takes them: absolute. */
+export function projectConstantUses(
+  project: Project,
+  layerStart: (id: string) => number | undefined,
+  selectedTarget: string | undefined
+): ConstantUse[] {
+  return resolvedUses(project.constantUses ?? [], layerStart, selectedTarget).map(
+    ({ use, address }) =>
+      createConstantUse(use.id ?? derivedId("cst", useKey(use), "use"), address, use.constant)
+  );
 }
 
-/** Convert project constants to Constant objects. */
-/** Convert a layer's label uses to LabelUse objects. */
-export function projectLabelUses(layer: ProjectLayer, layerId: string): LabelUse[] {
-  return (layer.labelUses ?? []).map((u) => {
-    const address = parseProjectAddress(u.address);
-    return createLabelUse(u.id ?? derivedId("lbl", layerId, address, "use"), address, u.label);
-  });
+/** The label uses in a view, as the index takes them: absolute. */
+export function projectLabelUses(
+  project: Project,
+  layerStart: (id: string) => number | undefined,
+  selectedTarget: string | undefined
+): LabelUse[] {
+  return resolvedUses(project.labelUses ?? [], layerStart, selectedTarget).map(
+    ({ use, address }) =>
+      createLabelUse(use.id ?? derivedId("lbl", useKey(use), "use"), address, use.label)
+  );
+}
+
+/**
+ * A use's site, frame included: `layer:lay_a:$0123`, `target:tgt_b:$8123`,
+ * `address::$8123`. A layer offset and a target address with the same number
+ * are not one site, which is why the frame is part of the key.
+ */
+export function useKey(use: { at: number | string; layer?: string; target?: string }): string {
+  const frame = useFrame(use);
+  const at = parseProjectAddress(use.at);
+  const hex = `$${at.toString(16).toUpperCase().padStart(4, "0")}`;
+  if (frame.space === "layer") return `layer:${frame.layer}:${hex}`;
+  if (frame.space === "target") return `target:${frame.target}:${hex}`;
+  return `address::${hex}`;
 }
 
 export function projectConstants(constants: readonly ProjectConstant[] = []): Constant[] {
@@ -1136,8 +1186,91 @@ export function entryPointsIntoTarget(project: Project): Project {
   };
 }
 
+/** The frame a stored use carries, spelled flat in the file like a claim's. */
+export function useFrame(use: { layer?: string; target?: string }): Frame {
+  if (use.layer !== undefined) return { space: "layer", layer: use.layer };
+  if (use.target !== undefined) return { space: "target", target: use.target };
+  return { space: "address" };
+}
+
+/** The flat spelling of a frame on a use, the way the file and document hold it. */
+export function useFrameFields(frame: Frame): { layer?: string; target?: string } {
+  if (frame.space === "layer") return { layer: frame.layer };
+  if (frame.space === "target") return { target: frame.target };
+  return {};
+}
+
+/**
+ * Bindings move to the root and gain a frame.
+ *
+ * They were nested in the layer that supplied the bytes, with **absolute**
+ * addresses — so relocating a layer left every binding behind, and a use that
+ * is a fact about one arrangement had nowhere to live. Now a use carries the
+ * same `Frame` a claim does and sits at the root beside the constants.
+ *
+ * **A migrated use is framed on the address space, deliberately.** Converting
+ * an absolute address to a layer offset needs the layer's placement, and for a
+ * `.prg` that is inside its bytes — which this boundary does not have, and a
+ * stored snapshot's migration never has. Converting where the bytes happen to
+ * be available would make one document mean two things depending on which
+ * boundary opened it first. The address frame says exactly what the old record
+ * said: this site, wherever the bytes came from. A new binding made through
+ * the workspace is layer-framed by `placed()`, like a claim.
+ */
+export function usesToRoot(project: Project): Project {
+  let changed = false;
+  const lifted = <T extends { address?: number | string; at?: number | string }>(
+    use: T
+  ): Omit<T, "address"> & { at: number | string } => {
+    if (use.address === undefined) return use as Omit<T, "address"> & { at: number | string };
+    changed = true;
+    const { address, ...rest } = use;
+    return { ...rest, at: rest.at ?? address } as Omit<T, "address"> & { at: number | string };
+  };
+  const constantUses = [...(project.constantUses ?? []).map(lifted)];
+  const labelUses = [...(project.labelUses ?? []).map(lifted)];
+  const layers = project.layers.map((layer) => {
+    if (!layer.constantUses && !layer.labelUses) return layer;
+    changed = true;
+    const { constantUses: nested, labelUses: nestedLabels, ...rest } = layer;
+    for (const use of nested ?? []) constantUses.push(lifted(use));
+    for (const use of nestedLabels ?? []) labelUses.push(lifted(use));
+    return rest;
+  });
+  if (!changed) return project;
+  return {
+    ...project,
+    layers,
+    ...(constantUses.length ? { constantUses } : {}),
+    ...(labelUses.length ? { labelUses } : {}),
+  };
+}
+
+/**
+ * The uses that are in a view, at the addresses they resolve to there.
+ *
+ * The same rule a claim follows, through the same `resolveAt`: a layer-framed
+ * use is at its layer's placement plus its offset and is absent when the layer
+ * is not linked; a target-framed use is present only in that target; an
+ * address-framed use is where it says.
+ */
+export function resolvedUses<T extends { at: number | string; layer?: string; target?: string }>(
+  uses: readonly T[],
+  layerStart: (id: string) => number | undefined,
+  selectedTarget: string | undefined
+): { use: T; address: number }[] {
+  const out: { use: T; address: number }[] = [];
+  for (const use of uses) {
+    const frame = useFrame(use);
+    if (frame.space === "target" && frame.target !== selectedTarget) continue;
+    const address = resolveAt(parseProjectAddress(use.at), frame, layerStart);
+    if (address !== undefined) out.push({ use, address });
+  }
+  return out;
+}
+
 export function parseProject(json: string): Project {
-  const project = entryPointsIntoTarget(JSON.parse(json) as Project);
+  const project = usesToRoot(entryPointsIntoTarget(JSON.parse(json) as Project));
 
   // **A record's fields used to be an object keyed by offset.** Every file
   // written before they were keyed by id says so, and they stay loadable: the

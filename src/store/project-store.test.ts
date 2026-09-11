@@ -751,10 +751,12 @@ describe("a document stored before bindings were keyed by site", () => {
   });
 
   const bindings = (store: ProjectStore) => {
-    const layer = projectFromDoc(store.document()).layers[0];
+    // At the root now, framed on the address space: what a nested absolute
+    // record meant, and the frame the migration gives it.
+    const project = projectFromDoc(store.document());
     return {
-      constants: (layer.constantUses ?? []).map((u) => `${u.address}=${u.constant}`).sort(),
-      labels: (layer.labelUses ?? []).map((u) => `${u.address}=${u.label}`).sort(),
+      constants: (project.constantUses ?? []).map((u) => `${u.at}=${u.constant}`).sort(),
+      labels: (project.labelUses ?? []).map((u) => `${u.at}=${u.label}`).sort(),
     };
   };
 
@@ -780,13 +782,13 @@ describe("a document stored before bindings were keyed by site", () => {
       // Rebinding replaces and unbinding clears — the R4 contract, on an
       // upgraded project.
       f.store.runOps(
-        [{ op: "constantUse.bind", id: "cst_new", layerId: "lay_a", address: 0x8000, constantId: "cst_b" }],
+        [{ op: "constantUse.bind", id: "cst_new", frame: { space: "address" }, at: 0x8000, constantId: "cst_b" }],
         "alice",
         1
       );
       expect(bindings(f.store).constants).toEqual(["$8000=cst_b", "$8010=cst_b"]);
       f.store.runOps(
-        [{ op: "constantUse.unbind", id: "cst_new", layerId: "lay_a", address: 0x8000 }],
+        [{ op: "constantUse.unbind", id: "cst_new", frame: { space: "address" }, at: 0x8000 }],
         "alice",
         2
       );
@@ -818,7 +820,8 @@ describe("a document stored before bindings were keyed by site", () => {
           at: 1,
           changeset: "cs_old",
         },
-      ]);
+        // Spelled as main recorded it, before a bind carried a frame.
+      ] as unknown as Parameters<SqliteStorage["appendOps"]>[0]);
 
       const undone = f.store.undo("alice", "ses_old");
       expect(undone.undone).toBeTruthy();

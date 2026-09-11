@@ -218,8 +218,22 @@ explorer. The synchronous listing does not execute arbitrary decoder source.
 
 ### Reference limits
 
-Constant and label use sites still store absolute addresses within their layer;
-relocation-aware binding frames are [#26](https://github.com/re64/re64/issues/26).
+**A binding carries a frame, like a claim.** Constant and label uses live at
+the root — `constantUses`, `labelUses` — each `{id, at, layer? | target?,
+constant | label}`, with `at` read in the use's frame exactly as a claim's is:
+an offset into the layer for a layer-framed use, an absolute address otherwise.
+`placed()` frames a new binding on owned bytes on its layer, so it moves with
+the bytes it names; a byte no layer supplies gets the address space. `scope:
+"target"` on the binding tools is the escape hatch for when relocation is wrong:
+the use is a fact about that arrangement, at that address, and is filtered to
+it on the way out like a target-framed claim. The site key carries the frame —
+`layer:lay_a:$0123` and `target:tgt_b:$8123` are two sites — so binding again
+replaces the binding *at that site*. A use nested in a layer with an absolute
+`address` is legacy input, lifted to the root **framed on the address space**:
+converting to a layer offset needs the layer's placement, which for a `.prg` is
+inside bytes the migration does not have, and converting where the bytes
+happen to be available would make one document mean two things depending on
+which boundary opened it first. Stored snapshots migrate the same way.
 
 ### Files
 

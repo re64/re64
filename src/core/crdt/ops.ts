@@ -12,7 +12,9 @@ import { fileId, splitFilePath } from "../project/files.js";
 
 import * as Y from "yjs";
 import { ClaimEdit, Op } from "../ops/types.js";
-import { legacyChildTarget, legacyTypeSetChildren, typeAddFields } from "../ops/legacy.js";
+import { bindSite, legacyChildTarget, legacyTypeSetChildren, typeAddFields } from "../ops/legacy.js";
+import { useFrameFields, useKey } from "../project/project.js";
+import type { Frame } from "../claims/model.js";
 import { derivedId } from "../project/identity.js";
 import { Claim } from "../claims/model.js";
 import { encodeClaim, decodeClaim, claimsRoot } from "./claims.js";
@@ -20,20 +22,29 @@ import { encodeClaim, decodeClaim, claimsRoot } from "./claims.js";
 const hex4 = (n: number) => "$" + n.toString(16).toUpperCase().padStart(4, "0");
 
 /**
- * Which entry an unbind means: the site when the operation names one, and the
- * entry carrying its use id when it does not — an operation stored before the
- * site was the key, replayed by undo or redo against a document that has since
- * been rekeyed.
+ * Which entry an unbind means: the site when the operation names one — frame
+ * and coordinate, or the address-framed site an operation from before frames
+ * meant by its absolute `address` — and the entry carrying its use id when it
+ * names neither, which only history from before sites were keys does.
  */
 function siteKeyFor(
   uses: Y.Map<Y.Map<unknown>>,
-  op: { id: string; address?: number }
+  op: { id: string; frame?: Frame; at?: number; address?: number }
 ): string | undefined {
-  if (op.address !== undefined) return hex4(op.address);
+  const site = bindSite(op);
+  if (site) return useKey({ at: site.at, ...useFrameFields(site.frame) });
   return [...uses.keys()].find((key) => {
     const held = uses.get(key);
     return held instanceof Y.Map && held.get("id") === op.id;
   });
+}
+
+/** A use record as the document spells it: the frame flat, the coordinate as hex. */
+function useRecord(
+  op: { id: string; frame: Frame; at: number },
+  reference: { constant: string } | { label: string }
+): Record<string, unknown> {
+  return { id: op.id, at: hex4(op.at), ...useFrameFields(op.frame), ...reference };
 }
 
 function layerById(doc: Y.Doc, id: string): Y.Map<unknown> {
@@ -217,19 +228,20 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
       // Keyed by the site, like every binding — see `constantUse.bind` for what
       // keying by a minted use id cost.
       case "labelUse.bind": {
-        const uses = childMap(layerById(doc, op.layerId), "labelUses");
-        const at = hex4(op.address);
-        let entry = uses.get(at);
+        const uses = doc.getMap<Y.Map<unknown>>("labelUses");
+        const site = bindSite(op)!;
+        const key = useKey({ at: site.at, ...useFrameFields(site.frame) });
+        let entry = uses.get(key);
         if (!entry) {
           entry = new Y.Map<unknown>();
-          uses.set(at, entry);
+          uses.set(key, entry);
         }
-        assign(entry, { id: op.id, address: at, label: op.labelId });
+        assign(entry, useRecord({ id: op.id, ...site }, { label: op.labelId }));
         break;
       }
 
       case "labelUse.unbind": {
-        const uses = childMap(layerById(doc, op.layerId), "labelUses");
+        const uses = doc.getMap<Y.Map<unknown>>("labelUses");
         const key = siteKeyFor(uses, op);
         if (key !== undefined) uses.delete(key);
         break;
@@ -635,19 +647,20 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
       // Which value showed depended on the ids, not on which bind happened
       // later.
       case "constantUse.bind": {
-        const uses = childMap(layerById(doc, op.layerId), "constantUses");
-        const at = hex4(op.address);
-        let entry = uses.get(at);
+        const uses = doc.getMap<Y.Map<unknown>>("constantUses");
+        const site = bindSite(op)!;
+        const key = useKey({ at: site.at, ...useFrameFields(site.frame) });
+        let entry = uses.get(key);
         if (!entry) {
           entry = new Y.Map<unknown>();
-          uses.set(at, entry);
+          uses.set(key, entry);
         }
-        assign(entry, { id: op.id, address: at, constant: op.constantId });
+        assign(entry, useRecord({ id: op.id, ...site }, { constant: op.constantId }));
         break;
       }
 
       case "constantUse.unbind": {
-        const uses = childMap(layerById(doc, op.layerId), "constantUses");
+        const uses = doc.getMap<Y.Map<unknown>>("constantUses");
         const key = siteKeyFor(uses, op);
         if (key !== undefined) uses.delete(key);
         break;
@@ -807,6 +820,12 @@ export function undoManagerFor(doc: Y.Doc, origin: unknown = "local"): Y.UndoMan
       doc.getMap("scenarios"),
       doc.getMap("captures"),
       doc.getMap("evidence"),
+      // The bindings, once they moved to the root — and the round-trip harness
+      // caught their absence within the hour, which is the whole argument for
+      // that harness. The note above was right that this list will be short
+      // again; it has now been short twice.
+      doc.getMap("constantUses"),
+      doc.getMap("labelUses"),
     ],
     {
       trackedOrigins: new Set([origin]),

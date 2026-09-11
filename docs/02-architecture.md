@@ -192,7 +192,7 @@ durability obligations using these terms.
 |---|---|
 | Structured investigation | Implemented: claims, declarations, scenarios, captures and evidence are represented and exposed through tools. |
 | Article production | Demonstrated through experiments; a supported editorial workflow is planned. Storage, editing, references and publication versioning remain unresolved. |
-| Claim and binding coordinates | Claim frames exist; completing the coordinate model for bindings is tracked in [#26](https://github.com/re64/re64/issues/26). |
+| Claim and binding coordinates | Claims and bindings both carry a frame — `address`, `layer` or `target` — and resolve the same way; see the [model](05-model.md#5-declarations-and-bindings). Comments and primary choices remain [#31](https://github.com/re64/re64/issues/31). |
 | File references | Files have stable ids and immutable content hashes; layers and captures reference those ids. Display names may change or be shared. D64 member selectors belong to layers. Legacy exports and stored snapshots migrate on load (see [model](05-model.md#files)). |
 | Session consistency | Replicas exist; uniform visibility and undo behavior remain [#28](https://github.com/re64/re64/issues/28). |
 | Edit schema consistency | The operation contract distinguishes omission from clear; the general surface audit remains [#29](https://github.com/re64/re64/issues/29). |
