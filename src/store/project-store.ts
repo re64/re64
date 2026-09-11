@@ -30,6 +30,31 @@ import { HistoryEntry, ProjectStorage, StoredChange, revOf } from "./storage.js"
  * somebody else has since changed is left alone, and a caller that was told
  * only "undone" would believe the whole action had gone.
  */
+/**
+ * Where a session's write is applied before the shared document sees it.
+ *
+ * A session with a replica writes **replica-first**: the operations go into its
+ * own copy, and what comes back is the exact Yjs update that produced — which
+ * the store then merges into the shared document. The other way round, writing
+ * the shared document and echoing the delta back, leaves the session's own
+ * write *pending* in its replica whenever somebody else touched the same key
+ * unmerged, because the echo's items would reference structs the replica has
+ * not seen. Replica-first never does: the shared document holds everything the
+ * replica holds, so the update always integrates. This is how a browser tab
+ * writes, and an MCP session is a proxy for one.
+ */
+export type WriteThrough = (ops: readonly Op[]) => Uint8Array;
+
+/** Bytes of a program's projection: the version a reader of `doc` answers with. */
+export function versionOf(doc: CrdtDoc): string {
+  return createHash("sha256")
+    // The *program*, not the conversation: a message is a document change
+    // and not a program change, so it must not read as one.
+    .update(JSON.stringify(programFromDoc(doc)))
+    .digest("hex")
+    .slice(0, 12);
+}
+
 export interface UndoOutcome {
   /** What was taken back, or null when nothing could be. */
   undone: string | null;
@@ -244,12 +269,7 @@ export class ProjectStore {
    * had merged in the meantime.
    */
   version(): string {
-    return createHash("sha256")
-      // The *program*, not the conversation: a message is a document change
-      // and not a program change, so it must not read as one.
-      .update(JSON.stringify(programFromDoc(this.document())))
-      .digest("hex")
-      .slice(0, 12);
+    return versionOf(this.document());
   }
 
   /**
@@ -678,7 +698,9 @@ export class ProjectStore {
      * import, and the reviewer that found it named this as the reason nobody
      * had: the receipt agreed with the mistake.
      */
-    layerStarts?: ReadonlyMap<string, number>
+    layerStarts?: ReadonlyMap<string, number>,
+    /** See `WriteThrough`: a session's own copy takes the write first. */
+    through?: WriteThrough
   ): { applied: number; descriptions: string[]; changeset: string } {
     // One call is one changeset, however many ops it takes. The boundary is
     // this function; it simply went unrecorded, which is why undo used to take
@@ -709,7 +731,7 @@ export class ProjectStore {
       this.addAuthor(author);
       this.recording = true;
       try {
-        this.applyThroughDocument(ops, author);
+        this.applyThroughDocument(ops, author, through);
       } finally {
         this.recording = false;
         this.lastProjection = projectFromDoc(this.document());
@@ -741,24 +763,26 @@ export class ProjectStore {
    * follows: two agents under one identity are two peers and neither may
    * revert the other. `re64 undo --any` passes neither and reaches anything.
    */
-  undo(author?: string, session?: string): UndoOutcome {
+  undo(author?: string, session?: string, through?: WriteThrough): UndoOutcome {
     return this.step(
       // Edits only. An undo is in the feed as its own entry, and undoing that
       // would put back what was just taken back rather than walking further.
       (c) => !c.undone && (c.kind ?? "edit") === "edit",
       (c) => c.inverse,
       true,
-      { author, session }
+      { author, session },
+      through
     );
   }
 
   /** Redo the most recently undone action, by the same scoping rule. */
-  redo(author?: string, session?: string): UndoOutcome {
+  redo(author?: string, session?: string, through?: WriteThrough): UndoOutcome {
     return this.step(
       (c) => c.undone === true && (c.kind ?? "edit") === "edit",
       (c) => c.op,
       false,
-      { author, session }
+      { author, session },
+      through
     );
   }
 
@@ -779,7 +803,8 @@ export class ProjectStore {
     wanted: (change: StoredChange) => boolean,
     direction: (change: StoredChange) => Op,
     undone: boolean,
-    scope: { author?: string; session?: string }
+    scope: { author?: string; session?: string },
+    through?: WriteThrough
   ): UndoOutcome {
     const inScope = (c: StoredChange): boolean => {
       if (scope.session !== undefined) return c.session === scope.session;
@@ -891,7 +916,8 @@ export class ProjectStore {
           );
           this.applyThroughDocument(
             applying.map(direction),
-            newest.author ?? "unknown"
+            newest.author ?? "unknown",
+            through
           );
         } finally {
           this.recording = false;
@@ -921,10 +947,17 @@ export class ProjectStore {
    * Never applied to the text directly. The document is what merges, so a write
    * that skipped it would be invisible to everyone else holding one.
    */
-  private applyThroughDocument(ops: readonly Op[], author: string): void {
+  private applyThroughDocument(
+    ops: readonly Op[],
+    author: string,
+    through?: WriteThrough
+  ): void {
     const doc = this.document();
     this.absorb(this.storage.readText());
-    for (const op of ops) applyOpToDoc(doc, op, author);
+    // Replica-first when the caller has one — the update is what its own copy
+    // produced, and merges here as a peer's would — and straight in otherwise.
+    if (through) applyUpdate(doc, through(ops), author);
+    else for (const op of ops) applyOpToDoc(doc, op, author);
     this.reconcileBlobNames();
     this.writeFile();
   }

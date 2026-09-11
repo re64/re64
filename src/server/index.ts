@@ -353,7 +353,10 @@ export function startServer(options: ServerOptions): RunningServer {
     const { sync, storage } = room(projectId);
     const doc = emptyDoc();
     applyUpdate(doc, encodeDoc(sync.store.document()), "seed");
-    const made: SessionReplica = { doc, cursor: storage.opsCursor(), session };
+    const made: SessionReplica = { doc, cursor: storage.opsCursor(), session, changed: 0 };
+    doc.on("update", () => {
+      made.changed++;
+    });
     replicas.set(key, made);
     return made;
   }
