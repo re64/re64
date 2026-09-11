@@ -6,7 +6,7 @@ The web front end: the stack, the disassembly widget, the arrow gutter, the pane
 > it. Entries are accurate as of when they were written and are **append-only**:
 > a superseded decision keeps its text and gains a note pointing forward, because
 > the value of a corrected decision is the correction. For what is true *now*, see
-> `docs/model.md`, `docs/algebra.md`, `docs/api.md` and `docs/developer-guide.md`.
+> `docs/05-model.md`, `docs/06-algebra.md`, `docs/07-api.md` and `docs/04-developer-guide.md`.
 
 ---
 

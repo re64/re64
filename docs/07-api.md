@@ -5,9 +5,12 @@ what a client actually sees rather than what somebody remembered. A test
 regenerates it and compares, because a committed generated file goes stale in
 silence.
 
-Companion to `docs/developer-guide.md`, which is how to use all this;
-`docs/algebra.md`, which is why the writes are shaped the way they are; and
-`docs/model.md`, which is the document these reach. `docs/decisions/agents.md`
+Start with the [manifest](01-purpose.md), [architecture](02-architecture.md) and
+[contracts](03-contracts.md) for goals, vocabulary and required behavior.
+
+Companion to `docs/04-developer-guide.md`, which is how to use all this;
+`docs/06-algebra.md`, which is why the writes are shaped the way they are; and
+`docs/05-model.md`, which is the document these reach. `docs/decisions/agents.md`
 says why each of them exists and what it replaced.
 
 ---
@@ -85,7 +88,7 @@ Auto-generated names (`sub_`, `loc_`, `dat_`), a layer's own entry label and
 built-in platform names are marked `writable: false` and their ids withheld,
 because nothing stored them.
 
-See `docs/algebra.md` for the full rules.
+See `docs/06-algebra.md` for the full rules.
 
 **Writes return more than `ok`:**
 

@@ -2,35 +2,49 @@
 
 ## Follow-up review — 2026-09-10
 
-Reviewed current `main` at `29c9b29`, the ten repair pull requests
+The initial follow-up reviewed `main` at `29c9b29`, the ten repair pull requests
 [#16](https://github.com/re64/re64/pull/16) through
 [#25](https://github.com/re64/re64/pull/25), and the larger follow-up designs in
 [#26](https://github.com/re64/re64/issues/26) and
 [#27](https://github.com/re64/re64/issues/27). The original findings below are
-retained as the baseline; this section supersedes their implementation status.
+retained as the baseline; this section supersedes their implementation status
+and includes subsequent PR re-reviews through #25 at `1309dbb` and #22 at
+`99523af`, #17 at `bbd2cca`, #16 at `f0fb9b7`, and #20 at `680c1f0`
+(the latter re-reviewed on 2026-09-11).
 
-Eight findings are fixed on current `main`: **R1, R2, R5, R6, R10, R11, R12
-and R15**. Seven branches need changes before they close their findings: **R3,
-R4, R7, R8, R9, R13 and R14**. The review also found one P1 regression in the
-new session-replica design, tracked as
+The original baseline had eight fixes: **R1, R2, R5, R6, R10, R11, R12 and
+R15**. R4's site-keying repair has since merged in PR #24 at `8d880c4`; its
+coordinate follow-up remains #26. R3's repair was approved at `b57907d` and
+merged in PR #23 at `7e7015c`. R9's commit/publication repair was approved
+in PR #25 at `1309dbb` and merged at `fe91b72`. R8's read-path repair was
+approved in PR #22 at `99523af` and merged at `4b59b58`; its file-reference
+design remains #27.
+R13's provenance repair was approved in PR #17 at `bbd2cca` and merged at
+`b40f642`. R14's ordering repair was approved in PR #16 at `f0fb9b7` and
+merged at `e9fe636`.
+R7's scenario-cache repair was approved in PR #20 at `680c1f0`. All ten
+original repair PRs are now approved or merged; the separate design and
+follow-up issues remain open work.
+The review also found one P1 regression in the new
+session-replica design, tracked as
 [#28](https://github.com/re64/re64/issues/28).
 
 | Finding | Current disposition | Review result |
 |---|---|---|
 | R1 | [PR #21](https://github.com/re64/re64/pull/21), merged | **Resolved.** Caller, session, tool context and logging are captured per request before the body await. |
 | R2 | merged on `main` | **Resolved.** `claim.set` now touches only the named keys and keeps structured groups atomic. |
-| R3 | [PR #23](https://github.com/re64/re64/pull/23) | **Changes requested.** The id-keyed nested maps are right, but legacy id-less fields are dropped and `type.set` still provides an ambiguous offset-keyed child-edit route. |
-| R4 | [PR #24](https://github.com/re64/re64/pull/24) | **Changes requested.** Site keying fixes accumulation, but undoing a rebind clears the site instead of restoring its previous binding. |
+| R3 | [PR #23](https://github.com/re64/re64/pull/23), merged at `7e7015c` | **Resolved.** Field identity, persisted migration, colliding-field preservation and legacy undo/redo semantics are verified. |
+| R4 | [PR #24](https://github.com/re64/re64/pull/24), merged at `8d880c4` | **Site-keying repair merged.** Rebind undo, persisted-map migration, old undo/redo history and address normalization are verified. Coordinate/frame follow-up remains #26. |
 | R5 | merged on `main` | **Resolved.** Target frames use stable target ids and are filtered at projection. |
 | R6 | merged on `main` | **Resolved.** The name-based default was removed and target references use ids. |
-| R7 | [PR #20](https://github.com/re64/re64/pull/20) | **Changes requested.** The view and placement enter the key, but present ROM and character-ROM content do not. |
-| R8 | [PR #22](https://github.com/re64/re64/pull/22) | **Changes requested.** Workspace loading follows the document hash, but the HTTP blob route still follows the mutable SQL name during the upload/record gap; its claimed conditional ETag response is also absent. |
-| R9 | [PR #25](https://github.com/re64/re64/pull/25) | **Changes requested.** Publication waits for commit, but a listener exception after the commit is handled as a transaction failure and reported as though the durable write failed. |
+| R7 | [PR #20](https://github.com/re64/re64/pull/20), approved at `680c1f0` | **Repair approved.** ROM changes rebuild cached maps, and execution keys use loaded ROM and character bytes; reused and fresh workspace verdicts agree. |
+| R8 | [PR #22](https://github.com/re64/re64/pull/22), merged at `4b59b58` | **Read-path repair merged.** Recorded hashes govern normalized name lookups; missing content fails, conditional reads work, and import preserves existing file records. File-reference design remains #27. |
+| R9 | [PR #25](https://github.com/re64/re64/pull/25), merged at `fe91b72` | **Resolved.** Rollback discards failed live state and queued updates; publication preserves committed notifications and isolates listener and reporter exceptions. |
 | R10 | [PR #19](https://github.com/re64/re64/pull/19), merged | **Resolved.** Each inverse is derived against its own rolling pre-state and socket actions retain session and changeset grouping. |
 | R11 | merged on `main` | **Resolved.** All accepted writes enter the feed and undo/redo append actions. |
 | R12 | merged on `main` | **Resolved with R11.** Appended undo actions give redo an explicit order. |
-| R13 | [PR #17](https://github.com/re64/re64/pull/17) | **Changes requested.** The adapters agree that `by` is a replacement, but `edit_evidence` still promises nullable clears while rejecting `method: null`. |
-| R14 | [PR #16](https://github.com/re64/re64/pull/16) | **Changes requested.** Selecting numeric or text comparison per pair creates a non-transitive comparator for legal mixed names, so ordering can still depend on insertion order. |
+| R13 | [PR #17](https://github.com/re64/re64/pull/17), merged at `b40f642` | **Resolved.** Provenance replacement, MCP method clears and undo/redo agree; canonical object-key comparison removes false conflicts while preserving real conflict protection. |
+| R14 | [PR #16](https://github.com/re64/re64/pull/16), merged at `e9fe636` | **Resolved.** Root comparators and nested-field/export tie-breakers use deterministic ordering; mixed-name and cross-locale convergence probes pass, including after the rebase over #17. |
 | R15 | [PR #18](https://github.com/re64/re64/pull/18), merged | **Resolved.** A shared whole-number parser rejects suffixes while preserving the advertised spellings. |
 
 ### What is now sound
@@ -50,61 +64,119 @@ three documented integer spellings across address, byte and flag inputs. Focused
 validation passed for all three: 129 MCP transport tests for #21, 67 store tests
 for #19, 131 MCP transport tests for #18, and typechecking on each branch.
 
-### Repair branches that remain incomplete
+### Repair branch follow-up
 
-**R3 / PR #23.** Keying fields by id and storing each as a nested map is the
-correct physical model. The migration currently converts the old object to a
-list but does not give an id-less legacy field an identity; `typeMapFrom` then
-skips it. More fundamentally, `type.set.fields` survives as an offset-keyed
-second writer. Once two fields may share an offset, that operation cannot say
-which one it edits or removes. It also contradicts the updated model prose that
-parent edits do not carry children. Remove that route or make it explicitly
-id-keyed. `Workspace.editField` contains a mechanical remnant too: it applies
-`Object.entries` to the new array and compares array indices as offsets.
+**R3 / PR #23 — approved at `b57907d` on 2026-09-10.** All previous blockers
+are addressed. Legacy text fields receive deterministic ids, `type.set.fields`
+is removed, and `Workspace.editField` checks actual offsets. The partial
+`edit_type` API also addresses the original additional observation about
+requiring a whole layout to rename a record. The store now persists migration
+of old CRDT field maps, and the list-shaped `type.add` preserves colliding
+fields during reconciliation and restoration. Independent probes verify the
+previous failures are fixed, including edits/removals surviving reopening.
 
-**R4 / PR #24.** A site-keyed map makes rebind and unbind mean what the API says.
-The inverse still looks up the previous use by the newly minted use id. On a
-rebind that id cannot exist in the pre-state, so undo records `unbind` and loses
-the old value. Inversion must find the prior binding by layer and site, or the
-site itself must carry a stable identity. Both constant and label uses need the
-sequence bind A → bind B → undo pinned.
+The compatibility reader added at `7149cd4` also fixes old type-add/remove
+history and child-rename undo/redo. Independent real-database upgrade probes
+confirm those fixes.
 
-**R7 / PR #20.** Adding target identity, placements and missing-ROM names fixes
-the reproduced cross-target collision. It is not yet a fingerprint of the
-effective machine: changing the bytes of a present BASIC, KERNAL or character
-ROM leaves the key unchanged. The character ROM can also change captured visual
-output without entering the key. Hash the actual external inputs rather than
-only their availability.
+The final compatibility repair preserves legacy child replacement semantics,
+including removal of omitted descriptions. Real-database upgrade probes now pass
+absent → set → undo → redo and set → clear → undo → redo, including state after
+reopening. Current `field.set` remains partial. Canonical field-key ordering in
+exports prevents unchanged replays from being rejected by the store's text
+comparison; the golden listing remains unchanged. The latest GitHub review
+approves this head and supersedes all previous change requests. PR #23
+subsequently merged at `7e7015c`.
 
-**R8 / PR #22.** Resolving workspace bytes through the file hash recorded in the
-document and reconciling the SQL index after operations is correct. The HTTP
-route still calls `storage.blob(requested)`. An upload over an existing name can
-therefore serve unrecorded replacement bytes while the document still names the
-old hash. The route also always returns 200; setting an ETag alone does not
-provide the advertised cheap 304. The route must use the same document-first
-resolver and implement `If-None-Match`, or its contract and prose must be
-narrowed.
+**R4 / PR #24 — approved at `47371ac` on 2026-09-10.** All previous blockers
+are addressed. The inverse restores the previous binding by layer and address.
+Persisted use maps migrate to site keys, keeping the greatest use id where a
+legacy site has duplicates under the stated policy. The migration is persisted
+and idempotent. Old unbind operations/inverses without an address resolve by
+their historical use id. Text writers compare parsed addresses and replace or
+clear all entries at a requested site while preserving the narrower scope of
+old id-only unbinds.
 
-**R9 / PR #25.** Deferring listeners and rebuilding the in-memory document after
-a storage failure closes the original live-state divergence. The transaction
-and notification loops share one `try/catch`, however. If a listener throws,
-the database has already committed, yet the method clears the document and
-throws a failure to the caller. That makes a durable success look retryable.
-Commit failure handling and post-commit notification failure handling need
-separate boundaries, with a throwing-listener test.
+Independent probes using snapshots and real databases produced by current
+`main` pass for both constants and labels: migration, rebind/undo/redo/unbind,
+old bind and unbind history, numeric/hex spellings, neighbouring-site preservation,
+and reopening. The latest GitHub review approves this head and supersedes the
+previous change requests. PR #24 subsequently merged at `8d880c4`.
+The coordinate/frame design remains #26.
 
-**R13 / PR #17.** Treating provenance `by` as one replacement value is coherent
-with its required author and fixes both adapters. The public `edit_evidence`
-description says a named field can be cleared with `null`, but its `method`
-schema and workspace type still reject null. The same set/clear behavior should
-be reachable through the MCP surface and tested there.
+PR #23 at `b57907d` is rebased over the merged #24. Both migration bodies are
+retained under one `migrateDoc` export and store hook; both independent upgrade
+probe sets pass on that combined head.
 
-**R14 / PR #16.** Sorting textual roots is required, but the proposed comparator
-chooses numeric versus textual comparison from each pair. For legal names
-`"10"`, `"2x"`, and `"3"`, it can say `10 < 2x`, `2x < 3`, and `3 < 10`.
-That violates the comparator contract and can preserve the insertion-order
-dependence being repaired. Each root must select one comparator from its schema,
-with a locale-independent code-unit tie-breaker.
+**R7 / PR #20 — approved at `680c1f0` on 2026-09-11.** The stale-map failure
+reproduced at `0b8f8cc` is fixed. ROM content participates in the workspace cache
+key so a replaced ROM rebuilds the loaded map, and execution fingerprints use
+the ROM bytes in that map and the supplied character image.
+
+The independent synthetic-KERNAL probe now changes the assertion from passing
+to failing in the reused workspace, matching fresh workspaces with shared or
+fresh checkpoint caches. Restoring the original ROM restores the passing
+verdict. A retained map's execution key stays unchanged when only the disk
+changes, while changing the supplied character bytes changes the key. The
+earlier two repair commits are unchanged by the rebase onto `e9fe636`.
+
+**R8 / PR #22 — approved at `99523af` on 2026-09-10.** All three failures
+reproduced at `06be7dd` are fixed. Import adds layer-blob records while preserving
+existing non-layer records and their hashes. A shared lookup normalizes both
+recorded and requested names for HTTP and the workspace byte loader. Independent
+probes verify aliases on either side, including import of an existing aliased
+record. Missing recorded content remains an error: HTTP returns 404 without a
+false ETag, including for conditional requests carrying the unavailable hash.
+
+The ordinary upload-before-record and matching-ETag probes still pass. The
+name-table fallback also continues to serve uploads without a document record.
+
+The file-id and compound-selector design remains #27.
+
+**R9 / PR #25 — approved at `1309dbb` on 2026-09-10.** The two failures
+reproduced at `d69bea6` are fixed. Transaction execution and notification delivery
+now have separate flags. A listener's failed transaction discards only its own
+queued updates and drops the live document for reconstruction from committed
+storage. Independent fault injection confirms agreement between live state,
+a receiving replica and a fresh store. A successful listener write queued before
+a second, failed write is still delivered, and subsequent writes work normally.
+
+Listener exceptions and a throwing `onPublishError` are isolated from the
+successful caller and from other listeners. Both earlier failure probes now
+pass. The initial test-file syntax error was already corrected at `d69bea6`.
+The non-blocking documentation correction was included before merge: nested
+writes join the outer SQLite transaction rather than creating a savepoint.
+PR #25 subsequently merged at `fe91b72`.
+
+**R13 / PR #17 — approved at `bbd2cca` on 2026-09-10.** The false undo/redo
+conflicts reproduced at `c0cfd43` are fixed. The store compares state with sorted
+object keys while preserving array order, and the writer emits evidence keys in
+a stable order. Independent full-clear, author-only replacement and omitted-field
+probes pass through both adapters and durable undo/redo. MCP method set/clear and
+clear-undo preserve author, timestamp and unrelated fields.
+
+The broader conflict comparison still refuses undo when another writer changes
+the provenance, while allowing undo to preserve an unrelated note edit. The
+earlier two repair commits are unchanged by the rebase onto `4b59b58`. The
+session-replica defect in #28 and wider schema-nullability audit in #29 remain
+separate follow-ups. PR #17 subsequently merged at `b40f642`.
+
+**R14 / PR #16 — approved at `f0fb9b7` on 2026-09-10.** Per-root comparator
+selection fixes the numeric/text cycle, and code-unit root tie-breakers and
+primary-label key sorting pass. Correction to the earlier review example:
+`parseInt("2x")` returns 2, so `10 / 2x / 3` did not demonstrate the cycle.
+The valid former cycle is `9 / $10 / $ZZ`, as the author correctly pointed out.
+
+The nested-field failure reproduced at `cee9843` is now fixed too. Document
+construction, field tie-breakers and export tie-breakers use code-unit ordering.
+The same saved snapshot projects `fld_z` before `fld_ä` under both `en-US` and
+`sv-SE`, with identical export hashes. The distinct IDs `fld_\u00e9` and
+`fld_e\u0301` survive and project/export in the same order after peers exchange
+updates. The earlier root-order probes still pass. The rebase over #17 arrived
+while the initial approval was being posted; the combined head `f0fb9b7` was
+then independently verified. It preserves both branches' serializer changes,
+and the ordering and provenance undo/redo probes pass together. PR #16
+subsequently merged at `e9fe636`.
 
 ### Follow-up design review
 
@@ -149,7 +221,7 @@ contains the required two-session transport cases.
 
 ### Follow-up validation
 
-- Current `main`: `npm test` — **1,721 passed, five skipped** across 102 passing
+- Initial `main` baseline (`29c9b29`): `npm test` — **1,721 passed, five skipped** across 102 passing
   test files and one skipped file; `npm run typecheck`, `npm run build`, and
   `npm run build:ui` passed.
 - The original model/storage and transport probes were re-run before the three
@@ -159,8 +231,83 @@ contains the required two-session transport cases.
   covered R1, R10 and R15 before merge.
 - Approved PR branches: the focused suites and typechecks listed above passed in
   detached worktrees.
-- GitHub review state: #18, #19 and #21 merged after approval. Concrete change
-  requests were submitted on #16, #17, #20, #22, #23, #24 and #25.
+- PR #23 re-review at `82ae789`: **1,730 passed, five skipped** after copying the
+  existing local experiment fixtures and ROMs into its detached worktree;
+  typecheck, TypeScript build and UI build passed. Separate probes reproduced
+  persisted-snapshot and colliding-field reconciliation/undo gaps, subsequently
+  fixed at `ddb85d2`.
+- PR #23 re-review at `ddb85d2`: **1,736 passed, five skipped**; typecheck,
+  TypeScript build and UI build passed. The previous preservation probes now
+  pass; real-database upgrade probes reproduced the history gap subsequently
+  addressed at `7149cd4`.
+- PR #23 re-review at `7149cd4`: **1,741 passed, five skipped**; typecheck,
+  TypeScript build and UI build passed. Old type-add/remove and child-rename
+  undo/redo probes pass; description replacement/clear probes expose the
+  P2 subsequently fixed at `b57907d`.
+- PR #23 approval at `b57907d`: **1,758 passed, five skipped**; typecheck,
+  TypeScript build and UI build passed. Description undo/redo and all earlier
+  field-preservation probes pass, as do the independent #24 binding upgrade
+  probes on this rebased head. The golden listing passed unchanged.
+- PR #24 re-review at `6d64b13`: **1,728 passed, five skipped** with the same
+  local fixtures in a separate worktree; typecheck, TypeScript build and UI build
+  passed. Separate probes verified rebind undo and reproduced the persisted-map,
+  history-upgrade and address-spelling gaps, subsequently fixed at `47371ac`.
+- PR #24 approval at `47371ac`: **1,735 passed, five skipped**; typecheck,
+  TypeScript build and UI build passed. Independent upgrade, history and adapter
+  probes passed for both constant and label bindings.
+- PR #25 re-review at `d69bea6`: **1,761 passed, five skipped**; typecheck,
+  TypeScript build and UI build passed on the identical source tree. The initial
+  syntax error was fixed during the review. Independent fault-injection probes
+  reproduce failed listener-write publication and error-reporter escape.
+- PR #25 approval at `1309dbb`: **1,763 passed, five skipped**; typecheck,
+  TypeScript build and UI build passed. Both earlier fault-injection probes pass,
+  as does an additional check that rollback preserves previously committed queued
+  notifications and subsequent writes. The golden listing passed unchanged.
+- PR #22 re-review at `06be7dd`: **1,766 passed, five skipped**, with the same
+  local ROM and experiment fixtures; typecheck, TypeScript build and UI build
+  passed. The golden listing passed unchanged. Independent HTTP/loader/import
+  probes verify the ordinary read and 304 fixes and reproduce import record loss,
+  alias lookup bypass and missing-content fallback, subsequently fixed at
+  `99523af`. HTTP probes used an OS-assigned port.
+- PR #22 approval at `99523af`: **1,770 passed, five skipped**; typecheck,
+  TypeScript build and UI build passed. The golden listing passed unchanged.
+  All earlier independent probes pass, along with checks for existing aliased
+  records, conditional requests for missing content and unrecorded uploads.
+- PR #17 re-review at `c0cfd43`: **1,763 passed, five skipped**; typecheck,
+  TypeScript build and UI build passed. The golden listing passed unchanged.
+  Independent adapter and MCP probes verify method clears, author/timestamp
+  preservation and omitted provenance; store and MCP undo/redo probes reproduce
+  false conflicts from serialized property ordering, subsequently fixed at `bbd2cca`.
+- PR #16 re-review at `cee9843`: **1,763 passed, five skipped**, including all
+  5,040 mixed-name permutations; typecheck, TypeScript build and UI build passed.
+  The golden listing passed unchanged. Independent root-order and exchanged-update
+  probes pass; same-snapshot cross-locale and same-locale collation-tie probes
+  reproduce differing nested field order, subsequently fixed at `7abf405`.
+- PR #17 approval at `bbd2cca`: **1,776 passed, five skipped**; typecheck,
+  TypeScript build and UI build passed. The golden listing passed unchanged.
+  Independent adapter, store undo/redo and MCP clear-undo probes pass. Genuine
+  conflicting provenance remains protected, and unrelated note edits survive undo.
+- PR #16 approval at `7abf405`: **1,777 passed, five skipped**, including all
+  5,040 mixed-name permutations; typecheck, TypeScript build and UI build passed.
+  The golden listing passed unchanged. Independent cross-locale snapshot/export
+  and synchronized-peer field-order probes pass, as do the earlier root probes.
+- PR #16 rebase verification at `f0fb9b7`: **1,783 passed, five skipped**;
+  typecheck, TypeScript build and UI build passed. Both the independent ordering
+  probes and #17's adapter, store undo/redo, MCP clear and real-conflict protection
+  probes pass on the combined head.
+- PR #20 re-review at `0b8f8cc` on 2026-09-11: **1,763 passed, five skipped**;
+  typecheck, TypeScript build and UI build passed. The golden listing passed
+  unchanged. An independent synthetic-ROM probe reproduces disagreement between
+  reused and fresh workspaces after ROM content changes. It used a temporary
+  working directory without changing the host's ROM files or starting a server;
+  the failure was subsequently fixed at `680c1f0`.
+- PR #20 approval at `680c1f0` on 2026-09-11: **1,789 passed, five skipped**;
+  typecheck, TypeScript build and UI build passed. The golden listing passed
+  unchanged. Independent changed-ROM, restored-ROM and exact-input fingerprint
+  probes pass; reused and fresh workspaces agree.
+- GitHub review state: #16, #17, #18, #19, #21, #22, #23, #24 and #25 merged
+  after approval; #20 is approved at `680c1f0`. No change requests remain on
+  the ten original repair PRs.
 - Design feedback was posted on #26 and #27; the new replica defect is #28.
 
 The model has a sound organizing idea: preserve separate interpretations as claims, identify entities independently of their addresses, and derive analysis and presentation from a shared document. The implementation does not yet consistently preserve those semantics. I reproduced data loss under concurrent edits, incorrect caller attribution, incorrect target selection, false scenario results caused by caching, and divergence between recorded file content and the bytes actually served.
@@ -372,7 +519,7 @@ There are also multiple overlapping representations of truth: CRDT state, export
 
 Additional code-reviewed API gaps, not counted in the 15 reproduced findings:
 
-- [edit_type](../../src/server/mcp/tools.ts#L1334) requires `name`, `size` and `fields`, while [setType](../../src/server/workspace.ts#L2499) sends them through `type.set` and reuses field identities by offset. This contradicts `docs/algebra.md`’s statement that parent edits exclude children and revisions name only changed fields. Adding `edit_field` did not remove the older competing edit route. Renaming a type should not require resending its size or expose an offset-based field replacement path.
+- [edit_type](../../src/server/mcp/tools.ts#L1334) requires `name`, `size` and `fields`, while [setType](../../src/server/workspace.ts#L2499) sends them through `type.set` and reuses field identities by offset. This contradicts `docs/06-algebra.md`’s statement that parent edits exclude children and revisions name only changed fields. Adding `edit_field` did not remove the older competing edit route. Renaming a type should not require resending its size or expose an offset-based field replacement path.
 - [edit_target](../../src/server/mcp/tools.ts#L2153) cannot clear optional `description` or `order` with `null`, although the low-level target patch allows clears. Nullability should be checked across every entity schema, not only claim fields.
 - [editEvidence](../../src/server/workspace.ts#L2103) does not recheck the resulting refutation’s explanation or its scenario references. `addEvidence` does perform some of these checks. A common request validator should enforce the same declared rules on additions and revisions without suppressing legitimate merged disagreements.
 - Coordinate semantics need an explicit inventory beyond claims. Comments and operand uses remain absolute values nested inside layers, and primary choices are global address keys. Define how each should behave when a layer is relocated, shadowed, or used by multiple targets, and test those decisions together.

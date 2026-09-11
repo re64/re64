@@ -1,8 +1,9 @@
 # re64 for developers
 
-What the document model is, what the API does, and how to use both. Written to
-be read start to finish once; after that, `docs/algebra.md` is the rule sheet and
-`docs/model.md` is the reference.
+Practical workflows for the concepts defined in the [architecture](02-architecture.md).
+Start with the [manifest](01-purpose.md) and [contracts](03-contracts.md).
+Use the [operation algebra](06-algebra.md) for edit semantics and the
+[generated API reference](07-api.md) for exact tool arguments.
 
 ---
 
@@ -12,7 +13,9 @@ A **project** is a CRDT document — a Yjs `Y.Doc` — backed by SQLite. Every
 participant holds a copy, edits merge without a coordinator, and a `.re64` file
 is an *import source* or an *export target*, never the truth.
 
-There is no save step. An edit is durable when the call returns.
+A successful server write is durable when its call returns. A disconnected
+client's local edit still needs synchronization and server persistence; these
+are distinct events in the sync contracts.
 
 The document has a small number of top-level roots:
 
@@ -26,7 +29,9 @@ The document has a small number of top-level roots:
 | `targets` | named views over the layer stack |
 | `files` | uploaded binaries, content-addressed |
 | `primaryLabels` | which of several names at an address renders |
-| `chat`, `participants` | people and what they said; deliberately outside the project projection |
+| `scenarios`, `captures`, `evidence` | experiments, retained outputs and accounts about claims |
+| `chat` | messages, included in project export but excluded from the program version |
+| `participants` | collaboration presence, outside the project projection |
 
 ---
 
@@ -51,9 +56,10 @@ than as a filter. A game loads, decrunches, then pulls in levels; each is a
 target, each correct at a different moment. `order` says which comes first and
 `description` says what the phase is.
 
-**Every read takes a `target`.** There is no current target on the server — a
-view is a parameter of the request, because one client can show two at once and
-neither may move the other. Omit it and you get the project's `defaultTarget`.
+**A read that depends on a memory arrangement takes a `target`.** There is no
+current or default target on the server. If several targets exist, select one;
+with one target, or none and an implied whole-stack arrangement, omission is
+unambiguous. Document-only work such as listing targets needs no selected target.
 
 What this does **not** solve is banking: `$D000` being VIC registers or character
 ROM depending on `$01` is runtime alternation inside one moment, not a sequence
@@ -66,7 +72,7 @@ of moments. Layers cannot express it and stacking two does not help.
 **One noun for everything anybody says about an address.**
 
 ```ts
-{ id, at, frame?, extent?, name?, says?, root?, description?, by }
+{ id, at, frame?, extent?, name?, says?, root?, description?, origin }
 ```
 
 - `name` — what to call it
@@ -117,7 +123,8 @@ a **declaration** at project level, and a **use** binding one instruction site t
 one declaration. `LDA #$01` stays `#$01` until somebody says which they meant,
 and nothing infers it.
 
-**Types.** A record layout: a size, and fields by offset. **Holes are legal** —
+**Types.** A record layout: a size, and fields identified by id and placed at
+offsets. Multiple fields may occupy one offset. **Holes are legal** —
 `size` is declared rather than derived, so a reader who has proved nineteen
 fields of a 200-byte record can say so without inventing padding. How many
 records is derived from `extent / size`; storing a count would be a third fact
@@ -169,26 +176,29 @@ Three things about this are worth knowing before using it.
 **The machine is never stored.** It is derived from the steps and the project's
 bytes, so the script is the truth and the machine is a cache keyed on a prefix of
 it — held in memory, lost on restart, and a miss simply re-runs from the start.
-That is why the surface stays stateless and why there is no "session".
+There is no persistent interactive machine session in this workflow; participant
+sessions and their document replicas are a separate concept.
 
 **Running is deterministic**, which is what makes resuming safe. Input is
 *scheduled* rather than delivered live for exactly this reason: the same steps
 over the same bytes produce the same machine, byte for byte.
 
-**A capture is evidence.** It goes to the blob store and gets a record in the
+**A capture can support evidence.** It goes to the blob store and gets a record in the
 document saying which step of which scenario made it, so what a run produced can
-be read again — and by somebody else — without running it.
+be read again — and by somebody else — without running it. An evidence record
+connects that output to a claim.
 
-What it does not model is stated rather than discovered: no badlines or sprite
-DMA, no bitmap mode or sprites in a composed frame, the SID as a write log rather
-than audio, and banking still absent. `docs/decisions/machine.md` has the whole
-list.
+Machine and renderer coverage evolves. Check the current scenario result and
+its warnings before relying on a hardware behavior. For example, the editorial
+experiments distinguish actual composed frames from decoded sprite plates and
+SID-write reconstructions. `docs/decisions/machine.md` records the implementation
+history; an old limitation there is not a current capability test.
 
 ---
 
 ## 4b. Evidence: saying something about a claim
 
-A claim carries **`method`** — *how* the author knows, not how sure they are:
+An evidence record carries **`method`** — *how* its author knows, not how sure they are:
 `guessed`, `transcribed`, `read`, `derived`, `ran`.
 
 That axis is not a preference. Experiment-0 put two agents on one binary; both
@@ -198,8 +208,9 @@ used the **same** static reasoning and shared its blind spot — so "two account
 agree" read as corroboration when it was one account arriving twice. One of them
 named the rule exactly: *agreement between two accounts is only evidence when the
 methods differ.* A confidence score cannot detect that; a method can. So
-`claims_at` reports `method`, and hygiene says whether duplicates were reached
-different ways.
+`claims_at` exposes supporting accounts, including their methods, and hygiene
+can distinguish how duplicates were reached. The `method` convenience argument
+on a claim tool edits the caller's supporting evidence.
 
 `transcribed` earns its own place: it is the category both agents' trust ledgers
 lacked, and *"the one that generated most of the errors on both sides"*.
@@ -250,7 +261,7 @@ checks, the checks lived in shell history, and `findings.md` was left saying
 
 ## 5. The API: two shapes, and no third
 
-This is the part worth learning once. Full rules in `docs/algebra.md`.
+This is the part worth learning once. Full rules in `docs/06-algebra.md`.
 
 **Entity** — claim, comment, constant, decoder, type, layer, target:
 
@@ -292,21 +303,21 @@ again is one the caller has to go looking for.
 
 ```
 # name an address
-add_claim at:$8100 name:InitializeGame root:routine     → clm_a1
+add_claim address:$8100 name:InitializeGame root:routine → clm_a1
 
 # correct it — names only what changes; omitted is left alone, null clears
 edit_claim id:clm_a1 name:SetUpGame
 
 # say what bytes are
-add_claim at:$8E00 extent:512 is:bitmap view:"char:8"    → clm_b2
+add_claim address:$8E00 extent:512 is:bitmap view:"char:8" → clm_b2
 
 # a second opinion at the same address — both stand
-add_claim at:$8100 name:MaybeInit                        → clm_c3
+add_claim address:$8100 name:MaybeInit                    → clm_c3
 bind_primary_name address:$8100 claim:clm_a1
 
 # a value, and a site that means it
 add_constant name:WHITE value:$01                        → cst_d4
-bind_constant address:$8213 constant:cst_d4
+bind_constants bindings:[{address:$8213,constant:cst_d4}]
 
 # a view over the stack
 add_target name:runtime layers:[{layer:lay_1},{layer:lay_2,at:$0801}]  → tgt_e5
@@ -334,9 +345,10 @@ also work online, and the reverse.** There is no second mode.
 text** — character offsets into a column are useless to a caller, which is the
 finding the whole agent surface was built on.
 
-Everything derived is derived on demand and cached per document version: the
-decode graph, basic blocks, the value analysis, routine effects. Asking is cheap;
-nothing is stored that can be computed.
+The decode graph, basic blocks, value analysis and routine effects are derived
+on demand. Their caches must account for the inputs they use, including external
+bytes; a document version alone is insufficient. Captures deliberately retained
+as evidence are persistent artifacts even though a scenario produced them.
 
 Three tools answer "what does this code *do*", and they differ in **standing**,
 which the answer states:
@@ -370,19 +382,35 @@ nothing is **kept as claimed**, not swapped for somebody real.
 
 ---
 
-## 8. Where to look next
+## 8. From investigation to an article
+
+Select findings that answer an editorial question, then assemble the evidence
+needed to explain them. Preserve the relevant target, byte sources, scenario
+inputs and limitations with the supporting material. Distinguish a live-machine
+capture from a decoded data plate or reconstructed sound in its caption.
+
+An editor's request for a demonstration can require more analysis or a new
+scenario. Record discoveries and corrections back in the project, including
+work that does not make the final article. The
+[experiment 9 article](../experiments/09-editorial/run1/article.html) and
+[editorial notes](../experiments/09-editorial/run1/editorial-notes.md) demonstrate
+this process. Article storage, structured citations and publication versioning
+remain unresolved in the [architecture](02-architecture.md).
+
+## 9. Where to look next
 
 | | |
 |---|---|
-| `docs/algebra.md` | the operation rules, and what they replaced |
-| `docs/model.md` | the model as reference, with its open tensions |
-| `docs/api.md` | the tool list, from the live schema |
-| `docs/purpose.md` | what this is for |
-| `docs/invariants.md` | what must not break, with the bug that produced each |
-| `docs/experiments.md` | the runs, and which line of code each moved |
+| `docs/06-algebra.md` | the operation rules, and what they replaced |
+| `docs/05-model.md` | the model as reference, with its open tensions |
+| `docs/07-api.md` | the tool list, from the live schema |
+| [01 · Manifest](01-purpose.md) | goals and both outputs |
+| [02 · Architecture](02-architecture.md) | concepts, responsibilities and design status |
+| [03 · Contracts](03-contracts.md) | sync, persistence and editorial obligations |
+| `docs/08-experiments.md` | the runs, and which line of code each moved |
 | `docs/decisions/` | the argument and the history, by subject |
 
-**If you are adding an entity**, pick a shape from `docs/algebra.md`, add its
+**If you are adding an entity**, pick a shape from `docs/06-algebra.md`, add its
 three (or two) operations, and let `src/core/crdt/roundtrip.test.ts` tell you
 what is missing — it is keyed by `Op["op"]`, so it will not compile until your
 operation has a case, and the case asserts all seven paths: applied to the

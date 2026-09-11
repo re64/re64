@@ -4,7 +4,7 @@ Eleven runs. They exist to find gaps in re64 by watching agents hit them, rather
 than by imagining what an agent would want — so what matters about each is not
 whether it "went well" but which line of code it moved.
 
-Third companion to `docs/model.md` and `docs/api.md`. Those two are the state;
+Third companion to `docs/05-model.md` and `docs/07-api.md`. Those two are the state;
 this is where most of it came from.
 
 ---
@@ -312,7 +312,7 @@ rather than hires, and every note in the rendered audio had the same length. Tho
 observations are theirs. But the message relaying them also carried the diagnosis —
 where to look for a per-frame colour write, and that the cycle-stamped SID capture
 was a better source for durations than the stream format — so what came back is not
-evidence of what an agent reaches for unaided, and `docs/experiments.md` is the
+evidence of what an agent reaches for unaided, and `docs/08-experiments.md` is the
 wrong place to let that blur.
 
 What the steer did **not** contain, and the editor found: the flicker is one

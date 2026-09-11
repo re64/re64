@@ -5,6 +5,10 @@ engineering a game is a long grind of recognising a routine, naming it and movin
 on, and that is work an agent can do alongside a person rather than instead of
 one.
 
+The work has two outputs: **structured knowledge about C64 programs** and
+**edited software-archaeology articles with supporting evidence**. Analysis and
+editorial work inform each other; the manifest explains their shared purpose.
+
 Three consumers over one document: an **MCP surface** for agents, a **web UI** for
 people, and the **HTTP API** both sit on. They share a document rather than a file
 format, so an agent naming a subroutine and a person reading the same code see
@@ -40,14 +44,15 @@ open browser without a reload.
 
 | | |
 |---|---|
-| `docs/purpose.md` | what this is for |
-| `docs/developer-guide.md` | **start here** — the model and the API, end to end |
-| `docs/model.md` | the model as reference |
-| `docs/algebra.md` | the operation rules |
-| `docs/api.md` | the MCP surface, generated from the live schema |
-| `docs/invariants.md` | what must not break, and what pins it |
-| `docs/experiments.md` | nine agent runs, and what each one changed |
-| `docs/decisions/` | why any of it is shaped the way it is |
+| [01 · Manifest](docs/01-purpose.md) | goals, audiences and the two outputs |
+| [02 · Architecture and vocabulary](docs/02-architecture.md) | concepts, components, implemented behavior and open design |
+| [03 · Contracts](docs/03-contracts.md) | synchronization, persistence, evidence and other obligations |
+| [04 · Developer guide](docs/04-developer-guide.md) | using and extending the system |
+| [05 · Model reference](docs/05-model.md) | data shapes and known tensions |
+| [06 · Operation algebra](docs/06-algebra.md) | edit semantics |
+| [07 · MCP API](docs/07-api.md) | generated from the live schema |
+| [08 · Experiments](docs/08-experiments.md) | investigations, editorial work and what they changed |
+| [Decision archive](docs/decisions/README.md) | historical reasoning; not a second specification |
 
 ## Development
 
@@ -133,7 +138,7 @@ code, how a span renders, what nests inside what — all of it is derived when
 something asks. `disagreements()` reports where a project contradicts itself
 rather than picking a winner.
 
-`docs/model.md` is the full reference.
+`docs/05-model.md` is the full reference.
 
 ### Project Structure
 

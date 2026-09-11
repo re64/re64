@@ -1,22 +1,91 @@
-# Invariants
+# Contracts and invariants
 
-Properties that must hold, each with the bug that produced it and the thing that
-pins it. **Read `docs/purpose.md` first** — that says what re64 is for; this says
-what may not be broken while building it.
+Read the [manifest](01-purpose.md), then the [architecture](02-architecture.md).
+The architecture defines the nouns; this document states the obligations
+between them. The [operation algebra](06-algebra.md) supplies detailed edit
+semantics. Historical explanations belong in [decisions/](decisions/README.md).
 
-Why this file exists rather than another design document: `docs/decisions/redesign-claims.md`
-was 1,206 lines describing a *target*, and planning it against the code found nine
-corrections, four blocking. A document describing a target goes stale in weeks. A
-property either holds or it does not, and a test says which.
+These are required properties, not a claim that all paths have been verified.
+Test references identify verification points; `unpinned` means no automated
+check is established here. Known gaps must be named rather than treated as
+exceptions. In particular, session visibility remains #28 and the general
+surface-nullability audit remains #29.
 
-**How to read the third column.** `unpinned` is not a defect — some of these are
-stances rather than assertions. It is a *risk marker*: the `carrySites` paragraph
-in `docs/decisions/analysis.md` names four sites where the code finds six, and it drifted precisely
-because nothing pinned it. Every `unpinned` row is a candidate for the same.
+Keep the existing A–F identifiers stable so code and reviews can cite them.
+New contracts should state their scope, the failure they prevent and how they
+can be checked. Product requirements can establish a contract before a bug
+occurs; editorial requirements below are examples.
 
-**How to add one.** An invariant earns a row when breaking it produced a bug that
-cost somebody real work. Not a preference, not a tidiness rule. Say what the bug
-was, or leave it out.
+## S. Synchronization, durability and reproducibility
+
+**S1 · An operation keeps the meaning it had for its author.** Caller, session,
+selected target and any resolved references belong to that operation's context.
+A concurrent request must not replace them. A session's read/merge policy must
+be explicit and consistent across reads, edits and undo; #28 tracks the current
+gap. This does not choose automatic versus deferred receipt of others' edits.
+*Verification:* `server/mcp/transport.test.ts`, `core/claims/offline.test.ts`;
+complete session consistency remains open.
+
+**S2 · Local application, durable commit and delivery are distinct events.**
+An offline edit can exist locally before the server persists it. A successful
+durable-write receipt must describe committed work. A rolled-back write must
+not remain the served state or be delivered as a committed update; a failing
+subscriber must not turn a committed write into a reported failure.
+*Verification:* `store/project-store.test.ts`, `server/write-paths.test.ts`.
+
+**S3 · Equal replicated state has one canonical projection.** Arrival order,
+locale and presentation preferences must not change serialized state used for
+versions. Sequences whose order is part of the data retain that order. This is
+independent of whether two participants agree with the interpretations stored.
+*Verification:* `core/crdt/concurrency.test.ts`, `core/crdt/roundtrip.test.ts`.
+
+**S4 · Undo reverses an action without inventing a conflict or hiding a real one.**
+Action grouping and attribution must survive every write path. Undo and redo
+preserve unrelated edits, report operations they skip and compare values rather
+than incidental object-key order. They do not rewind the entire shared document.
+*Verification:* `store/project-store.test.ts`, `server/mcp/transport.test.ts`.
+
+**S5 · Migration preserves identity, contributions and usable history.** A
+stored snapshot needs migration just as an imported file does. Later operations
+must be able to reference migrated entities after restart. Compatibility rules
+for recorded operations must be explicit; a new shape cannot silently reinterpret
+old undo history.
+*Verification:* `core/crdt/doc.test.ts`, `core/crdt/roundtrip.test.ts`,
+`store/project-store.test.ts`.
+
+**S6 · A byte reference and an execution key describe the bytes actually used.**
+When a document records a content hash, a missing blob is missing content, not
+permission to substitute the latest bytes with the same name. Cached analysis
+and scenario checkpoints must account for their actual target, resources, ROMs
+and rendering inputs. Changing an input must not preserve a stale passing check.
+The immutable-reference design is still #27; a document version alone is not an
+execution fingerprint.
+*Verification:* `store/blobs.test.ts`, `server/database-mode.test.ts`,
+`server/building.test.ts`, `core/machine/scenario.test.ts`.
+
+## P. Editorial and publication contracts
+
+These obligations guide the planned editorial workflow. The HTML experiments
+demonstrate the workflow but do not implement an article schema or publication
+versioning system.
+
+**P1 · A significant factual assertion has inspectable support.** Preserve the
+source material, relevant interpretation and verification conditions needed to
+assess it. Historical claims may need external sources. Editorial selection
+must not turn a hypothesis into an established observation.
+*Verification:* editorial review; automated traceability is not yet specified.
+
+**P2 · Media says how it was made.** Distinguish captured behavior, decoded
+source data, reconstructed output and illustration. Record material limitations
+of the machine or rendering method where they affect what a reader may conclude.
+*Origin:* [experiment 9's editorial notes](../experiments/09-editorial/run1/editorial-notes.md).
+*Verification:* captions and editorial review; not automated.
+
+**P3 · A published edition remains an identifiable account.** Later investigation
+must not silently change the evidence a released article relies on. How to retain
+the article, referenced resources and verification inputs together is unresolved;
+it must be designed before a publication mechanism promises this guarantee.
+*Verification:* planned; requires the publication/reference design.
 
 ---
 
@@ -31,8 +100,9 @@ the same shape keyed by slot, found in experiment 3. Both were justified for a
 single author and never revisited when a second arrived.
 *Pinned:* `core/claims/offline.test.ts` — "revising a span requires saying which one, by id".
 
-**A2 · Every write adds. Correcting is by id.** Even the same name twice adds; two
+**A2 · Entity creation adds; correcting an entity is by id.** Even the same name twice adds; two
 claims are told apart by id.
+Bindings have the separate replacement semantics defined in the operation algebra.
 *Origin:* the same two bugs as A1. `add_claim` with a `root` was still reusing an
 existing id in experiment 8, under a tool whose description promised it never replaces.
 *Pinned:* `core/claims/offline.test.ts` — "declaring a span adds, whatever the writer had seen".
@@ -75,12 +145,12 @@ is taken away").
 transport replaceable.
 *Pinned:* `core/crdt/boundary.test.ts`.
 
-**A8 · Chat never reaches the project, the export, or the version hash.** A message
-describes no bytes and belongs in no `.re64`.
-*Origin:* nothing was written to exclude it — it holds by omission, which is
-exactly why it needs a test. The first symptom would be somebody's conversation in
-a file they handed to someone else.
-*Pinned:* `core/crdt/chat.test.ts` — "does not reach the project", "leaves the projection identical".
+**A8 · Chat is project history, not a program change.** Messages travel in the
+project projection and export. `programFromDoc` excludes them from the program
+version; participation is also outside that version. Program undo excludes chat.
+*Origin:* the earlier rule excluded chat from export too. The document now
+preserves the conversation while distinguishing it from program knowledge.
+*Pinned:* `core/crdt/chat.test.ts`, `core/crdt/doc.ts` (`programFromDoc`).
 
 **A9 · Every operation round-trips seven ways.** Applied to the document, carried
 by `projectFromDoc`, survives the export, emitted by the diff, inverts to where it
@@ -259,8 +329,11 @@ batch tools disagreed about their own contract and a caller could not tell which
 it would get.
 *Pinned:* `server/mcp/transport.test.ts` — "declares several regions at once, and reports the ones it declined", "says several things at once and reports what it declined", "does not lose a whole batch to one comment on a byteless address".
 
-**D5 · `null` clears a field; omitting it leaves the field alone.** The distinction
+**D5 · For a clearable field, `null` clears; omitting it leaves the field alone.** The distinction
 `Partial<>` cannot make, and without it a root could be declared and never taken off.
+Required fields are not implicitly nullable. Structured replacement values such
+as provenance follow the algebra's rules; a nested omission is not automatically
+a partial edit. The remaining schema consistency audit is #29.
 *Pinned:* `server/mcp/transport.test.ts` — "clears a field with null, which omitting it cannot say".
 
 **D6 · Identity rides on a header, never in a tool schema.** A model can omit a
@@ -275,7 +348,7 @@ table. Had that table listed `you` first, every agent edit would have been
 attributed to the person watching.
 *Pinned:* `server/mcp/identity.test.ts` — "believes a claim it does not recognise, rather than picking somebody else", "keeps two strangers apart".
 
-**D8 · Every write path leaves the same record.** Socket, HTTP, CLI and agent edits
+**D8 · Every write path leaves the same record.** Socket, HTTP, import/reconciliation and agent edits
 all reach `ops`, or `changes_since` would be blind to precisely what an agent most
 needs to see. The log is append-only, or a held cursor silently changes meaning.
 *Pinned:* `server/write-paths.test.ts` — "converges and records every author".

@@ -611,7 +611,7 @@ describe("a layer of every kind reaches the file", () => {
 /**
  * The algebra itself, asserted rather than described.
  *
- * `docs/algebra.md` says every low-level type is one of two shapes and each
+ * `docs/06-algebra.md` says every low-level type is one of two shapes and each
  * shape has exactly one set of verbs. That held by care until this existed, and
  * care is what let three different update semantics live in one vocabulary
  * without anybody noticing: a full PUT for four types, a partial write for

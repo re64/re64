@@ -15,7 +15,9 @@ write *how* something works here, it belongs in `docs/`.
 re64 is an **agentic-first, collaborative C64 reverse engineering framework**.
 Reverse engineering a game is a long grind of recognising a routine, naming it,
 and moving on — work an agent can do alongside a person rather than instead of
-one. `docs/purpose.md` is the statement of intent; read it first.
+one. Its two outputs are structured knowledge about C64 programs and edited
+software-archaeology articles with supporting evidence.
+[The manifest](docs/01-purpose.md) is the statement of intent; read it first.
 
 Three consumers over one document, and the document is the point:
 
@@ -34,14 +36,19 @@ person reading the same code see each other's work as it happens.
 
 | | |
 |---|---|
-| `docs/purpose.md` | what this is for, and what it refuses to be |
-| `docs/developer-guide.md` | **start here** — the model and the API, end to end |
-| `docs/invariants.md` | what must not break, the bug behind each, and what pins it |
-| `docs/algebra.md` | the operation rules: two shapes, forty-five operations, no third |
-| `docs/model.md` | the model as reference, with its open tensions |
-| `docs/api.md` | the tools — **generated**, do not hand-edit |
-| `docs/experiments.md` | eleven runs, and which line of code each moved |
-| `docs/decisions/` | the argument and the history, by subject |
+| [01 · Manifest](docs/01-purpose.md) | goals and both outputs |
+| [02 · Architecture and vocabulary](docs/02-architecture.md) | concepts, components and design status |
+| [03 · Contracts](docs/03-contracts.md) | sync rules and other obligations, with verification points |
+| [04 · Developer guide](docs/04-developer-guide.md) | practical workflows |
+| [05 · Model reference](docs/05-model.md) | data shapes and known tensions |
+| [06 · Operation algebra](docs/06-algebra.md) | edit semantics |
+| [07 · MCP API](docs/07-api.md) | generated reference; edit its generator, then regenerate |
+| [08 · Experiments](docs/08-experiments.md) | observations from investigations and editorial work |
+| [Decision archive](docs/decisions/README.md) | historical reasoning, by subject |
+
+Read 01–03 in order before changing a design contract. Use the later references
+for the subsystem being changed. A planned capability or historical decision
+is not a statement that the implementation already supports it.
 
 `docs/decisions/` is where the reasoning went. It is **append-only history**: an
 entry keeps its text and gains a note when superseded, because the value of a
@@ -86,7 +93,7 @@ why a rename does not round-trip to the server.
 | `npm run build` / `dev` | compile / watch |
 | `npm run build:ui` / `dev:ui` | bundle the browser |
 | `npm run serve` | run the server |
-| `npm run gen:api` | regenerate `docs/api.md` from the live schema |
+| `npm run gen:api` | regenerate `docs/07-api.md` from the live schema |
 | `npm run gen:kernal` / `gen:basic` | regenerate the ROM effect tables |
 
 Before saying anything is done: `npm test`, `npm run typecheck`,
@@ -97,7 +104,7 @@ it moves, say so and say why.
 
 ## The rules that matter most
 
-Stated flat here; the reasoning is in `docs/invariants.md`, which names the bug
+Stated flat here; the reasoning is in `docs/03-contracts.md`, which names the bug
 each one cost.
 
 **What works offline must also work online, and the reverse.** There is no
@@ -146,7 +153,7 @@ Tests live beside their source with a `.test.ts` suffix. Vitest.
 | `src/core/claims/offline.test.ts` | the offline/online rule above |
 
 **A generated file that is committed gets a test that regenerates and compares.**
-`kernal-effects`, `basic-effects` and `docs/api.md` all have one, because a
+`kernal-effects`, `basic-effects` and `docs/07-api.md` all have one, because a
 committed generated file goes stale in silence.
 
 ---
@@ -169,7 +176,7 @@ committed generated file goes stale in silence.
 ## Working with experiments
 
 Most of this design came out of eleven runs with agents on real binaries.
-`docs/experiments.md` says what each asked and what it moved. Two rules make them
+`docs/08-experiments.md` says what each asked and what it moved. Two rules make them
 produce measurements rather than anecdotes:
 
 **Take the reports and the request log together, and where they disagree the log

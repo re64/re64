@@ -1,5 +1,9 @@
 # The operation algebra
 
+Reference for the concepts in [02 · Architecture](02-architecture.md) and the
+obligations in [03 · Contracts](03-contracts.md). Use [07 · MCP API](07-api.md)
+for exact tool schemas; operation payloads and tool arguments are separate layers.
+
 Every low-level type is one of **two shapes**, and each shape has exactly one set
 of verbs. There are no other spellings, no per-type exceptions, and no upserts.
 
@@ -73,8 +77,16 @@ Three rules follow, and they are the ones this project keeps rediscovering:
 - **`set` is partial, so a rename is a rename.** A full-value PUT means changing
   one field requires resending every other, which is both unusable and
   last-writer-wins over fields the writer never looked at.
-- **`null` clears; omitted leaves alone.** `Partial<T>` cannot express the
+- **`null` clears a clearable field; omitted leaves alone.** `Partial<T>` cannot express the
   difference, and without it a field can be set and never taken off.
+
+**A replacement value has its own boundary.** For example, `evidence.set.by`
+replaces provenance as one value: omitting `by` leaves provenance untouched,
+`by: null` withdraws it, and a supplied `{author}` clears omitted method/time
+fields. The MCP `edit_evidence method: null` convenience operation preserves the
+record's author and time while clearing its method. This is different from
+making every nested object an implicit partial patch. Required identity and
+signature fields are not implicitly nullable.
 
 ## Shape 2 — Binding
 

@@ -197,7 +197,7 @@ export function placed(loaded: LoadedProject, address: number): { frame: Frame; 
     // The target frame is for a claim that really is about one arrangement, it
     // is honoured on the way in and filtered on the way out, and nothing emits
     // one by default. Which writes should be able to ask for one is open; see
-    // `docs/model.md`.
+    // `docs/05-model.md`.
     undefined
   );
 }

@@ -18,6 +18,6 @@ image with coverage and structure asked for and prose forbidden. Stage two ran
 The two snapshots are the point of keeping both: between them the claims, types,
 comments and constants do not move.
 
-`docs/experiments.md` has the reading. The numbers in it come from the
+`docs/08-experiments.md` has the reading. The numbers in it come from the
 transcript, not from the reports — three of them contradict what the reports say
 happened.

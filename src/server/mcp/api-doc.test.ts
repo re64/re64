@@ -5,10 +5,10 @@ import { liveTools } from "../../tools/live-tools.js";
 import { CLAIM_FIELDS } from "../../core/crdt/doc.js";
 
 /**
- * `docs/api.md` against the server it describes.
+ * `docs/07-api.md` against the server it describes.
  *
  * A committed generated file goes stale in silence, and this one did: the
- * previous `docs/api.md` was written by hand from a schema dump and was wrong
+ * previous `docs/07-api.md` was written by hand from a schema dump and was wrong
  * about eight tools within a fortnight — describing writes that had been split,
  * renamed, or tightened, with nothing to say so.
  *
@@ -19,7 +19,7 @@ import { CLAIM_FIELDS } from "../../core/crdt/doc.js";
 describe("the API document against the live schema", () => {
   it("is what the generator produces today", async () => {
     const tools = await liveTools();
-    expect(readFileSync("docs/api.md", "utf-8")).toBe(generateApiDoc(tools));
+    expect(readFileSync("docs/07-api.md", "utf-8")).toBe(generateApiDoc(tools));
   }, 30_000);
 
   it("puts every tool in exactly one section", async () => {
@@ -80,7 +80,7 @@ describe("what the document persists against what a tool can write", () => {
       "*argument* is `address`, because fifteen tools already called a point " +
       "that and three called it `at` — which cost three independent agents " +
       "round trips. The field did not move; the wire spelling did.",
-    layer: "the scope, derived from the address — never chosen (see docs/model.md)",
+    layer: "the scope, derived from the address — never chosen (see docs/05-model.md)",
     target: "the same, for a claim no layer supplies bytes for",
     origin:
       "machinery or judgement; `user` for anything a tool writes, and the one " +

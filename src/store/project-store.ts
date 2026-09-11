@@ -673,7 +673,7 @@ export class ProjectStore {
      * instead: `name +$87FF` for a claim written at `$9000`.
      *
      * That is the one place a writer looks to confirm a write, and
-     * `docs/model.md` says offsets never appear in an answer. It hid a
+     * `docs/05-model.md` says offsets never appear in an answer. It hid a
      * systematic displacement of eighty claims through three sessions and an
      * import, and the reviewer that found it named this as the reason nobody
      * had: the receipt agreed with the mistake.

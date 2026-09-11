@@ -76,14 +76,14 @@ was fixed with R5, since both were the same missing rule.
 
 This is the sharpest sentence in the document and it is correct. Claims expose
 partial updates and rewrite whole records; fields expose ids and are stored by
-offset; bindings are described in `docs/algebra.md` as a position-keyed shape
+offset; bindings are described in `docs/06-algebra.md` as a position-keyed shape
 and are stored under randomly minted use ids. **Yjs converges on all of these.**
 Convergence was never the property in question, and this project has been
 treating it as though it were.
 
 R3 lands directly on yesterday's work and the hit is fair. `field.add`,
 `field.set` and `field.remove` were added so that a field is addressed by its
-id "like every other entity", and `docs/model.md` was updated to say a move
+id "like every other entity", and `docs/05-model.md` was updated to say a move
 "rewrites the offset key and keeps the id, so the description survives". Under
 one writer that is true. Under two it is not: the storage is still a map keyed
 by offset, and giving the object an `id` field did not make the *identity*
@@ -107,9 +107,9 @@ storage-level. The verbs were built on top of a shape that cannot honour them.
 - **R5 is the cheapest P1 by a distance.** The loader already resolves layer
   frames against the selected view and simply does not ask the same question of
   target frames. One condition, one test.
-- **The stale-docs note was right and is now fixed.** `docs/developer-guide.md`
+- **The stale-docs note was right and is now fixed.** `docs/04-developer-guide.md`
   still described `by` on a claim and `supersedes` as an evidence kind, both
-  removed; `docs/model.md` said "`layer.set` does not exist" while the operation
+  removed; `docs/05-model.md` said "`layer.set` does not exist" while the operation
   is declared, applied and inverted — the real gap is that **no tool emits one**,
   which is F1 again and was hidden by stating it the wrong way round.
 

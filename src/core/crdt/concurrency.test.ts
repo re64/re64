@@ -243,7 +243,7 @@ describe("a partial edit touches only what it names", () => {
 
 describe("a binding is keyed by its site", () => {
   /**
-   * **`docs/algebra.md` describes a binding as an address-to-id map** — bind and
+   * **`docs/06-algebra.md` describes a binding as an address-to-id map** — bind and
    * unbind by key, and binding again is how one is updated. The storage keyed it
    * by a *minted use id* instead, so every bind added a competitor rather than
    * replacing one.

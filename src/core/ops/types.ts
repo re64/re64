@@ -64,7 +64,7 @@ export interface ClaimRemoveOp {
 
 
 
-/** Write a comment. **Always adds.** See `docs/algebra.md`, Shape 1. */
+/** Write a comment. **Always adds.** See `docs/06-algebra.md`, Shape 1. */
 export interface CommentAddOp {
   op: "comment.add";
   id: string;
@@ -173,7 +173,7 @@ export interface ConstantSetOp {
  *
  * Keyed by id, like every other entity. A target's *name* is what a request
  * names and what `defaultTarget` records, but a name is a field somebody chose
- * and is resolved as a lookup — never an identity. See `docs/algebra.md`.
+ * and is resolved as a lookup — never an identity. See `docs/06-algebra.md`.
  */
 export interface TargetAddOp {
   op: "target.add";
@@ -307,7 +307,7 @@ export interface TypeAddOp {
 /**
  * Revise a type by id. Omitted leaves alone.
  *
- * **A parent edit does not carry its children**, which `docs/algebra.md` has said
+ * **A parent edit does not carry its children**, which `docs/06-algebra.md` has said
  * since fields became first class and this operation went on contradicting. It
  * carried an offset-keyed `fields` patch — a second writer for the same storage,
  * keyed on the thing that is explicitly not an identity. Once two fields may sit
@@ -623,7 +623,7 @@ export interface CaptureRemoveOp {
 }
 
 /**
- * Every edit, in two shapes. See `docs/algebra.md`.
+ * Every edit, in two shapes. See `docs/06-algebra.md`.
  *
  * **Entity** — `add` mints an id and always adds, `set` revises named fields by
  * id, `remove` takes it back by id. **Binding** — `bind` puts a key, `unbind`

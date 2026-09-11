@@ -1,6 +1,6 @@
 # Decisions
 
-Why re64 is shaped the way it is. Eight files, split by subject, holding the
+Why re64 is shaped the way it is. Files split by subject, holding the
 argument and the history that used to live in `CLAUDE.md`.
 
 | | |
@@ -27,20 +27,21 @@ when it was written. For what is true now:
 
 | | |
 |---|---|
-| `docs/purpose.md` | what this is for |
-| `docs/developer-guide.md` | the model and the API, for a developer |
-| `docs/model.md` | the model as reference |
-| `docs/algebra.md` | the operation rules |
-| `docs/api.md` | the tools, generated from the live schema |
-| `docs/invariants.md` | what must not break, and what pins it |
-| `docs/experiments.md` | the runs, and which line of code each moved |
+| [01 · Manifest](../01-purpose.md) | purpose and both outputs |
+| [02 · Architecture](../02-architecture.md) | vocabulary, component boundaries and design status |
+| [03 · Contracts](../03-contracts.md) | sync rules and other obligations |
+| [04 · Developer guide](../04-developer-guide.md) | practical workflows |
+| [05 · Model reference](../05-model.md) | data shapes and tensions |
+| [06 · Operation algebra](../06-algebra.md) | edit semantics |
+| [07 · MCP API](../07-api.md) | generated tool reference |
+| [08 · Experiments](../08-experiments.md) | observations from runs |
 
 ## How to add one
 
 **Append-only.** Superseding a decision does not edit it — it adds an entry that
 names the old one and says what changed. The value of a corrected decision is
 the correction, and rewriting in place destroys exactly what this archive is
-for. `docs/algebra.md` is a worked example: it keeps a table of what each
+for. `docs/06-algebra.md` is a worked example: it keeps a table of what each
 operation *was* beside what it is.
 
 An entry earns its place the same way an invariant does: something cost real
@@ -48,13 +49,25 @@ work. Say what it was, or leave it out.
 
 ## What is stale right now
 
-The **write vocabulary was made uniform on 2026-09-07** (`docs/algebra.md`), so
+The **write vocabulary was made uniform on 2026-09-07** (`docs/06-algebra.md`), so
 entries written before then name tools and operations that have been renamed or
 split — `set_region`, `set_label`, `set_claim`, `set_decoder`, `set_target`,
 `set_primary_name`, `label.bind`, `constant.bind`, `primary.set`, and the
 `*.delete` spellings. The reasoning in those entries stands; only the spellings
-moved, and `docs/algebra.md` has the table.
+moved, and `docs/06-algebra.md` has the table.
 
 The **CLI was removed on 2026-09-07**, so `re64 migrate`, `re64 export`,
 `re64 disasm` and `re64 undo` no longer exist. Agents use MCP and people use the
-web UI; `docs/purpose.md`, written before the removal, already listed neither.
+web UI; `docs/01-purpose.md`, written before the removal, already listed neither.
+
+## Documentation structure — 2026-09-11
+
+The top-level documents are numbered in reading order: manifest, architecture,
+contracts, developer guide, model, algebra, generated API and experiments. The
+manifest makes structured knowledge and edited software-archaeology articles
+the two outputs of re64. Article representation and publication mechanics remain
+open architecture decisions. The numbered references supersede earlier pointers
+that treated the developer guide as the first specification to read.
+
+This archive retains its subject filenames and historical arguments. Links were
+updated for the new paths; those navigation edits do not revise earlier decisions.

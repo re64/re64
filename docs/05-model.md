@@ -4,16 +4,19 @@ What the model *is*, with no account of how it got here. `docs/decisions/` carri
 reasoning and the history; this carries the shape. Where the two disagree, read
 the code — but this file is meant to be checked against it and kept true.
 
-Written to be read cold, in about ten minutes, by somebody deciding what to
-change. `docs/api.md` is how you reach it, and `docs/experiments.md` is where most of
-this came from.
+Read the [architecture and vocabulary](02-architecture.md) before this reference.
+`docs/07-api.md` is how you reach the model, and `docs/08-experiments.md` is where
+many of its requirements came from. Historical passages below explain specific
+transitions; the architecture's status table distinguishes intended work from
+implemented concepts.
 
 ---
 
 ## 1. The document
 
-A project is a Yjs document with nine roots. It is the truth; a `.re64` file is
-an import source or an export target and is never synced to.
+A project is represented by a Yjs document with the roots below. SQLite stores
+the shared state and history in database mode. A `.re64` file is an import/export
+representation; the existing file-backed store also reconciles external edits.
 
 | root | holds | shape |
 |---|---|---|
@@ -22,15 +25,19 @@ an import source or an export target and is never synced to.
 | `targets` | named arrangements of layers | map by id |
 | `constants` | `{id, name, value}` | map by id |
 | `decoders` | `{id, name, source}` | map by id |
-| `types` | `{id, name, size, fields}` | map by id, fields nested by offset |
+| `types` | `{id, name, size, fields}` | map by id, fields nested by field id |
 | `files` | the binaries, content-addressed | map by name |
 | `primaryLabels` | address → claim id | map |
 | `meta` | `name`, `description` | map |
+| `scenarios` | machine actions and checks | map by id, ordered steps |
+| `captures` | retained run outputs | map by id |
+| `evidence` | supporting, refuting or retiring accounts | map by id |
+| `chat` | messages | ordered list |
 
-Two further roots live in their own modules — `crdt/chat.ts` and
-`crdt/participants.ts` — and are deliberately outside `projectFromDoc`'s
-whitelist, so a message or an arrival never reaches a `Project`, never reaches
-an export, and never moves the version.
+Presence lives in `crdt/participants.ts` and is outside the project projection.
+Chat is included by `projectFromDoc` as `messages` and survives export.
+`programFromDoc` removes messages for the program version so conversation does
+not change that version. These are distinct projections.
 
 ---
 
@@ -687,11 +694,10 @@ layer `labels` and `regions` and no `claims` key; it is migrated in memory on
 every load. The golden test pins the legacy file. Anybody opening the repo's
 canonical example to learn the format sees the model that was replaced.
 
-**Surfaces are lopsided.** MCP reaches 72 tools. The CLI reaches labels,
-regions, undo/redo, import/export. The browser's whole write surface is
-`addLabel`, `removeLabel`, `setRegion`, `removeRegion`, `undo`, `redo` — no
-comments, constants, decoders, types, targets, roots, or anything claims-native,
-though all of them are modelled and reachable by an agent.
+**Surface coverage must be checked.** There is no separate CLI. MCP and the web
+UI share concepts and core behavior, but that does not establish feature parity.
+Use the generated API and UI implementation to check which workflows each
+supports; a fixed tool count or historical browser-method list goes stale.
 
 **`layer.set` exists in the vocabulary and reaches no tool.** The operation is
 declared, applied and inverted; nothing on the MCP or HTTP surface emits one, so

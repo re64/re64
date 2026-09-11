@@ -152,7 +152,7 @@ export interface Provenance {
    * mistakes and none of its own checking.
    *
    * Absent means unstated, which is honest for the many claims nobody thought
-   * about. See `docs/invariants.md` **E10**.
+   * about. See `docs/03-contracts.md` **E10**.
    */
   readonly method?: ClaimMethod;
 }

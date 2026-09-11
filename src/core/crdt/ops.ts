@@ -604,7 +604,7 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
         doc.getMap<Y.Map<unknown>>("evidence").delete(op.id);
         break;
 
-      // **A binding is keyed by its site**, which is what `docs/algebra.md` has
+      // **A binding is keyed by its site**, which is what `docs/06-algebra.md` has
       // always said it is: an address-to-id map, where binding again is how a
       // binding is updated.
       //

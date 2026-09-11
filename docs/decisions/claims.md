@@ -6,7 +6,7 @@ The model itself — one noun, how it got there, and every case that shaped it: 
 > it. Entries are accurate as of when they were written and are **append-only**:
 > a superseded decision keeps its text and gains a note pointing forward, because
 > the value of a corrected decision is the correction. For what is true *now*, see
-> `docs/model.md`, `docs/algebra.md`, `docs/api.md` and `docs/developer-guide.md`.
+> `docs/05-model.md`, `docs/06-algebra.md`, `docs/07-api.md` and `docs/04-developer-guide.md`.
 
 ---
 
@@ -430,7 +430,7 @@ would be swallowed by the row and appear nowhere.
 
 ## The claims redesign, landed
 
-**It is done.** `docs/model.md` is the model as it stands; read that first.
+**It is done.** `docs/05-model.md` is the model as it stands; read that first.
 `docs/redesign-claims.md` is the design document it was built from, kept because
 every number in it is something the code measured — but it describes a plan, and
 the plan was executed. What follows is the argument, not a proposal.
