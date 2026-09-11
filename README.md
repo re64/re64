@@ -48,7 +48,7 @@ open browser without a reload.
 | [02 · Architecture and vocabulary](docs/02-architecture.md) | concepts, components, implemented behavior and open design |
 | [03 · Contracts](docs/03-contracts.md) | synchronization, persistence, evidence and other obligations |
 | [04 · Developer guide](docs/04-developer-guide.md) | using and extending the system |
-| [05 · Model reference](docs/05-model.md) | data shapes and known tensions |
+| [05 · Model reference](docs/05-model.md) | current data shapes, representations and readers |
 | [06 · Operation algebra](docs/06-algebra.md) | edit semantics |
 | [07 · MCP API](docs/07-api.md) | generated from the live schema |
 | [08 · Experiments](docs/08-experiments.md) | investigations, editorial work and what they changed |

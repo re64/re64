@@ -1,706 +1,332 @@
-# The re64 document model, as it stands
+# Document model reference
 
-What the model *is*, with no account of how it got here. `docs/decisions/` carries the
-reasoning and the history; this carries the shape. Where the two disagree, read
-the code — but this file is meant to be checked against it and kept true.
+This reference describes current data shapes, their representations and the
+code that reads them. Read the [architecture](02-architecture.md) for concepts
+and ownership, the [contracts](03-contracts.md) for required behavior, and the
+[operation algebra](06-algebra.md) for mutations. Worked tasks belong in the
+[developer guide](04-developer-guide.md); exact tool schemas belong in the
+[generated API reference](07-api.md).
 
-Read the [architecture and vocabulary](02-architecture.md) before this reference.
-`docs/07-api.md` is how you reach the model, and `docs/08-experiments.md` is where
-many of its requirements came from. Historical passages below explain specific
-transitions; the architecture's status table distinguishes intended work from
-implemented concepts.
+The definitions in [project.ts](../src/core/project/project.ts) and
+[claims/model.ts](../src/core/claims/model.ts), together with their adapters and
+readers, are the implementation anchors below. A source comment or historical
+decision is not sufficient evidence of current behavior.
 
----
+## 1. Representations
 
-## 1. The document
-
-A project is represented by a Yjs document with the roots below. SQLite stores
-the shared state and history in database mode. A `.re64` file is an import/export
-representation; the existing file-backed store also reconciles external edits.
-
-| root | holds | shape |
+| Representation | Contains | Entry point |
 |---|---|---|
-| `layers` | byte resources | array, order is declaration order |
-| `claims` | everything anybody says about an address | map by id, flat |
-| `targets` | named arrangements of layers | map by id |
-| `constants` | `{id, name, value}` | map by id |
-| `decoders` | `{id, name, source}` | map by id |
-| `types` | `{id, name, size, fields}` | map by id, fields nested by field id |
-| `files` | the binaries, content-addressed | map by name |
-| `primaryLabels` | address → claim id | map |
-| `meta` | `name`, `description` | map |
-| `scenarios` | machine actions and checks | map by id, ordered steps |
-| `captures` | retained run outputs | map by id |
-| `evidence` | supporting, refuting or retiring accounts | map by id |
-| `chat` | messages | ordered list |
+| Project document | Mergeable state in one replica | [CRDT adapter](../src/core/crdt/doc.ts) |
+| `Project` | Plain serializable project data, also used for import/export | `projectFromDoc`, [project types](../src/core/project/project.ts) |
+| Program projection | Project data with messages removed | `programFromDoc` |
+| Loaded project | Target-selected layers, resolved byte sources and absolute domain claims | [loader](../src/core/project/loader.ts) |
+| `.re64` text | Serialized project content; may also contain legacy input shapes | [parser](../src/core/project/project.ts), [serializer](../src/core/project/serialize.ts) |
+| Database snapshot and history | Stored CRDT state/updates and operation records used for persistence, reconstruction and undo | [store](../src/store/project-store.ts) |
 
-Presence lives in `crdt/participants.ts` and is outside the project projection.
-Chat is included by `projectFromDoc` as `messages` and survives export.
-`programFromDoc` removes messages for the program version so conversation does
-not change that version. These are distinct projections.
+A `Project` value is not a second live replica. Editing the plain value does
+not synchronize it. It also does not contain all CRDT metadata, operation
+history, blob bytes or session state.
 
----
+Optional ids on import types allow older files to load.
+[Identity helpers](../src/core/project/identity.ts) establish ids before
+document operations address the entities. Claims in the loaded domain have a
+required id and numeric absolute address.
 
-## 2. Layers — byte resources
+## 2. Document roots
 
-A layer holds bytes and knows nothing about where it sits.
+The root layout and projection are defined in
+[crdt/doc.ts](../src/core/crdt/doc.ts). Maps holding entities use nested maps
+for their fields unless stated otherwise.
 
-```ts
-type: "prg" | "raw" | "bytes" | "symbols" | "rom"
-```
+| Root | Document shape | Project representation |
+|---|---|---|
+| `layers` | Ordered array of layer maps; annotations and use maps nested within each layer | `layers: ProjectLayer[]` |
+| `claims` | Map by claim id, flattened claim fields | `claims: ProjectClaim[]` |
+| `targets` | Map by target id | `targets: ProjectTarget[]` |
+| `constants` | Map by constant id | `constants: ProjectConstant[]` |
+| `decoders` | Map by decoder id | `decoders: ProjectDecoder[]` |
+| `types` | Map by type id; nested field maps keyed by field id | `types: ProjectType[]`, each with a field list |
+| `files` | Map by filename | `files: {name, hash, size}[]` |
+| `primaryLabels` | Map from address key to claim id | `primaryLabels: Record<string, string>` |
+| `meta` | Project scalars: name, description, entryPoints | Corresponding top-level properties |
+| `scenarios` | Map by scenario id; steps stored as one JSON string value | Scenarios with ordered step lists |
+| `captures` | Map by capture id | `captures: ProjectCapture[]` |
+| `evidence` | Map by evidence id | `evidence: ProjectEvidence[]` |
+| `chat` | Ordered array of message maps | `messages: ProjectMessage[]` |
 
-- **`prg`** — a file whose first two bytes are its load address
-- **`raw`** — a file placed at an address the project gives
-- **`bytes`** — inline hex, optionally repeated to a length
-- **`symbols`** — names only, supplies no bytes, occupies no range
-- **`rom`** — a machine ROM (`basic`, `kernal`, `characters`), resolved from the
-  host, landing where the hardware decodes it
+Map projections use deterministic ordering; layer and chat sequences retain
+their stored order. S3 defines the ordering obligation. The `meta.set`
+operation exposes only name and description; a stored scalar is not necessarily
+editable through every surface.
 
-A layer may carry `reference: true` — bytes to resolve *through* rather than to
-read. Default for `rom`. Reference layers answer every question and are left out
-of the rendered listing.
+Presence is maintained by [participants.ts](../src/core/crdt/participants.ts)
+outside the project projection. Chat survives project export but is removed
+from the program projection used for the program version. Chat is excluded from
+program undo; explicit message operations are still part of the algebra.
 
-A layer still owns its **comments**. It also still declares `labels` and
-`regions` in the schema; those are read when migrating an older file and are
-never written.
+## 3. Layers and targets
 
----
+A `ProjectLayer` has an id and a byte-source type, with optional name,
+reference flag, annotations and uses:
 
-## 3. Targets — arrangements
-
-A target is a memory map: which layers, in what order, at what address.
-
-```json
-{ "name": "runtime",
-  "layers": ["lay_symbols", { "layer": "lay_runtime", "at": "$0100" }],
-  "entryPoints": ["$C065"],
-  "order": 2,
-  "description": "the image the loader expands into" }
-```
-
-- **Order is z-order**, bottom-up: the last entry shadows the ones before it.
-- A bare id links a layer at its own address; the object form moves it.
-- A symbols layer is never linked and never filtered.
-- A link naming a layer that has gone is skipped, not refused.
-
-**There is no current target, and no default one either.** A view is a parameter
-of the request: every tool takes `target` and every answer reports the one it
-used. A project declaring more than one **refuses** a call that names none and
-lists them, because the bytes at an address differ between views and there is no
-answer right for all of them. Where there is no choice — one target, or none,
-which implies a single view over the whole stack — naming it is not required.
-
-The document used to carry `defaultTarget`, and it is gone. It read as "what
-this project is *for*", which is a reasonable thing for a file to say, but every
-call that named no view was answered through it — so a document field was
-answering a question about the reader. On the Camels silver image, which
-declares five targets and no default, the invented answer was `loader`: one
-layer, in which every claim framed on the runtime layer does not exist. Which
-view somebody is reading is a property of the looker, and lives in their
-session.
-
-**So a write that touches no address needs no view.** A type, a field, a
-constant, a decoder, a piece of evidence, a layer, a target: those are edits to
-the *document*, and they go through a path that never builds a memory map.
-`list_targets` is the case that settles it — asking which views exist cannot
-itself require choosing one. Such an edit reports no instruction delta, because
-there is no view for the count to be about and a zero would be a measurement
-nobody took.
-
-**A reference in the document is an id.** Not a name, not an address, not a
-slot. This was stated as a rule about *write keying* — "adding always adds;
-correcting is by id" — and read that way it looks satisfied. Read as a rule about
-**references** it was not: a target frame stored the target's name, so renaming a
-target orphaned every claim framed on it and two targets could share a name with
-nothing able to tell them apart. Names stay usable at the API, where a person
-types them, and are resolved at the boundary; what reaches the document is an id.
-
-The same rule now holds inside a **field type**, which is where it was hardest.
-A field type is one string and the references in it — another type, a constant
-naming a count — were names. `u8[CreatureCount]` goes in; `u8[cst_kj39fa]` is
-stored.
-
-**Names survive as an alias layer, because the suggestion is worth having.**
-`Creature[creatureIndex]` is something a reader can be wrong about out loud;
-`typ_kj39fa[cst_x0plq2]` is something nobody can be wrong about because nobody
-can read it. That bias is useful — it is how a mis-typed table gets noticed — so
-it is kept where it belongs, in what a person writes and what a surface renders,
-and never in what the document holds. Three spellings are accepted:
-
-| | |
+| Type | Source and placement |
 |---|---|
-| `typ_kj39fa` | an id, always, never ambiguous |
-| `Creature` | a name, when exactly one thing answers to it |
-| `Creature@typ_kj39fa` | when more than one does |
+| `prg` | File at `path`; its first two bytes provide the load address |
+| `raw` | File at `path`, with declared `address` |
+| `bytes` | Inline hex `bytes`, declared address and optional repeated `length` |
+| `symbols` | Annotations without bytes or an occupied range |
+| `rom` | Host-supplied BASIC, KERNAL or character ROM at its hardware address |
 
-A bare name two things answer to is **refused**, with both `@id` forms in the
-message, and the same form is accepted straight back. The refusal is the point:
-a reader who meets it learns the document has grown a second `Creature`, which
-is a thing they wanted to know. `list_types` renders the suffix for the same
-reason — it is the notice that the plain name is no longer resolvable.
+`reference: true` excludes a layer from the rendered listing while leaving its
+bytes available for resolution; ROM layers default to reference. Legacy
+`labels` and `regions` are input compatibility fields. Current interpretations
+are claims.
 
-**Resolution asks what *this session* knows** — and the opposite was tried first,
-which is worth recording because it looked like the careful answer. Resolving
-against the server's current document was defended by citing the offline rule,
-and it *is* the failure the rule names: "an operation whose correctness depends
-on having seen what everyone else did fails the first direction." Whether a write
-succeeded depended on whether somebody else had concurrently declared a second
-`Creature`, and an offline participant could not know.
+A `ProjectTarget` carries `id`, `name`, an ordered `layers` list and optional
+`entryPoints`, `order` and `description`. A list entry is a layer id or
+`{id?, layer, at?}`. Explicit `at` relocates that layer in this target;
+otherwise it uses its source address. Later links shadow earlier links.
+Symbols layers remain available without being linked. Missing layer references
+are skipped.
 
-An MCP session is a proxy for a browser tab, and `src/client/session.ts` was
-already the model. Each holds its own copy of the document. A name resolves
-there, the resolved operation carries ids, and it merges whatever anyone else
-did. Two participants resolving one name to different ids is *correct* — the
-same shape as two readers naming one routine differently, which this model
-tolerates by design and hygiene reports.
+A target can represent a packed image, decrunched memory, a loader stage or a
+patched arrangement. Its stored fields describe an arrangement; they do not
+record the transformation between those images or a live CPU/device state.
 
-Ambiguity is therefore **local**: two `Creature`s in my view must be
-disambiguated; somebody else's concurrent second one does not change what my
-operation meant.
+Target selection is implemented by `selectTarget`, `projectForTarget` and
+`withSyntheticTarget` in the loader:
 
-**One invariant holds this up**: no field-type spelling can be mistaken for an
-id. An id is three letters, an underscore and six of `[0-9a-z]`; `u8`, `u16be`,
-`char(n)`, `bytes(n)` and `bits(n)` contain no underscore. It is true by
-construction and asserted anyway, in `identity.test.ts`, because it would stop
-being true the moment a spelling with an underscore was added.
+- Requests needing a memory arrangement select a target by id or unambiguous
+  name. With several targets, omission is refused.
+- A single target is unambiguous. A project with none can use its whole stack;
+  `withSyntheticTarget` supplies one arrangement for surfaces that need one.
+- Document-only operations, such as listing targets or editing a type, do not
+  require target selection.
+- There is no stored `defaultTarget`. Target selection belongs to request or
+  client context. Target `order` is descriptive sequencing, not a default.
 
-**A binding is keyed by its site**, which is what the algebra always said it is:
-an address-to-id map, where binding again is how one is updated. It was keyed by
-a minted use id, so every bind added a competitor — two uses at one site, the
-loaded index keeping whichever sorted last by an id nobody chose, and unbinding
-leaving the other still resolving.
+## 4. Claims and frames
 
-A document stored before that — a `.re64db` whose snapshot holds uses keyed by
-use id — is rekeyed by site when the store opens it, and the migration is
-persisted like any update, because a later operation names items it created.
-Where a stored map held two uses at one site, the one whose id sorts last is
-kept: that is the one every view was already showing, and the records carry no
-time to choose by otherwise. History written then carries no site on its
-unbinds; those are read by the use id they name, against whatever they are
-applied to, so undo and redo work across the upgrade rather than throwing.
+The loaded `Claim` in [claims/model.ts](../src/core/claims/model.ts) has
+`id`, numeric absolute `at`, `origin`, and optional `frame`, `extent`,
+`name`, `says`, `root` and `description`.
 
-**Open, and decided but not built**, as
-[#26](https://github.com/re64/re64/issues/26). A binding names an instruction's
-operand, so it should travel with its layer when the layer is relocated — and a
-target frame should be available as the escape hatch when relocation is wrong,
-exactly as a claim has one. Uses are stored inside a layer with an *absolute*
-address today, so they stay behind. That is the same `Frame` the claims carry and
-wants doing the same way.
-
-Still breaking the id rule, and named here rather than left to be discovered: a
-**capture refers to its bytes by filename** — R8 fixed which bytes a name means,
-not that a name is the reference — and a **layer refers to its file by path**.
-Both are one missing id and are [#27](https://github.com/re64/re64/issues/27).
-
-**Which arrangement a claim is about, and the default.** A claim on a byte no
-layer supplies — zero page, an I/O register, a KERNAL vector — is framed on the
-**address space**: a fact about the machine this program runs on, true in every
-arrangement of it. The target frame exists for a claim that really is about one
-arrangement, is honoured on the way in and filtered on the way out, and nothing
-emits one by default.
-
-That default was measured rather than chosen. Camels' 68 hand-named zero-page
-addresses were written while reading `runtime`. Framed there and honestly
-filtered, they disappear from the other four views — and `patched` is the same
-program with eleven byte patches over it, `machine` the same program with the
-ROMs banked in. `$02` is `printColumn` in all of them. **Which writes should be
-able to ask for a target frame is undecided**, and is the same question as scoped
-names.
-
-### Freshness is not correctness
-
-**Only the inbox is deferred.** A write applies to the session's own copy and
-propagates at once, so "add a constant, then use it" batches — the session knows
-what it just made. There is no outbox and no offline write queue, because a
-connected session has no reason to hold its own work.
-
-**Nothing forces a merge.** A session may work from an out-of-date view for as
-long as it likes, however online its connection is. Its writes still converge.
-What it risks is doing something somebody has already done, which surfaces
-afterwards as two names for one routine — a state this model keeps rather than
-prevents. So `pending` on an answer says how much is waiting and from whom,
-absent when nothing is; `changes_since` says what it is without taking it in;
-and `merge` takes it in, explicitly.
-
-**There is no `expectVersion` any more.** A write could refuse if the whole
-document had moved since you read it, which is refusing to merge in a system
-whose premise is that concurrent edits merge — and an offline participant can
-never supply a valid whole-document hash, so it was a second mode by
-construction. A write carries ids; there is nothing for a concurrent edit to
-make it mean differently.
-
----
-
-## 4. Claims — statements about addresses
-
-One noun. Formerly two: a "label" is a claim with a `name`, a "region" is a
-claim with an `extent` and an interpretation.
-
-### In the model
-
-```ts
-interface Claim {
-  id: string            // the only identity
-  at: number            // absolute, always, in the domain
-  origin: ClaimOrigin   // machinery or judgement
-  frame?: Frame         // what it belongs to
-  extent?: number       // how far it reaches; absent means a point
-  name?: string
-  says?: Interpretation // what the bytes are
-  root?: RootKind       // decode from here
-  description?: string  // what a name means on this machine
-}
-```
-
-**`id`, `at` and `origin` are always present. Everything else is optional**, and
-a write refuses a claim with none of `name`, `is` or `root` — a claim saying
-nothing about an address is not a claim.
-
-Who made it and how they know are **not here**: they belong to an act of
-vouching, so they live on the evidence that names this claim. See §5.
-
-### The four value types
-
-```ts
-Frame = { space: "address" }                        // the machine
-      | { space: "layer";  layer: string }          // stored as an offset
-      | { space: "target"; target: string }         // absolute in that target
-
-Interpretation = { is: "data" }
-               | { is: "text";   encoding?: TextEncoding; view?: string }
-               | { is: "bitmap"; view?: string }
-               | { is: "jumptable" }
-               | { is: "record"; typeId: string }
-
-RootKind    = "entry" | "routine" | "location" | "data"
-ClaimOrigin = "user" | "layer" | "platform" | "auto" | "analysis"
-```
-
-### In the file and the API
-
-`says` is flattened, so what a reader meets is thirteen flat keys:
-
-```
-id  at  extent  layer  target  name  is  encoding  view  typeId  root
-description  origin
-```
-
-**Five are conditional on another field's value:**
-
-| field | meaningful only when |
+| Value | Alternatives |
 |---|---|
-| `encoding` | `is: "text"` |
-| `view` | `is: "text"` or `is: "bitmap"` |
-| `typeId` | `is: "record"` — and required there |
-| `layer` | layer-framed |
-| `target` | target-framed |
+| `Frame` | `{space:"address"}`, `{space:"layer", layer:<id>}`, `{space:"target", target:<id>}` |
+| `Interpretation` | `{is:"data"}`, `{is:"text", encoding?, view?}`, `{is:"bitmap", view?}`, `{is:"jumptable"}`, `{is:"record", typeId}` |
+| `RootKind` | `entry`, `routine`, `location`, `data` |
+| `ClaimOrigin` | `user`, `layer`, `platform`, `auto`, `analysis` |
 
-`extent` is not conditional but means three different things: a span with `is`,
-an array's reach with `name`, and a record count with `is: "record"`.
+The project/file/document representation flattens `says` into `is`,
+`encoding`, `view` and `typeId`, and the frame into `layer` or `target`.
+Omitting both frame fields denotes address-space scope. A layer-framed stored `at` is
+an offset; the loader adds the selected layer placement to obtain absolute
+`Claim.at`. MCP address arguments are absolute and named `address`; they are
+not the file's `at` field.
 
-### What actually does something
+`placed` in [ops/edits.ts](../src/core/ops/edits.ts) chooses the topmost byte
+layer as the default owner. With no supplying layer it chooses address-space
+scope, which travels across targets. Explicit target frames are represented
+and filtered by the loader; selecting a target for a request does not by itself
+give a new claim a target frame. Which writes should expose explicit target
+framing remains a design question.
 
-Worth stating, because the answer is not obvious from the shape and because a
-field nothing reads is this project's most repeated defect:
+`extent` always measures bytes. Absent extent is a point; for a record claim
+the number of records is derived from extent divided by the type's size.
+It is not a stored record count. The interpretations have no `code` or
+`unknown` member; decode roots and absence of interpretation serve those roles
+under the B contracts.
 
-| field | effect |
+| Field | Reader/effect |
 |---|---|
-| `says.is` | picks the row strategy, and drives the `interpretation` disagreement |
-| `says.encoding` / `.view` / `.typeId` | how the bytes render |
-| `extent` + `says` | whether operands render as an offset into it |
-| `root` | seeds the decode; drives the `rootInData` disagreement |
-| `frame` | whether the claim moves when a layer is relinked |
-| `name` | renders; drives the `nameShared` disagreement |
-| `origin` | **name ranking, platform-name hiding, and the hygiene gate** |
-| `description` | informational |
+| `says` | Row strategy and interpretation disagreements |
+| `encoding`, `view`, `typeId` | Text/bitmap rendering or record layout |
+| `extent` | Span, containment and record-array reach |
+| `root` | Decode roots and root-in-data disagreements |
+| `frame` | Relocation and target filtering |
+| `name` | Label rendering and name disagreements |
+| `origin` | Name ranking, platform-name hiding and hygiene filtering |
+| `description` | Explanatory text |
 
-`origin` is the load-bearing one and the reason it stayed on the claim when the
-rest of provenance left: `CLAIM_RANK` in `claims/names.ts` orders names by it,
-`view/rows.ts` hides platform names with it, and hygiene skips generated names
-with it. A seeded Camels project has 383 `platform` names and 472 `auto` ones
-against none by hand, which is the scale that makes the gate matter.
+See [claim names](../src/core/claims/names.ts),
+[claim set](../src/core/claims/set.ts) and [rows](../src/core/view/rows.ts).
+Provenance belongs to evidence; `origin` is not a contributor's identity.
 
-### One concept, one argument name
+## 5. Declarations and bindings
 
-The surface names an address three ways, and the difference is real:
-
-| | | |
+| Declaration | Project fields | Reference/use |
 |---|---|---|
-| `address` | a **point** | 19 tools |
-| `start` + `length`/`lines` | a **span you read** | 6 tools |
-| `from` + `to` | a **range you filter** | 2 tools |
+| Constant | `id, name, value` | Layer `constantUses`: site address → constant id |
+| Type | `id, name, size, unit?, fields` | Claim `typeId`; nested field-type expression |
+| Decoder | `id, name, source` | Claim `view: "snippet:<id>"` and decoder tools |
 
-It used to name it four ways: `at` on the three claim tools and `from` on
-`run_program`, against `address` everywhere else, with nothing to justify the
-split. **Three independent readers paid for it** — experiment 10's editor missed
-on three tools in a row, the silver image's build script took 238 refusals
-passing `at` to `add_comment`, and experiment 11's reviewer took six passing
-`address` to `preview` and never registered the message.
+Layer `labelUses` similarly bind a site to a claim id under the legacy field
+name `label`. Both use maps are keyed by normalized site address in the
+document; their project lists retain use ids for operation/history
+compatibility. `primaryLabels` is a project-level address → claim-id choice.
+The algebra owns bind/unbind semantics.
 
-`at` did not move in the *model*: a claim's position is `at`, in the document
-and in the file. Only the wire spelling changed, and `api-doc.test.ts` records
-it as persisted-and-deliberately-unwritable so the two cannot quietly diverge.
+### Record fields
 
-Nested structures keep their own names — a scenario step is `{kind, at}` and a
-target link is `{layer, at}` — because those are stored in documents, and
-renaming them would rewrite every scenario in every project.
+Each field is `{id, offset, name, type, description?}`. The project holds a
+list; the document keys nested field maps by id. Several fields can occupy
+one offset. `size` is declared rather than computed from the fields, so holes
+are representable.
 
-### Scope
+Field syntax is parsed by [memory/type.ts](../src/core/memory/type.ts):
 
-Derived from the address, never chosen: the topmost layer supplying the byte,
-else the target. A layer-framed claim stores an **offset** into that layer's
-bytes; the loader adds the layer's start back. Offsets never appear in any tool
-argument or answer. Every write reports the scope it derived.
+| Form | Meaning |
+|---|---|
+| `u8`, `i8`, `u16`, `u16be`, `ptr`, `ptrbe` | Numeric and pointer fields with explicit width/order |
+| `char(n)`, `char(n,encoding)`, `bytes(n)` | Text or byte spans |
+| `bits(n)` | Field within a bit record |
+| Another type's id | Nested record |
+| `T[n]`, `T[first..last]` | Array and optional nonzero index origin |
+| `T[countConstantId]` | Array with a named count reference |
+| `T[4][8]` | Nested arrays, outer dimension first |
 
-`view` values: `char:N`, `bits:N`, `sprite`, `sprite-multi`, `snippet:<id>`.
+A type's `unit` defaults to bytes; `unit:"bits"` makes field offsets count
+bits. Type `size` and `fieldSize` still measure bytes; `fieldBits` handles
+bit widths. Bit records can nest inside byte records. `pathAt` derives paths
+such as `zones[2].name`; paths are not stored and holes produce no field path.
 
----
+Readable type/count names are resolved at the boundary and ids stored inside
+field expressions. Resolution accepts an id, a unique name, or `name@id`
+where supported; an ambiguous name is refused. A name is not made unique by
+deleting a competing declaration. Missing references use the relevant reader's
+fallback rather than a cascading deletion.
 
-## 5. The three declaration tables
+### Decoders
 
-Each splits a declaration from its uses, for the same reason: a declaration
-describes no bytes, so there is no layer for it to travel with.
+`source` is the body of a function receiving `(bytes, params)` and returning
+a validated `Decoded` value. [sandbox/run.ts](../src/sandbox/run.ts) runs it
+in a worker with SES and a timeout; the browser uses
+[decoder-worker.ts](../src/ui/decoder-worker.ts). Decoders drive tools and the
+explorer. The synchronous listing does not execute arbitrary decoder source.
 
-| | declaration (project) | use |
-|---|---|---|
-| constant | `{id, name, value}` | `{id, address, constant}` in the owning layer |
-| decoder | `{id, name, source}` | `view: "snippet:<id>"` on a claim |
-| type | `{id, name, size, fields}` | `says: {is: "record", typeId}` on a claim |
+### Reference limits
 
-**Types.** `size` is bytes per record, declared rather than summed, so holes are
-legal. `fields` is a list, each carrying an **id**, and the document keys them by
-that id: an offset says where a field sits, never which field it is. Two readers
-adding different fields to one record both survive because they touch different
-keys — and two who add one at the *same* offset both survive too, which an
-offset key could not express. Field types: `u8`, `i8`, `u16`, `u16be`,
-`ptr`, `ptrbe`, `char(n)`, `char(n,encoding)`, `bytes(n)`, or another type's
-name. How many records a claim holds is `extent / size`, derived.
+Constant and label use sites still store absolute addresses within their layer;
+relocation-aware binding frames are [#26](https://github.com/re64/re64/issues/26).
+Files are `{name, hash, size}` records keyed by name. Layers reference paths
+and captures reference filenames, while blob content is keyed by hash.
+Stable file identity is [#27](https://github.com/re64/re64/issues/27).
+A content hash does not turn the filename referring to it into an immutable id.
 
-**A field is an entity, not an attribute of one** — and the *storage* had to say
-so too, which took two goes. It has an id, and `field.add` / `field.set` /
-`field.remove` address it by that id. The document keys fields by that id and
-each field is a map of its own, so a move sets a number and two readers editing
-different properties of one field both survive.
+## 6. Scenarios and captures
 
-The first attempt kept the offset as the key and added the verbs on top. Under
-one writer that looks identical; under two it is not, and the Codex review found
-both halves. A move was still a delete plus a create, so two peers moving one
-field to different offsets produced **two entries carrying one id** — after which
-`field.remove` took one away and left the other. And a field was a plain object
-at its key, so `field.set` wrote the whole of it and a rename lost to a
-concurrent description edit. Verbs on a shape that cannot honour them.
+A `ProjectScenario` is `{id, name, description?, steps}`.
+[ProjectStep](../src/core/project/project.ts) defines the ordered actions:
+start, set registers/memory, joystick input, keyboard input, run, assert and
+capture.
 
-A document stored before that — a `.re64db` whose snapshot holds fields keyed by
-offset as plain objects — is brought to this shape when the store opens it, and
-the migration is persisted like any update, because a later edit to a migrated
-field names items the migration created. The text migration alone never reached a
-stored document: a store restores its snapshot directly and does not pass through
-the file. And `type.add` carries its fields as a **list**, each with its id and
-offset, because a payload keyed by offset can hold one field per offset and
-silently dropped the second whenever a type was recreated — by the file
-reconciler, or by undoing its removal. History recorded in the old shapes — a
-`type.add` keyed by offset, a `type.set` carrying a child patch — is not
-rewritten, because a row is applied to whatever state it meets; both adapters
-read those two shapes through `ops/legacy.ts` and nothing else does, so undo and
-redo of work done before the change keep meaning what they meant.
+Steps have ids but are stored and replaced as one list. There are no independent
+step edit operations: two revisions to the list compete as whole values.
+This differs from independently editable record fields. Step ids also let
+capture records name the step that produced them.
 
-**Two fields at one offset both stand**, and hygiene reports the pair. Offset
-keys made that case merge into one field and silently lose a reader's work; it is
-now the same shape as two claims at one address, which this model keeps rather
-than prevents. `type.set` therefore never carries
-`fields`: it names the type's own name, size and unit and leaves the children
-alone, and `edit_type` above it does the same — so renaming a record no longer
-means restating its size, which is its own way of losing a field. Editing a record by resending its whole field list is how one writer's
-new field disappears when another writer resends a list minted before it, and
-being nested inside a type is no reason for a field to be exposed to that.
+A `ProjectCapture` is:
 
-Any of them takes `[n]` for an array — `u8[8]`, `Creature[42]`, `char(40)[3]` —
-or `[first..last]` where the first index is not zero, which some tables are.
-`u8[4][8]` nests the way C reads it, outer dimension first. An array is a
-modifier on a field type rather than a kind of its own, so it needed no change
-to the schema, the CRDT, the operations or the file format: a field type is one
-string.
-
-**A count may name a constant** — `u8[CreatureCount]`, `u8[1..LevelCount]` —
-which is the equate an assembler source would write. It earns its keep when the
-same number appears more than once: two arrays written `[CreatureCount]` say
-their counts are the *same* count, which is the whole content of a shared index
-without a new noun, and binding that constant to the immediate the code compares
-against ties the layout to the program. Resolved on load and never stored: the
-document holds the text, so changing the constant changes the layout that named
-it, and a constant that has gone falls back to the number it had.
-
-**A bitmask is a record at bit granularity.** `unit: "bits"` makes a type's
-field offsets count bits instead of bytes, and fields in one take `bits(n)`.
-`$D011` is seven fields in one byte — three bits of scroll, a row select, a
-blank, a bitmap flag and the ninth raster bit — which is structurally a record:
-named things at offsets, holes legal, two people editing different offsets. Bit
-*n* is the one worth 2^*n*, as every datasheet numbers them; the listing prints
-them high to low, because that is how a byte is written and it is a display
-choice rather than what an offset means.
-
-**`size` stays in bytes either way, and so does `fieldSize`.** A unit that
-silently changed what an existing number meant is the defect shape this project
-keeps catching, so a bit record of `size: 1` occupies one byte and nothing that
-already reads a size has to learn anything. Only code walking *inside* one asks
-`fieldBits`. A bit record nests inside a byte record like any other type, which
-is what gives `zones[2].flags.doubleWidth` with no new path machinery.
-
-**A path is derived from a type, never stored.** Given a record claim and an
-address inside it, `zones[2].name` — or `zones[0].slots[3]`, or
-`waves[1].name + 2` where the address is inside a fixed string rather than at
-its start. Silent in a hole, because a hole is a real gap in interpretation.
-`where` answers with it. The same brackets index the machine's arrays:
-`screen[10,2]`, `sprite[13]`.
-
-A reference to a declaration that has gone renders the bytes, the literal, or
-the plain value. Nothing sweeps.
-
-### Provenance lives on the evidence, not on the claim
-
-A claim carries **`origin`** — `user | layer | platform | auto | analysis` — and
-nothing else about who. That is intrinsic: it says whether this is somebody's
-judgement or machinery, and hygiene gates on it because 855 of a seeded Camels
-project's names are `platform` or `auto`.
-
-**Who vouched and how they know are properties of an act of vouching**, so they
-sit on an evidence record: `{author, method?, when?}` beside `kind`. `add_claim`
-mints one — a `supports` — alongside the claim, which is two operations under
-one changeset.
-
-The reason is merging. A claim carrying its own author cannot be shared: two
-readers reaching the same finding produce two claims, and merging them would
-erase one. Four runs on Camels independently re-derived the zone table, the
-cheat, the IRQ handler and the high-score file — one finding with four accounts,
-which the old shape could only say as four findings. Now it is **one claim with
-four supporting records**, each keeping its author and method, and "do these
-accounts differ" is finally computable rather than a thing `method` could only
-hint at.
-
-**Two verbs, and two more were rejected.** An `asserts` kind for "created it"
-would distinguish only *arrival order*, which the log already records, and it
-breaks under parallel collaboration — two agents independently creating one
-claim both assert it, and merging would mean rewriting one into a support to
-preserve a fact that carries no information.
-
-`supersedes` existed and was removed. It said "an earlier reading, replaced" —
-neither support nor refutation — and it stored an **ordering**, which is the one
-thing a conflict-free merge cannot supply: two peers offline can each supersede
-the same claim with a different replacement, and the document converges on two
-parallel supersessions with nothing to break the tie. Chains compound it. Every
-other ordering question here is answered by a single-valued key, and the key for
-this one already existed: **`primaryLabels` is "which reading is current"**, one
-entry per address, last writer wins, and read by the renderer — which
-`supersedes` never was. A second mechanism for one question is how the two drift
-apart.
-
-Nobody wanted it, either. Of every `add_evidence` call the runs have made, all
-are `supports` or `refutes`, and the one facing exactly the case `supersedes`
-was designed for — an earlier framing of some bytes as cut music, replaced —
-wrote *"Refutes the earlier framing of this as new/cut music."*
-
-**Every kind is read.** `refutes` reports a declared disagreement; `supports`
-backs a claim, and two of them by different authors with different methods is an
-independent confirmation. The switch is exhaustive with a `never` default,
-because for a long time only `refutes` was read at all.
-
-Strength lives in `method` and in whether a scenario is attached, never in the
-verb.
-
-### Retiring
-
-**Refuting did not solve the problem it looked like it solved.** A refuted claim
-still renders, still competes for the name at its address, still appears in
-`claims_at` — so a reader arriving later meets the contradiction with nothing
-marking which half is live. The document accumulates settled arguments in the
-working set, and the more careful the project the worse it gets.
-
-The fix is *not* to make refutation hide its target. `disagreements()` reports
-contradiction and never picks a winner, and one writer refuting another's
-reading is precisely the case where nobody has won yet. So retiring is a
-separate act, and `retires` is the third evidence kind.
-
-| | says | the claim |
-|---|---|---|
-| `refutes` | this is wrong, and here is what shows it | stands, and is reported |
-| `retires` | this is out | leaves the working set, stays in the document |
-
-**A claim is retired when a live `retires` record names it** — derived on every
-read, never stored, so there is no flag to keep in sync and restoring is
-removing the record. `retire_claim` and `restore_claim` are conveniences over
-`evidence.add` and `evidence.remove`; retirement needed no operation of its own,
-which is the test that the shape is right.
-
-**Filtered in one place**: `loader.ts`, where `ProjectClaim[]` becomes `Claim[]`
-for a target. Rendering, naming, hygiene and `disagreements` all read that list,
-so none of them needs to know retirement exists — the alternative is nine
-filters, eight of which are correct.
-
-**Anyone may retire anything.** It was nearly called `withdraws`, which is wrong
-for a reason worth keeping: only a claim's author can withdraw it, and the case
-this exists for is the second reader clearing up after the first.
-
-**Retiring is not deleting, and deleting is not destroying.** A retired claim is
-still in the file, with its evidence, so it exports and `list_retired` shows it
-with what took it out. A *removed* claim is out of the document and lives in the
-operations log, where `claim.remove`'s inverse carries the whole of it — the
-right answer for a claim entered by mistake, the wrong one for a reading
-somebody honestly held.
-
-**And it is counted.** `describe_project` reports how many claims are retired,
-because hiding something is itself a confident answer and a document that looks
-tidier than it is has told the reader something false.
-
-**This is not `supersedes` returning.** That one stored an *ordering* between two
-claims, which a merge cannot supply. `retires` is a unary predicate on one
-claim: two peers retiring the same claim while apart converge on two records that
-agree, and a retirement names no chain it has to stay consistent with. It may
-carry `other` to point at what replaced it, and nothing reads that as a rank.
-
-### Evidence, field by field
-
-```
-id  claim  kind  author  method  when  scenario  capture  other  note
+```text
+id, scenario, step, kind, file, when?
 ```
 
-| field | present | effect |
-|---|---|---|
-| `claim` | **always** | what it is about — a *claim*, never an address |
-| `kind` | **always** | `supports` \| `refutes` \| `retires` |
-| `author` | on anything a person or agent wrote | reported by `claims_at`; **the corroboration reading** |
-| `method` | optional | `guessed \| transcribed \| read \| derived \| ran` |
-| `when` | optional | informational |
-| `scenario` | optional | **the strongest form**: it re-runs |
-| `capture` | optional | so the check can be read without re-running |
-| `other` | optional | another claim: what a refutation contradicts, or what replaced a retired one |
-| `note` | optional | prose |
+`scenario` and `step` identify the source; `kind` is ram, screen, frames,
+trace, sid or devices. `file` names the retained bytes. Captures are separate
+document entities referencing scenarios, not children embedded in the scenario
+record. Removing a scenario keeps its captures.
 
-**Two rules are enforced at the write**, and they are the same rule: a `refutes`
-with neither `other` nor `note` is refused, and so is a retirement — an opinion
-with no handle on it, and the second one takes a claim out of sight.
+Machine state is derived by [machine/scenario.ts](../src/core/machine/scenario.ts)
+from steps and execution inputs. In-memory checkpoints accelerate reruns.
+Retained capture bytes and records persist separately. Neither a scenario
+reference nor a capture record contains a complete immutable bundle of every
+target, ROM and external input; execution keys and S6 must account for actual
+inputs, and publication reproducibility remains a separate design obligation.
 
-**Strongest to weakest**, which is worth stating because the model does not rank
-them and a reader has to:
+## 7. Evidence and retirement
 
-1. A claim with a `supports` naming a **scenario** — it re-runs, and trusts nobody
-2. Two of those, by different authors, exercising different paths — *not
-   currently expressible; there is nothing that says two checks are independent*
-3. Two accounts agreeing with **different** methods — an agreement you have
-   reason to believe is not correlated
-4. Two agreeing with the **same** method — one account, not two
-5. `method` alone
+`ProjectEvidence` has `id`, `claim`, `kind` and optional `author`,
+`method`, `when`, `scenario`, `capture`, `other` and `note`.
+The project/document fields flatten provenance; the operation layer groups it
+under `by`. Replacement and clear behavior belongs to the operation algebra.
 
-`method` is a *negative* discriminator and not a strength: its job, from
-experiment 0, is to catch an agreement that is really one account arriving
-twice. Both agents there concluded glyphs `$03`/`$04` were never drawn, both
-were wrong, and they agreed because they shared a blind spot. A confidence
-number cannot see that; a method can.
-
-### What reads a disagreement, and what reads hygiene
-
-Two different questions, and they are answered by different code with different
-rules — which matters, because they overlap on one case and disagree about it.
-
-**`disagreements()`** — `core/claims/set.ts`, knows nothing about any analysis.
-Reported per *overlap*, never per byte: a first version turned one disputed span
-in experiment 7 into 1,832 findings.
-
-| kind | when |
+| Field | Meaning and reader |
 |---|---|
-| `declared` | somebody wrote a `refutes`. **Need not overlap** — `$8DF9` holding `$3B` refutes a claim about the glyph `$3B`, at a different address entirely |
-| `nameShared` | one name reaching two addresses |
-| `interpretation` | two claims overlap, `says.is` differs, **and neither contains the other** |
-| `rootInData` | a decode root inside somebody's "these are not instructions" |
+| `claim` | Claim id the account concerns |
+| `kind` | `supports`, `refutes` or `retires`; read by disagreement/retirement logic |
+| `author`, `method`, `when` | Attribution reported by evidence/claim reads |
+| `method` | `guessed`, `transcribed`, `read`, `derived`, `ran`; also used in corroboration/hygiene descriptions |
+| `scenario` | A workflow that can be rerun to inspect its checks |
+| `capture` | Retained output that can be inspected without rerunning |
+| `other` | Related claim, such as a competing interpretation or replacement |
+| `note` | Explanation a reference alone does not supply |
 
-**`checkHygiene()`** — `core/analysis/hygiene.ts`. About *your annotations*, and
-zero is the resting state. It reads evidence in exactly one place: the
-`label.duplicated` message gathers the **methods across everyone who vouched**
-for each twin, so it can say whether two labels with one name corroborate each
-other or are one account written down twice.
+Claim creation through MCP adds the caller's supporting account. Claim-tool
+`method` arguments are conveniences for that evidence. Several authors can
+support one claim without sharing a provenance field on the claim.
 
-`label.duplicated` · `label.nameShared` · `constant.nameShared` ·
-`annotation.insideInstruction` · `claim.noBytes` · `claim.missingDecoder` ·
-`type.missing` · `type.extentMismatch` · `type.redundantClaim` ·
-`comment.inlineDuplicated` · `claim.interpretationsDiffer`
+`refutes` reports a contrary account without hiding the claim. A live
+`retires` record removes its claim from the loaded working set while retaining
+the claim and evidence in the project and export. Retirement is derived by
+`retiredClaimIds` and filtered by the loader. `restore_claim` removes retirement
+evidence. The API requires a reason via `note` or `other` for refutation and
+retirement. `other` is not a ranking or a supersession chain.
 
-**`findings()`** — `core/claims/review.ts`, where the claims and the decode graph
-disagree: `codeInClaim`, `unreached`, `unexplained`. Needs both halves, so it is
-kept apart from both of the above.
+Different methods can help expose correlated reasoning, but do not prove
+independence or truth. A scenario link permits a repeatable check; its assertions
+and inputs still determine what the check establishes. The model stores no
+confidence score or automatic ranking of evidential strength.
 
-### The one rule that is stated twice, in opposite senses
+## 8. Comments, chat and derived readers
 
-`disagreements()` suppresses an `interpretation` finding when one claim contains
-the other — *containment is refinement*. `checkHygiene()` fires
-`claim.interpretationsDiffer` on exactly that case.
+Comments are layer-owned `{id, address, placement?, text, order?}` records.
+Placement is before, inline or after. Multiple comments can occupy an address.
+Messages are `{id, at, author, name, text}`, where `at` is a timestamp;
+message ordering is conversation order, not address order.
 
-Both are defensible and they were written for different questions. Hygiene draws
-the line in its own comment: **an inner claim saying nothing is naming a place
-inside a structure; an inner claim saying something *else* is a disagreement.**
-The forty-two zone names claimed as `text` inside the zone table's `data` span
-are the case it was written for, and the silver image still has them.
+Analysis and rendering derive names, record paths, decode graphs, blocks,
+routine effects and listings from loaded data. The following readers answer
+different questions:
 
-It is recorded here rather than resolved, because a curated project will meet
-the seam and should meet it knowing.
+| Reader | Inputs | Result |
+|---|---|---|
+| [`disagreements()`](../src/core/claims/set.ts) | Claims and evidence | Declared refutations, shared names, overlapping interpretations, roots inside data |
+| [`checkHygiene()`](../src/core/analysis/hygiene.ts) | Annotations and analysis context | Annotation problems and missing/inconsistent references |
+| [`findings()`](../src/core/claims/review.ts) | Claims and decode graph | Code in interpreted spans, unreached claims and unexplained bytes |
 
----
+A known distinction remains: `disagreements()` suppresses an interpretation
+conflict when one span contains the other, while hygiene can report different
+interpretations on that containment. These reports do not select a winning
+interpretation.
 
-## 6. Comments
+## 9. Compatibility and open boundaries
 
-Their own objects: `{id, address, placement, text, order?}` with placement
-`before | inline | after`. Owned by a **layer**, unlike claims. Every comment at
-an address renders; there is no index choosing one.
+File parsing/loading accepts legacy labels, regions, id-less entities and
+older field layouts. [claims/migrate.ts](../src/core/claims/migrate.ts) and the
+identity helpers establish the current project form. Stored CRDT snapshots
+also require migration when opened; file migration alone does not reach them.
 
----
+Field maps formerly keyed by offset and use maps formerly keyed by use id are
+migrated and persisted by the store. Old operation rows retain their payloads;
+[ops/legacy.ts](../src/core/ops/legacy.ts) and the adapters preserve supported
+historical field and binding behavior during replay. S5 defines the obligation
+and links the repair origins. This does not promise compatibility for every
+obsolete operation spelling.
 
-## 7. What is derived and never stored
+The architecture owns the status of session visibility, binding coordinates,
+file identity, schema nullability and article representation. Do not infer that
+those gaps are closed from this reference. In particular, current session
+machinery does not yet give every read and undo path consistent isolation.
 
-- which name an operand shows (all claims at the address, plus `primaryLabels`)
-- whether a byte is code (a walk from the roots)
-- the region tree, the equate block, the TYPE block
-- how many records an array holds
-- basic blocks, the call graph, routine extents, effects
-- disagreements and hygiene findings
-- the listing itself
+Other limitations visible in the current model:
 
----
+- `view` on a claim is a rendering format; a target is a memory arrangement.
+- `record` interpretations reference reusable layouts; record count is derived.
+- The committed Gridrunner example still uses legacy labels/regions, so it is
+  not a template for writing the current claim format.
+- An operation existing in `Op` does not prove that every API/UI exposes it.
+  `layer.set` exists, but the current MCP surface has no layer rename tool.
 
-## 8. Known tensions
-
-Stated without recommendations.
-
-**The claim object does six jobs.** Identity, position, naming, interpretation,
-decoding, provenance — sixteen flat keys in the file, six of them conditional on
-a neighbour's value. That is a discriminated union flattened into a record. The
-flattening buys one-line diffs and costs comprehensibility.
-
-**One concept, two spellings.** The model says `claim.says.is`; the file and API
-say `is`. `primaryLabels` is named for an object that no longer exists — it is
-indexed by claim id, and the tools are `bind_primary_name` / `unbind_primary_name`.
-
-**"View" means two things.** `view` on a claim is a rendering format
-(`char:8`). A *target* is also routinely called a view, including in tool
-descriptions. Both can appear in one call.
-
-**`record` is unlike its siblings.** `data`, `text`, `bitmap` and `jumptable`
-are byte-local. `record` points at a project-level declaration and changes what
-`extent` means. Nothing in the name says an array.
-
-**`root` and `says` are not orthogonal in practice.** Every interpretation is
-given `root: "data"` so it renders, so a field that reads as a separate concern
-is usually a consequence of another.
-
-**The reference project is still in the legacy shape.** `gridrunner.re64` holds
-layer `labels` and `regions` and no `claims` key; it is migrated in memory on
-every load. The golden test pins the legacy file. Anybody opening the repo's
-canonical example to learn the format sees the model that was replaced.
-
-**Surface coverage must be checked.** There is no separate CLI. MCP and the web
-UI share concepts and core behavior, but that does not establish feature parity.
-Use the generated API and UI implementation to check which workflows each
-supports; a fixed tool count or historical browser-method list goes stale.
-
-**`layer.set` exists in the vocabulary and reaches no tool.** The operation is
-declared, applied and inverted; nothing on the MCP or HTTP surface emits one, so
-a layer still cannot be renamed by anybody using this. That is F1 in its usual
-form and it is the gap, stated the right way round — this file said the
-*operation* did not exist, which was wrong and hid which half was missing.
+Historical arguments and the earlier long-form reference are indexed in the
+[documentation decision](decisions/README.md#reference-boundaries--2026-09-11).
