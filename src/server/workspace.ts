@@ -1,4 +1,6 @@
 import { resolveFile, splitFilePath } from "../core/project/files.js";
+import type { Frame } from "../core/claims/model.js";
+import { resolvedUses, useFrame } from "../core/project/project.js";
 /**
  * One project, analysed and editable, for consumers that are not a browser.
  *
@@ -4949,9 +4951,11 @@ export class Workspace {
     target: number,
     from: number,
     to?: number,
-    at?: number
+    at?: number,
+    scope?: "target"
   ): EditResult {
     return this.edit(caller, (loaded) => {
+      if (scope === "target") this.site(loaded, target, scope);
       const lives = at ?? target;
       const label = loaded.map
         .getLabels()
@@ -4981,26 +4985,23 @@ export class Workspace {
         );
       }
 
-      return sites.map((site) => {
-        const layerId = owningLayerId(loaded, site.address);
-        return {
-          op: "labelUse.bind",
-          id: newId("lbl"),
-          layerId,
-          address: site.address,
-          labelId: label.id,
-        } as Op;
-      });
+      return sites.map(
+        (site) =>
+          ({
+            op: "labelUse.bind",
+            id: newId("lbl"),
+            ...this.site(loaded, site.address, scope),
+            labelId: label.id,
+          }) as Op
+      );
     });
   }
 
   unbindLabel(caller: Caller, address: number): EditResult {
     return this.edit(caller, (loaded) => {
-      const layerId = owningLayerId(loaded, address);
-      const layer = loaded.project.layers.find((l) => l.id === layerId);
-      const use = layer?.labelUses?.find((u) => parseProjectAddress(u.address) === address);
-      if (!use?.id) throw new Error(`No label is bound at ${hex4(address)}.`);
-      return [{ op: "labelUse.unbind", id: use.id, layerId, address }];
+      const found = this.useResolvedAt(loaded, loaded.project.labelUses ?? [], address);
+      if (!found?.id) throw new Error(`No label is bound at ${hex4(address)}.`);
+      return [{ op: "labelUse.unbind", id: found.id, frame: useFrame(found), at: parseProjectAddress(found.at) }];
     });
   }
 
@@ -5207,8 +5208,16 @@ export class Workspace {
    * different things for two peers. Names resolve on reads; writes name what
    * they change.
    */
-  bindConstant(caller: Caller, address: number, constantId: string): EditResult {
+  bindConstant(
+    caller: Caller,
+    address: number,
+    constantId: string,
+    scope?: "target"
+  ): EditResult {
     return this.edit(caller, (loaded) => {
+      // A fact about the request before any fact about the bytes: a scope that
+      // names no target is refused as such, whatever is at the address.
+      const site = this.site(loaded, address, scope);
       const instruction = this.program().instructions.get(address);
       if (!instruction) {
         throw new Error(`No instruction at ${hex4(address)}; nothing there to read as a constant.`);
@@ -5239,12 +5248,30 @@ export class Workspace {
         );
       }
 
-      const { layerId, create } = ensureOwningLayer(loaded, address, this.room.projectId);
-      return [
-        ...(create ? [create] : []),
-        { op: "constantUse.bind", id: newId("cst"), layerId, address, constantId: constant.id },
-      ];
+      return [{ op: "constantUse.bind", id: newId("cst"), ...site, constantId: constant.id }];
     });
+  }
+
+  /**
+   * Where a binding lives: the same answer a claim gets from `placed()`, so a
+   * use on owned bytes is an offset into its layer and moves with it, and one
+   * on an unowned byte is a fact about the address space. `scope: "target"` is
+   * the escape hatch for when relocation is wrong — the use is a fact about
+   * this arrangement, at this absolute address, and no other.
+   */
+  private site(
+    loaded: LoadedProject,
+    address: number,
+    scope: "target" | undefined
+  ): { frame: Frame; at: number } {
+    if (scope !== "target") return placed(loaded, address);
+    if (!loaded.selectedTarget) {
+      throw new Error(
+        `A target-framed binding needs a target to be about, and this call selected none. ` +
+          `Name one, or leave scope out to bind the site in its layer.`
+      );
+    }
+    return { frame: { space: "target", target: loaded.selectedTarget.id }, at: address };
   }
 
   /**
@@ -5257,7 +5284,8 @@ export class Workspace {
    */
   bindConstants(
     caller: Caller,
-    bindings: readonly { address: number; constant: string }[]
+    bindings: readonly { address: number; constant: string }[],
+    scope?: "target"
   ): EditResult {
     if (bindings.length === 0) throw new Error("Give at least one binding.");
 
@@ -5271,6 +5299,7 @@ export class Workspace {
     const result = this.edit(caller, (loaded) => {
       rejected = [];
       const ops: Op[] = [];
+      if (scope === "target") this.site(loaded, bindings[0].address, scope);
 
       for (const entry of bindings) {
         const reject = (reason: string) =>
@@ -5295,8 +5324,7 @@ export class Workspace {
         ops.push({
           op: "constantUse.bind",
           id: newId("cst"),
-          layerId: owningLayerId(loaded, entry.address),
-          address: entry.address,
+          ...this.site(loaded, entry.address, scope),
           constantId: constant.id,
         } as Op);
       }
@@ -5330,14 +5358,26 @@ export class Workspace {
 
   unbindConstant(caller: Caller, address: number): EditResult {
     return this.edit(caller, (loaded) => {
-      const layerId = owningLayerId(loaded, address);
-      const layer = loaded.project.layers.find((l) => l.id === layerId);
-      const use = layer?.constantUses?.find(
-        (u) => parseProjectAddress(u.address) === address
-      );
-      if (!use?.id) throw new Error(`No constant is bound at ${hex4(address)}.`);
-      return [{ op: "constantUse.unbind", id: use.id, layerId, address }];
+      // The use that resolves to this address *in this view*, whatever frame
+      // it carries — so a target-framed one is found in its target and a
+      // layer-framed one wherever its layer landed.
+      const found = this.useResolvedAt(loaded, loaded.project.constantUses ?? [], address);
+      if (!found?.id) throw new Error(`No constant is bound at ${hex4(address)}.`);
+      return [
+        { op: "constantUse.unbind", id: found.id, frame: useFrame(found), at: parseProjectAddress(found.at) },
+      ];
     });
+  }
+
+  private useResolvedAt<T extends { id?: string; at: number | string; layer?: string; target?: string }>(
+    loaded: LoadedProject,
+    uses: readonly T[],
+    address: number
+  ): T | undefined {
+    const starts = new Map(loaded.map.getLayers().map((l) => [l.id, l.start] as const));
+    return resolvedUses(uses, (id) => starts.get(id), loaded.selectedTarget?.id).find(
+      (r) => r.address === address
+    )?.use;
   }
 
   constants(): {

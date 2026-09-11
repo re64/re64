@@ -268,12 +268,12 @@ describe("a binding is keyed by its site", () => {
     applyOpToDoc(doc, {
       op: "constantUse.bind",
       id,
-      layerId: "lay_a",
-      address: 0x8000,
+      frame: { space: "address" },
+      at: 0x8000,
       constantId,
     });
 
-  const usesOf = (doc: CrdtDoc) => projectFromDoc(doc).layers[0].constantUses ?? [];
+  const usesOf = (doc: CrdtDoc) => projectFromDoc(doc).constantUses ?? [];
 
   it("replaces rather than accumulating when the same site is bound again", () => {
     const doc = docFromProject(BOUND);
@@ -292,8 +292,8 @@ describe("a binding is keyed by its site", () => {
     applyOpToDoc(doc, {
       op: "constantUse.unbind",
       id: "cst_u2",
-      layerId: "lay_a",
-      address: 0x8000,
+      frame: { space: "address" },
+      at: 0x8000,
     });
     expect(usesOf(doc)).toHaveLength(0);
   });

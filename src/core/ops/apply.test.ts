@@ -173,58 +173,58 @@ describe("a binding's inverse restores what was at the site", () => {
     const first: Op = {
       op: "constantUse.bind",
       id: "cst_use1",
-      layerId: "lay_a",
-      address: 0x8000,
+      frame: { space: "address" },
+      at: 0x8000,
       constantId: "cst_a",
     };
     const again: Op = {
       op: "constantUse.bind",
       id: "cst_use2",
-      layerId: "lay_a",
-      address: 0x8000,
+      frame: { space: "address" },
+      at: 0x8000,
       constantId: "cst_b",
     };
 
     const bound = applyOp(withConstants, first);
     const inverse = invertOp(bound, again);
     const rebound = applyOp(bound, again);
-    expect(parseProject(rebound).layers[0].constantUses).toHaveLength(1);
+    expect(parseProject(rebound).constantUses).toHaveLength(1);
 
     // Undoing it is `ONE` again, not an empty site.
     const undone = parseProject(applyOp(rebound, inverse));
-    expect(undone.layers[0].constantUses).toHaveLength(1);
-    expect(undone.layers[0].constantUses![0].constant).toBe("cst_a");
+    expect(undone.constantUses).toHaveLength(1);
+    expect(undone.constantUses![0].constant).toBe("cst_a");
   });
 
   it("puts back the label a rebind replaced", () => {
     const first: Op = {
       op: "labelUse.bind",
       id: "lbl_use1",
-      layerId: "lay_a",
-      address: 0x8010,
+      frame: { space: "address" },
+      at: 0x8010,
       labelId: "clm_1",
     };
     const again: Op = {
       op: "labelUse.bind",
       id: "lbl_use2",
-      layerId: "lay_a",
-      address: 0x8010,
+      frame: { space: "address" },
+      at: 0x8010,
       labelId: "clm_2",
     };
 
     const bound = applyOp(withConstants, first);
     const inverse = invertOp(bound, again);
     const undone = parseProject(applyOp(applyOp(bound, again), inverse));
-    expect(undone.layers[0].labelUses).toHaveLength(1);
-    expect(undone.layers[0].labelUses![0].label).toBe("clm_1");
+    expect(undone.labelUses).toHaveLength(1);
+    expect(undone.labelUses![0].label).toBe("clm_1");
   });
 
   it("clears a site that had nothing on it, as before", () => {
     const fresh: Op = {
       op: "constantUse.bind",
       id: "cst_use1",
-      layerId: "lay_a",
-      address: 0x8020,
+      frame: { space: "address" },
+      at: 0x8020,
       constantId: "cst_a",
     };
     expect(roundTrips(fresh, withConstants)).toBe(true);
@@ -257,14 +257,14 @@ describe("the text writers key a binding by its site under either spelling", () 
 `)
   );
   const usesIn = (text: string) =>
-    (parseProject(text).layers[0].constantUses ?? []).map((u) => `${u.id}:${u.constant}`);
+    (parseProject(text).constantUses ?? []).map((u) => `${u.id}:${u.constant}`);
 
   it("replaces every use at the site, however each spelled it", () => {
     const bound = applyOp(withNumericUse, {
       op: "constantUse.bind",
       id: "cst_new",
-      layerId: "lay_a",
-      address: 0x8000,
+      frame: { space: "address" },
+      at: 0x8000,
       constantId: "cst_b",
     });
     expect(usesIn(bound)).toEqual(["cst_new:cst_b"]);
@@ -274,8 +274,8 @@ describe("the text writers key a binding by its site under either spelling", () 
     const cleared = applyOp(withNumericUse, {
       op: "constantUse.unbind",
       id: "cst_whatever",
-      layerId: "lay_a",
-      address: 0x8000,
+      frame: { space: "address" },
+      at: 0x8000,
     });
     expect(usesIn(cleared)).toEqual([]);
 

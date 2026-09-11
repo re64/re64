@@ -31,7 +31,7 @@ import {
   ProjectLayer,
 } from "./project.js";
 import { filesWithIds, fileId } from "./files.js";
-import { entryPointsIntoTarget, parseProject, parseProjectAddress } from "./project.js";
+import { entryPointsIntoTarget, parseProject, parseProjectAddress, useKey, usesToRoot } from "./project.js";
 
 /** Serialize one object compactly on a single line: `{ "a": 1, "b": 2 }`. */
 /**
@@ -69,6 +69,8 @@ function inOrder(entity: Record<string, unknown>, keys: readonly string[]): Reco
 }
 
 const FIELD_KEYS = ["id", "offset", "name", "type", "description"] as const;
+/** A use's keys as the file writes them; frame flat, like a claim's. */
+const USE_KEYS = ["id", "at", "layer", "target", "constant", "label"] as const;
 /** As the document projects a piece of evidence; see `EVIDENCE_FIELDS` in `crdt/doc.ts`. */
 const EVIDENCE_KEYS = [
   "id",
@@ -86,7 +88,7 @@ const EVIDENCE_KEYS = [
 /** Serialize a project in the hand-maintained house style. */
 export function formatProject(project: Project): string {
   // Never written at the root: a list still there belongs to a target.
-  project = filesWithIds(entryPointsIntoTarget(project));
+  project = usesToRoot(filesWithIds(entryPointsIntoTarget(project)));
   const lines: string[] = ["{"];
   const body: string[] = [];
 
@@ -144,6 +146,21 @@ export function formatProject(project: Project): string {
       .map((c) => `    ${compactObject(c as unknown as Record<string, unknown>)}`)
       .join(",\n");
     body.push(`  "constants": [\n${entries}\n  ]`);
+  }
+
+  // After the constants they name and before the targets whose frames they
+  // may carry — a reader meets a use's constant before the use.
+  for (const root of ["constantUses", "labelUses"] as const) {
+    const held = project[root];
+    if (held?.length) {
+      // By site, then id: the text and the document have to spell one state the
+      // same way, and the document projects its uses in this order.
+      const entries = [...held]
+        .sort((a, b) => byCodeUnit(useKey(a), useKey(b)) || byCodeUnit(a.id ?? "", b.id ?? ""))
+        .map((u) => `    ${compactObject(inOrder(u as unknown as Record<string, unknown>, USE_KEYS))}`)
+        .join(",\n");
+      body.push(`  "${root}": [\n${entries}\n  ]`);
+    }
   }
 
   if (project.targets?.length) {
@@ -839,85 +856,55 @@ export function deleteConstant(raw: string, id: string): string {
 }
 
 /**
- * Bind a site to a constant, and release it.
- *
- * **Keyed by the site, in both adapters.** The document keys uses by address and
- * this keyed them by use id, so a rebind here appended a second record while the
- * same rebind through the CRDT replaced one — two adapters answering differently
- * for one operation, which is what R13 was one root over. Binding again is how a
- * binding is updated, so the record at the address is the one to overwrite.
+ * Bind a site to a constant, and release it. Root-level, keyed by the site —
+ * frame and coordinate together, so a layer offset and a target address with
+ * the same number are two sites. Binding again is how a binding is updated, so
+ * the record at the site is the one overwritten. Both adapters key the same way.
  */
-export function bindConstant(
-  raw: string,
-  layerIndex: number,
-  use: ProjectConstantUse
-): string {
+export function bindConstant(raw: string, use: ProjectConstantUse): string {
   const project = parseProject(raw);
-  const layer = project.layers[layerIndex];
-  if (!layer) throw new Error(`No layer at index ${layerIndex} to own a constant use`);
-
-  // **Compared as numbers, and every use at the site goes.** A use may spell
-  // its address `32768` or `"$8000"` — both are legal in a file — and comparing
-  // the spellings appended a second use at one site, which the document adapter
-  // had just stopped doing. A file written while binds accumulated may hold
-  // several at one site already; binding again is the update, so it replaces
-  // all of them.
-  const uses = (layer.constantUses ??= []);
-  const here = uses.filter((u) => sameSite(u.address, use.address));
+  const uses = (project.constantUses ??= []);
+  const key = useKey(use);
+  const here = uses.filter((u) => useKey(u) === key);
   if (here.length === 1 && here[0].constant === use.constant && here[0].id === use.id) return raw;
-  layer.constantUses = [...uses.filter((u) => !sameSite(u.address, use.address)), use];
+  project.constantUses = [...uses.filter((u) => useKey(u) !== key), use];
   return formatProject(project);
 }
 
-/**
- * Release a site, for the reason `bindConstant` gives — or one record, when the
- * operation predates sites and names only a use id. The distinction matters in
- * a file that still holds two uses at one site: an old unbind meant "this
- * record", and taking its neighbour with it would be a guess.
- */
-export function unbindConstant(raw: string, layerIndex: number, site: UseSite): string {
+/** Release a site, or one record where the operation predates sites and names only an id. */
+export function unbindConstant(raw: string, site: UseSite): string {
   const project = parseProject(raw);
-  const layer = project.layers[layerIndex];
-  if (!layer?.constantUses?.some((u) => atSite(u, site))) return raw;
-
-  layer.constantUses = layer.constantUses.filter((u) => !atSite(u, site));
-  if (layer.constantUses.length === 0) delete layer.constantUses;
+  if (!project.constantUses?.some((u) => atUseSite(u, site))) return raw;
+  project.constantUses = project.constantUses.filter((u) => !atUseSite(u, site));
+  if (project.constantUses.length === 0) delete project.constantUses;
   return formatProject(project);
 }
 
-/** Which use an unbind means: every one at the address, or the one with the id. */
-export type UseSite = { address: number; id?: string } | { address?: undefined; id: string };
-
-const atSite = (use: { id?: string; address: number | string }, site: UseSite): boolean =>
-  site.address !== undefined ? sameSite(use.address, site.address) : use.id === site.id;
-
-/** One site under either spelling. */
-const sameSite = (a: number | string, b: number | string): boolean =>
-  parseProjectAddress(a) === parseProjectAddress(b);
-
-
-/** Bind a site to a label, and release it. Idempotent, like the rest. */
-export function bindLabel(raw: string, layerIndex: number, use: ProjectLabelUse): string {
+export function bindLabel(raw: string, use: ProjectLabelUse): string {
   const project = parseProject(raw);
-  const layer = project.layers[layerIndex];
-  if (!layer) throw new Error(`No layer at index ${layerIndex} to own a label use`);
-
-  const uses = (layer.labelUses ??= []);
-  const here = uses.filter((u) => sameSite(u.address, use.address));
+  const uses = (project.labelUses ??= []);
+  const key = useKey(use);
+  const here = uses.filter((u) => useKey(u) === key);
   if (here.length === 1 && here[0].label === use.label && here[0].id === use.id) return raw;
-  layer.labelUses = [...uses.filter((u) => !sameSite(u.address, use.address)), use];
+  project.labelUses = [...uses.filter((u) => useKey(u) !== key), use];
   return formatProject(project);
 }
 
-export function unbindLabel(raw: string, layerIndex: number, site: UseSite): string {
+export function unbindLabel(raw: string, site: UseSite): string {
   const project = parseProject(raw);
-  const layer = project.layers[layerIndex];
-  if (!layer?.labelUses?.some((u) => atSite(u, site))) return raw;
-
-  layer.labelUses = layer.labelUses.filter((u) => !atSite(u, site));
-  if (layer.labelUses.length === 0) delete layer.labelUses;
+  if (!project.labelUses?.some((u) => atUseSite(u, site))) return raw;
+  project.labelUses = project.labelUses.filter((u) => !atUseSite(u, site));
+  if (project.labelUses.length === 0) delete project.labelUses;
   return formatProject(project);
 }
+
+/** Which use an unbind means: the one at the site, or the one with the id. */
+export type UseSite = { key: string; id?: string } | { key?: undefined; id: string };
+
+const atUseSite = (use: { id?: string } & Parameters<typeof useKey>[0], site: UseSite): boolean =>
+  site.key !== undefined ? useKey(use) === site.key : use.id === site.id;
+
+
 
 /**
  * Set or clear a project-level field.

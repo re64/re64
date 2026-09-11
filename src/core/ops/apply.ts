@@ -13,6 +13,9 @@ import { fileId } from "../project/files.js";
  */
 
 import {
+  useFrameFields,
+  useFrame,
+  useKey,
   ProjectType,
   Project,
   ProjectComment,
@@ -61,7 +64,8 @@ import {
   deleteClaim,
 } from "../project/serialize.js";
 import { ClaimEdit, EvidenceSetOp, Op } from "./types.js";
-import { legacyChildTarget, legacyTypeSetChildren, typeAddFields } from "./legacy.js";
+import { bindSite, legacyChildTarget, legacyTypeSetChildren, typeAddFields } from "./legacy.js";
+import type { Frame } from "../claims/model.js";
 import { derivedId } from "../project/identity.js";
 import { Claim, Provenance } from "../claims/model.js";
 import { ProjectClaim, ProjectEvidence, ProjectField, projectClaims } from "../project/project.js";
@@ -94,54 +98,32 @@ function findRegion(project: Project, id: string): Found<ProjectRegion> | undefi
   return undefined;
 }
 
-/**
- * What is bound at a site, for the operation about to overwrite it.
- *
- * **By the site, not by the id in the operation.** A bind mints a fresh use id,
- * so on a rebind that id cannot exist in the pre-state: looking it up found
- * nothing, the inverse became `unbind`, and undoing a rebind cleared the site
- * instead of putting back what was there. A site holds one binding now, which is
- * what makes it the thing to ask about.
- */
-function constantUseAt(
-  project: Project,
-  layerId: string,
-  site: { address?: number; id: string }
-): Found<ProjectConstantUse> | undefined {
-  const layerIndex = project.layers.findIndex((l) => l.id === layerId);
-  if (layerIndex < 0) return undefined;
-  const entry = project.layers[layerIndex].constantUses?.find((u) => atSite(u, site));
-  return entry ? { layerIndex, entry } : undefined;
+/** The use at a site, or the one with the id where the operation predates sites. */
+function useAt<T extends { id?: string; at: number | string; layer?: string; target?: string }>(
+  uses: readonly T[] | undefined,
+  op: { id: string; frame?: Frame; at?: number; address?: number }
+): T | undefined {
+  const site = bindSite(op);
+  if (site) {
+    const key = useKey({ at: site.at, ...useFrameFields(site.frame) });
+    return uses?.find((u) => useKey(u) === key);
+  }
+  return uses?.find((u) => u.id === op.id);
 }
 
-function labelUseAt(
-  project: Project,
-  layerId: string,
-  site: { address?: number; id: string }
-): Found<ProjectLabelUse> | undefined {
-  const layerIndex = project.layers.findIndex((l) => l.id === layerId);
-  if (layerIndex < 0) return undefined;
-  const entry = project.layers[layerIndex].labelUses?.find((u) => atSite(u, site));
-  return entry ? { layerIndex, entry } : undefined;
-}
+/** The site an unbind names for the text writers, or the record. */
+const siteOf = (op: { id: string; frame?: Frame; at?: number; address?: number }): UseSite => {
+  const site = bindSite(op);
+  return site ? { key: useKey({ at: site.at, ...useFrameFields(site.frame) }) } : { id: op.id };
+};
 
-/** The site an unbind names, or the record, for the text writers. */
-const siteOf = (op: { id: string; address?: number }): UseSite =>
-  op.address !== undefined ? { address: op.address } : { id: op.id };
-
-/**
- * By the site when the operation names one, by the use id when it does not —
- * the latter being an operation stored before the site was the key. Compared
- * as numbers: a use may spell its address `32768` or `"$8000"`, and the two are
- * one site.
- */
-function atSite(
-  use: { id?: string; address: number | string },
-  site: { address?: number; id: string }
-): boolean {
-  return site.address !== undefined
-    ? parseProjectAddress(use.address) === site.address
-    : use.id === site.id;
+/** A use record for the text, spelled as the file spells one. */
+function useEntry<R extends { constant: string } | { label: string }>(
+  op: { id: string; frame?: Frame; at?: number; address?: number },
+  reference: R
+): { id: string; at: string; layer?: string; target?: string } & R {
+  const site = bindSite(op)!;
+  return { id: op.id, at: addressHex(site.at), ...useFrameFields(site.frame), ...reference };
 }
 
 function findComment(project: Project, id: string): Found<ProjectComment> | undefined {
@@ -322,19 +304,12 @@ export function applyOp(raw: string, op: Op): string {
       return deleteTarget(raw, op.id);
 
     case "labelUse.bind":
-      return bindLabel(raw, layerIndexOf(project, op.layerId), {
-        id: op.id,
-        address: addressHex(op.address),
-        label: op.labelId,
-      });
+      return bindLabel(raw, useEntry(op, { label: op.labelId }));
 
-    case "labelUse.unbind": {
+    case "labelUse.unbind":
       // The site, resolved through the id only for an operation stored before
       // the site was the key. Nothing there: nothing to do.
-      const found = labelUseAt(project, op.layerId, op);
-      if (!found) return raw;
-      return unbindLabel(raw, found.layerIndex, siteOf(op));
-    }
+      return useAt(project.labelUses, op) ? unbindLabel(raw, siteOf(op)) : raw;
 
     case "claim.add":
       return upsertClaim(raw, projectClaimOf(op.claim));
@@ -594,17 +569,10 @@ export function applyOp(raw: string, op: Op): string {
       return deleteEvidence(raw, op.id);
 
     case "constantUse.bind":
-      return bindConstant(raw, layerIndexOf(project, op.layerId), {
-        id: op.id,
-        address: addressHex(op.address),
-        constant: op.constantId,
-      });
+      return bindConstant(raw, useEntry(op, { constant: op.constantId }));
 
-    case "constantUse.unbind": {
-      const found = constantUseAt(project, op.layerId, op);
-      if (!found) return raw;
-      return unbindConstant(raw, found.layerIndex, siteOf(op));
-    }
+    case "constantUse.unbind":
+      return useAt(project.constantUses, op) ? unbindConstant(raw, siteOf(op)) : raw;
 
     case "layer.add":
       return insertLayer(
@@ -766,26 +734,29 @@ export function invertOp(raw: string, op: Op): Op {
     }
 
     case "labelUse.bind": {
-      const found = labelUseAt(project, op.layerId, op);
-      if (!found) return { op: "labelUse.unbind", id: op.id, layerId: op.layerId, address: op.address };
+      // What was at the site, by the site: a bind mints a fresh use id, so the
+      // pre-state never holds it. Nothing there inverts to clearing the site.
+      const found = useAt(project.labelUses, op);
+      const site = bindSite(op)!;
+      if (!found) return { op: "labelUse.unbind", id: op.id, frame: site.frame, at: site.at };
       return {
         op: "labelUse.bind",
-        id: found.entry.id!,
-        layerId: project.layers[found.layerIndex].id!,
-        address: parseProjectAddress(found.entry.address),
-        labelId: found.entry.label,
+        id: found.id!,
+        frame: useFrame(found),
+        at: parseProjectAddress(found.at),
+        labelId: found.label,
       };
     }
 
     case "labelUse.unbind": {
-      const found = labelUseAt(project, op.layerId, op);
+      const found = useAt(project.labelUses, op);
       if (!found) return op;
       return {
         op: "labelUse.bind",
-        id: found.entry.id!,
-        layerId: project.layers[found.layerIndex].id!,
-        address: parseProjectAddress(found.entry.address),
-        labelId: found.entry.label,
+        id: found.id!,
+        frame: useFrame(found),
+        at: parseProjectAddress(found.at),
+        labelId: found.label,
       };
     }
 
@@ -1065,26 +1036,27 @@ export function invertOp(raw: string, op: Op): Op {
     }
 
     case "constantUse.bind": {
-      const found = constantUseAt(project, op.layerId, op);
-      if (!found) return { op: "constantUse.unbind", id: op.id, layerId: op.layerId, address: op.address };
+      const found = useAt(project.constantUses, op);
+      const site = bindSite(op)!;
+      if (!found) return { op: "constantUse.unbind", id: op.id, frame: site.frame, at: site.at };
       return {
         op: "constantUse.bind",
-        id: found.entry.id!,
-        layerId: project.layers[found.layerIndex].id!,
-        address: parseProjectAddress(found.entry.address),
-        constantId: found.entry.constant,
+        id: found.id!,
+        frame: useFrame(found),
+        at: parseProjectAddress(found.at),
+        constantId: found.constant,
       };
     }
 
     case "constantUse.unbind": {
-      const found = constantUseAt(project, op.layerId, op);
+      const found = useAt(project.constantUses, op);
       if (!found) return op;
       return {
         op: "constantUse.bind",
-        id: found.entry.id!,
-        layerId: project.layers[found.layerIndex].id!,
-        address: parseProjectAddress(found.entry.address),
-        constantId: found.entry.constant,
+        id: found.id!,
+        frame: useFrame(found),
+        at: parseProjectAddress(found.at),
+        constantId: found.constant,
       };
     }
 

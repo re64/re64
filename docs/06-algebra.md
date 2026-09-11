@@ -147,7 +147,15 @@ A *declaration* and a *use* are different objects and now have different nouns.
 They used to share one — `constant.set` and `constant.bind` were about a
 declaration and a site respectively, under a single name, and `label.bind` named
 an entity that no longer exists at all, since a label is a claim. The nouns match
-the fields they live in: `labelUses`, `constantUses`.
+the roots they live in: `labelUses`, `constantUses`.
+
+**The key is a site, and a site is a frame and a coordinate.** A use carries the
+same `Frame` a claim does — `layer` with an offset, `target` or `address` with an
+absolute address — so `layer:lay_a:$0123` and `target:tgt_b:$8123` are two keys
+with one number, and binding again replaces the binding *at that site*. An
+operation recorded before uses had frames carries `layerId` and an absolute
+`address`; it is read as the address-framed site at that address, which is what
+it meant. See [the model](05-model.md#5-declarations-and-bindings).
 
 Two verbs is the complete algebra for a map, because "update" and "create" are
 the same operation on a key. Nothing is missing here — this shape was already

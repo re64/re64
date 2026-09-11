@@ -27,6 +27,7 @@ import * as Y from "yjs";
 import { needsMigration, migrateToClaims } from "../claims/migrate.js";
 import { derivedId, layerIdOf } from "../project/identity.js";
 import {
+  useKey,
   entryPointsIntoTarget,
   ProjectType,
   Project,
@@ -97,6 +98,9 @@ const ROOT_FILES = "files";
 const ROOT_TARGETS = "targets";
 const ROOT_CLAIMS = "claims";
 const ROOT_CHAT = "chat";
+// Bindings, at the root and framed like claims; see `usesToRoot`.
+const ROOT_CONSTANT_USES = "constantUses";
+const ROOT_LABEL_USES = "labelUses";
 
 /** Scalars a project carries outside its layers. */
 // No `entryPoints`: a root list is a target's and is migrated into one on the
@@ -173,17 +177,9 @@ export function docFromProject(declared: Project): Y.Doc {
       // the record's own id made every bind add a competitor instead. Two uses
       // then sat at one address and the loaded index kept whichever sorted last,
       // by an id that is random.
-      const useMap = new Y.Map<Y.Map<unknown>>();
-      for (const use of [...(constantUses ?? [])].sort(byId)) {
-        useMap.set(siteKey(use.address), mapFrom(use as unknown as Record<string, unknown>));
-      }
-      entry.set("constantUses", useMap);
-
-      const labelUseMap = new Y.Map<Y.Map<unknown>>();
-      for (const use of [...(labelUses ?? [])].sort(byId)) {
-        labelUseMap.set(siteKey(use.address), mapFrom(use as unknown as Record<string, unknown>));
-      }
-      entry.set("labelUses", labelUseMap);
+      // Uses are not here any more: `usesToRoot` lifted them to the root, framed.
+      void constantUses;
+      void labelUses;
 
       layers.push([entry]);
     }
@@ -204,6 +200,18 @@ export function docFromProject(declared: Project): Y.Doc {
     const constants = doc.getMap<Y.Map<unknown>>(ROOT_CONSTANTS);
     for (const constant of [...(project.constants ?? [])].sort(byId)) {
       constants.set(constant.id!, mapFrom(constant as unknown as Record<string, unknown>));
+    }
+
+    // **Keyed by the site, frame included.** A layer offset and a target
+    // address with the same number are two sites; keying on the number alone
+    // is how a relocated binding would silently overwrite a different one.
+    const constantUses = doc.getMap<Y.Map<unknown>>(ROOT_CONSTANT_USES);
+    for (const use of [...(project.constantUses ?? [])].sort(byId)) {
+      constantUses.set(useKey(use), mapFrom(use as unknown as Record<string, unknown>));
+    }
+    const labelUses = doc.getMap<Y.Map<unknown>>(ROOT_LABEL_USES);
+    for (const use of [...(project.labelUses ?? [])].sort(byId)) {
+      labelUses.set(useKey(use), mapFrom(use as unknown as Record<string, unknown>));
     }
 
     // Project level for the same reason: a way of *reading* bytes describes
@@ -352,6 +360,14 @@ export function projectFromDoc(doc: Y.Doc): Project {
   const claims = doc.getMap<Y.Map<unknown>>(ROOT_CLAIMS);
   const types = doc.getMap<Y.Map<unknown>>(ROOT_TYPES);
 
+  // Legacy nested uses, lifted to the root as address-framed on the way out.
+  const nestedConstantUses: ProjectConstantUse[] = [];
+  const nestedLabelUses: ProjectLabelUse[] = [];
+  const lifted = <T extends { address?: number | string; at?: number | string }>(u: T) => {
+    const { address, ...rest } = u as T & { address?: number | string };
+    return { ...rest, at: rest.at ?? address } as unknown as Omit<T, "address"> & { at: number | string };
+  };
+
   const project: Project = {
     layers: layers.toArray().map((entry) => {
       const scalars = { ...(entry.toJSON() as Record<string, unknown>) };
@@ -364,6 +380,8 @@ export function projectFromDoc(doc: Y.Doc): Project {
       const labels = entry.get("labels") as Y.Map<Y.Map<unknown>> | undefined;
       const regions = entry.get("regions") as Y.Map<Y.Map<unknown>> | undefined;
       const comments = entry.get("comments") as Y.Map<Y.Map<unknown>> | undefined;
+      // A document not yet through `migrateDoc` still nests them; they are read
+      // as address-framed uses at the root, which is what they meant.
       const uses = entry.get("constantUses") as Y.Map<Y.Map<unknown>> | undefined;
       const labelUses = entry.get("labelUses") as Y.Map<Y.Map<unknown>> | undefined;
 
@@ -389,21 +407,18 @@ export function projectFromDoc(doc: Y.Doc): Project {
 
       if (labelList.length) layer.labels = labelList;
       if (regionList.length) layer.regions = regionList;
-      const useList = uses
-        ? sortedValues<ProjectConstantUse>(uses, "address", "number").map((u) =>
-            inOrder<ProjectConstantUse>(u as unknown as Record<string, unknown>, USE_FIELDS)
-          )
-        : [];
+      if (uses) {
+        for (const u of sortedValues<ProjectConstantUse>(uses, "address", "number")) {
+          nestedConstantUses.push(lifted(u));
+        }
+      }
 
       if (commentList.length) layer.comments = commentList;
-      const labelUseList = labelUses
-        ? sortedValues<ProjectLabelUse>(labelUses, "address", "number").map((u) =>
-            inOrder<ProjectLabelUse>(u as unknown as Record<string, unknown>, LABEL_USE_FIELDS)
-          )
-        : [];
-
-      if (useList.length) layer.constantUses = useList;
-      if (labelUseList.length) layer.labelUses = labelUseList;
+      if (labelUses) {
+        for (const u of sortedValues<ProjectLabelUse>(labelUses, "address", "number")) {
+          nestedLabelUses.push(lifted(u));
+        }
+      }
       return layer;
     }),
   };
@@ -427,6 +442,23 @@ export function projectFromDoc(doc: Y.Doc): Project {
     inOrder<ProjectConstant>(c as unknown as Record<string, unknown>, CONSTANT_FIELDS)
   );
   if (constantList.length) project.constants = constantList;
+
+  const constantUseList = [
+    ...nestedConstantUses,
+    ...sortedValues<ProjectConstantUse>(
+      doc.getMap<Y.Map<unknown>>(ROOT_CONSTANT_USES),
+      "at",
+      "number"
+    ).map((u) => inOrder<ProjectConstantUse>(u as unknown as Record<string, unknown>, USE_FIELDS)),
+  ];
+  if (constantUseList.length) project.constantUses = constantUseList;
+  const labelUseList = [
+    ...nestedLabelUses,
+    ...sortedValues<ProjectLabelUse>(doc.getMap<Y.Map<unknown>>(ROOT_LABEL_USES), "at", "number").map(
+      (u) => inOrder<ProjectLabelUse>(u as unknown as Record<string, unknown>, LABEL_USE_FIELDS)
+    ),
+  ];
+  if (labelUseList.length) project.labelUses = labelUseList;
 
   const claimList = sortedValues<ProjectClaim>(claims, "at", "number").map((c) =>
     inOrder<ProjectClaim>(c as unknown as Record<string, unknown>, CLAIM_FIELDS)
@@ -545,8 +577,8 @@ const REGION_FIELDS = [
   "view",
 ] as const;
 const COMMENT_FIELDS = ["id", "address", "placement", "text", "order"] as const;
-const USE_FIELDS = ["id", "address", "constant"] as const;
-const LABEL_USE_FIELDS = ["id", "address", "label"] as const;
+const USE_FIELDS = ["id", "at", "layer", "target", "constant"] as const;
+const LABEL_USE_FIELDS = ["id", "at", "layer", "target", "label"] as const;
 const CONSTANT_FIELDS = ["id", "name", "value"] as const;
 const DECODER_FIELDS = ["id", "name", "source"] as const;
 const TYPE_FIELDS = ["id", "name", "size", "unit", "fields"] as const;
@@ -835,27 +867,34 @@ export function migrateDoc(doc: Y.Doc): boolean {
       }
     }
 
+    // **Bindings move to the root, framed on the address space.** They were
+    // nested in the layer that supplied the bytes — first keyed by use id,
+    // then by address — and either way the record meant "this site, wherever
+    // the bytes came from", which is the address frame. Where a nested map
+    // held two at one site, the use whose id sorts last is kept, because that
+    // is the one every view was already showing. See `usesToRoot` for why the
+    // coordinate is not converted here.
     for (const layer of doc.getArray<Y.Map<unknown>>(ROOT_LAYERS).toArray()) {
-      for (const root of ["constantUses", "labelUses"] as const) {
-        const uses = layer.get(root);
-        if (!(uses instanceof Y.Map)) continue;
+      for (const root of [ROOT_CONSTANT_USES, ROOT_LABEL_USES] as const) {
+        const nested = layer.get(root);
+        if (!(nested instanceof Y.Map)) continue;
+        const target = doc.getMap<Y.Map<unknown>>(root);
         const idOf = (v: unknown): string =>
           String(v instanceof Y.Map ? v.get("id") : ((v as { id?: string })?.id ?? ""));
-        const legacy = [...uses.entries()]
-          .filter(([key, value]) => {
-            if (!(value instanceof Y.Map)) return true;
-            const address = value.get("address") as number | string | undefined;
-            return address === undefined || key !== siteKey(address);
-          })
-          // Set in id order, so where two share a site the last id wins.
-          .sort(([, a], [, b]) => (idOf(a) < idOf(b) ? -1 : idOf(a) > idOf(b) ? 1 : 0));
-        for (const [key, value] of legacy) {
+        const entries = [...nested.entries()].sort(([, a], [, b]) =>
+          idOf(a) < idOf(b) ? -1 : idOf(a) > idOf(b) ? 1 : 0
+        );
+        for (const [, value] of entries) {
           const held = (value instanceof Y.Map ? value.toJSON() : value) as Record<string, unknown>;
-          uses.delete(key);
-          if (held.address === undefined) continue;
-          uses.set(siteKey(held.address as number | string), asMap(held));
-          moved = true;
+          const at = held.at ?? held.address;
+          if (at === undefined) continue;
+          const { address: _address, ...rest } = held;
+          void _address;
+          const use = { ...rest, at } as { at: number | string; layer?: string; target?: string };
+          target.set(useKey(use), asMap(use as Record<string, unknown>));
         }
+        layer.delete(root);
+        moved = true;
       }
     }
   }, "migrate");

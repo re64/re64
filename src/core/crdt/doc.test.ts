@@ -404,20 +404,18 @@ describe("migrating a stored document's bindings", () => {
     return doc;
   };
   const constantsOf = (doc: Y.Doc) =>
-    (projectFromDoc(doc).layers[0].constantUses ?? []).map((u) => `${u.address}=${u.constant}`).sort();
+    (projectFromDoc(doc).constantUses ?? []).map((u) => `${u.at}=${u.constant}`).sort();
 
   it("keys each use by its site, and where two shared one keeps the last id", () => {
     const doc = legacy();
     expect(migrateDoc(doc)).toBe(true);
     // `cst_u1` sorts after `cst_u0`, and was the one the loaded index showed.
     expect(constantsOf(doc)).toEqual(["$8000=cst_a", "$8010=cst_b"]);
-    expect(projectFromDoc(doc).layers[0].labelUses).toEqual([
-      { id: "lbl_u1", address: "$8004", label: "clm_1" },
-    ]);
-    const keys = [
-      ...(doc.getArray<Y.Map<unknown>>("layers").get(0).get("constantUses") as Y.Map<unknown>).keys(),
-    ].sort();
-    expect(keys).toEqual(["$8000", "$8010"]);
+    expect(projectFromDoc(doc).labelUses).toEqual([{ id: "lbl_u1", at: "$8004", label: "clm_1" }]);
+    // At the root, keyed by the site with its frame — and gone from the layer.
+    const keys = [...doc.getMap<unknown>("constantUses").keys()].sort();
+    expect(keys).toEqual(["address::$8000", "address::$8010"]);
+    expect(doc.getArray<Y.Map<unknown>>("layers").get(0).has("constantUses")).toBe(false);
   });
 
   it("takes an unbind stored without an address, by the id it carries", () => {

@@ -466,6 +466,7 @@ Say which name the operands referring to an address mean, over a span. Give `fro
 | `labelAddress` | `string,number` | optional | Where that label is, if not at `address`; renders as name±n |
 | `from` | `string,number` | **required** | First instruction to bind |
 | `to` | `string,number` | optional | Last instruction; just `from` if omitted |
+| `scope` | `target` | optional | Leave out to bind the site in its layer, so the binding moves with the bytes it names. "target" pins it to this arrangement at this address instead — the escape hatch for when relocation is wrong. |
 
 #### `unbind_name`
 
@@ -576,6 +577,7 @@ Say that the immediate operand at an address means a named constant, so it rende
 |---|---|---|---|
 | `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `constant` | `string` | **required** | A constant id from add_constant or list_constants |
+| `scope` | `target` | optional | Leave out to bind the site in its layer, so the binding moves with the bytes it names. "target" pins it to this arrangement at this address instead — the escape hatch for when relocation is wrong. |
 
 #### `bind_constants`
 
@@ -584,6 +586,7 @@ Bind several sites in one call, as one action. add_constants batches the declara
 | argument | type | | |
 |---|---|---|---|
 | `bindings` | `array` | **required** |  |
+| `scope` | `target` | optional | Leave out to bind the site in its layer, so the binding moves with the bytes it names. "target" pins it to this arrangement at this address instead — the escape hatch for when relocation is wrong. |
 
 #### `unbind_constant`
 

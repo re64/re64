@@ -1824,6 +1824,14 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         .describe("Where that label is, if not at `address`; renders as name±n"),
       from: address.describe("First instruction to bind"),
       to: address.optional().describe("Last instruction; just `from` if omitted"),
+      scope: z
+        .enum(["target"])
+        .optional()
+        .describe(
+          "Leave out to bind the site in its layer, so the binding moves with the " +
+            "bytes it names. \"target\" pins it to this arrangement at this address " +
+            "instead — the escape hatch for when relocation is wrong."
+        ),
     },
     (args: {
       project?: string;
@@ -1833,6 +1841,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       labelAddress?: number;
       from: number;
       to?: number;
+      scope?: "target";
     }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project, args.target);
@@ -1842,7 +1851,8 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         args.address,
         args.from,
         args.to,
-        args.labelAddress
+        args.labelAddress,
+        args.scope
       );
     }
   );
@@ -1992,15 +2002,24 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         .array(z.strictObject({ address, constant: z.string().describe("A constant id") }))
         .min(1)
         .max(500),
+      scope: z
+        .enum(["target"])
+        .optional()
+        .describe(
+          "Leave out to bind the site in its layer, so the binding moves with the " +
+            "bytes it names. \"target\" pins it to this arrangement at this address " +
+            "instead — the escape hatch for when relocation is wrong."
+        ),
     },
     (args: {
+      scope?: "target";
       project?: string;
       target?: string;
       bindings: { address: number; constant: string }[];
     }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project, args.target);
-      return space.bindConstants(caller, args.bindings);
+      return space.bindConstants(caller, args.bindings, args.scope);
     }
   );
 
@@ -2032,11 +2051,23 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "Takes a name or an id; where a name reaches two constants the operand's " +
       "own value picks between them, since two constants sharing a name must " +
       "differ in value to be worth telling apart.",
-    { project, address, constant: z.string().describe("A constant id from add_constant or list_constants") },
-    (args: { project?: string; target?: string; address: number; constant: string }) => {
+    {
+      project,
+      address,
+      constant: z.string().describe("A constant id from add_constant or list_constants"),
+      scope: z
+        .enum(["target"])
+        .optional()
+        .describe(
+          "Leave out to bind the site in its layer, so the binding moves with the " +
+            "bytes it names. \"target\" pins it to this arrangement at this address " +
+            "instead — the escape hatch for when relocation is wrong."
+        ),
+    },
+    (args: { project?: string; target?: string; address: number; constant: string; scope?: "target" }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project, args.target);
-      return space.bindConstant(caller, args.address, args.constant);
+      return space.bindConstant(caller, args.address, args.constant, args.scope);
     }
   );
 
