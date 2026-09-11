@@ -1,6 +1,6 @@
 import { fileId } from "../project/files.js";
 import { describe, it, expect } from "vitest";
-import { diffProjects } from "./diff.js";
+import { diffProjects, type FileContentRejection } from "./diff.js";
 import { applyOps, invertOp } from "./apply.js";
 import { parseProject } from "../project/project.js";
 import { docFromProject, projectFromDoc } from "../crdt/doc.js";
@@ -53,3 +53,18 @@ describe("a file in the document", () => {
   });
 
 });
+
+for (const changed of [{hash:"new"}, {size:99}, {hash:undefined}]) {
+  it(`rejects immutable content changes without losing independent metadata: ${JSON.stringify(changed)}`, () => {
+    const before = { ...base(), files: [{id:"fil_modern",name:"game.prg",hash:"old",size:3}] };
+    const after = {...before,name:"Renamed project",files:[{...before.files[0],...changed,name:"renamed.prg"}]};
+    const rejected: FileContentRejection[] = [];
+    const ops = diffProjects(before,after,rejected);
+    expect(ops).toEqual([
+      {op:"meta.set",key:"name",value:"Renamed project"},
+      {op:"file.set",id:"fil_modern",fields:{name:"renamed.prg"}},
+    ]);
+    expect(rejected).toEqual([{file:"fil_modern",retained:{hash:"old",size:3},rejected:{hash:"old",size:3,...changed}}]);
+    expect(parseProject(applyOps(JSON.stringify(before),ops)).files).toEqual([{...before.files[0],name:"renamed.prg"}]);
+  });
+}

@@ -262,3 +262,25 @@ describe("a socket asking for something that is not here", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 });
+
+it("reports rejected file content in HTTP replacements while accepting independent edits", async () => {
+  const send = async (project: unknown) => {
+    const response = await fetch(`${base()}/api/project`, {
+      method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({raw:JSON.stringify(project)}),
+    });
+    expect(response.status).toBe(200);
+    return await response.json() as {applied:number;rejected?:{file:string;retained:{hash:string};rejected:{hash:string}}[]};
+  };
+  const before = {...JSON.parse(PROJECT),files:[{id:"fil_modern",name:"game.prg",hash:"a".repeat(64),size:3}]};
+  await send(before);
+  const after = {...before,name:"New title",files:[{...before.files[0],name:"renamed.prg",hash:"b".repeat(64)}]};
+  const result = await send(after);
+  expect(result.applied).toBe(2);
+  expect(result.rejected).toEqual([{file:"fil_modern",retained:{hash:before.files[0].hash,size:3},rejected:{hash:after.files[0].hash,size:3}}]);
+  const saved = JSON.parse((await fetchProject()).raw);
+  expect(saved.name).toBe("New title");
+  expect(saved.files).toEqual([{...before.files[0],name:"renamed.prg"}]);
+  const onlyRejected = await send({...saved,files:after.files});
+  expect(onlyRejected.applied).toBe(0);
+  expect(onlyRejected.rejected).toHaveLength(1);
+});

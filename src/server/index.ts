@@ -24,8 +24,7 @@ import {
   hashBytes,
 } from "../store/index.js";
 import { openDatabase } from "../store/db.js";
-import { diffProjects, parseProject } from "../core/index.js";
-import { needsMigration, migrateToClaims } from "../core/claims/migrate.js";
+import { parseProject } from "../core/index.js";
 import { SyncServer } from "./sync.js";
 import { CheckpointCache } from "../core/machine/scenario.js";
 import { SessionReplica, Workspace } from "./workspace.js";
@@ -491,10 +490,8 @@ export function startServer(options: ServerOptions): RunningServer {
         // Migrated before diffing: the document holds claims, and a caller may
         // PUT either form. Comparing claims against layer labels emits removals
         // for everything and additions for nothing, which is a silent wipe.
-        const ops = diffProjects(
-          projectFromDoc(doc),
-          needsMigration(incoming) ? migrateToClaims(incoming).project : incoming
-        );
+        const ops = store.diffIncoming(incoming);
+        const rejected = store.rejectedFileChanges();
         for (const op of ops) applyOpToDoc(doc, op, "http");
         store.addAuthor("http");
 
@@ -502,7 +499,10 @@ export function startServer(options: ServerOptions): RunningServer {
         // merged alongside this one. History stays session-scoped: a save is
         // not a session, and one entry per keystroke would defeat the point.
         store.writeFile();
-        return sendJson(res, 200, { ok: true, version: store.version(), applied: ops.length });
+        return sendJson(res, 200, {
+          ok: true, version: store.version(), applied: ops.length,
+          ...(rejected.length ? { rejected } : {}),
+        });
       }
 
       // Raw bytes for a layer, so the browser can build the memory map and

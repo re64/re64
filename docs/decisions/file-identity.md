@@ -34,3 +34,22 @@ entities. Neither deletion nor a missing blob permits a same-name substitution.
 The round-trip suite covers all three file operations. Migration tests cover
 exports and stored snapshots, and MCP transport tests exercise duplicate names,
 rename stability, repeated captures and retrieval of earlier bytes.
+
+## Follow-up: rejected content must not block unrelated writes (#43)
+
+The initial text diff threw when an incoming modern file retained its id but
+changed its hash or size. `absorb()` called that diff on the normal write path,
+so a hand edit to the export made unrelated writes fail. On a retry in file mode,
+the write could reach the update log and then fail during export, returning a
+failure for a change a reopened store already held.
+
+The diff now skips invalid content fields, retains valid renames, and optionally
+collects rejection details. Incoming text reconciliation retains those details
+for HTTP receipts and `describe_project` hygiene; regenerating an accepted export
+does not clear them. They are process-local diagnostics about the last incoming
+comparison, not facts added to the project. A rejected-only export is regenerated
+too, so it cannot poison the next write. Legacy no-id history semantics remain.
+
+The workspace cache also stops looking up file ids in the SQL filename table.
+Recorded content hashes already occur in the selected document projection. ROM
+hashes remain a separate cache input because the host supplies those bytes.
