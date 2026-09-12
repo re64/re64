@@ -32,6 +32,7 @@
 
 import { NameIndex } from "../claims/names.js";
 import { CommentIndex } from "../memory/comment.js";
+import { explains } from "../claims/evidence.js";
 import { ConstantIndex } from "../memory/constant.js";
 import { InstructionIndex } from "../arch/mos6502/disassembler.js";
 import { LoadedProject } from "../project/loader.js";
@@ -60,7 +61,9 @@ export type HygieneKind =
   /** Two fields of one record are declared at the same offset. */
   | "type.fieldsShareOffset"
   /** One span says these bytes are X and a span inside it says they are Y. */
-  | "claim.interpretationsDiffer";
+  | "claim.interpretationsDiffer"
+  /** A refutation or retirement that names no claim and gives no reason. */
+  | "evidence.unexplained";
 
 export interface HygieneFinding {
   kind: HygieneKind;
@@ -426,6 +429,23 @@ export function checkHygiene(
         ],
       });
     }
+  }
+
+  // A refutation that names nothing and says nothing. No request can make one
+  // — `checkEvidenceRequest` refuses it on the way in — but two can: one peer
+  // clears `other` and another clears the note, each valid where it was
+  // written, and the merge keeps both. Nobody was wrong, so nothing is
+  // rejected or repaired; it is reported here, which is what hygiene is for.
+  for (const item of loaded.project.evidence ?? []) {
+    if ((item.kind !== "refutes" && item.kind !== "retires") || explains(item)) continue;
+    found.push({
+      kind: "evidence.unexplained",
+      message:
+        `Evidence ${item.id ?? "(no id)"} ${item.kind} claim ${item.claim} and points at nothing: ` +
+        `no \`other\` and no note. Nobody reading it can tell what was wrong — ` +
+        `edit_evidence gives it one, or remove_evidence takes it back.`,
+      subjects: [{ id: item.id }, { id: item.claim }],
+    });
   }
 
   return found;

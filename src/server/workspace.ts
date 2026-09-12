@@ -92,6 +92,7 @@ import {
 import { runDecoder } from "../sandbox/run.js";
 import { renderTextWith } from "../sandbox/sync.js";
 import { databaseFileBytes } from "../store/load.js";
+import { checkEvidenceRequest, explains } from "../core/claims/evidence.js";
 import { hashBytes } from "../store/blobs.js";
 import type { RomLoader } from "../core/project/loader.js";
 import { BytesLayer } from "../core/memory/layer.js";
@@ -2301,7 +2302,6 @@ export class Workspace {
   ): EditResult & { evidence: string } {
     // The document, not a view: a record layout and a piece of evidence are
     // both project-level, so neither can need a stack chosen to be written.
-    const loaded = { project: this.document() };
     // **Checked against the project, not against this view.** Evidence is said
     // about a claim rather than about an address, so a claim framed on a layer
     // the current target does not link is still a claim and still has things
@@ -2310,37 +2310,9 @@ export class Workspace {
     // refused three writes in the silver-image build and told the caller the
     // claims were *retired*, which they were not: a confident wrong answer in
     // the one place that exists to keep the record straight.
-    const known = (id: string): "yes" | "retired" | "no" => {
-      if (!(loaded.project.claims ?? []).some((c) => c.id === id)) return "no";
-      return retiredClaimIds(loaded.project.evidence).has(id) ? "retired" : "yes";
-    };
-    const held = known(claim);
-    if (held === "retired") {
-      throw new Error(
-        `Claim ${claim} is retired, so nothing more is said about it. ` +
-          `restore_claim puts it back first.`
-      );
-    }
-    if (held === "no") {
-      throw new Error(`No claim ${claim}. claims_at reports what covers an address, with ids.`);
-    }
-    if (about.other !== undefined && known(about.other) === "no") {
-      throw new Error(`No claim ${about.other} to point at. list_claims shows the ids.`);
-    }
-    if (
-      about.scenario !== undefined &&
-      !(loaded.project.scenarios ?? []).some((x) => x.id === about.scenario)
-    ) {
-      throw new Error(`No scenario ${about.scenario}. list_scenarios shows what there is.`);
-    }
-    // A refutation that names nothing is an opinion with no handle on it: the
-    // whole point is that a reader can follow it.
-    if (kind === "refutes" && about.other === undefined && about.note === undefined) {
-      throw new Error(
-        `A ${kind} needs something to point at: another claim (\`other\`), or a note ` +
-          `saying why. Otherwise nobody reading it can tell what was wrong.`
-      );
-    }
+    //
+    // The one rule adding and revising share: see `checkEvidenceRequest`.
+    checkEvidenceRequest(this.document(), undefined, { claim, kind, ...about });
 
     const id = newId("evd");
     const result = this.editDocument(caller, () => [
@@ -2382,17 +2354,20 @@ export class Workspace {
       note?: string | null;
     }
   ): EditResult & { evidence: string } {
-    const held = this.mustHold(
-      this.program().loaded.project.evidence ?? [],
-      id,
-      "evidence",
-      "list_evidence"
-    );
+    // The document, not a view, as `addEvidence` reads it: evidence is
+    // project-wide, and revising it must not need a target chosen or bytes
+    // loaded. Read through the program, an edit in a project with two targets
+    // and none selected failed for a reason that had nothing to do with it.
+    const held = this.mustHold(this.document().evidence ?? [], id, "evidence", "list_evidence");
     if (Object.values(fields).every((v) => v === undefined)) {
       throw new Error(
         "Give at least one field to change: kind, method, scenario, capture, other, note."
       );
     }
+    // The same rule an add follows, on the fields this request reaches — so a
+    // record that could not have been added in a shape cannot be edited into
+    // it, and an edit to a note is not refused for a scenario deleted since.
+    checkEvidenceRequest(this.document(), held, fields);
     // **`method` lives inside `by`, and revising it must not drop the author.**
     // `evidence.set` takes the whole of `by` or none of it, so naming only the
     // method here would replace `{author, when, method}` with `{method}` and
@@ -2429,7 +2404,7 @@ export class Workspace {
   }
 
   removeEvidence(caller: Caller, id: string): EditResult {
-    this.mustHold(this.program().loaded.project.evidence ?? [], id, "evidence", "list_evidence");
+    this.mustHold(this.document().evidence ?? [], id, "evidence", "list_evidence");
     return this.editDocument(caller, () => [{ op: "evidence.remove", id }]);
   }
 
@@ -4524,9 +4499,10 @@ export class Workspace {
           `list_evidence shows what it says.`
       );
     }
-    // The same rule refutation follows: a retirement nobody can follow is an
-    // opinion with no handle on it, and this one takes something out of sight.
-    if (about.note === undefined && about.other === undefined) {
+    // The same rule refutation follows — `checkEvidenceRequest` holds it for
+    // both kinds — said here in this verb's words, because this one takes
+    // something out of sight.
+    if (!explains(about)) {
       throw new Error(
         `Retiring needs a reason a later reader can follow: a note saying why, ` +
           `or \`other\` naming the claim that replaced it.`

@@ -3333,3 +3333,98 @@ describe("a binding's escape hatch: framed on the target", () => {
     expect(refused.text).toContain("selected none");
   });
 });
+
+describe("one rule for adding and revising evidence (#30)", () => {
+  /**
+   * `add_evidence` refused a refutation pointing at nothing; `edit_evidence`
+   * checked nothing, so a record that could not have been added in a shape
+   * could be edited into it. One request validator now serves both, and it
+   * reads the request — what was supplied, null against omitted — rather than
+   * re-validating the whole record on every touch.
+   */
+  const exported = async () => JSON.parse(((await callTool("export_project")).value as { text: string }).text);
+  const claimAt = async (address: string, name: string) =>
+    ((await callTool("add_claim", { address, name })).value as { claims: { claim: string }[] }).claims[0].claim;
+  const evidenceOf = async (id: string) =>
+    ((await callTool("list_evidence", {})).value as { evidence: { id: string; kind: string; other?: string; note?: string; scenario?: string }[] })
+      .evidence.find((e) => e.id === id);
+
+  it("refuses the edit into a shape the add refuses, with the same message and nothing written", async () => {
+    const claim = await claimAt("$8F30", "Contested");
+    const said = await callTool("add_evidence", { claim, kind: "supports", note: "looked right" });
+    const id = (said.value as { evidence: string }).evidence;
+    const refusedAdd = await callTool("add_evidence", { claim, kind: "refutes" });
+    expect(refusedAdd.isError).toBe(true);
+
+    const before = await exported();
+    // kind alone, and kind with the note cleared in the same request.
+    const refusedEdit = await callTool("edit_evidence", { id, kind: "refutes", note: null });
+    expect(refusedEdit.isError).toBe(true);
+    expect(refusedEdit.text).toBe(refusedAdd.text);
+    // A blank note is not an explanation either.
+    const blank = await callTool("edit_evidence", { id, kind: "refutes", note: "   " });
+    expect(blank.isError).toBe(true);
+    expect(await exported()).toEqual(before);
+
+    // With a reason it is a refutation; clearing that reason is refused; the
+    // other handle can be cleared while one remains.
+    const other = await claimAt("$8F32", "Alternative");
+    expect((await callTool("edit_evidence", { id, kind: "refutes", other, note: "because" })).isError).toBe(false);
+    expect((await callTool("edit_evidence", { id, other: null })).isError).toBe(false);
+    const last = await callTool("edit_evidence", { id, note: null });
+    expect(last.isError).toBe(true);
+    expect(last.text).toMatch(/point at/);
+    expect(await evidenceOf(id)).toMatchObject({ kind: "refutes", note: "because" });
+    // Back to a support with the note dropped in one request is fine.
+    expect((await callTool("edit_evidence", { id, kind: "supports", note: null })).isError).toBe(false);
+    expect(await evidenceOf(id)).toMatchObject({ kind: "supports" });
+  });
+
+  it("checks a reference only when the request names it, so a deleted scenario blocks nothing else", async () => {
+    const claim = await claimAt("$8F40", "Checked");
+    const made = await callTool("add_scenario", { name: "check", steps: [{ kind: "start", at: "$8F40" }] });
+    const scenario = (made.value as { scenario: string }).scenario;
+    const said = await callTool("add_evidence", { claim, kind: "supports", scenario, note: "ran it" });
+    expect(said.isError, said.text).toBe(false);
+    const id = (said.value as { evidence: string }).evidence;
+
+    expect((await callTool("remove_scenario", { id: scenario })).isError).toBe(false);
+    // An edit that does not name the scenario is not the request that did.
+    expect((await callTool("edit_evidence", { id, note: "ran it, once" })).isError).toBe(false);
+    expect((await callTool("edit_evidence", { id, method: "ran" })).isError).toBe(false);
+    expect((await evidenceOf(id))?.scenario).toBe(scenario);
+    // Naming it again is a new request to point at it, and gets the add's answer.
+    const again = await callTool("edit_evidence", { id, scenario });
+    expect(again.isError).toBe(true);
+    expect(again.text).toMatch(/No scenario/);
+    // Clearing it is always possible.
+    expect((await callTool("edit_evidence", { id, scenario: null })).isError).toBe(false);
+    expect((await evidenceOf(id))?.scenario).toBeUndefined();
+  });
+
+  it("revises evidence in a project with several targets and none selected", async () => {
+    // Evidence is project-wide. Read through the loaded program, revising it
+    // needed a view chosen, and a project with two targets and no selection
+    // refused for a reason that had nothing to do with the evidence.
+    const project = ((await callTool("create_project", { name: "two-views" })).value as { project: string }).project;
+    const layer = await callTool("add_byte_layer", { project, type: "bytes", address: "$8000", bytes: "A9 01 60" });
+    expect(layer.isError, layer.text).toBe(false);
+    const layerId = ((await callTool("list_targets", { project })).value as { layers: { id: string }[] }).layers[0].id;
+    for (const name of ["one", "two"]) {
+      const target = await callTool("add_target", { project, name, layers: [{ layer: layerId }] });
+      expect(target.isError, target.text).toBe(false);
+    }
+    // A claim is placed in a view, so adding one names a target; evidence is
+    // about the claim and names none.
+    const added = await callTool("add_claim", { project, target: "one", address: "$8000", name: "Start" });
+    expect(added.isError, added.text).toBe(false);
+    const claim = (added.value as { claims: { claim: string }[] }).claims[0].claim;
+    const said = await callTool("add_evidence", { project, claim, kind: "supports", note: "seen" });
+    expect(said.isError, said.text).toBe(false);
+    const id = (said.value as { evidence: string }).evidence;
+    const revised = await callTool("edit_evidence", { project, id, note: "seen twice" });
+    expect(revised.isError, revised.text).toBe(false);
+    const removed = await callTool("remove_evidence", { project, id });
+    expect(removed.isError, removed.text).toBe(false);
+  });
+});

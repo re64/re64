@@ -1433,3 +1433,43 @@ was not showing.
 way in and filtered on the way out like a target-framed claim, and refused
 where no target was selected to be about. Which *claim* writes should get the
 same argument remains the open question in #31.
+
+## One rule for adding and revising evidence — 2026-09-12
+
+Issue #30. `addEvidence` refused a refutation that pointed at nothing;
+`editEvidence` checked only that the record existed and that something was
+supplied. So a record that could not have been *added* in a shape could be
+*edited into* it — `kind: "refutes"` on a bare support, or `note: null` on the
+one explanation — and the rule the add stated was a statement, not a rule.
+
+**The rule is about the request, and it is shared.** `checkEvidenceRequest`
+takes the caller's snapshot, the existing record (absent for an add) and the
+patch as supplied — `null` a clear, absent "leave alone" — and refuses only a
+request that does not say what it is. That is the one kind of refusal a write
+is entitled to under the contract: a fact about the request, not a judgement
+about the result. Three consequences follow from taking "request" seriously,
+and each was argued by the reviewer before the branch existed:
+
+- **The shape is checked where the request reaches it.** An add, or an edit
+  touching `kind`, `other` or `note`, must leave a refutation or a retirement
+  with a claim to point at or a nonblank note. A method-only edit does not
+  force repair of a record that two peers' edits merged into an incomplete
+  state — nobody's request was wrong, so nothing is refused, and hygiene
+  reports the result as `evidence.unexplained`. A blank note is not an
+  explanation; the add used to test presence and accept `""`.
+- **A reference is checked only when the request supplies it.** A scenario
+  deleted since a record named it must not block an edit to the note, and
+  `scenario: null` must be able to clear it. Resupplying the dangling id is a
+  new request to point at it and gets the add's refusal. The subject claim is
+  checked on the add and never again: it is immutable.
+- **Both verbs read the document, not the view.** Evidence is project-wide, and
+  `editEvidence` read the loaded program, so a project with two targets and no
+  selection refused an edit for a reason that had nothing to do with it.
+
+**Nothing runs on merge, replay or migration.** Start with `other` and a note,
+let one peer clear `other` and another clear the note, and merge: two valid
+requests, one refutation that names nothing. That record is kept — rejecting
+or repairing either contribution would be the write deciding what the result
+should be — and reported, which is what hygiene is for. `capture` resolution is
+deliberately not added here: the add never checked it, and sharing the
+validator is not the same as completing it.
