@@ -1576,3 +1576,51 @@ describe("revising provenance is undoable and redoable", () => {
     }
   });
 });
+
+describe("an update from a peer is checked before it becomes the document", () => {
+  /**
+   * See S7. The staged copy is what makes a refusal possible at all: a CRDT
+   * cannot take an update back, so the only place to say no is before.
+   */
+  const text = JSON.stringify({
+    name: "peer",
+    layers: [{ id: "lay_a", type: "bytes", address: "$8000", bytes: "a9016000" }],
+  });
+  const opened = () => {
+    const dir = mkdtempSync(join(tmpdir(), "re64-receive-"));
+    const storage = new SqliteStorage(join(dir, "p.re64db"), "p");
+    storage.initialize(text, Date.now(), "peer");
+    return { dir, storage, store: new ProjectStore(storage) };
+  };
+
+  it("takes what decodes and projects to a readable project, and refuses the rest without moving", () => {
+    const f = opened();
+    try {
+      const before = encodeDoc(f.store.document());
+      const layers = () => projectFromDoc(f.store.document()).layers.map((l) => l.id);
+
+      // A peer's valid edit, as its replica would produce it.
+      const peer = docFromUpdates([before]);
+      applyOpToDoc(peer, { op: "layer.add", id: "lay_s", layerType: "symbols", name: "names", index: 0 });
+      expect(f.store.receive(encodeDoc(peer), "peer")).toEqual({ accepted: true });
+      expect(layers()).toEqual(["lay_s", "lay_a"]);
+
+      // Bytes that are not an update.
+      const garbage = f.store.receive(new Uint8Array([7, 7, 7]), "peer");
+      expect(garbage).toMatchObject({ accepted: false, reason: expect.stringMatching(/could not be decoded/) });
+
+      // An update that would leave the project unreadable.
+      const bad = docFromUpdates([encodeDoc(f.store.document())]);
+      applyOpToDoc(bad, { op: "layer.add", id: "lay_bad", layerType: "bytes", name: "bad", index: 2 });
+      const refused = f.store.receive(encodeDoc(bad), "peer");
+      expect(refused).toMatchObject({ accepted: false, reason: expect.stringMatching(/unreadable.*requires a 'bytes' field/) });
+      expect(layers()).toEqual(["lay_s", "lay_a"]);
+      // Refused twice is refused the same way: nothing staged leaked into the document.
+      expect(f.store.receive(encodeDoc(bad), "peer")).toMatchObject({ accepted: false });
+      expect(layers()).toEqual(["lay_s", "lay_a"]);
+    } finally {
+      f.storage.close();
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -34,7 +34,10 @@ const ALLOWED: { package: string; match: RegExp; only: string[] }[] = [
   {
     package: "y-protocols / lib0",
     match: /["'](?:y-protocols|lib0)\//,
-    only: [join("src", "core", "crdt"), join("src", "server", "sync.ts")],
+    // The relay, and the one test that speaks raw frames at it: a truncated
+    // or foreign message is exactly what no stock client will ever send, so
+    // proving the relay survives one means writing the bytes by hand.
+    only: [join("src", "core", "crdt"), join("src", "server", "sync.ts"), join("src", "server", "sync.test.ts")],
   },
   {
     package: "y-websocket",

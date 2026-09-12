@@ -757,3 +757,51 @@ document-level call needing none.
 and does not use is a lie in the one place agents read, so the schemas want
 splitting; that is a per-tool judgement over the whole surface and wants its own
 pass.
+
+## What a peer may send, and what the relay does about it — 2026-09-12
+
+Issue #32. The relay "does not understand the schema. It moves opaque updates
+and lets the CRDT decide what merging means" — true, and it was standing in for
+a second sentence nobody had written. The decode ran with no boundary around
+it, so a truncated sync step threw out of the socket's `message` listener; and a
+well-formed update went into the shared document unread, so one peer could push
+a `bytes` layer with no bytes and leave the project unopenable through every
+surface at once — the failure `parseProject`'s symbols-layer note already
+describes for a file, reachable from a socket with no file involved.
+
+**Who may connect and what a connected peer may send are two questions.**
+Authentication being deliberately absent settles the first and says nothing
+about the second, and the two had been treated as one. The second is settled
+here, narrowly: a peer's bytes get the treatment a byte in the program gets — a
+confident wrong answer is worse than a gap — so a message that cannot be taken
+is refused *and said*, never swallowed.
+
+**Staged, because a CRDT cannot take an update back.** The update is applied
+to a copy built from the document's own state, the copy is projected, and the
+projection is held to `checkProjectShape` — the checks extracted from
+`parseProject`, so the wire and the file are held to one line rather than two
+that drift. Only then is the update merged into the document. The copy costs an
+encode and a decode of the document per incoming update, which is the price of
+not having to undo somebody else's structs; a persistent mirror would save it
+and add a second document to keep right, and nothing yet says the price is
+worth that.
+
+**Structure, never semantics — and not a schema validator.** The line is what
+makes the document *unreadable*: a layer of a type nothing knows, a `bytes`
+layer with no bytes, a record with no layout, an enum spelled wrong, a root
+holding something the projection cannot read. It is not "no conflicts", which
+is the merge's job and is allowed to be untidy: a dangling reference heals, two
+contradicting claims are both shown, and a refutation two peers' edits merged
+into pointing at nothing is hygiene's to report. The review that opened this
+issue asked for exactly that separation, and for no comprehensive validator to
+be built around a schema #31 is about to reconsider; the shared function is the
+existing file checks and nothing more.
+
+**Refusal is a close.** The protocol has no message for "I did not take that":
+a peer holds a change this document will never hold, and a socket left open
+would let it carry on believing it was in sync. So the socket is closed with a
+policy-violation code and the reason as its text, and the server logs who and
+why through `onRefused`. A stock client reconnects and offers the same structs
+again and is refused again — loudly, which is the point; a quiet divergence is
+the one outcome this must not produce. Nobody else is affected: the document
+did not move, so nothing was relayed.

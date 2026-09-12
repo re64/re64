@@ -69,6 +69,14 @@ export interface SyncOptions {
   onSession?: (sessionId: string, userId: string) => void;
   /** A session turned out to be editing under this Yjs client id. */
   onClient?: (sessionId: string, clientId: number) => void;
+  /**
+   * A peer sent something that was not taken, and was told so and cut off.
+   *
+   * Said rather than swallowed: a message that cannot be decoded, or that
+   * would leave the document unreadable, is a fact about the peer that sent
+   * it, and the peer that sent it has state this document will never hold.
+   */
+  onRefused?: (refusal: { user: string; session?: string; reason: string }) => void;
 }
 
 export class SyncServer {
@@ -236,33 +244,89 @@ export class SyncServer {
     socket.on("error", () => socket.close());
   }
 
+  /**
+   * One message from a peer.
+   *
+   * **Everything a peer sends is checked before it becomes the document, and
+   * a message that is not taken is said.** Who may connect is deliberately
+   * unsettled here; what a connected peer may send is a different question,
+   * and the two had been treated as one: the decode ran with no boundary
+   * around it, so a truncated frame threw out of the socket's listener, and a
+   * well-formed update went into the shared document unread, so one peer could
+   * leave the project unopenable for every other. The document is the thing
+   * being protected — a peer's bytes get the treatment a byte in the program
+   * gets, which is that a confident wrong answer is worse than a gap.
+   */
   private receive(socket: WebSocket, data: Uint8Array): void {
     if (data.length === 0) return;
-    const decoder = decoding.createDecoder(data);
-    const reply = encoding.createEncoder();
+    try {
+      const decoder = decoding.createDecoder(data);
+      switch (decoding.readVarUint(decoder)) {
+        case MESSAGE_SYNC:
+          this.receiveSync(socket, decoder);
+          break;
+        case MESSAGE_AWARENESS:
+          awarenessProtocol.applyAwarenessUpdate(
+            this.awareness,
+            decoding.readVarUint8Array(decoder),
+            socket
+          );
+          break;
+        default:
+          // An unknown envelope is a newer peer, not a broken one. Ignore it.
+          break;
+      }
+    } catch (error) {
+      this.refuse(socket, `the message could not be decoded: ${describe(error)}`);
+    }
+  }
 
+  /**
+   * The sync sub-protocol, read here rather than through `readSyncMessage`,
+   * because that applies an update straight to the document and swallows what
+   * goes wrong on the way. A step 1 is a question and is answered; a step 2 or
+   * an update is state, and goes through the store's own boundary.
+   */
+  private receiveSync(socket: WebSocket, decoder: decoding.Decoder): void {
+    const doc = this.options.store.document();
     switch (decoding.readVarUint(decoder)) {
-      case MESSAGE_SYNC: {
+      case syncProtocol.messageYjsSyncStep1: {
+        const reply = encoding.createEncoder();
         encoding.writeVarUint(reply, MESSAGE_SYNC);
-        // Tagging the origin with this socket is what stops the update being
-        // echoed back to its sender by the document observer.
-        syncProtocol.readSyncMessage(decoder, reply, this.options.store.document(), socket);
-        // An encoder holding only its type byte means there was nothing to say.
-        if (encoding.length(reply) > 1) send(socket, reply);
+        syncProtocol.writeSyncStep2(reply, doc, decoding.readVarUint8Array(decoder));
+        send(socket, reply);
         break;
       }
-      case MESSAGE_AWARENESS: {
-        awarenessProtocol.applyAwarenessUpdate(
-          this.awareness,
-          decoding.readVarUint8Array(decoder),
-          socket
-        );
+      case syncProtocol.messageYjsSyncStep2:
+      case syncProtocol.messageYjsUpdate: {
+        // Tagging the origin with this socket is what stops the update being
+        // echoed back to its sender by the document observer.
+        const taken = this.options.store.receive(decoding.readVarUint8Array(decoder), socket);
+        if (!taken.accepted) this.refuse(socket, taken.reason);
         break;
       }
       default:
-        // An unknown envelope is a newer peer, not a broken one. Ignore it.
         break;
     }
+  }
+
+  /**
+   * Cut a peer off, saying why.
+   *
+   * Closing is the only honest answer the protocol has: the peer holds a
+   * change this document will never hold, and a socket left open would let it
+   * carry on believing it was in sync. The close reason is what it is told;
+   * `onRefused` is what the server logs. Nobody else is affected — the
+   * document did not move, so nothing was relayed.
+   */
+  private refuse(socket: WebSocket, reason: string): void {
+    this.options.onRefused?.({
+      user: this.userOf.get(socket) ?? "anonymous",
+      ...(this.sessionOf.has(socket) ? { session: this.sessionOf.get(socket) } : {}),
+      reason,
+    });
+    // A close reason is at most 123 bytes on the wire.
+    if (socket.readyState === WebSocket.OPEN) socket.close(1008, reason.slice(0, 120));
   }
 
   private leave(socket: WebSocket): void {
@@ -402,3 +466,5 @@ interface AwarenessChange {
 function send(socket: WebSocket, encoder: encoding.Encoder): void {
   if (socket.readyState === WebSocket.OPEN) socket.send(encoding.toUint8Array(encoder));
 }
+
+const describe = (error: unknown): string => (error instanceof Error ? error.message : String(error));
