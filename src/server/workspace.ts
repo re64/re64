@@ -2269,7 +2269,9 @@ export class Workspace {
       note?: string;
     }[];
   } {
-    const all = this.program().loaded.project.evidence ?? [];
+    // The document, like every other evidence path: `list_evidence` names no
+    // target, and reading through the program made listing need a view chosen.
+    const all = this.document().evidence ?? [];
     const found = claim === undefined ? all : all.filter((e) => e.claim === claim);
     return {
       total: found.length,
