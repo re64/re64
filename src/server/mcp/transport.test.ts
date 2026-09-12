@@ -3424,6 +3424,11 @@ describe("one rule for adding and revising evidence (#30)", () => {
     const id = (said.value as { evidence: string }).evidence;
     const revised = await callTool("edit_evidence", { project, id, note: "seen twice" });
     expect(revised.isError, revised.text).toBe(false);
+    const listed = await callTool("list_evidence", { project, claim });
+    expect(listed.isError, listed.text).toBe(false);
+    // Two records: the support `add_claim` minted for the caller, and this one.
+    const shown = (listed.value as { evidence: { id: string; note?: string }[] }).evidence;
+    expect(shown.find((e) => e.id === id)?.note).toBe("seen twice");
     const removed = await callTool("remove_evidence", { project, id });
     expect(removed.isError, removed.text).toBe(false);
   });
