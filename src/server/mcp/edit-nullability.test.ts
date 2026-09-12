@@ -15,6 +15,8 @@ type Inventory = {
 const patches = {
   "message.set": { text: false },
   "decoder.set": { name: false, source: false },
+  // unit is optional in the entity but not nullable in type.set: "bytes"
+  // selects the default interpretation of offsets explicitly.
   "type.set": { name: false, size: false, unit: false },
   "field.set": { name: false, type: false, description: true, offset: false },
   "claim.set": {
@@ -32,6 +34,8 @@ const patches = {
     scenario: true, capture: true, other: true, note: true,
   },
   "scenario.set": { name: false, description: true, steps: false },
+  // placement is optional in the entity but not nullable in comment.set:
+  // "before" restores the default (stored as absence by both adapters).
   "comment.set": { address: "comment movement is not exposed", text: false, placement: false, order: true },
 } satisfies Inventory;
 

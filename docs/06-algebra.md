@@ -100,23 +100,18 @@ caller need not change that field; it does **not** mean the entity can exist
 without it. Required values reject `null`. Empty strings and empty arrays are
 values, subject to each field's validation, rather than alternate clear tokens.
 
-| Tool | Arguments accepting `null` | Arguments that cannot be cleared |
-|---|---|---|
-| `edit_claim` | `name`, `is`, `extent`, `root`, `encoding`, `view`, `method` | `address`, `typeId` |
-| `edit_comment` | `order` | `text`, `placement` |
-| `edit_target` | `entryPoints`, `order`, `description` | `name`, `layers` |
-| `edit_field` | `description` | `name`, `type`, `offset` |
-| `edit_evidence` | `method`, `scenario`, `capture`, `other`, `note` | `kind` |
-| `edit_scenario` | `description` | `name`, `steps` |
-| `edit_type` | none | `name`, `size`, `unit` |
-| `edit_constant` | none | `name`, `value` |
-| `edit_decoder` | none | `name`, `source` |
-| `edit_message` | none | `text` |
-
-The table lists editable arguments, excluding ids and request context. The
+The [generated API reference](07-api.md) lists nullable arguments. The
 [registry test](../src/server/mcp/edit-nullability.test.ts) checks every registered
 `edit_*` tool and its fields against an inventory checked against the operation
 types. Explicit exceptions record fields that the MCP surface does not expose.
+Short argument hints in the MCP schema explain clearing at the point of use;
+this section defines the convention.
+
+Some optional entity fields have explicit default values in their edit API:
+`edit_type unit: "bytes"` selects the default offset unit, and
+`edit_comment placement: "before"` restores the default placement. Neither
+argument accepts `null` under its patch operation's contract.
+
 File and layer renames cannot clear their name; captures have no `edit_capture`
 tool even though the low-level `capture.set` can clear `when`.
 
@@ -126,7 +121,10 @@ tool even though the low-level `capture.set` can clear `when`.
 siblings. Supplying a non-null `is` replaces the interpretation with that kind
 and the options supplied in the same call. `is: null` withdraws the whole
 interpretation. A record requires `typeId`; withdraw it with `is: null` rather
-than leaving a record without a layout reference. `method` edits the caller's
+than leaving a record without a layout reference. Non-null options require an
+interpretation and must belong to its kind: `typeId` to record, `encoding` to
+text, and `view` to text or bitmap. An invalid edit is refused before any fields
+are written. `method` edits the caller's
 supporting evidence, preserving its author and time.
 
 Clearing target `entryPoints` removes the explicit list; an empty list remains

@@ -3182,6 +3182,33 @@ describe("clear versus omit across edit tools (#29)", () => {
     expect(await comment()).not.toHaveProperty("order");
   });
 
+  it.each([
+    { initial: { is: "text" }, changes: { is: "record" }, error: /record claim needs a typeId/ },
+    { initial: {}, changes: { encoding: "ascii" }, error: /what the bytes are/ },
+    { initial: { is: "text" }, changes: { typeId: "typ_x" }, error: /typeId belongs to a record/ },
+    { initial: { is: "bitmap", view: "bits:1" }, changes: { encoding: "ascii" }, error: /encoding belongs to a text/ },
+    { initial: { is: "data" }, changes: { view: "char:8" }, error: /view belongs to a text or bitmap/ },
+  ])("refuses invalid interpretation edits atomically: $changes", async ({ initial, changes, error }) => {
+    const made = await edit("add_claim", { address: "$8250", name: "keep", extent: 8, ...initial });
+    const id = (made.value as { claims: { claim: string }[] }).claims[0].claim;
+    const before = await exported();
+    const refused = await callTool("edit_claim", { id, name: "must not be written", method: "ran", ...changes });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(error);
+    expect(await exported()).toEqual(before);
+  });
+
+  it("accepts a complete replacement and a later layout-only edit", async () => {
+    const made = await edit("add_claim", { address: "$8250", name: "record", is: "text", encoding: "ascii", extent: 8 });
+    const id = (made.value as { claims: { claim: string }[] }).claims[0].claim;
+    // Dangling layout references are valid; deleting a layout must not delete its claims.
+    await edit("edit_claim", { id, is: "record", typeId: "typ_a" });
+    await edit("edit_claim", { id, typeId: "typ_b" });
+    const claim = (await exported()).claims.find((c: { id: string }) => c.id === id);
+    expect(claim).toMatchObject({ is: "record", typeId: "typ_b", name: "record", extent: 8 });
+    expect(claim).not.toHaveProperty("encoding");
+  });
+
   it("clears interpretation options while preserving omitted siblings", async () => {
     const made = await edit("add_claim", {
       address: "$8250", name: "text", is: "text", encoding: "ascii", view: "char:8", extent: 4,
