@@ -116,7 +116,7 @@ import {
   projectFromDoc,
   programFromDoc,
 } from "../core/crdt/index.js";
-import { legacySiteOf, makeFileLoader, placementsOf } from "../core/index.js";
+import { checkProjectShape, legacySiteOf, makeFileLoader, placementsOf } from "../core/index.js";
 import { framedLegacy } from "../core/ops/legacy.js";
 
 /**
@@ -519,6 +519,39 @@ export class ProjectStore {
 
   merge(update: Uint8Array, origin: unknown): void {
     applyUpdate(this.document(), update, origin);
+  }
+
+  /**
+   * Take an update from a peer, or say why not.
+   *
+   * The relay moved opaque bytes straight into the shared document, and there
+   * were two ways for that to go wrong with nothing said: a message that could
+   * not be decoded threw wherever it happened to, and one that decoded fine
+   * could leave the projection in a shape the loader refuses — a layer with no
+   * type, a record with no layout — after which every surface failed to open
+   * the project and nothing pointed at the message that did it.
+   *
+   * So the update is applied to a **staged copy** first and the projection
+   * checked against the same line a file is held to (`checkProjectShape`),
+   * and only then merged into the document. A CRDT cannot take an update back
+   * once integrated, which is why the copy exists. Structure only: what two
+   * writers merge into is allowed to be untidy, and hygiene reports it.
+   */
+  receive(update: Uint8Array, origin: unknown): { accepted: true } | { accepted: false; reason: string } {
+    const doc = this.document();
+    const staged = docFromUpdates([encodeDoc(doc)]);
+    try {
+      applyUpdate(staged, update, "stage");
+    } catch (error) {
+      return { accepted: false, reason: `the update could not be decoded: ${message(error)}` };
+    }
+    try {
+      checkProjectShape(projectFromDoc(staged));
+    } catch (error) {
+      return { accepted: false, reason: `the update would leave the project unreadable: ${message(error)}` };
+    }
+    applyUpdate(doc, update, origin);
+    return { accepted: true };
   }
 
   /**
@@ -1241,3 +1274,5 @@ function addressesOf(
     return start === undefined ? undefined : start + claim.at;
   };
 }
+
+const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));

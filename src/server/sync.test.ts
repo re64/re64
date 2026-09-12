@@ -4,6 +4,9 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebsocketProvider } from "y-websocket";
+import { WebSocket } from "ws";
+import * as encoding from "lib0/encoding";
+import * as syncProtocol from "y-protocols/sync";
 import { FileStorage, ProjectStore, pathsFor } from "../store/index.js";
 import { SyncServer } from "./sync.js";
 import {
@@ -47,6 +50,7 @@ let http: Server;
 let sync: SyncServer;
 let store: ProjectStore;
 let port: number;
+let refused: { user: string; session?: string; reason: string }[];
 
 /**
  * A participant, using the client the browser will use.
@@ -98,7 +102,8 @@ beforeEach(async () => {
   writeFileSync(projectPath, PROJECT, "utf-8");
 
   store = new ProjectStore(new FileStorage(pathsFor(projectPath)));
-  sync = new SyncServer({ store, idleMs: 50, writeMs: 20 });
+  refused = [];
+  sync = new SyncServer({ store, idleMs: 50, writeMs: 20, onRefused: (r) => refused.push(r) });
   http = createServer();
   http.on("upgrade", (req, socket, head) => sync.handleUpgrade(req, socket, head));
 
@@ -245,5 +250,119 @@ describe("keeping the file current during a session", () => {
     expect(currentText()).toContain(`"name": "Rapid9"`);
 
     await alice.close();
+  });
+});
+
+/**
+ * A peer speaking raw frames — the thing a stock client never sends, which is
+ * exactly what the receiver has to survive.
+ */
+async function rawPeer(author: string): Promise<{
+  send(frame: Uint8Array): void;
+  closed: Promise<{ code: number; reason: string }>;
+}> {
+  const socket = new WebSocket(`${url()}?author=${author}`);
+  socket.binaryType = "arraybuffer";
+  await new Promise<void>((resolve, reject) => {
+    socket.once("open", () => resolve());
+    socket.once("error", reject);
+  });
+  const closed = new Promise<{ code: number; reason: string }>((resolve) =>
+    socket.once("close", (code, reason) => resolve({ code, reason: reason.toString() }))
+  );
+  return { send: (frame) => socket.send(frame), closed };
+}
+
+/** A sync-update frame carrying these bytes as the update. */
+function updateFrame(update: Uint8Array): Uint8Array {
+  const frame = encoding.createEncoder();
+  encoding.writeVarUint(frame, 0); // MESSAGE_SYNC
+  syncProtocol.writeUpdate(frame, update);
+  return encoding.toUint8Array(frame);
+}
+
+describe("what a peer sends is checked before it becomes the document", () => {
+  /**
+   * Who may connect is deliberately unsettled; what a connected peer may send
+   * is a different question. The decode ran with no boundary and a well-formed
+   * update went into the shared document unread, so one peer could throw the
+   * process or leave the project unopenable for every other. Three failure
+   * paths, none of which had a test: the process survives each, the document
+   * does not move, the sender is told, and the other peer is unaffected.
+   */
+  const layersHeld = () => projectFromDoc(store.document()).layers.map((l) => l.id);
+
+  const stillServing = async (bob: Client) => {
+    applyOpToDoc(bob.doc, { op: "claim.add", claim: { id: "lbl_9", at: 0x8008, name: "After", origin: "user" } });
+    await settle();
+    expect(projectFromDoc(store.document()).claims!.some((c) => c.id === "lbl_9")).toBe(true);
+  };
+
+  it("refuses a truncated update, and says so", async () => {
+    const bob = await Client.connect(url(), "bob");
+    const mallory = await rawPeer("mallory");
+    const whole = updateFrame(encodeDoc(docFromProject(parseProject(PROJECT))));
+    mallory.send(whole.slice(0, Math.floor(whole.length / 2)));
+
+    const closed = await mallory.closed;
+    expect(closed.code).toBe(1008);
+    expect(closed.reason).toMatch(/could not be decoded/);
+    expect(refused).toEqual([{ user: "mallory", reason: expect.stringMatching(/could not be decoded/) }]);
+    expect(layersHeld()).toEqual(["lay_a"]);
+    await stillServing(bob);
+    await bob.close();
+  });
+
+  it("refuses an envelope it cannot read past, rather than throwing out of the socket", async () => {
+    const bob = await Client.connect(url(), "bob");
+    const mallory = await rawPeer("mallory");
+    // A sync step 1 whose state vector is cut off: `readSyncMessage` had no
+    // boundary around this one at all.
+    mallory.send(new Uint8Array([0, 0, 200, 200]));
+    const closed = await mallory.closed;
+    expect(closed.code).toBe(1008);
+    expect(refused[0]?.reason).toMatch(/could not be decoded/);
+    await stillServing(bob);
+    await bob.close();
+  });
+
+  it("refuses an update from an incompatible schema", async () => {
+    const bob = await Client.connect(url(), "bob");
+    const mallory = await rawPeer("mallory");
+    // A document whose `layers` holds a string where this schema reads a map:
+    // it decodes, and it would leave the shared document with a root nothing
+    // here can project.
+    const other = emptyDoc();
+    other.getArray("layers").push(["not a layer"]);
+    mallory.send(updateFrame(encodeDoc(other)));
+
+    const closed = await mallory.closed;
+    expect(closed.code).toBe(1008);
+    expect(closed.reason).toMatch(/unreadable/);
+    expect(layersHeld()).toEqual(["lay_a"]);
+    // And the document is still readable by the store itself.
+    expect(() => projectFromDoc(store.document())).not.toThrow();
+    await stillServing(bob);
+    await bob.close();
+  });
+
+  it("refuses a well-formed update that projects to what the loader refuses", async () => {
+    const bob = await Client.connect(url(), "bob");
+    const alice = await Client.connect(url(), "alice");
+    await settle();
+    // A bytes layer with no bytes and no address: `parseProject` refuses the
+    // file, and the document used to take it and become unopenable everywhere.
+    applyOpToDoc(alice.doc, { op: "layer.add", id: "lay_bad", layerType: "bytes", name: "bad", index: 1 });
+    await settle();
+
+    expect(refused.map((r) => r.user)).toEqual(["alice"]);
+    expect(refused[0].reason).toMatch(/unreadable.*requires a 'bytes' field/);
+    expect(layersHeld()).toEqual(["lay_a"]);
+    expect(currentText()).not.toContain("lay_bad");
+    await stillServing(bob);
+    // Alice still holds it, and no document here ever will.
+    expect(projectFromDoc(alice.doc).layers.map((l) => l.id)).toContain("lay_bad");
+    await alice.close();
+    await bob.close();
   });
 });
