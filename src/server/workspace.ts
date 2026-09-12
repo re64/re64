@@ -5374,12 +5374,15 @@ export class Workspace {
     uses: readonly T[],
     address: number
   ): T | undefined {
-    const starts = new Map(loaded.map.getLayers().map((l) => [l.id, l.start] as const));
+    const layers = loaded.map.getLayers();
+    const starts = new Map(layers.map((l) => [l.id, l.start] as const));
+    const ranks = new Map(layers.map((l, index) => [l.id, index] as const));
     // The **last** that resolves here, which `resolvedUses` orders least
-    // specific first: the index the listing reads keeps the last binding at an
-    // address, so this is the one that shows — and unbinding must take away
-    // the one that shows, or the two would disagree.
-    const here = resolvedUses(uses, (id) => starts.get(id), loaded.selectedTarget?.id).filter(
+    // specific first and lowest layer first — the same order the loader gave
+    // the index the listing reads, which keeps the last binding at an address.
+    // So this is the one that shows, and unbinding takes away the one that
+    // shows, or the two would disagree.
+    const here = resolvedUses(uses, (id) => starts.get(id), loaded.selectedTarget?.id, (id) => ranks.get(id)).filter(
       (r) => r.address === address
     );
     return here[here.length - 1]?.use;

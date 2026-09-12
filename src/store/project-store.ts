@@ -116,7 +116,8 @@ import {
   projectFromDoc,
   programFromDoc,
 } from "../core/crdt/index.js";
-import { makeFileLoader, placementsOf } from "../core/index.js";
+import { legacySiteOf, makeFileLoader, placementsOf } from "../core/index.js";
+import { framedLegacy } from "../core/ops/legacy.js";
 
 /**
  * A project in the form the document holds.
@@ -218,6 +219,20 @@ export class ProjectStore {
               throw new Error("no bytes here");
             };
     return placementsOf(project, makeFileLoader(bytes));
+  }
+
+  /**
+   * Operations as this document spells them: a binding recorded before frames
+   * is brought forward to the site its record moved to. See `framedLegacy`.
+   */
+  private framed(ops: readonly Op[]): Op[] {
+    const legacy = (op: Op): boolean =>
+      (op.op === "constantUse.bind" || op.op === "labelUse.bind" || op.op === "constantUse.unbind" || op.op === "labelUse.unbind") &&
+      op.layerId !== undefined &&
+      op.address !== undefined;
+    if (!ops.some(legacy)) return [...ops];
+    const siteOf = legacySiteOf(projectFromDoc(this.document()), this.placements());
+    return ops.map((op) => (legacy(op) ? framedLegacy(op, siteOf) : op));
   }
 
   /**
@@ -781,6 +796,7 @@ export class ProjectStore {
     // back part of a decision and report the whole thing.
     const changeset = `chg_${now.toString(36)}${(this.changesets++).toString(36)}`;
     if (ops.length === 0) return { applied: 0, descriptions: [], changeset };
+    ops = this.framed(ops);
 
     let commitToReplica: (() => void) | undefined;
     const result = this.committing(() => {
@@ -961,7 +977,7 @@ export class ProjectStore {
         // The op whose effect must still be present for the stored inverse to
         // mean anything: what was applied last time round. Undoing checks the
         // original op, redoing checks the inverse that undid it.
-        const settled = undone ? change.op : change.inverse;
+        const [settled] = this.framed([undone ? change.op : change.inverse]);
         // **Compared as state, not as text.** Key order is not state, and a
         // writer that deletes and reinserts a key moves it — so replaying an
         // operation whose values already held could change the bytes and
@@ -976,7 +992,7 @@ export class ProjectStore {
           continue;
         }
         applying.push(change);
-        text = applyOp(text, direction(change));
+        text = applyOp(text, this.framed([direction(change)])[0]);
       }
 
       if (applying.length > 0) {
@@ -995,8 +1011,8 @@ export class ProjectStore {
           const at = Date.now();
           this.storage.appendOps(
             applying.map((change) => ({
-              op: direction(change),
-              inverse: undone ? change.op : change.inverse,
+              op: this.framed([direction(change)])[0],
+              inverse: this.framed([undone ? change.op : change.inverse])[0],
               kind: undone ? ("undo" as const) : ("redo" as const),
               ...(change.author === undefined ? {} : { author: change.author }),
               ...(change.session === undefined ? {} : { session: change.session }),
@@ -1005,7 +1021,7 @@ export class ProjectStore {
             }))
           );
           commitToReplica = this.applyThroughDocument(
-            applying.map(direction),
+            this.framed(applying.map(direction)),
             newest.author ?? "unknown",
             through
           );

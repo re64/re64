@@ -1058,9 +1058,10 @@ export function projectCommentsToComments(
 export function projectConstantUses(
   project: Project,
   layerStart: (id: string) => number | undefined,
-  selectedTarget: string | undefined
+  selectedTarget: string | undefined,
+  layerRank?: (id: string) => number | undefined
 ): ConstantUse[] {
-  return resolvedUses(project.constantUses ?? [], layerStart, selectedTarget).map(
+  return resolvedUses(project.constantUses ?? [], layerStart, selectedTarget, layerRank).map(
     ({ use, address }) =>
       createConstantUse(use.id ?? derivedId("cst", useKey(use), "use"), address, use.constant)
   );
@@ -1070,9 +1071,10 @@ export function projectConstantUses(
 export function projectLabelUses(
   project: Project,
   layerStart: (id: string) => number | undefined,
-  selectedTarget: string | undefined
+  selectedTarget: string | undefined,
+  layerRank?: (id: string) => number | undefined
 ): LabelUse[] {
-  return resolvedUses(project.labelUses ?? [], layerStart, selectedTarget).map(
+  return resolvedUses(project.labelUses ?? [], layerStart, selectedTarget, layerRank).map(
     ({ use, address }) =>
       createLabelUse(use.id ?? derivedId("lbl", useKey(use), "use"), address, use.label)
   );
@@ -1248,10 +1250,32 @@ export function useFrameFields(frame: Frame): { layer?: string; target?: string 
  * the recorded bytes when it opens. A root record still spelled with a legacy
  * `address` is address-framed, as it always was.
  */
+/**
+ * Where a nested binding is, in frames: the site a legacy `layerId` and
+ * absolute `address` mean once the layer's placement is known. Undefined where
+ * it is not, and the caller leaves the record — or the operation — as it was.
+ * One rule for `usesToRoot`, the store's migration and the operations recorded
+ * before frames, so the three agree on which site a moved binding became.
+ */
+export function legacySiteOf(
+  project: Project,
+  layerStart: (id: string) => number | undefined
+): (layerId: string, address: number) => { frame: Frame; at: number } | undefined {
+  const types = new Map(project.layers.map((layer, index) => [layerIdOf(layer, index), layer.type] as const));
+  return (layerId, address) => {
+    const type = types.get(layerId);
+    if (type === undefined) return undefined;
+    if (type === "symbols") return { frame: { space: "address" }, at: address };
+    const start = layerStart(layerId);
+    return start === undefined ? undefined : { frame: { space: "layer", layer: layerId }, at: address - start };
+  };
+}
+
 export function usesToRoot(
   project: Project,
   layerStart: (id: string) => number | undefined
 ): Project {
+  const siteOf = legacySiteOf(project, layerStart);
   let changed = false;
   const lifted = <T extends { address?: number | string; at?: number | string }>(
     use: T
@@ -1266,17 +1290,16 @@ export function usesToRoot(
   const layers = project.layers.map((layer, index) => {
     if (!layer.constantUses && !layer.labelUses) return layer;
     const id = layerIdOf(layer, index);
-    const owned = layer.type !== "symbols";
-    const start = owned ? layerStart(id) : undefined;
-    if (owned && start === undefined) return layer; // not placeable here: stays nested
+    if (siteOf(id, 0) === undefined) return layer; // not placeable here: stays nested
     changed = true;
     const framed = <T extends { address: number | string }>(use: T) => {
-      const at = parseProjectAddress(use.address);
+      const site = siteOf(id, parseProjectAddress(use.address))!;
       const { address, ...rest } = use;
       void address;
-      return owned
-        ? ({ ...rest, at: at - start!, layer: id } as unknown as Omit<T, "address"> & { at: number; layer: string })
-        : ({ ...rest, at } as unknown as Omit<T, "address"> & { at: number });
+      return { ...rest, at: site.at, ...useFrameFields(site.frame) } as unknown as Omit<T, "address"> & {
+        at: number;
+        layer?: string;
+      };
     };
     const { constantUses: nested, labelUses: nestedLabels, ...rest } = layer;
     for (const use of nested ?? []) constantUses.push(framed(use) as ProjectConstantUse);
@@ -1313,7 +1336,14 @@ export function frameSpecificity(use: { layer?: string; target?: string }): numb
 export function resolvedUses<T extends { at: number | string; layer?: string; target?: string }>(
   uses: readonly T[],
   layerStart: (id: string) => number | undefined,
-  selectedTarget: string | undefined
+  selectedTarget: string | undefined,
+  /**
+   * Where a layer sits in the view's stack, bottom first. Two layer-framed
+   * uses at one address are two layers' bindings, and the one on top is what
+   * shows — the rule bytes already follow — rather than whichever the
+   * document happened to list first.
+   */
+  layerRank: (id: string) => number | undefined = () => undefined
 ): { use: T; address: number }[] {
   const out: { use: T; address: number }[] = [];
   for (const use of uses) {
@@ -1322,11 +1352,18 @@ export function resolvedUses<T extends { at: number | string; layer?: string; ta
     const address = resolveAt(parseProjectAddress(use.at), frame, layerStart);
     if (address !== undefined) out.push({ use, address });
   }
-  // Least specific first, so an index that keeps the last binding at an address
-  // keeps the most specific one, and a reader taking the last match agrees.
+  // Least specific first, then lowest layer first, so an index that keeps the
+  // last binding at an address keeps the most specific one on the topmost
+  // layer, and a reader taking the last match agrees.
+  const rank = (use: T): number => (use.layer === undefined ? 0 : (layerRank(use.layer) ?? 0));
   return out
     .map((entry, index) => ({ entry, index }))
-    .sort((a, b) => frameSpecificity(a.entry.use) - frameSpecificity(b.entry.use) || a.index - b.index)
+    .sort(
+      (a, b) =>
+        frameSpecificity(a.entry.use) - frameSpecificity(b.entry.use) ||
+        rank(a.entry.use) - rank(b.entry.use) ||
+        a.index - b.index
+    )
     .map(({ entry }) => entry);
 }
 

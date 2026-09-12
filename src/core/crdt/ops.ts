@@ -62,17 +62,6 @@ function useSlot(
   return undefined;
 }
 
-/**
- * Whether a nested bind — history — is already reflected at the root: the use
- * it recorded stands there, moved by the migration. Replaying it nested would
- * say the same thing twice, and undo checks a replay changes nothing.
- */
-function reflected(doc: Y.Doc, root: "constantUses" | "labelUses", id: string, reference: string): boolean {
-  const uses = doc.getMap<Y.Map<unknown>>(root);
-  const field = root === "constantUses" ? "constant" : "label";
-  return [...uses.values()].some((held) => held instanceof Y.Map && held.get("id") === id && held.get(field) === reference);
-}
-
 /** A use record as the document spells it: the frame flat, the coordinate as hex. */
 function useRecord(
   op: { id: string; site: BindSite },
@@ -264,7 +253,6 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
       // Keyed by the site, like every binding — see `constantUse.bind` for what
       // keying by a minted use id cost.
       case "labelUse.bind": {
-        if (bindSite(op)?.kind === "nested" && reflected(doc, "labelUses", op.id, op.labelId)) break;
         const { uses, key } = useSlot(doc, "labelUses", op)!;
         let entry = uses.get(key);
         if (!entry) {
@@ -681,7 +669,6 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
       // Which value showed depended on the ids, not on which bind happened
       // later.
       case "constantUse.bind": {
-        if (bindSite(op)?.kind === "nested" && reflected(doc, "constantUses", op.id, op.constantId)) break;
         const { uses, key } = useSlot(doc, "constantUses", op)!;
         let entry = uses.get(key);
         if (!entry) {

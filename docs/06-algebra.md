@@ -154,9 +154,10 @@ same `Frame` a claim does — `layer` with an offset, `target` or `address` with
 absolute address — so `layer:lay_a:$0123` and `target:tgt_b:$8123` are two keys
 with one number, and binding again replaces the binding *at that site*. An
 operation recorded before uses had frames carries `layerId` and an absolute
-`address`; it is applied to the nested form it was recorded against — the
-owner is part of what it said — and the boundary that knows the layer's
-placement converts the result. See [the model](05-model.md#5-declarations-and-bindings).
+`address`; the store brings it forward to the site that record moved to
+(`framedLegacy`, with the placements the store reads from its bytes) and, where
+it cannot place the layer, applies it to the nested form it was recorded
+against. See [the model](05-model.md#5-declarations-and-bindings).
 
 Two verbs is the complete algebra for a map, because "update" and "create" are
 the same operation on a key. Nothing is missing here — this shape was already

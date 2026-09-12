@@ -802,36 +802,80 @@ describe("a document stored before bindings were keyed by site", () => {
     }
   });
 
-  it("undoes and redoes history whose inverses carry no address", () => {
+  // Rows as main recorded them, in both generations: the bind that produced
+  // `cst_u1`, with the inverse the older main computed — an unbind by id, no
+  // site — and the one the newer main computed, carrying the layer and the
+  // absolute address. Neither is spelled the way the document holds the use
+  // now, and the store brings both forward to the site the use moved to.
+  const history = (inverse: Record<string, unknown>) =>
+    [
+      {
+        op: { op: "constantUse.bind", id: "cst_u1", layerId: "lay_a", address: 0x8000, constantId: "cst_a" },
+        inverse,
+        author: "alice",
+        session: "ses_old",
+        at: 1,
+        changeset: "cs_old",
+      },
+    ] as unknown as Parameters<SqliteStorage["appendOps"]>[0];
+
+  for (const [generation, inverse] of [
+    ["no address", { op: "constantUse.unbind", id: "cst_u1", layerId: "lay_a" }],
+    ["the layer and the address", { op: "constantUse.unbind", id: "cst_u1", layerId: "lay_a", address: 0x8000 }],
+  ] as const) {
+    it(`undoes and redoes history whose inverse carries ${generation}, at the site the use moved to`, () => {
+      const f = opened();
+      try {
+        f.store.document();
+        f.storage.appendOps(history(inverse));
+
+        const undone = f.store.undo("alice", "ses_old");
+        expect(undone.undone).toBeTruthy();
+        expect(bindings(f.store).constants).toEqual(["$0010=cst_b"]);
+
+        // Redo puts the bind back **where the use lives now** — framed, at the
+        // root — and not nested where nothing current could reach it.
+        const redone = f.store.redo("alice", "ses_old");
+        expect(redone.undone).toBeTruthy();
+        expect(bindings(f.store).constants).toEqual(["$0000=cst_a", "$0010=cst_b"]);
+
+        // So the operation the workspace emits for the displayed binding finds
+        // it, with no reopen in between: unbind, and bind again.
+        const inLayer = { frame: { space: "layer", layer: "lay_a" } as const, at: 0 };
+        f.store.runOps([{ op: "constantUse.unbind", id: "cst_u1", ...inLayer }], "alice", 3);
+        expect(bindings(f.store).constants).toEqual(["$0010=cst_b"]);
+        f.store.runOps([{ op: "constantUse.bind", id: "cst_u3", ...inLayer, constantId: "cst_b" }], "alice", 4);
+        expect(bindings(f.store).constants).toEqual(["$0000=cst_b", "$0010=cst_b"]);
+      } finally {
+        f.storage.close();
+        rmSync(f.dir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  it("brings a label binding's history forward the same way", () => {
     const f = opened();
     try {
       f.store.document();
-      // A row as main recorded it: the bind that produced `cst_u1`, with the
-      // inverse main computed for it — an unbind by id, no site.
       f.storage.appendOps([
         {
-          op: { op: "constantUse.bind", id: "cst_u1", layerId: "lay_a", address: 0x8000, constantId: "cst_a" },
-          inverse: { op: "constantUse.unbind", id: "cst_u1", layerId: "lay_a" },
+          op: { op: "labelUse.bind", id: "lbl_u1", layerId: "lay_a", address: 0x8004, labelId: "clm_1" },
+          inverse: { op: "labelUse.unbind", id: "lbl_u1", layerId: "lay_a", address: 0x8004 },
           author: "alice",
           session: "ses_old",
           at: 1,
           changeset: "cs_old",
         },
-        // Spelled as main recorded it, before a bind carried a frame.
       ] as unknown as Parameters<SqliteStorage["appendOps"]>[0]);
-
-      // The inverse names a layer and an id, and the use has moved to the root
-      // since: found by the id, wherever it is now.
-      const undone = f.store.undo("alice", "ses_old");
-      expect(undone.undone).toBeTruthy();
-      expect(bindings(f.store).constants).toEqual(["$0010=cst_b"]);
-
-      // Redo applies the bind as it was recorded — nested, in its layer — and
-      // the next open moves it to the root like the rest.
-      const redone = f.store.redo("alice", "ses_old");
-      expect(redone.undone).toBeTruthy();
-      expect(bindings(f.store).constants).toEqual(["$0010=cst_b", "$8000=cst_a in lay_a"]);
-      expect(bindings(new ProjectStore(f.storage)).constants).toEqual(["$0000=cst_a", "$0010=cst_b"]);
+      expect(f.store.undo("alice", "ses_old").undone).toBeTruthy();
+      expect(bindings(f.store).labels).toEqual([]);
+      expect(f.store.redo("alice", "ses_old").undone).toBeTruthy();
+      expect(bindings(f.store).labels).toEqual(["$0004=clm_1"]);
+      const inLayer = { frame: { space: "layer", layer: "lay_a" } as const, at: 4 };
+      f.store.runOps([{ op: "labelUse.unbind", id: "lbl_u1", ...inLayer }], "alice", 3);
+      expect(bindings(f.store).labels).toEqual([]);
+      // And nothing was left nested for a reopen to find.
+      expect(projectFromDoc(f.store.document()).layers[0].labelUses).toBeUndefined();
     } finally {
       f.storage.close();
       rmSync(f.dir, { recursive: true, force: true });

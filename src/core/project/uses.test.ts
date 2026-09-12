@@ -206,6 +206,49 @@ describe("two frames resolving to one address", () => {
    * orders least specific first — and the workspace's unbind takes the last,
    * so what it removes is what was showing.
    */
+  it("breaks a tie between two layers' bindings by the view's stack, as bytes are", () => {
+    // A base and a patch over it, each binding the same site; whichever is on
+    // top in the selected target is the one that shows — and the answer must
+    // not depend on the order the document happens to list the uses in, which
+    // migration changes (nested lists came in target order; the root sorts by
+    // site and id).
+    const stacked = (order: ["lay_base", "lay_patch"] | ["lay_patch", "lay_base"]): Project => ({
+      name: "stacked",
+      layers: [
+        {
+          id: "lay_base",
+          type: "bytes",
+          address: "$8000",
+          bytes: "a90160",
+          constantUses: [{ id: "cst_uz", address: "$8000", constant: "cst_base" }],
+        },
+        {
+          id: "lay_patch",
+          type: "bytes",
+          address: "$8000",
+          bytes: "a90160",
+          constantUses: [{ id: "cst_ua", address: "$8000", constant: "cst_patch" }],
+        },
+      ],
+      constants: [
+        { id: "cst_base", name: "BASE", value: "$01" },
+        { id: "cst_patch", name: "PATCH", value: "$01" },
+      ],
+      targets: [{ id: "tgt_1", name: "view", layers: [...order] }],
+    });
+    const shown = (project: Project) =>
+      buildMemoryMap(project, makeFileLoader(() => new Uint8Array()), { target: "view" }).constants.nameAt(0x8000);
+    const migrated = (project: Project): Project => {
+      const doc = docFromProject(project);
+      migrateDoc(doc, () => 0x8000);
+      return projectFromDoc(doc);
+    };
+    expect(shown(stacked(["lay_base", "lay_patch"]))).toBe("PATCH");
+    expect(shown(stacked(["lay_patch", "lay_base"]))).toBe("BASE");
+    expect(shown(migrated(stacked(["lay_base", "lay_patch"])))).toBe("PATCH");
+    expect(shown(migrated(stacked(["lay_patch", "lay_base"])))).toBe("BASE");
+  });
+
   it("orders least specific first, so the last at an address is the most specific", () => {
     const uses = [
       { id: "t", at: "$8000", target: "tgt_1", constant: "cst_t" },

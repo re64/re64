@@ -229,8 +229,9 @@ the use is a fact about that arrangement, at that address, and is filtered to
 it on the way out like a target-framed claim. The site key carries the frame —
 `layer:lay_a:$0123` and `target:tgt_b:$8123` are two sites — so binding again
 replaces the binding *at that site*. Where two frames resolve to one address in
-a view, the more specific shows — `address` < `layer` < `target` — and unbinding
-by address takes away the one that shows.
+a view, the more specific shows — `address` < `layer` < `target` — and between
+two layers' bindings the layer on top of the view's stack, as with bytes;
+unbinding by address takes away the one that shows.
 
 A use nested in a layer with an absolute `address` is the **legacy form**, and
 it said two things: the site, and the *owner* — the layer decided whether the
@@ -241,7 +242,10 @@ placement, and a store reads the placement from the bytes it holds when it
 opens a snapshot. Every other boundary — `parseProject`, `formatProject`,
 `docFromProject`, the diff — reads and writes the nested form as it is, so a
 layer nobody can place keeps its bindings until an open that can. A use on a
-symbols layer owns no bytes and becomes address-framed.
+symbols layer owns no bytes and becomes address-framed. An operation recorded
+before frames — `layerId` and an absolute `address` — is brought forward by the
+store to the same site before it is applied or replayed, so undo and redo of
+old history land where the use lives now.
 
 ### Files
 

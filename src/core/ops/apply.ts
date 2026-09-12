@@ -180,16 +180,9 @@ function bindUse<R extends { constant: string } | { label: string }>(
   if (site.kind === "framed") {
     return root(raw, { id: op.id, at: addressHex(site.at), ...useFrameFields(site.frame), ...reference });
   }
-  // Already reflected: the use this recorded stands at the root, moved there
-  // by the migration. Replaying it nested would say the same thing twice.
-  if (reflected(project, op.id, reference)) return raw;
   return nested(raw, layerIndexOf(project, site.layerId), { id: op.id, address: addressHex(site.address!), ...reference });
 }
 
-const reflected = (project: Project, id: string, reference: { constant: string } | { label: string }): boolean =>
-  "constant" in reference
-    ? (project.constantUses ?? []).some((u) => u.id === id && u.constant === reference.constant)
-    : (project.labelUses ?? []).some((u) => u.id === id && u.label === reference.label);
 
 /** The site a bind names, as its unbind spells it: framed, or the layer and address. */
 const clearing = (op: { frame?: Frame; at?: number; layerId?: string; address?: number }) =>
