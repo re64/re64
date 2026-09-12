@@ -1379,17 +1379,30 @@ key carries the frame — `layer:lay_a:$0123` and `target:tgt_b:$8123` are two
 sites with one number — because keying on the number alone is how a relocated
 binding would silently overwrite a different one.
 
-**Not converted: a migrated use is framed on the address space.** The review
-asked for the coordinate conversion — `$8123` in a layer beginning at `$8000`
-becoming `+$0123` — and it is the right conversion where it can be made. It
-cannot be made at the boundaries a migration runs at: a `.prg` layer's placement
-is in its bytes, which `parseProject` and a stored snapshot's `migrateDoc` do not
-have, and converting only where bytes happen to be available would make one
-document mean two things depending on which boundary opened it first — the
-identity defect this whole round was about, reintroduced by a migration. The
-address frame says exactly what the old record said. Every new binding made
-through the workspace is layer-framed by `placed()`, so the debt is bounded to
-history and shrinks with every rebind.
+**Converted where the placement is known, and kept nested until then.** The
+first cut of this lifted every nested use to the root framed on the address
+space, arguing that the conversion to a layer offset needs a placement the text
+boundaries do not have and that the address frame "says exactly what the old
+record said". The review showed it does not: the nested record said the *owner*
+too. The layer decided whether the binding was in a view at all, and two layers
+bound at one address — a base and a patch — were two bindings; lifted to the
+address space they were one key, and the excluded layer's binding showed in
+views it had never been in. So a nested use becomes a **layer-framed** use at
+`address − placement`, which says both things, and the boundaries that cannot
+place a layer do not convert at all: `parseProject`, `formatProject`,
+`docFromProject` and the diff read and write the nested form as it is, the
+loader converts against the layer's *declared* placement (an absolute address
+was written looking at the layer where it declared itself), and the store reads
+a `.prg`'s placement from the bytes it holds when it opens a snapshot. A layer
+nobody can place keeps its bindings nested for an open that can. An operation
+recorded before frames is applied to the nested form it was recorded against.
+
+**Where two frames resolve to one address, the more specific shows** —
+`address` < `layer` < `target` — and unbinding by address takes away the one
+that shows. `resolvedUses` orders least specific first so an index that keeps
+the last binding at an address keeps the most specific, and the workspace's
+lookup takes the last; the two were briefly first-wins and last-wins, and could
+unbind a use the listing was not showing.
 
 **`scope: "target"` on the binding tools** is the escape hatch, honoured on the
 way in and filtered on the way out like a target-framed claim, and refused

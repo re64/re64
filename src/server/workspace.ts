@@ -5375,9 +5375,14 @@ export class Workspace {
     address: number
   ): T | undefined {
     const starts = new Map(loaded.map.getLayers().map((l) => [l.id, l.start] as const));
-    return resolvedUses(uses, (id) => starts.get(id), loaded.selectedTarget?.id).find(
+    // The **last** that resolves here, which `resolvedUses` orders least
+    // specific first: the index the listing reads keeps the last binding at an
+    // address, so this is the one that shows — and unbinding must take away
+    // the one that shows, or the two would disagree.
+    const here = resolvedUses(uses, (id) => starts.get(id), loaded.selectedTarget?.id).filter(
       (r) => r.address === address
-    )?.use;
+    );
+    return here[here.length - 1]?.use;
   }
 
   constants(): {

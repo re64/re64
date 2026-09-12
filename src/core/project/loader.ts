@@ -385,7 +385,7 @@ export function buildMemoryMap(
 ): LoadedProject {
   // A root `entryPoints` list becomes a target here as everywhere else a
   // project enters, so an in-memory project gets what a file gets.
-  declared = usesToRoot(filesWithIds(entryPointsIntoTarget(declared)));
+  declared = filesWithIds(entryPointsIntoTarget(declared));
   // One form below, whatever the file holds. A project still written with labels
   // and regions is converted here, exactly as `re64 migrate` converts it on disk
   // — the precedent `identity.ts` already records for ids: "files without ids
@@ -576,8 +576,15 @@ export function buildMemoryMap(
   // target; an address-framed one is where it says.
   const startOf = (id: string): number | undefined => layerStart.get(id);
   const viewId = chosen === undefined ? undefined : (chosen.id ?? chosen.name);
-  constants.bindAll(projectConstantUses(project, startOf, viewId));
-  for (const use of projectLabelUses(project, startOf, viewId)) {
+  // A use still nested in its layer is converted here, where every placement
+  // is known. Against the layer's **declared** placement, not where this view
+  // puts it: the absolute address was written while looking at the layer where
+  // it declared itself, and that is the offset the operand has. A use whose
+  // layer is not in this view stays nested and is not in this view either,
+  // which is what its owner always meant.
+  const framed = usesToRoot(project, placementsOf(migrated, loadFile));
+  constants.bindAll(projectConstantUses(framed, startOf, viewId));
+  for (const use of projectLabelUses(framed, startOf, viewId)) {
     userLabels.bindUse(use.address, use.labelId);
     labelUses.push(use);
   }
@@ -587,7 +594,7 @@ export function buildMemoryMap(
   for (const use of labelUses) map.labelUses.set(use.address, use.labelId);
 
   return {
-    project,
+    project: framed,
     map,
     ...(chosen === undefined
       ? {}
@@ -662,3 +669,41 @@ export const ROM_AT: Record<"basic" | "kernal" | "characters", number> = {
 
 /** Bytes for a machine ROM, from wherever the host keeps them. */
 export type RomLoader = (rom: "basic" | "kernal" | "characters") => Uint8Array | undefined;
+
+/**
+ * Where each layer of a project lands, for a boundary that can read its bytes.
+ *
+ * What `usesToRoot` and `migrateDoc` need to convert a legacy binding: a `.prg`
+ * layer's placement is in its first two bytes, a `raw` or `bytes` layer
+ * declares its own, a ROM is where the machine keeps it, and a symbols layer
+ * owns no bytes and has none. A layer whose bytes cannot be read answers
+ * `undefined`, and its bindings stay nested for a boundary that can.
+ */
+export function placementsOf(
+  project: Project,
+  loadFile: FileLoader
+): (id: string) => number | undefined {
+  const starts = new Map<string, number>();
+  project.layers.forEach((decl, index) => {
+    const id = layerIdOf(decl, index);
+    try {
+      if (decl.type === "prg") {
+        const file = decl.file === undefined ? undefined : project.files?.find((f) => f.id === decl.file);
+        const { start } = loadFile(
+          file?.name ?? decl.path!,
+          decl.address === undefined ? undefined : parseProjectAddress(decl.address),
+          decl.member,
+          file
+        );
+        starts.set(id, start);
+      } else if (decl.type === "raw" || decl.type === "bytes") {
+        starts.set(id, parseProjectAddress(decl.address!));
+      } else if (decl.type === "rom") {
+        starts.set(id, ROM_AT[decl.rom ?? "kernal"]);
+      }
+    } catch {
+      // Unreadable: this boundary cannot place it, and says so by answering nothing.
+    }
+  });
+  return (id) => starts.get(id);
+}

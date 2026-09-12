@@ -751,11 +751,15 @@ describe("a document stored before bindings were keyed by site", () => {
   });
 
   const bindings = (store: ProjectStore) => {
-    // At the root now, framed on the address space: what a nested absolute
-    // record meant, and the frame the migration gives it.
+    // At the root now, framed on the layer at the offset its placement gives —
+    // the store reads the placement from the bytes it holds. A use still
+    // nested (one a legacy operation put back) is listed by its address.
     const project = projectFromDoc(store.document());
     return {
-      constants: (project.constantUses ?? []).map((u) => `${u.at}=${u.constant}`).sort(),
+      constants: [
+        ...(project.constantUses ?? []).map((u) => `${u.at}=${u.constant}`),
+        ...project.layers.flatMap((l) => (l.constantUses ?? []).map((u) => `${u.address}=${u.constant} in ${l.id}`)),
+      ].sort(),
       labels: (project.labelUses ?? []).map((u) => `${u.at}=${u.label}`).sort(),
     };
   };
@@ -775,29 +779,22 @@ describe("a document stored before bindings were keyed by site", () => {
       // Two were at $8000; the one whose id sorts last is the one the loaded
       // index had been showing, so it is the one kept.
       expect(bindings(f.store)).toEqual({
-        constants: ["$8000=cst_a", "$8010=cst_b"],
-        labels: ["$8004=clm_1"],
+        constants: ["$0000=cst_a", "$0010=cst_b"],
+        labels: ["$0004=clm_1"],
       });
 
       // Rebinding replaces and unbinding clears — the R4 contract, on an
       // upgraded project.
-      f.store.runOps(
-        [{ op: "constantUse.bind", id: "cst_new", frame: { space: "address" }, at: 0x8000, constantId: "cst_b" }],
-        "alice",
-        1
-      );
-      expect(bindings(f.store).constants).toEqual(["$8000=cst_b", "$8010=cst_b"]);
-      f.store.runOps(
-        [{ op: "constantUse.unbind", id: "cst_new", frame: { space: "address" }, at: 0x8000 }],
-        "alice",
-        2
-      );
-      expect(bindings(f.store).constants).toEqual(["$8010=cst_b"]);
+      const inLayer = { frame: { space: "layer", layer: "lay_a" } as const, at: 0 };
+      f.store.runOps([{ op: "constantUse.bind", id: "cst_new", ...inLayer, constantId: "cst_b" }], "alice", 1);
+      expect(bindings(f.store).constants).toEqual(["$0000=cst_b", "$0010=cst_b"]);
+      f.store.runOps([{ op: "constantUse.unbind", id: "cst_new", ...inLayer }], "alice", 2);
+      expect(bindings(f.store).constants).toEqual(["$0010=cst_b"]);
 
       // Reopened: the migration was persisted, so the edits that named the
       // migrated items are found again.
       const again = new ProjectStore(f.storage);
-      expect(bindings(again).constants).toEqual(["$8010=cst_b"]);
+      expect(bindings(again).constants).toEqual(["$0010=cst_b"]);
       expect(migrateDoc(again.document())).toBe(false);
     } finally {
       f.storage.close();
@@ -823,13 +820,18 @@ describe("a document stored before bindings were keyed by site", () => {
         // Spelled as main recorded it, before a bind carried a frame.
       ] as unknown as Parameters<SqliteStorage["appendOps"]>[0]);
 
+      // The inverse names a layer and an id, and the use has moved to the root
+      // since: found by the id, wherever it is now.
       const undone = f.store.undo("alice", "ses_old");
       expect(undone.undone).toBeTruthy();
-      expect(bindings(f.store).constants).toEqual(["$8010=cst_b"]);
+      expect(bindings(f.store).constants).toEqual(["$0010=cst_b"]);
 
+      // Redo applies the bind as it was recorded — nested, in its layer — and
+      // the next open moves it to the root like the rest.
       const redone = f.store.redo("alice", "ses_old");
       expect(redone.undone).toBeTruthy();
-      expect(bindings(f.store).constants).toEqual(["$8000=cst_a", "$8010=cst_b"]);
+      expect(bindings(f.store).constants).toEqual(["$0010=cst_b", "$8000=cst_a in lay_a"]);
+      expect(bindings(new ProjectStore(f.storage)).constants).toEqual(["$0000=cst_a", "$0010=cst_b"]);
     } finally {
       f.storage.close();
       rmSync(f.dir, { recursive: true, force: true });

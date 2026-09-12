@@ -1,4 +1,8 @@
 import { SqliteStorage } from "./sqlite-storage.js";
+import { FileStorage } from "./file-storage.js";
+import { databaseFileBytes } from "./load.js";
+import { nodeFileBytes } from "../node-files.js";
+import { dirname } from "node:path";
 /**
  * The live document for a project, shared by everyone editing it.
  *
@@ -112,6 +116,7 @@ import {
   projectFromDoc,
   programFromDoc,
 } from "../core/crdt/index.js";
+import { makeFileLoader, placementsOf } from "../core/index.js";
 
 /**
  * A project in the form the document holds.
@@ -197,6 +202,25 @@ export class ProjectStore {
   constructor(private readonly storage: ProjectStorage) {}
 
   /**
+   * Where each layer lands, read from the bytes this store holds, for the one
+   * migration that needs it: a nested binding becomes a layer-framed one at
+   * `address - placement`, and a `.prg`'s placement is in its file. A layer
+   * whose bytes are not here answers nothing and keeps its bindings nested.
+   */
+  private placements(): (id: string) => number | undefined {
+    const project = projectFromDoc(this.doc!);
+    const bytes =
+      this.storage instanceof SqliteStorage
+        ? databaseFileBytes(this.storage, project.files ?? [])
+        : this.storage instanceof FileStorage
+          ? nodeFileBytes(dirname(this.storage.paths.project))
+          : () => {
+              throw new Error("no bytes here");
+            };
+    return placementsOf(project, makeFileLoader(bytes));
+  }
+
+  /**
    * The shared document, built on first use.
    *
    * Recovers from the update log if one survived a crash, so an interrupted
@@ -237,7 +261,7 @@ export class ProjectStore {
 
     // After the observer, so that it is persisted; see `migrateDoc` for why a
     // migration that is not is worse than none.
-    if (migrateDoc(this.doc)) this.lastProjection = projectFromDoc(this.doc);
+    if (migrateDoc(this.doc, this.placements())) this.lastProjection = projectFromDoc(this.doc);
     const registry = projectFromDoc(this.doc).files ?? [];
     for (const file of registry) {
       if (file.hash || !(this.storage instanceof SqliteStorage)) continue;

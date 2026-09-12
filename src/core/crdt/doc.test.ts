@@ -406,32 +406,50 @@ describe("migrating a stored document's bindings", () => {
   const constantsOf = (doc: Y.Doc) =>
     (projectFromDoc(doc).constantUses ?? []).map((u) => `${u.at}=${u.constant}`).sort();
 
-  it("keys each use by its site, and where two shared one keeps the last id", () => {
+  // The store reads a `.prg`'s placement from its bytes; here it is given.
+  const placed = (id: string) => (id === "lay_a" ? 0x8000 : undefined);
+
+  it("frames each use on its layer at the offset its placement gives, and where two shared one site keeps the last id", () => {
     const doc = legacy();
-    expect(migrateDoc(doc)).toBe(true);
+    expect(migrateDoc(doc, placed)).toBe(true);
     // `cst_u1` sorts after `cst_u0`, and was the one the loaded index showed.
-    expect(constantsOf(doc)).toEqual(["$8000=cst_a", "$8010=cst_b"]);
-    expect(projectFromDoc(doc).labelUses).toEqual([{ id: "lbl_u1", at: "$8004", label: "clm_1" }]);
+    expect(constantsOf(doc)).toEqual(["$0000=cst_a", "$0010=cst_b"]);
+    expect(projectFromDoc(doc).labelUses).toEqual([{ id: "lbl_u1", at: "$0004", layer: "lay_a", label: "clm_1" }]);
     // At the root, keyed by the site with its frame — and gone from the layer.
     const keys = [...doc.getMap<unknown>("constantUses").keys()].sort();
-    expect(keys).toEqual(["address::$8000", "address::$8010"]);
+    expect(keys).toEqual(["layer:lay_a:$0000", "layer:lay_a:$0010"]);
     expect(doc.getArray<Y.Map<unknown>>("layers").get(0).has("constantUses")).toBe(false);
   });
 
-  it("takes an unbind stored without an address, by the id it carries", () => {
+  it("leaves a layer it cannot place exactly as it was, for an open that can", () => {
     const doc = legacy();
-    migrateDoc(doc);
+    migrateDoc(doc); // no placements: the file migration runs, the uses stay
+    const layer = projectFromDoc(doc).layers[0];
+    expect(layer.constantUses?.map((u) => `${u.id}@${u.address}`).sort()).toEqual([
+      "cst_u0@$8000",
+      "cst_u1@$8000",
+      "cst_u2@$8010",
+    ]);
+    expect(projectFromDoc(doc).constantUses).toBeUndefined();
+    // And the next open, with the bytes, finishes the move.
+    expect(migrateDoc(doc, placed)).toBe(true);
+    expect(constantsOf(doc)).toEqual(["$0000=cst_a", "$0010=cst_b"]);
+  });
+
+  it("takes an unbind stored without an address, by the id it carries, before and after the move", () => {
+    const doc = legacy();
     applyOpToDoc(doc, { op: "constantUse.unbind", id: "cst_u2", layerId: "lay_a" });
-    expect(constantsOf(doc)).toEqual(["$8000=cst_a"]);
+    migrateDoc(doc, placed);
+    expect(constantsOf(doc)).toEqual(["$0000=cst_a"]);
     // And one naming an id nothing holds does nothing, rather than guessing.
     applyOpToDoc(doc, { op: "constantUse.unbind", id: "cst_u0", layerId: "lay_a" });
-    expect(constantsOf(doc)).toEqual(["$8000=cst_a"]);
+    expect(constantsOf(doc)).toEqual(["$0000=cst_a"]);
   });
 
   it("moves nothing twice", () => {
     const doc = legacy();
-    migrateDoc(doc);
-    expect(migrateDoc(doc)).toBe(false);
+    migrateDoc(doc, placed);
+    expect(migrateDoc(doc, placed)).toBe(false);
   });
 });
 

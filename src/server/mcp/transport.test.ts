@@ -3269,6 +3269,44 @@ describe("a binding's escape hatch: framed on the target", () => {
     expect(after.constantUses?.some((u) => u.constant === constant) ?? false).toBe(false);
   });
 
+  it("shows the more specific of two frames at one address, and unbinds that one first", async () => {
+    // The default binding is framed on the layer; the escape hatch on the
+    // target. Both resolve to one address in this view, and the target's is
+    // what shows, because it is about this arrangement in particular. Unbind
+    // takes away what shows, so the two cannot disagree.
+    const sites = (
+      (await callTool("find_immediates", { value: "$01" })).value as { sites: { address: string }[] }
+    ).sites;
+    const at = sites[1].address;
+    const layerBound = (await callTool("add_constant", { name: "BY_LAYER", value: "$01" })).value as { constant: string };
+    const targetBound = (await callTool("add_constant", { name: "BY_TARGET", value: "$01" })).value as { constant: string };
+    const boundAt = async (constant: string) => {
+      const listed = (await callTool("list_constants", {})).value as { constants: { id: string; boundAt: string[] }[] };
+      return listed.constants.find((c) => c.id === constant)?.boundAt ?? [];
+    };
+
+    expect((await callTool("bind_constant", { address: at, constant: layerBound.constant })).isError).toBe(false);
+    expect(await boundAt(layerBound.constant)).toEqual([at]);
+    expect((await callTool("bind_constant", { address: at, constant: targetBound.constant, scope: "target" })).isError).toBe(false);
+    expect(await boundAt(targetBound.constant)).toEqual([at]);
+    expect(await boundAt(layerBound.constant)).toEqual([]);
+
+    // Both are in the document; only one shows.
+    const exported = JSON.parse(((await callTool("export_project", {})).value as { text: string }).text) as {
+      constantUses?: { constant: string; target?: string; layer?: string }[];
+    };
+    expect(exported.constantUses?.find((u) => u.constant === layerBound.constant)?.layer).toBeDefined();
+    expect(exported.constantUses?.find((u) => u.constant === targetBound.constant)?.target).toBeDefined();
+
+    // The first unbind takes the target's, and the layer's shows again.
+    expect((await callTool("unbind_constant", { address: at })).isError).toBe(false);
+    expect(await boundAt(targetBound.constant)).toEqual([]);
+    expect(await boundAt(layerBound.constant)).toEqual([at]);
+    expect((await callTool("unbind_constant", { address: at })).isError).toBe(false);
+    expect(await boundAt(layerBound.constant)).toEqual([]);
+    expect((await callTool("unbind_constant", { address: at })).isError).toBe(true);
+  });
+
   it("refuses the target scope where no target was selected to be about", async () => {
     // A project with no targets has one implied arrangement, and a binding
     // framed on "this arrangement" would name nothing.
