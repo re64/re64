@@ -208,8 +208,7 @@ export class ProjectStore {
    * `address - placement`, and a `.prg`'s placement is in its file. A layer
    * whose bytes are not here answers nothing and keeps its bindings nested.
    */
-  private placements(): (id: string) => number | undefined {
-    const project = projectFromDoc(this.doc!);
+  private placements(project: Project = projectFromDoc(this.doc!)): (id: string) => number | undefined {
     const bytes =
       this.storage instanceof SqliteStorage
         ? databaseFileBytes(this.storage, project.files ?? [])
@@ -222,17 +221,24 @@ export class ProjectStore {
   }
 
   /**
-   * Operations as this document spells them: a binding recorded before frames
+   * An operation as this document spells it: a binding recorded before frames
    * is brought forward to the site its record moved to. See `framedLegacy`.
+   *
+   * **Against the state the operation applies to**, which is the text the
+   * caller is walking and not the room. An action is several operations, and
+   * a later one may name a layer an earlier one adds — a symbols layer and a
+   * binding in it, in one changeset — so resolving every operation against the
+   * document as it stood before the action found no such layer and let the
+   * binding land nested, where nothing current could reach it.
    */
-  private framed(ops: readonly Op[]): Op[] {
-    const legacy = (op: Op): boolean =>
+  private framed(op: Op, text: string): Op {
+    const legacy =
       (op.op === "constantUse.bind" || op.op === "labelUse.bind" || op.op === "constantUse.unbind" || op.op === "labelUse.unbind") &&
       op.layerId !== undefined &&
       op.address !== undefined;
-    if (!ops.some(legacy)) return [...ops];
-    const siteOf = legacySiteOf(projectFromDoc(this.document()), this.placements());
-    return ops.map((op) => (legacy(op) ? framedLegacy(op, siteOf) : op));
+    if (!legacy) return op;
+    const project = parseProject(text);
+    return framedLegacy(op, legacySiteOf(project, this.placements(project)));
   }
 
   /**
@@ -796,7 +802,6 @@ export class ProjectStore {
     // back part of a decision and report the whole thing.
     const changeset = `chg_${now.toString(36)}${(this.changesets++).toString(36)}`;
     if (ops.length === 0) return { applied: 0, descriptions: [], changeset };
-    ops = this.framed(ops);
 
     let commitToReplica: (() => void) | undefined;
     const result = this.committing(() => {
@@ -819,10 +824,14 @@ export class ProjectStore {
       // what the session had never merged.
       let text = formatProject(projectFromDoc(through?.document() ?? this.document()));
       const changes: Change[] = [];
-      for (const op of ops) {
+      // Spelled as the document spells them, one by one against the state each
+      // applies to; what is recorded and applied is what was checked.
+      ops = ops.map((raw) => {
+        const op = this.framed(raw, text);
         changes.push({ op, inverse: invertOp(text, op), author, at: now, session, changeset });
         text = applyOp(text, op);
-      }
+        return op;
+      });
 
       this.addAuthor(author);
       this.recording = true;
@@ -967,7 +976,10 @@ export class ProjectStore {
       // write's `did` is: to check that what happened is what was meant.
       const absolute = addressesOf(text);
       const skipped: UndoOutcome["skipped"] = [];
-      const applying: StoredChange[] = [];
+      // Each with its operation and inverse spelled against the state it met,
+      // which is what gets recorded and applied — not recomputed later against
+      // the room as it stood before the action.
+      const applying: { change: StoredChange; op: Op; inverse: Op }[] = [];
 
       // **Backwards to undo, forwards to redo.** An action's operations depend
       // on each other in the order they were made, so putting them back in
@@ -977,7 +989,7 @@ export class ProjectStore {
         // The op whose effect must still be present for the stored inverse to
         // mean anything: what was applied last time round. Undoing checks the
         // original op, redoing checks the inverse that undid it.
-        const [settled] = this.framed([undone ? change.op : change.inverse]);
+        const settled = this.framed(undone ? change.op : change.inverse, text);
         // **Compared as state, not as text.** Key order is not state, and a
         // writer that deletes and reinserts a key moves it — so replaying an
         // operation whose values already held could change the bytes and
@@ -991,8 +1003,9 @@ export class ProjectStore {
           });
           continue;
         }
-        applying.push(change);
-        text = applyOp(text, this.framed([direction(change)])[0]);
+        const op = this.framed(direction(change), text);
+        applying.push({ change, op, inverse: settled });
+        text = applyOp(text, op);
       }
 
       if (applying.length > 0) {
@@ -1010,9 +1023,9 @@ export class ProjectStore {
         try {
           const at = Date.now();
           this.storage.appendOps(
-            applying.map((change) => ({
-              op: this.framed([direction(change)])[0],
-              inverse: this.framed([undone ? change.op : change.inverse])[0],
+            applying.map(({ change, op, inverse }) => ({
+              op,
+              inverse,
               kind: undone ? ("undo" as const) : ("redo" as const),
               ...(change.author === undefined ? {} : { author: change.author }),
               ...(change.session === undefined ? {} : { session: change.session }),
@@ -1021,14 +1034,14 @@ export class ProjectStore {
             }))
           );
           commitToReplica = this.applyThroughDocument(
-            this.framed(applying.map(direction)),
+            applying.map(({ op }) => op),
             newest.author ?? "unknown",
             through
           );
         } finally {
           this.recording = false;
         }
-        for (const change of applying) this.storage.markUndone(change.seq, undone);
+        for (const { change } of applying) this.storage.markUndone(change.seq, undone);
       }
 
       return {

@@ -1,3 +1,4 @@
+import type { Op } from "../core/ops/types.js";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -852,6 +853,103 @@ describe("a document stored before bindings were keyed by site", () => {
       }
     });
   }
+
+  // One action, two operations that depend on each other: a symbols layer is
+  // added and a site in it bound, as `add_constant`-then-`bind` on a zero-page
+  // address used to do. Redo must bring the bind forward against the state
+  // the layer.add just produced — resolved against the room as it stood
+  // before the action, the layer was absent and the bind landed nested.
+  for (const [kind, bind, unbind, list] of [
+    [
+      "constant",
+      { op: "constantUse.bind", id: "use_1", layerId: "lay_s", address: 0xfb, constantId: "cst_a" },
+      { op: "constantUse.unbind", id: "use_1", layerId: "lay_s", address: 0xfb },
+      (store: ProjectStore) => bindings(store).constants,
+    ],
+    [
+      "label",
+      { op: "labelUse.bind", id: "use_1", layerId: "lay_s", address: 0xfb, labelId: "clm_1" },
+      { op: "labelUse.unbind", id: "use_1", layerId: "lay_s", address: 0xfb },
+      (store: ProjectStore) => bindings(store).labels,
+    ],
+  ] as const) {
+    it(`redoes a grouped layer-add and ${kind} bind against the state the action produces`, () => {
+      // The project as main left it after that action: the symbols layer with
+      // the binding nested in it. Opening migrates the binding to the root.
+      const dir = mkdtempSync(join(tmpdir(), "re64-legacy-group-"));
+      const storage = new SqliteStorage(join(dir, "p.re64db"), "p");
+      const nested = kind === "constant"
+        ? { constantUses: [{ id: "use_1", address: "$00FB", constant: "cst_a" }] }
+        : { labelUses: [{ id: "use_1", address: "$00FB", label: "clm_1" }] };
+      storage.initialize(
+        JSON.stringify({
+          name: "legacy",
+          layers: [
+            { id: "lay_a", type: "bytes", address: "$8000", bytes: "a9016000" },
+            { id: "lay_s", type: "symbols", name: "annotations", ...nested },
+          ],
+          constants: [{ id: "cst_a", name: "ONE", value: "$01" }],
+        }),
+        Date.now(),
+        "legacy"
+      );
+      const f = { dir, storage, store: new ProjectStore(storage) };
+      try {
+        f.store.document();
+        const add = { op: "layer.add", id: "lay_s", layerType: "symbols", name: "annotations", index: 1 };
+        f.storage.appendOps([
+          { op: add, inverse: { op: "layer.remove", id: "lay_s" }, author: "alice", session: "ses_old", at: 1, changeset: "cs_grp" },
+          { op: bind, inverse: unbind, author: "alice", session: "ses_old", at: 1, changeset: "cs_grp" },
+        ] as unknown as Parameters<SqliteStorage["appendOps"]>[0]);
+        expect(list(f.store)).toContain(kind === "constant" ? "$00FB=cst_a" : "$00FB=clm_1");
+
+        const undone = f.store.undo("alice", "ses_old");
+        expect(undone.skipped).toEqual([]);
+        expect(projectFromDoc(f.store.document()).layers.some((l) => l.id === "lay_s")).toBe(false);
+
+        const redone = f.store.redo("alice", "ses_old");
+        expect(redone.skipped).toEqual([]);
+        const after = projectFromDoc(f.store.document());
+        const layer = after.layers.find((l) => l.id === "lay_s")!;
+        expect(layer).toBeDefined();
+        // At the root, address-framed — a symbols layer owns no bytes — and
+        // not nested in the layer the action just put back.
+        expect(layer.constantUses ?? layer.labelUses).toBeUndefined();
+        expect(list(f.store)).toContain(kind === "constant" ? "$00FB=cst_a" : "$00FB=clm_1");
+
+        // So the operation the workspace emits for it finds it, with no reopen.
+        const current = kind === "constant"
+          ? { op: "constantUse.unbind", id: "use_1", frame: { space: "address" }, at: 0xfb }
+          : { op: "labelUse.unbind", id: "use_1", frame: { space: "address" }, at: 0xfb };
+        f.store.runOps([current as Op], "alice", 5);
+        expect(list(f.store).some((b) => b.startsWith("$00FB"))).toBe(false);
+      } finally {
+        f.storage.close();
+        rmSync(f.dir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  it("brings a legacy batch entering runOps forward the same way, one operation against the last", () => {
+    const f = opened();
+    try {
+      f.store.document();
+      f.store.runOps(
+        [
+          { op: "layer.add", id: "lay_s", layerType: "symbols", name: "annotations", index: 1 },
+          { op: "constantUse.bind", id: "use_1", layerId: "lay_s", address: 0xfb, constantId: "cst_a" },
+        ] as unknown as Op[],
+        "alice",
+        1
+      );
+      const after = projectFromDoc(f.store.document());
+      expect(after.layers.find((l) => l.id === "lay_s")!.constantUses).toBeUndefined();
+      expect(bindings(f.store).constants).toContain("$00FB=cst_a");
+    } finally {
+      f.storage.close();
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
 
   it("brings a label binding's history forward the same way", () => {
     const f = opened();
