@@ -320,8 +320,14 @@ support one claim without sharing a provenance field on the claim.
 `retires` record removes its claim from the loaded working set while retaining
 the claim and evidence in the project and export. Retirement is derived by
 `retiredClaimIds` and filtered by the loader. `restore_claim` removes retirement
-evidence. The API requires a reason via `note` or `other` for refutation and
-retirement. `other` is not a ranking or a supersession chain.
+evidence. A refutation or a retirement must point at something — `other`, or a
+nonblank `note` — and one rule holds it for adding and for revising
+([`checkEvidenceRequest`](../src/core/claims/evidence.ts)): what is refused is
+a *request* that does not say what it is, checked on the fields the request
+reaches, with a reference checked only when the request names it. Two valid
+edits can still merge into a refutation that names nothing; both are kept and
+hygiene reports it as `evidence.unexplained`. `other` is not a ranking or a
+supersession chain.
 
 Different methods can help expose correlated reasoning, but do not prove
 independence or truth. A scenario link permits a repeatable check; its assertions
