@@ -256,15 +256,17 @@ describe("the text writers key a binding by its site under either spelling", () 
 }
 `)
   );
+  // Nested, so the operations that reach them are the nested spelling: a
+  // layer and an absolute address. See `bindSite`.
   const usesIn = (text: string) =>
-    (parseProject(text).constantUses ?? []).map((u) => `${u.id}:${u.constant}`);
+    (parseProject(text).layers[0].constantUses ?? []).map((u) => `${u.id}:${u.constant}`);
 
   it("replaces every use at the site, however each spelled it", () => {
     const bound = applyOp(withNumericUse, {
       op: "constantUse.bind",
       id: "cst_new",
-      frame: { space: "address" },
-      at: 0x8000,
+      layerId: "lay_a",
+      address: 0x8000,
       constantId: "cst_b",
     });
     expect(usesIn(bound)).toEqual(["cst_new:cst_b"]);
@@ -274,8 +276,8 @@ describe("the text writers key a binding by its site under either spelling", () 
     const cleared = applyOp(withNumericUse, {
       op: "constantUse.unbind",
       id: "cst_whatever",
-      frame: { space: "address" },
-      at: 0x8000,
+      layerId: "lay_a",
+      address: 0x8000,
     });
     expect(usesIn(cleared)).toEqual([]);
 

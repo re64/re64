@@ -92,9 +92,33 @@ export interface ProjectLayer {
   /** Comments about addresses this layer owns */
   comments?: ProjectComment[];
   /** Operands in this layer that mean a named constant */
-  constantUses?: ProjectConstantUse[];
+  constantUses?: LegacyConstantUse[];
   /** Operands in this layer that mean one particular label */
-  labelUses?: ProjectLabelUse[];
+  labelUses?: LegacyLabelUse[];
+}
+
+/**
+ * A binding as it was nested in the layer that supplied its bytes, at an
+ * absolute address.
+ *
+ * **Read everywhere, written by no tool.** The record said two things: the
+ * site, and the *owner* — the layer decided whether the binding showed at all,
+ * and kept it apart from another layer's binding at the same address. Both
+ * survive only as a layer-framed use with the offset `address - placement`,
+ * and the placement is not known at every boundary, so the nested form stays
+ * a form the document can hold until a boundary that knows it converts it.
+ * See `usesToRoot`.
+ */
+export interface LegacyConstantUse {
+  id?: string;
+  address: number | string;
+  constant: string;
+}
+
+export interface LegacyLabelUse {
+  id?: string;
+  address: number | string;
+  label: string;
 }
 
 /**
@@ -1201,23 +1225,33 @@ export function useFrameFields(frame: Frame): { layer?: string; target?: string 
 }
 
 /**
- * Bindings move to the root and gain a frame.
+ * Bindings move to the root and gain a frame — **where their layer's placement
+ * is known**, and not before.
  *
- * They were nested in the layer that supplied the bytes, with **absolute**
- * addresses — so relocating a layer left every binding behind, and a use that
- * is a fact about one arrangement had nowhere to live. Now a use carries the
- * same `Frame` a claim does and sits at the root beside the constants.
+ * A use nested in a layer, with an absolute address, is the legacy form and it
+ * carried two facts: the site, and the *owner* — the layer it lived in decided
+ * whether it showed at all, and kept it apart from another layer's binding at
+ * the same address. Lifting it to the address space would keep the first fact
+ * and lose the second, so a nested use becomes a **layer-framed** use with the
+ * offset `address - placement`, which says both things the old record said. A
+ * use in a symbols layer — the layers `ensureOwningLayer` made to hold
+ * zero-page bindings — owns no bytes and becomes address-framed, which is what
+ * `placed()` gives an unowned byte today.
  *
- * **A migrated use is framed on the address space, deliberately.** Converting
- * an absolute address to a layer offset needs the layer's placement, and for a
- * `.prg` that is inside its bytes — which this boundary does not have, and a
- * stored snapshot's migration never has. Converting where the bytes happen to
- * be available would make one document mean two things depending on which
- * boundary opened it first. The address frame says exactly what the old record
- * said: this site, wherever the bytes came from. A new binding made through
- * the workspace is layer-framed by `placed()`, like a claim.
+ * The placement is the one thing this needs, and for a `.prg` it is inside the
+ * file's bytes: `parseProject` does not have them, a stored snapshot's
+ * migration does not have them, and converting where they happen to be
+ * available would make one document mean two things depending on which
+ * boundary opened it first. So this takes a resolver, converts what it can, and
+ * **leaves the rest nested** for a boundary that knows more — the loader, which
+ * has every placement once the layers have landed, and the store, which reads
+ * the recorded bytes when it opens. A root record still spelled with a legacy
+ * `address` is address-framed, as it always was.
  */
-export function usesToRoot(project: Project): Project {
+export function usesToRoot(
+  project: Project,
+  layerStart: (id: string) => number | undefined
+): Project {
   let changed = false;
   const lifted = <T extends { address?: number | string; at?: number | string }>(
     use: T
@@ -1229,12 +1263,24 @@ export function usesToRoot(project: Project): Project {
   };
   const constantUses = [...(project.constantUses ?? []).map(lifted)];
   const labelUses = [...(project.labelUses ?? []).map(lifted)];
-  const layers = project.layers.map((layer) => {
+  const layers = project.layers.map((layer, index) => {
     if (!layer.constantUses && !layer.labelUses) return layer;
+    const id = layerIdOf(layer, index);
+    const owned = layer.type !== "symbols";
+    const start = owned ? layerStart(id) : undefined;
+    if (owned && start === undefined) return layer; // not placeable here: stays nested
     changed = true;
+    const framed = <T extends { address: number | string }>(use: T) => {
+      const at = parseProjectAddress(use.address);
+      const { address, ...rest } = use;
+      void address;
+      return owned
+        ? ({ ...rest, at: at - start!, layer: id } as unknown as Omit<T, "address"> & { at: number; layer: string })
+        : ({ ...rest, at } as unknown as Omit<T, "address"> & { at: number });
+    };
     const { constantUses: nested, labelUses: nestedLabels, ...rest } = layer;
-    for (const use of nested ?? []) constantUses.push(lifted(use));
-    for (const use of nestedLabels ?? []) labelUses.push(lifted(use));
+    for (const use of nested ?? []) constantUses.push(framed(use) as ProjectConstantUse);
+    for (const use of nestedLabels ?? []) labelUses.push(framed(use) as ProjectLabelUse);
     return rest;
   });
   if (!changed) return project;
@@ -1244,6 +1290,16 @@ export function usesToRoot(project: Project): Project {
     ...(constantUses.length ? { constantUses } : {}),
     ...(labelUses.length ? { labelUses } : {}),
   };
+}
+
+/**
+ * How specific a use's frame is: the address space, then a layer, then one
+ * arrangement. Where two uses resolve to one address in a view, the more
+ * specific one is what the view shows — and it is what `unbind` takes away,
+ * so the two cannot disagree.
+ */
+export function frameSpecificity(use: { layer?: string; target?: string }): number {
+  return use.target !== undefined ? 2 : use.layer !== undefined ? 1 : 0;
 }
 
 /**
@@ -1266,11 +1322,16 @@ export function resolvedUses<T extends { at: number | string; layer?: string; ta
     const address = resolveAt(parseProjectAddress(use.at), frame, layerStart);
     if (address !== undefined) out.push({ use, address });
   }
-  return out;
+  // Least specific first, so an index that keeps the last binding at an address
+  // keeps the most specific one, and a reader taking the last match agrees.
+  return out
+    .map((entry, index) => ({ entry, index }))
+    .sort((a, b) => frameSpecificity(a.entry.use) - frameSpecificity(b.entry.use) || a.index - b.index)
+    .map(({ entry }) => entry);
 }
 
 export function parseProject(json: string): Project {
-  const project = usesToRoot(entryPointsIntoTarget(JSON.parse(json) as Project));
+  const project = entryPointsIntoTarget(JSON.parse(json) as Project);
 
   // **A record's fields used to be an object keyed by offset.** Every file
   // written before they were keyed by id says so, and they stay loadable: the

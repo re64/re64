@@ -142,17 +142,24 @@ export interface MetaSetOp {
  * uses carried a frame, read as an address-framed site at that address, which
  * is what the record meant.
  */
-export interface LabelBindOp {
+/**
+ * Where a binding is.
+ *
+ * A frame and a coordinate in it, exactly as a claim is placed. The second
+ * spelling is **history only**: before uses had frames a binding was nested in
+ * the layer that supplied its bytes, at an absolute address, and an operation
+ * recorded then still means that — the owner and all — so it is applied to the
+ * nested form rather than reinterpreted. See `bindSite`.
+ */
+export type BindingSite =
+  | { frame: Frame; at: number; layerId?: undefined; address?: undefined }
+  | { /** @deprecated history only */ layerId: string; /** @deprecated history only */ address: number; frame?: undefined; at?: undefined };
+
+export type LabelBindOp = {
   op: "labelUse.bind";
   id: string;
-  frame: Frame;
-  at: number;
   labelId: string;
-  /** @deprecated history only */
-  layerId?: string;
-  /** @deprecated history only */
-  address?: number;
-}
+} & BindingSite;
 
 export interface LabelUnbindOp {
   op: "labelUse.unbind";
@@ -160,7 +167,7 @@ export interface LabelUnbindOp {
   /** The site. Absent only on history from before sites were keys; see `ConstantUnbindOp`. */
   frame?: Frame;
   at?: number;
-  /** @deprecated history only */
+  /** @deprecated history only: the owning layer, and the absolute address where one was recorded */
   layerId?: string;
   /** @deprecated history only */
   address?: number;
@@ -437,17 +444,11 @@ export interface ConstantRemoveOp {
 }
 
 /** Say that the operand at a site means a constant. See `LabelBindOp` for the site. */
-export interface ConstantBindOp {
+export type ConstantBindOp = {
   op: "constantUse.bind";
   id: string;
-  frame: Frame;
-  at: number;
   constantId: string;
-  /** @deprecated history only */
-  layerId?: string;
-  /** @deprecated history only */
-  address?: number;
-}
+} & BindingSite;
 
 export interface ConstantUnbindOp {
   op: "constantUse.unbind";
@@ -783,10 +784,11 @@ export interface Change {
 export type AddressResolver = (claim: { at: number; frame?: Claim["frame"] }) => number | undefined;
 
 /** A binding's site as a reader spells it: an offset into a layer, or an address. */
-function siteText(op: { frame?: Frame; at?: number; address?: number }): string {
+function siteText(op: { frame?: Frame; at?: number; layerId?: string; address?: number }): string {
   const at = op.at ?? op.address ?? 0;
   const hex4 = `$${at.toString(16).toUpperCase().padStart(4, "0")}`;
-  return op.frame?.space === "layer" ? `+${hex4} in ${op.frame.layer}` : hex4;
+  if (op.frame?.space === "layer") return `+${hex4} in ${op.frame.layer}`;
+  return op.layerId === undefined ? hex4 : `${hex4} in ${op.layerId}`;
 }
 
 export function describeOp(op: Op, resolve?: AddressResolver): string {

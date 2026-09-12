@@ -228,12 +228,20 @@ the bytes it names; a byte no layer supplies gets the address space. `scope:
 the use is a fact about that arrangement, at that address, and is filtered to
 it on the way out like a target-framed claim. The site key carries the frame —
 `layer:lay_a:$0123` and `target:tgt_b:$8123` are two sites — so binding again
-replaces the binding *at that site*. A use nested in a layer with an absolute
-`address` is legacy input, lifted to the root **framed on the address space**:
-converting to a layer offset needs the layer's placement, which for a `.prg` is
-inside bytes the migration does not have, and converting where the bytes
-happen to be available would make one document mean two things depending on
-which boundary opened it first. Stored snapshots migrate the same way.
+replaces the binding *at that site*. Where two frames resolve to one address in
+a view, the more specific shows — `address` < `layer` < `target` — and unbinding
+by address takes away the one that shows.
+
+A use nested in a layer with an absolute `address` is the **legacy form**, and
+it said two things: the site, and the *owner* — the layer decided whether the
+binding showed, and kept it apart from another layer's at the same address. It
+becomes a layer-framed use at `address − placement`, which says both, and only
+where the placement is known: the loader converts against the layer's declared
+placement, and a store reads the placement from the bytes it holds when it
+opens a snapshot. Every other boundary — `parseProject`, `formatProject`,
+`docFromProject`, the diff — reads and writes the nested form as it is, so a
+layer nobody can place keeps its bindings until an open that can. A use on a
+symbols layer owns no bytes and becomes address-framed.
 
 ### Files
 

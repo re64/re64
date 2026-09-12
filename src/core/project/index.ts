@@ -16,6 +16,7 @@ export {
   FileLoader,
   LoadedProject,
   buildMemoryMap,
+  placementsOf,
   projectForTarget,
   projectTypes,
 } from "./loader.js";

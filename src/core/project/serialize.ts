@@ -31,7 +31,7 @@ import {
   ProjectLayer,
 } from "./project.js";
 import { filesWithIds, fileId } from "./files.js";
-import { entryPointsIntoTarget, parseProject, parseProjectAddress, useKey, usesToRoot } from "./project.js";
+import { entryPointsIntoTarget, LegacyConstantUse, LegacyLabelUse, parseProject, parseProjectAddress, useKey } from "./project.js";
 
 /** Serialize one object compactly on a single line: `{ "a": 1, "b": 2 }`. */
 /**
@@ -88,7 +88,7 @@ const EVIDENCE_KEYS = [
 /** Serialize a project in the hand-maintained house style. */
 export function formatProject(project: Project): string {
   // Never written at the root: a list still there belongs to a target.
-  project = usesToRoot(filesWithIds(entryPointsIntoTarget(project)));
+  project = filesWithIds(entryPointsIntoTarget(project));
   const lines: string[] = ["{"];
   const body: string[] = [];
 
@@ -898,11 +898,67 @@ export function unbindLabel(raw: string, site: UseSite): string {
   return formatProject(project);
 }
 
-/** Which use an unbind means: the one at the site, or the one with the id. */
-export type UseSite = { key: string; id?: string } | { key?: undefined; id: string };
+/**
+ * Which use an unbind means: the one at the framed site at the root; the one at
+ * an absolute address nested in a layer (history); or the one with the id.
+ */
+export type UseSite =
+  | { key: string; layerIndex?: undefined; address?: undefined; id?: undefined }
+  | { layerIndex: number; address: number; key?: undefined; id?: undefined }
+  | { layerIndex: number; id: string; key?: undefined; address?: undefined }
+  | { id: string; key?: undefined; layerIndex?: undefined; address?: undefined };
 
 const atUseSite = (use: { id?: string } & Parameters<typeof useKey>[0], site: UseSite): boolean =>
   site.key !== undefined ? useKey(use) === site.key : use.id === site.id;
+
+/**
+ * The nested form, kept writable for the operations recorded against it. An
+ * operation from before frames says "this operand, in this layer"; applying it
+ * to the root would either lose the owner or invent a placement the text does
+ * not know. See `usesToRoot` for where the conversion happens instead.
+ */
+const atNestedSite = (use: { id?: string; address: number | string }, site: { address?: number; id?: string }): boolean =>
+  site.address !== undefined ? parseProjectAddress(use.address) === site.address : use.id === site.id;
+
+export function bindConstantIn(raw: string, layerIndex: number, use: LegacyConstantUse): string {
+  const project = parseProject(raw);
+  const layer = project.layers[layerIndex];
+  const uses = (layer.constantUses ??= []);
+  const at = parseProjectAddress(use.address);
+  const here = uses.filter((u) => parseProjectAddress(u.address) === at);
+  if (here.length === 1 && here[0].constant === use.constant && here[0].id === use.id) return raw;
+  layer.constantUses = [...uses.filter((u) => parseProjectAddress(u.address) !== at), use];
+  return formatProject(project);
+}
+
+export function unbindConstantIn(raw: string, layerIndex: number, site: { address?: number; id?: string }): string {
+  const project = parseProject(raw);
+  const layer = project.layers[layerIndex];
+  if (!layer.constantUses?.some((u) => atNestedSite(u, site))) return raw;
+  layer.constantUses = layer.constantUses.filter((u) => !atNestedSite(u, site));
+  if (layer.constantUses.length === 0) delete layer.constantUses;
+  return formatProject(project);
+}
+
+export function bindLabelIn(raw: string, layerIndex: number, use: LegacyLabelUse): string {
+  const project = parseProject(raw);
+  const layer = project.layers[layerIndex];
+  const uses = (layer.labelUses ??= []);
+  const at = parseProjectAddress(use.address);
+  const here = uses.filter((u) => parseProjectAddress(u.address) === at);
+  if (here.length === 1 && here[0].label === use.label && here[0].id === use.id) return raw;
+  layer.labelUses = [...uses.filter((u) => parseProjectAddress(u.address) !== at), use];
+  return formatProject(project);
+}
+
+export function unbindLabelIn(raw: string, layerIndex: number, site: { address?: number; id?: string }): string {
+  const project = parseProject(raw);
+  const layer = project.layers[layerIndex];
+  if (!layer.labelUses?.some((u) => atNestedSite(u, site))) return raw;
+  layer.labelUses = layer.labelUses.filter((u) => !atNestedSite(u, site));
+  if (layer.labelUses.length === 0) delete layer.labelUses;
+  return formatProject(project);
+}
 
 
 

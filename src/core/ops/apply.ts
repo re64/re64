@@ -20,6 +20,9 @@ import {
   Project,
   ProjectComment,
   ProjectConstantUse,
+  LegacyConstantUse,
+  LegacyLabelUse,
+  ProjectLayer,
   ProjectLabel,
   ProjectLabelUse,
   ProjectRegion,
@@ -29,7 +32,9 @@ import {
 } from "../project/project.js";
 import {
   bindConstant,
+  bindConstantIn,
   bindLabel,
+  bindLabelIn,
   deleteComment,
   deleteConstant,
   deleteDecoder,
@@ -49,8 +54,10 @@ import {
   setPrimaryLabel,
   setProjectMeta,
   unbindConstant,
+  unbindConstantIn,
   UseSite,
   unbindLabel,
+  unbindLabelIn,
   upsertComment,
   upsertFile,
   deleteFile,
@@ -63,10 +70,10 @@ import {
   upsertClaim,
   deleteClaim,
 } from "../project/serialize.js";
-import { ClaimEdit, EvidenceSetOp, Op } from "./types.js";
+import { BindingSite, ClaimEdit, EvidenceSetOp, Op } from "./types.js";
 import { bindSite, legacyChildTarget, legacyTypeSetChildren, typeAddFields } from "./legacy.js";
 import type { Frame } from "../claims/model.js";
-import { derivedId } from "../project/identity.js";
+import { derivedId, layerIdOf } from "../project/identity.js";
 import { Claim, Provenance } from "../claims/model.js";
 import { ProjectClaim, ProjectEvidence, ProjectField, projectClaims } from "../project/project.js";
 
@@ -98,32 +105,110 @@ function findRegion(project: Project, id: string): Found<ProjectRegion> | undefi
   return undefined;
 }
 
-/** The use at a site, or the one with the id where the operation predates sites. */
-function useAt<T extends { id?: string; at: number | string; layer?: string; target?: string }>(
-  uses: readonly T[] | undefined,
-  op: { id: string; frame?: Frame; at?: number; address?: number }
-): T | undefined {
+/**
+ * The use an operation means, and where: at the root by its framed site, or —
+ * history — nested in the owning layer by absolute address. An operation from
+ * before sites were keys names only an id, which is looked for everywhere.
+ */
+type FoundUse<T, L> = { use: T; layerIndex?: undefined } | { use: L; layerIndex: number };
+
+function useAt<T extends { id?: string; at: number | string; layer?: string; target?: string }, L extends { id?: string; address: number | string }>(
+  project: Project,
+  root: readonly T[] | undefined,
+  nested: (layer: ProjectLayer) => readonly L[] | undefined,
+  op: { id: string; frame?: Frame; at?: number; layerId?: string; address?: number }
+): FoundUse<T, L> | undefined {
   const site = bindSite(op);
-  if (site) {
+  if (site?.kind === "framed") {
     const key = useKey({ at: site.at, ...useFrameFields(site.frame) });
-    return uses?.find((u) => useKey(u) === key);
+    const use = root?.find((u) => useKey(u) === key);
+    return use && { use };
   }
-  return uses?.find((u) => u.id === op.id);
+  if (site?.kind === "nested") {
+    const layerIndex = layerIndexOf(project, site.layerId);
+    const use = nested(project.layers[layerIndex])?.find((u) =>
+      site.address === undefined ? u.id === op.id : parseProjectAddress(u.address) === site.address
+    );
+    if (use || site.address !== undefined) return use && { use, layerIndex };
+    // By id and not in the layer named: it may have moved to the root since.
+  }
+  const atRoot = root?.find((u) => u.id === op.id);
+  if (atRoot) return { use: atRoot };
+  for (const [layerIndex, layer] of project.layers.entries()) {
+    const use = nested(layer)?.find((u) => u.id === op.id);
+    if (use) return { use, layerIndex };
+  }
+  return undefined;
 }
 
-/** The site an unbind names for the text writers, or the record. */
-const siteOf = (op: { id: string; frame?: Frame; at?: number; address?: number }): UseSite => {
+const constantUseAt = (project: Project, op: Parameters<typeof useAt>[3]) =>
+  useAt(project, project.constantUses, (l) => l.constantUses, op);
+const labelUseAt = (project: Project, op: Parameters<typeof useAt>[3]) =>
+  useAt(project, project.labelUses, (l) => l.labelUses, op);
+
+/**
+ * What the text writers release: the site the operation named — framed at the
+ * root, or an address in a layer — or, where it named only an id, that record
+ * and no other at its site.
+ */
+const siteOf = (
+  found: FoundUse<{ id?: string } & Parameters<typeof useKey>[0], { id?: string; address: number | string }>,
+  op: { id: string; frame?: Frame; at?: number; layerId?: string; address?: number }
+): UseSite => {
   const site = bindSite(op);
-  return site ? { key: useKey({ at: site.at, ...useFrameFields(site.frame) }) } : { id: op.id };
+  if (found.layerIndex === undefined) {
+    return site?.kind === "framed" ? { key: useKey(found.use) } : { id: op.id };
+  }
+  return site?.kind === "nested" && site.address !== undefined
+    ? { layerIndex: found.layerIndex, address: site.address }
+    : { layerIndex: found.layerIndex, id: op.id };
 };
 
-/** A use record for the text, spelled as the file spells one. */
-function useEntry<R extends { constant: string } | { label: string }>(
-  op: { id: string; frame?: Frame; at?: number; address?: number },
-  reference: R
-): { id: string; at: string; layer?: string; target?: string } & R {
+/**
+ * Write a bind as the file spells one: at the root, framed; or — history —
+ * nested in the owning layer at an absolute address.
+ */
+function bindUse<R extends { constant: string } | { label: string }>(
+  raw: string,
+  project: Project,
+  op: { id: string; frame?: Frame; at?: number; layerId?: string; address?: number },
+  reference: R,
+  root: (raw: string, use: { id: string; at: string; layer?: string; target?: string } & R) => string,
+  nested: (raw: string, layerIndex: number, use: { id: string; address: string } & R) => string
+): string {
   const site = bindSite(op)!;
-  return { id: op.id, at: addressHex(site.at), ...useFrameFields(site.frame), ...reference };
+  if (site.kind === "framed") {
+    return root(raw, { id: op.id, at: addressHex(site.at), ...useFrameFields(site.frame), ...reference });
+  }
+  // Already reflected: the use this recorded stands at the root, moved there
+  // by the migration. Replaying it nested would say the same thing twice.
+  if (reflected(project, op.id, reference)) return raw;
+  return nested(raw, layerIndexOf(project, site.layerId), { id: op.id, address: addressHex(site.address!), ...reference });
+}
+
+const reflected = (project: Project, id: string, reference: { constant: string } | { label: string }): boolean =>
+  "constant" in reference
+    ? (project.constantUses ?? []).some((u) => u.id === id && u.constant === reference.constant)
+    : (project.labelUses ?? []).some((u) => u.id === id && u.label === reference.label);
+
+/** The site a bind names, as its unbind spells it: framed, or the layer and address. */
+const clearing = (op: { frame?: Frame; at?: number; layerId?: string; address?: number }) =>
+  op.frame !== undefined ? { frame: op.frame, at: op.at } : { layerId: op.layerId, address: op.address };
+
+/** The bind that puts a found use back: framed at the root, or nested where it was. */
+function rebind<R extends { constantId: string } | { labelId: string }>(
+  found: FoundUse<{ id?: string; at: number | string; layer?: string; target?: string }, { id?: string; address: number | string }>,
+  project: Project,
+  reference: R
+): { id: string } & R & BindingSite {
+  const site: BindingSite =
+    found.layerIndex === undefined
+      ? { frame: useFrame(found.use), at: parseProjectAddress(found.use.at) }
+      : {
+          layerId: layerIdOf(project.layers[found.layerIndex], found.layerIndex),
+          address: parseProjectAddress(found.use.address),
+        };
+  return { id: found.use.id!, ...reference, ...site };
 }
 
 function findComment(project: Project, id: string): Found<ProjectComment> | undefined {
@@ -304,12 +389,16 @@ export function applyOp(raw: string, op: Op): string {
       return deleteTarget(raw, op.id);
 
     case "labelUse.bind":
-      return bindLabel(raw, useEntry(op, { label: op.labelId }));
+      return bindUse(raw, project, op, { label: op.labelId }, bindLabel, bindLabelIn);
 
-    case "labelUse.unbind":
+    case "labelUse.unbind": {
       // The site, resolved through the id only for an operation stored before
       // the site was the key. Nothing there: nothing to do.
-      return useAt(project.labelUses, op) ? unbindLabel(raw, siteOf(op)) : raw;
+      const found = labelUseAt(project, op);
+      if (!found) return raw;
+      const site = siteOf(found, op);
+      return site.layerIndex === undefined ? unbindLabel(raw, site) : unbindLabelIn(raw, site.layerIndex, site);
+    }
 
     case "claim.add":
       return upsertClaim(raw, projectClaimOf(op.claim));
@@ -569,10 +658,14 @@ export function applyOp(raw: string, op: Op): string {
       return deleteEvidence(raw, op.id);
 
     case "constantUse.bind":
-      return bindConstant(raw, useEntry(op, { constant: op.constantId }));
+      return bindUse(raw, project, op, { constant: op.constantId }, bindConstant, bindConstantIn);
 
-    case "constantUse.unbind":
-      return useAt(project.constantUses, op) ? unbindConstant(raw, siteOf(op)) : raw;
+    case "constantUse.unbind": {
+      const found = constantUseAt(project, op);
+      if (!found) return raw;
+      const site = siteOf(found, op);
+      return site.layerIndex === undefined ? unbindConstant(raw, site) : unbindConstantIn(raw, site.layerIndex, site);
+    }
 
     case "layer.add":
       return insertLayer(
@@ -736,28 +829,15 @@ export function invertOp(raw: string, op: Op): Op {
     case "labelUse.bind": {
       // What was at the site, by the site: a bind mints a fresh use id, so the
       // pre-state never holds it. Nothing there inverts to clearing the site.
-      const found = useAt(project.labelUses, op);
-      const site = bindSite(op)!;
-      if (!found) return { op: "labelUse.unbind", id: op.id, frame: site.frame, at: site.at };
-      return {
-        op: "labelUse.bind",
-        id: found.id!,
-        frame: useFrame(found),
-        at: parseProjectAddress(found.at),
-        labelId: found.label,
-      };
+      const found = labelUseAt(project, op);
+      if (!found) return { op: "labelUse.unbind", id: op.id, ...clearing(op) };
+      return { op: "labelUse.bind", ...rebind(found, project, { labelId: found.use.label }) };
     }
 
     case "labelUse.unbind": {
-      const found = useAt(project.labelUses, op);
+      const found = labelUseAt(project, op);
       if (!found) return op;
-      return {
-        op: "labelUse.bind",
-        id: found.id!,
-        frame: useFrame(found),
-        at: parseProjectAddress(found.at),
-        labelId: found.label,
-      };
+      return { op: "labelUse.bind", ...rebind(found, project, { labelId: found.use.label }) };
     }
 
     case "claim.add": {
@@ -1036,28 +1116,15 @@ export function invertOp(raw: string, op: Op): Op {
     }
 
     case "constantUse.bind": {
-      const found = useAt(project.constantUses, op);
-      const site = bindSite(op)!;
-      if (!found) return { op: "constantUse.unbind", id: op.id, frame: site.frame, at: site.at };
-      return {
-        op: "constantUse.bind",
-        id: found.id!,
-        frame: useFrame(found),
-        at: parseProjectAddress(found.at),
-        constantId: found.constant,
-      };
+      const found = constantUseAt(project, op);
+      if (!found) return { op: "constantUse.unbind", id: op.id, ...clearing(op) };
+      return { op: "constantUse.bind", ...rebind(found, project, { constantId: found.use.constant }) };
     }
 
     case "constantUse.unbind": {
-      const found = useAt(project.constantUses, op);
+      const found = constantUseAt(project, op);
       if (!found) return op;
-      return {
-        op: "constantUse.bind",
-        id: found.id!,
-        frame: useFrame(found),
-        at: parseProjectAddress(found.at),
-        constantId: found.constant,
-      };
+      return { op: "constantUse.bind", ...rebind(found, project, { constantId: found.use.constant }) };
     }
 
     case "layer.add":

@@ -13,9 +13,11 @@ import { filesWithIds, fileId } from "../project/files.js";
  */
 
 import {
-  usesToRoot,
   useFrame,
+  useFrameFields,
   useKey,
+  LegacyConstantUse,
+  LegacyLabelUse,
   Project,
   ProjectClaim,
   ProjectComment,
@@ -29,7 +31,8 @@ import {
   ProjectType,
   targetLinks,
 } from "../project/project.js";
-import { ClaimEdit, LayerAddOp, Op, TypeField } from "./types.js";
+import { BindingSite, ClaimEdit, LayerAddOp, Op, TypeField } from "./types.js";
+import { layerIdOf } from "../project/identity.js";
 import { Claim } from "../claims/model.js";
 
 /** A stored claim as the model sees it, via the loader's own parser. */
@@ -82,19 +85,48 @@ const sameLabel = (a: ProjectLabel, b: ProjectLabel) =>
   (a.type ?? "address") === (b.type ?? "address") &&
   a.extent === b.extent;
 
-function usesById(project: Project): Map<string, ProjectConstantUse> {
-  return new Map((project.constantUses ?? []).filter((u) => u.id).map((u) => [u.id!, u]));
+/**
+ * A use and where it lives: at the root, framed, or — history — nested in a
+ * layer at an absolute address. Both forms are diffed in their own spelling,
+ * because the operations that reach a nested one are the ones recorded before
+ * frames, and only a boundary that knows the layer's placement may convert it.
+ */
+type OwnedUse<T, L> = { use: T; layerId?: undefined } | { use: L; layerId: string };
+
+function usesById(project: Project): Map<string, OwnedUse<ProjectConstantUse, LegacyConstantUse>> {
+  const out = new Map<string, OwnedUse<ProjectConstantUse, LegacyConstantUse>>();
+  project.layers.forEach((layer, index) => {
+    for (const use of layer.constantUses ?? []) if (use.id) out.set(use.id, { use, layerId: layerIdOf(layer, index) });
+  });
+  for (const use of project.constantUses ?? []) if (use.id) out.set(use.id, { use });
+  return out;
 }
 
-function labelUsesById(project: Project): Map<string, ProjectLabelUse> {
-  return new Map((project.labelUses ?? []).filter((u) => u.id).map((u) => [u.id!, u]));
+function labelUsesById(project: Project): Map<string, OwnedUse<ProjectLabelUse, LegacyLabelUse>> {
+  const out = new Map<string, OwnedUse<ProjectLabelUse, LegacyLabelUse>>();
+  project.layers.forEach((layer, index) => {
+    for (const use of layer.labelUses ?? []) if (use.id) out.set(use.id, { use, layerId: layerIdOf(layer, index) });
+  });
+  for (const use of project.labelUses ?? []) if (use.id) out.set(use.id, { use });
+  return out;
 }
 
-const sameLabelUse = (a: ProjectLabelUse, b: ProjectLabelUse) =>
-  useKey(a) === useKey(b) && a.label === b.label;
+/** The site of a use as its operation spells it. */
+const useSite = <T extends { at: number | string; layer?: string; target?: string }, L extends { address: number | string }>(
+  owned: OwnedUse<T, L>
+): BindingSite =>
+  owned.layerId === undefined
+    ? { frame: useFrame(owned.use), at: parseProjectAddress(owned.use.at) }
+    : { layerId: owned.layerId, address: parseProjectAddress(owned.use.address) };
 
-const sameUse = (a: ProjectConstantUse, b: ProjectConstantUse) =>
-  useKey(a) === useKey(b) && a.constant === b.constant;
+const sameSite = (a: BindingSite, b: BindingSite) =>
+  a.layerId === b.layerId && a.address === b.address && a.at === b.at && useKey({ at: a.at ?? 0, ...useFrameFields(a.frame ?? { space: "address" }) }) === useKey({ at: b.at ?? 0, ...useFrameFields(b.frame ?? { space: "address" }) });
+
+const sameLabelUse = (a: OwnedUse<ProjectLabelUse, LegacyLabelUse>, b: OwnedUse<ProjectLabelUse, LegacyLabelUse>) =>
+  sameSite(useSite(a), useSite(b)) && a.use.label === b.use.label;
+
+const sameUse = (a: OwnedUse<ProjectConstantUse, LegacyConstantUse>, b: OwnedUse<ProjectConstantUse, LegacyConstantUse>) =>
+  sameSite(useSite(a), useSite(b)) && a.use.constant === b.use.constant;
 
 const sameConstant = (a: ProjectConstant, b: ProjectConstant) =>
   a.name === b.name && parseProjectAddress(a.value) === parseProjectAddress(b.value);
@@ -136,8 +168,8 @@ export function diffProjects(
   to: Project,
   rejected?: FileContentRejection[]
 ): Op[] {
-  from = usesToRoot(filesWithIds(from));
-  to = usesToRoot(filesWithIds(to));
+  from = filesWithIds(from);
+  to = filesWithIds(to);
   const ops: Op[] = [];
 
   // Name and description, which had an operation and an inverse and no way to
@@ -297,14 +329,10 @@ export function diffProjects(
     if (!afterComments.has(id)) ops.push({ op: "comment.remove", id, layerId: owned.layerId });
   }
   for (const [id, use] of beforeUses) {
-    if (!afterUses.has(id)) {
-      ops.push({ op: "constantUse.unbind", id, frame: useFrame(use), at: parseProjectAddress(use.at) });
-    }
+    if (!afterUses.has(id)) ops.push({ op: "constantUse.unbind", id, ...useSite(use) });
   }
   for (const [id, use] of beforeLabelUses) {
-    if (!afterLabelUses.has(id)) {
-      ops.push({ op: "labelUse.unbind", id, frame: useFrame(use), at: parseProjectAddress(use.at) });
-    }
+    if (!afterLabelUses.has(id)) ops.push({ op: "labelUse.unbind", id, ...useSite(use) });
   }
   // Declarations go after the sites that meant them, so nothing is left
   // pointing at a constant that has already gone.
@@ -605,25 +633,13 @@ export function diffProjects(
   for (const [id, use] of afterLabelUses) {
     const before = beforeLabelUses.get(id);
     if (before && sameLabelUse(before, use)) continue;
-    ops.push({
-      op: "labelUse.bind",
-      id,
-      frame: useFrame(use),
-      at: parseProjectAddress(use.at),
-      labelId: use.label,
-    });
+    ops.push({ op: "labelUse.bind", id, ...useSite(use), labelId: use.use.label });
   }
 
   for (const [id, use] of afterUses) {
     const before = beforeUses.get(id);
     if (before && sameUse(before, use)) continue;
-    ops.push({
-      op: "constantUse.bind",
-      id,
-      frame: useFrame(use),
-      at: parseProjectAddress(use.at),
-      constantId: use.constant,
-    });
+    ops.push({ op: "constantUse.bind", id, ...useSite(use), constantId: use.use.constant });
   }
 
   for (const [id, owned] of afterComments) {

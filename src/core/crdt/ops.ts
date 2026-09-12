@@ -12,7 +12,7 @@ import { fileId, splitFilePath } from "../project/files.js";
 
 import * as Y from "yjs";
 import { ClaimEdit, Op } from "../ops/types.js";
-import { bindSite, legacyChildTarget, legacyTypeSetChildren, typeAddFields } from "../ops/legacy.js";
+import { BindSite, bindSite, legacyChildTarget, legacyTypeSetChildren, typeAddFields } from "../ops/legacy.js";
 import { useFrameFields, useKey } from "../project/project.js";
 import type { Frame } from "../claims/model.js";
 import { derivedId } from "../project/identity.js";
@@ -22,29 +22,65 @@ import { encodeClaim, decodeClaim, claimsRoot } from "./claims.js";
 const hex4 = (n: number) => "$" + n.toString(16).toUpperCase().padStart(4, "0");
 
 /**
- * Which entry an unbind means: the site when the operation names one — frame
- * and coordinate, or the address-framed site an operation from before frames
- * meant by its absolute `address` — and the entry carrying its use id when it
- * names neither, which only history from before sites were keys does.
+ * The map a binding lives in and its key there: the root, keyed by the framed
+ * site; or — history — the owning layer's nested map, keyed by the absolute
+ * address. An unbind from before sites were keys names only an id, and is
+ * found by scanning every map for it.
  */
-function siteKeyFor(
-  uses: Y.Map<Y.Map<unknown>>,
-  op: { id: string; frame?: Frame; at?: number; address?: number }
-): string | undefined {
+function useSlot(
+  doc: Y.Doc,
+  root: "constantUses" | "labelUses",
+  op: { id: string; frame?: Frame; at?: number; layerId?: string; address?: number }
+): { uses: Y.Map<Y.Map<unknown>>; key: string } | undefined {
   const site = bindSite(op);
-  if (site) return useKey({ at: site.at, ...useFrameFields(site.frame) });
-  return [...uses.keys()].find((key) => {
-    const held = uses.get(key);
-    return held instanceof Y.Map && held.get("id") === op.id;
-  });
+  if (site?.kind === "framed") {
+    return { uses: doc.getMap<Y.Map<unknown>>(root), key: useKey({ at: site.at, ...useFrameFields(site.frame) }) };
+  }
+  const byId = (uses: Y.Map<Y.Map<unknown>>) =>
+    [...uses.keys()].find((key) => {
+      const held = uses.get(key);
+      return held instanceof Y.Map && held.get("id") === op.id;
+    });
+  if (site?.kind === "nested" && site.address !== undefined) {
+    return { uses: childMap(layerById(doc, site.layerId), root), key: hex4(site.address) };
+  }
+  // By id alone: in the layer named, if one was — and then anywhere, because
+  // the use may have moved to the root since the operation was recorded.
+  if (site?.kind === "nested") {
+    const uses = childMap(layerById(doc, site.layerId), root);
+    const key = byId(uses);
+    if (key !== undefined) return { uses, key };
+  }
+  const atRoot = byId(doc.getMap<Y.Map<unknown>>(root));
+  if (atRoot !== undefined) return { uses: doc.getMap<Y.Map<unknown>>(root), key: atRoot };
+  for (const layer of doc.getArray<Y.Map<unknown>>("layers")) {
+    const nested = layer.get(root);
+    if (!(nested instanceof Y.Map)) continue;
+    const key = byId(nested as Y.Map<Y.Map<unknown>>);
+    if (key !== undefined) return { uses: nested as Y.Map<Y.Map<unknown>>, key };
+  }
+  return undefined;
+}
+
+/**
+ * Whether a nested bind — history — is already reflected at the root: the use
+ * it recorded stands there, moved by the migration. Replaying it nested would
+ * say the same thing twice, and undo checks a replay changes nothing.
+ */
+function reflected(doc: Y.Doc, root: "constantUses" | "labelUses", id: string, reference: string): boolean {
+  const uses = doc.getMap<Y.Map<unknown>>(root);
+  const field = root === "constantUses" ? "constant" : "label";
+  return [...uses.values()].some((held) => held instanceof Y.Map && held.get("id") === id && held.get(field) === reference);
 }
 
 /** A use record as the document spells it: the frame flat, the coordinate as hex. */
 function useRecord(
-  op: { id: string; frame: Frame; at: number },
+  op: { id: string; site: BindSite },
   reference: { constant: string } | { label: string }
 ): Record<string, unknown> {
-  return { id: op.id, at: hex4(op.at), ...useFrameFields(op.frame), ...reference };
+  return op.site.kind === "framed"
+    ? { id: op.id, at: hex4(op.site.at), ...useFrameFields(op.site.frame), ...reference }
+    : { id: op.id, address: hex4(op.site.address!), ...reference };
 }
 
 function layerById(doc: Y.Doc, id: string): Y.Map<unknown> {
@@ -228,22 +264,20 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
       // Keyed by the site, like every binding — see `constantUse.bind` for what
       // keying by a minted use id cost.
       case "labelUse.bind": {
-        const uses = doc.getMap<Y.Map<unknown>>("labelUses");
-        const site = bindSite(op)!;
-        const key = useKey({ at: site.at, ...useFrameFields(site.frame) });
+        if (bindSite(op)?.kind === "nested" && reflected(doc, "labelUses", op.id, op.labelId)) break;
+        const { uses, key } = useSlot(doc, "labelUses", op)!;
         let entry = uses.get(key);
         if (!entry) {
           entry = new Y.Map<unknown>();
           uses.set(key, entry);
         }
-        assign(entry, useRecord({ id: op.id, ...site }, { label: op.labelId }));
+        assign(entry, useRecord({ id: op.id, site: bindSite(op)! }, { label: op.labelId }));
         break;
       }
 
       case "labelUse.unbind": {
-        const uses = doc.getMap<Y.Map<unknown>>("labelUses");
-        const key = siteKeyFor(uses, op);
-        if (key !== undefined) uses.delete(key);
+        const slot = useSlot(doc, "labelUses", op);
+        if (slot) slot.uses.delete(slot.key);
         break;
       }
 
@@ -647,22 +681,20 @@ function applyOpInTransaction(doc: Y.Doc, op: Op): void {
       // Which value showed depended on the ids, not on which bind happened
       // later.
       case "constantUse.bind": {
-        const uses = doc.getMap<Y.Map<unknown>>("constantUses");
-        const site = bindSite(op)!;
-        const key = useKey({ at: site.at, ...useFrameFields(site.frame) });
+        if (bindSite(op)?.kind === "nested" && reflected(doc, "constantUses", op.id, op.constantId)) break;
+        const { uses, key } = useSlot(doc, "constantUses", op)!;
         let entry = uses.get(key);
         if (!entry) {
           entry = new Y.Map<unknown>();
           uses.set(key, entry);
         }
-        assign(entry, useRecord({ id: op.id, ...site }, { constant: op.constantId }));
+        assign(entry, useRecord({ id: op.id, site: bindSite(op)! }, { constant: op.constantId }));
         break;
       }
 
       case "constantUse.unbind": {
-        const uses = doc.getMap<Y.Map<unknown>>("constantUses");
-        const key = siteKeyFor(uses, op);
-        if (key !== undefined) uses.delete(key);
+        const slot = useSlot(doc, "constantUses", op);
+        if (slot) slot.uses.delete(slot.key);
         break;
       }
 

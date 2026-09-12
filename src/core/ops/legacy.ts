@@ -82,18 +82,30 @@ export function legacyChildTarget<F extends { id?: string; offset: number }>(
 /**
  * The site a bind or unbind means, whichever spelling it arrived in.
  *
- * A current operation carries a frame and a coordinate. One recorded before
- * uses had frames carries `layerId` and an absolute `address` — and it meant
- * "this site, wherever the bytes came from", which is the address frame. One
- * older still carries only an id, which `siteKeyFor` in the adapters resolves
- * by scanning for it.
+ * A current operation carries a frame and a coordinate, and lives at the root.
+ * One recorded before uses had frames carries the owning `layerId` and an
+ * absolute `address` — and it meant "this operand, *in this layer*", which is
+ * not the address frame: the owner decided whether the binding showed, and
+ * kept it apart from another layer's at the same address. So it goes where it
+ * always went, nested in its layer, until a boundary that knows the layer's
+ * placement converts it (`usesToRoot`). One older still carries an id and no
+ * site at all, and is resolved by scanning for the id.
  */
+export type BindSite =
+  | { kind: "framed"; frame: Frame; at: number }
+  | { kind: "nested"; layerId: string; address?: number };
+
 export function bindSite(op: {
   frame?: Frame;
   at?: number;
+  layerId?: string;
   address?: number;
-}): { frame: Frame; at: number } | undefined {
-  if (op.frame !== undefined && op.at !== undefined) return { frame: op.frame, at: op.at };
-  if (op.address !== undefined) return { frame: { space: "address" }, at: op.address };
+}): BindSite | undefined {
+  if (op.frame !== undefined && op.at !== undefined) return { kind: "framed", frame: op.frame, at: op.at };
+  if (op.layerId !== undefined) {
+    return op.address === undefined
+      ? { kind: "nested", layerId: op.layerId }
+      : { kind: "nested", layerId: op.layerId, address: op.address };
+  }
   return undefined;
 }
