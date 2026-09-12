@@ -4310,6 +4310,23 @@ export class Workspace {
         for (const key of Object.keys(replacement)) {
           if (replacement[key] === null) delete replacement[key];
         }
+        if (Object.values(replacement).some((value) => value !== undefined)) {
+          if (replacement.is === undefined) {
+            throw new Error("Say what the bytes are (`is`) before how to read them.");
+          }
+          if (replacement.is === "record" && replacement.typeId === undefined) {
+            throw new Error("A record claim needs a typeId: list_types shows what this project has.");
+          }
+          if (replacement.typeId !== undefined && replacement.is !== "record") {
+            throw new Error("typeId belongs to a record interpretation; supply is: \"record\" with it.");
+          }
+          if (replacement.encoding !== undefined && replacement.is !== "text") {
+            throw new Error("encoding belongs to a text interpretation; supply is: \"text\" with it.");
+          }
+          if (replacement.view !== undefined && replacement.is !== "text" && replacement.is !== "bitmap") {
+            throw new Error("view belongs to a text or bitmap interpretation; supply its is with it.");
+          }
+        }
         says = Object.keys(replacement).length === 0 ? null : replacement;
       }
       const merged = { ...fields, ...(says === undefined ? {} : { says }) } as ClaimEdit & {
