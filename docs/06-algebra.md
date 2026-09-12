@@ -92,6 +92,47 @@ record's author and time while clearing its method. This is different from
 making every nested object an implicit partial patch. Required identity and
 signature fields are not implicitly nullable.
 
+### MCP edit clearability
+
+Every entity edit distinguishes an omitted field (leave it alone) from an
+explicit `null` (remove a clearable value). Optional in a request means the
+caller need not change that field; it does **not** mean the entity can exist
+without it. Required values reject `null`. Empty strings and empty arrays are
+values, subject to each field's validation, rather than alternate clear tokens.
+
+| Tool | Arguments accepting `null` | Arguments that cannot be cleared |
+|---|---|---|
+| `edit_claim` | `name`, `is`, `extent`, `root`, `encoding`, `view`, `method` | `address`, `typeId` |
+| `edit_comment` | `order` | `text`, `placement` |
+| `edit_target` | `entryPoints`, `order`, `description` | `name`, `layers` |
+| `edit_field` | `description` | `name`, `type`, `offset` |
+| `edit_evidence` | `method`, `scenario`, `capture`, `other`, `note` | `kind` |
+| `edit_scenario` | `description` | `name`, `steps` |
+| `edit_type` | none | `name`, `size`, `unit` |
+| `edit_constant` | none | `name`, `value` |
+| `edit_decoder` | none | `name`, `source` |
+| `edit_message` | none | `text` |
+
+The table lists editable arguments, excluding ids and request context. The
+[registry test](../src/server/mcp/edit-nullability.test.ts) checks every registered
+`edit_*` tool and its fields against an inventory checked against the operation
+types. Explicit exceptions record fields that the MCP surface does not expose.
+File and layer renames cannot clear their name; captures have no `edit_capture`
+tool even though the low-level `capture.set` can clear `when`.
+
+`edit_claim` is a convenience patch over the whole-value `says` field. Without
+`is`, supplied interpretation options amend the existing interpretation:
+`encoding: null` and `view: null` remove just those options, preserving omitted
+siblings. Supplying a non-null `is` replaces the interpretation with that kind
+and the options supplied in the same call. `is: null` withdraws the whole
+interpretation. A record requires `typeId`; withdraw it with `is: null` rather
+than leaving a record without a layout reference. `method` edits the caller's
+supporting evidence, preserving its author and time.
+
+Clearing target `entryPoints` removes the explicit list; an empty list remains
+an explicit value. Clearing comment `order` restores the default ordering for
+that comment. Neither operation removes the entity; use its `remove_*` tool.
+
 ## Shape 2 — Binding
 
 A **key → id** map. The key is a position — an address — and the value names an

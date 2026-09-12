@@ -1506,7 +1506,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       id: z.string().describe("Field id, from list_types"),
       name: z.string().min(1).optional(),
       type: z.string().optional(),
-      description: z.string().nullable().optional(),
+      description: z.string().nullable().optional().describe("Null clears the description; omit to leave it alone"),
       offset: z.number().int().min(0).optional().describe("Move it here"),
     },
     (args: {
@@ -1676,9 +1676,10 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "ids covering an address; an invented `dat_`/`loc_`/`sub_` name has none, " +
       "because nothing stored it, and naming that address is an ordinary " +
       "`add_claim`. " +
-      "Every field is optional and **omitting one leaves it alone**; passing " +
+      "Every edit field is optional and **omitting one leaves it alone**; passing " +
       "`null` clears it — which is how a root is taken off, an extent removed, " +
-      "or an interpretation un-said.",
+      "or an interpretation un-said. Address and record typeId cannot be cleared; " +
+      "use is: null to withdraw the whole record interpretation.",
     {
       project,
       id: z.string().describe("Claim id, from claims_at or add_claim"),
@@ -1688,15 +1689,15 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
           "Move it. Absolute, like every address here — a claim is stored " +
             "relative to the layer holding its bytes, and this is converted"
         ),
-      name: z.string().min(1).nullable().optional(),
+      name: z.string().min(1).nullable().optional().describe("Null clears; omit to leave unchanged"),
       // `record` was missing here while `add_claim` accepted it, so a record
       // claim could be made and never corrected — reported in two runs.
-      is: z.enum(["data", "text", "bitmap", "jumptable", "record"]).nullable().optional(),
-      typeId: z.string().nullable().optional().describe("With is:\"record\", the layout"),
-      extent: z.number().int().min(1).max(0x10000).nullable().optional(),
-      root: z.enum(["entry", "routine", "location", "data"]).nullable().optional(),
-      encoding: z.enum(["petscii", "screen", "ascii", "keycode"]).nullable().optional(),
-      view: z.string().nullable().optional(),
+      is: z.enum(["data", "text", "bitmap", "jumptable", "record"]).nullable().optional().describe("Null clears; omit to leave unchanged"),
+      typeId: z.string().optional().describe("With is:\"record\", the required layout; cannot be cleared"),
+      extent: z.number().int().min(1).max(0x10000).nullable().optional().describe("Null clears; omit to leave unchanged"),
+      root: z.enum(["entry", "routine", "location", "data"]).nullable().optional().describe("Null clears; omit to leave unchanged"),
+      encoding: z.enum(["petscii", "screen", "ascii", "keycode"]).nullable().optional().describe("Null clears; omit to leave unchanged"),
+      view: z.string().nullable().optional().describe("Null clears; omit to leave unchanged"),
       // Settable at creation and nowhere else, so a reader who learned more
       // could not say so — "I guessed, then I ran it" is exactly the movement
       // this axis exists to record.
@@ -1717,7 +1718,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       root?: RootKind | null;
       encoding?: TextEncoding | null;
       view?: string | null;
-      typeId?: string | null;
+      typeId?: string;
       method?: "guessed" | "transcribed" | "read" | "derived" | "ran" | null;
     }) => {
       const { workspace, caller } = context();
@@ -1751,9 +1752,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         if (value === undefined) continue;
         saysTouched = true;
         if (key === "is" && value === null) saysCleared = true;
-        else if (value !== null) says[key] = value;
+        else says[key] = value;
       }
-      if (saysTouched) fields.says = saysCleared ? null : (says as Claim["says"]);
+      if (saysTouched) fields.says = saysCleared ? null : says;
 
       // `method` lives on `by`, which also carries the author and the source —
       // so this merges rather than replacing, or revising how you know would
@@ -1762,7 +1763,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         fields.method = args.method;
       }
 
-      return space.setClaim(caller, args.id, fields as ClaimEdit);
+      return space.setClaim(caller, args.id, fields as Parameters<typeof space.setClaim>[2]);
     }
   );
 
@@ -2184,7 +2185,8 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     "edit_target",
     "Revise a view by id. Omitted fields are left alone, so describing a " +
       "target does not restate its layers and two people revising one do not " +
-      "revert each other. An id nothing holds is an error — this never creates.",
+      "revert each other. An id nothing holds is an error — this never creates. " +
+      "`entryPoints`, `order`, and `description` accept null to clear.",
     {
       project,
       id: z.string().describe("From add_target or list_targets"),
@@ -2199,18 +2201,18 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         .min(1)
         .optional()
         .describe("Bottom-up, so the last shadows the rest; omit to leave the links alone"),
-      entryPoints: z.array(address).optional(),
-      order: z.number().int().optional(),
-      description: z.string().optional(),
+      entryPoints: z.array(address).nullable().optional().describe("Null clears explicit entry points"),
+      order: z.number().int().nullable().optional().describe("Null clears ordering"),
+      description: z.string().nullable().optional().describe("Null clears the description"),
     },
     (args: {
       project?: string;
       id: string;
       name?: string;
       layers?: { layer: string; at?: number }[];
-      entryPoints?: number[];
-      order?: number;
-      description?: string;
+      entryPoints?: number[] | null;
+      order?: number | null;
+      description?: string | null;
     }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project);
@@ -2378,7 +2380,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   tool(
     "edit_evidence",
     "Revise a piece of evidence by id. Omitted fields are left alone; `null` " +
-      "clears one. An id nothing holds is an error. Revising `method` keeps the " +
+      "clears method, scenario, capture, other, or note; kind cannot be cleared. An id nothing holds is an error. Revising `method` keeps the " +
       "author and the time the record already carries.",
     {
       project,
@@ -2393,10 +2395,10 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
             "`null` clears the method while keeping them — somebody vouched for " +
             "this even where how they knew is no longer worth stating."
         ),
-      scenario: z.string().nullable().optional(),
-      capture: z.string().nullable().optional(),
-      other: z.string().nullable().optional(),
-      note: z.string().nullable().optional(),
+      scenario: z.string().nullable().optional().describe("Null clears; omit to leave unchanged"),
+      capture: z.string().nullable().optional().describe("Null clears; omit to leave unchanged"),
+      other: z.string().nullable().optional().describe("Null clears; omit to leave unchanged"),
+      note: z.string().nullable().optional().describe("Null clears; omit to leave unchanged"),
     },
     (args: {
       project?: string;
@@ -2486,7 +2488,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       project,
       id: z.string().describe("From add_scenario or list_scenarios"),
       name: z.string().min(1).optional(),
-      description: z.string().nullable().optional(),
+      description: z.string().nullable().optional().describe("Null clears the description; omit to leave it alone"),
       steps: z.array(stepSchema).min(1).optional(),
     },
     (args: {
@@ -2788,11 +2790,13 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     "Revise a comment by id: its text, its placement, or where it sits among " +
       "the comments at its address. The half add_comment deliberately does not " +
       "do — an address does not identify a comment, so revising by address is " +
-      "how one writer silently destroys another's.",
+      "how one writer silently destroys another's. Omitted fields stay unchanged; " +
+      "`order: null` clears explicit ordering.",
     {
       project,
       id: z.string().describe("From list_comments or add_comment"),
       text: z.string().min(1).optional(),
+      order: z.number().int().nullable().optional().describe("Null restores default ordering by id"),
       placement: z.enum(["before", "inline", "after"]).optional(),
     },
     (args: {
@@ -2800,12 +2804,14 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       target?: string;
       id: string;
       text?: string;
+      order?: number | null;
       placement?: "before" | "inline" | "after";
     }) => {
       const { workspace, caller } = context();
       const space = workspace(args.project, args.target);
       return space.editComment(caller, args.id, {
         ...(args.text === undefined ? {} : { text: args.text }),
+        ...(args.order === undefined ? {} : { order: args.order }),
         ...(args.placement === undefined ? {} : { placement: args.placement }),
       });
     }

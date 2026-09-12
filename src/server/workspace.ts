@@ -1313,9 +1313,9 @@ export class Workspace {
     fields: {
       name?: string;
       layers?: readonly { layer: string; at?: number }[];
-      entryPoints?: readonly number[];
-      order?: number;
-      description?: string;
+      entryPoints?: readonly number[] | null;
+      order?: number | null;
+      description?: string | null;
     }
   ): EditResult & { target: string } {
     this.mustHold(projectFromDoc(this.reading()).targets ?? [], id, "target", "list_targets");
@@ -1335,7 +1335,7 @@ export class Workspace {
           ...(links === undefined ? {} : { layers: links }),
           ...(fields.entryPoints === undefined
             ? {}
-            : { entryPoints: [...fields.entryPoints] }),
+            : { entryPoints: fields.entryPoints === null ? null : [...fields.entryPoints] }),
           ...(fields.order === undefined ? {} : { order: fields.order }),
           ...(fields.description === undefined ? {} : { description: fields.description }),
         },
@@ -4280,7 +4280,10 @@ export class Workspace {
    * interpretation would otherwise be unexpressible, and the inverse of "set a
    * root on a claim that had none" unwritable.
    */
-  setClaim(caller: Caller, id: string, fields: ClaimEdit): EditResult {
+  setClaim(caller: Caller, id: string, fields: Omit<ClaimEdit, "says"> & {
+    says?: { is?: Interpretation["is"]; encoding?: TextEncoding | null; view?: string | null; typeId?: string } | null;
+    method?: ClaimMethod | null;
+  }): EditResult {
     if (Object.keys(fields).length === 0) {
       throw new Error("Give at least one field to change. Omitted means 'leave alone'; null clears.");
     }
@@ -4298,10 +4301,20 @@ export class Workspace {
       // parts it did not mention come from what is already there. Without this,
       // `edit_claim view:` turned a text span back into a hex dump and clearing
       // the view did not bring it back.
-      const merged: ClaimEdit =
-        fields.says && fields.says !== null && held.says && !("is" in (fields.says as object))
-          ? { ...fields, says: { ...held.says, ...fields.says } as Claim["says"] }
-          : fields;
+      let says = fields.says;
+      if (says) {
+        const replacement: Record<string, unknown> = {
+          ...(!("is" in says) ? held.says : {}),
+          ...says,
+        };
+        for (const key of Object.keys(replacement)) {
+          if (replacement[key] === null) delete replacement[key];
+        }
+        says = Object.keys(replacement).length === 0 ? null : replacement;
+      }
+      const merged = { ...fields, ...(says === undefined ? {} : { says }) } as ClaimEdit & {
+        method?: ClaimMethod | null;
+      };
 
       // **How you know is no longer on the claim, so revising it edits the
       // vouching instead.** `method` stays an argument here because that is how
@@ -5780,7 +5793,7 @@ export class Workspace {
   editComment(
     caller: Caller,
     id: string,
-    changes: { text?: string; placement?: CommentPlacement; order?: number }
+    changes: { text?: string; placement?: CommentPlacement; order?: number | null }
   ): EditResult {
     if (changes.text === undefined && changes.placement === undefined && changes.order === undefined) {
       throw new Error("Give something to change: text, placement, or order.");

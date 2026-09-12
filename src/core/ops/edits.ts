@@ -436,7 +436,7 @@ export function commentAddOp(
 export function commentEditOp(
   loaded: LoadedProject,
   id: string,
-  changes: { text?: string; placement?: CommentPlacement; order?: number }
+  changes: { text?: string; placement?: CommentPlacement; order?: number | null }
 ): Op {
   for (const layer of loaded.project.layers) {
     const existing = layer.comments?.find((c) => c.id === id);
