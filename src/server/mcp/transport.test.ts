@@ -3136,3 +3136,71 @@ describe('file identity at the participant boundary', () => {
     expect(listed.scenarios.find(s=>s.id===id)!.captures.find(c=>c.id===first.id)!.file).toBe(first.file);
   });
 });
+
+describe("clear versus omit across edit tools (#29)", () => {
+  const exported = async () => JSON.parse(
+    ((await callTool("export_project")).value as { text: string }).text,
+  );
+  const edit = async (tool: string, args: Record<string, unknown>) => {
+    const result = await callTool(tool, args);
+    expect(result.isError, result.text).toBe(false);
+    return result;
+  };
+
+  it("clears target optional fields independently, preserving omitted values and links", async () => {
+    const { layers } = (await callTool("list_targets")).value as { layers: { id: string }[] };
+    const made = await edit("add_target", {
+      name: "clearable", layers: [{ layer: layers[0].id }],
+      entryPoints: [0x8100], order: 7, description: "keep until cleared",
+    });
+    const id = (made.value as { target: string }).target;
+    const before = (await exported()).targets.find((t: { id: string }) => t.id === id);
+    await edit("edit_target", { id, description: null });
+    const partial = (await exported()).targets.find((t: { id: string }) => t.id === id);
+    expect(partial).not.toHaveProperty("description");
+    expect(partial.entryPoints).toEqual(before.entryPoints);
+    expect(partial.order).toBe(7);
+    await edit("edit_target", { id, entryPoints: null, order: null });
+    const after = (await exported()).targets.find((t: { id: string }) => t.id === id);
+    expect(after).not.toHaveProperty("entryPoints");
+    expect(after).not.toHaveProperty("order");
+    expect(after.layers).toEqual(before.layers);
+    expect(after.name).toBe("clearable");
+  });
+
+  it("clears comment order without rewriting its text or placement", async () => {
+    const made = await edit("add_comment", { address: "$8100", text: "keep this", placement: "after" });
+    const id = (made.value as { comment: string }).comment;
+    await edit("edit_comment", { id, order: 12 });
+    const comment = async () => (await exported()).layers.flatMap((l: { comments?: unknown[] }) => l.comments ?? [])
+      .find((c: { id: string }) => c.id === id);
+    expect((await comment()).order).toBe(12);
+    await edit("edit_comment", { id, text: "revised" });
+    expect((await comment()).order).toBe(12);
+    await edit("edit_comment", { id, order: null });
+    expect(await comment()).toMatchObject({ text: "revised", placement: "after" });
+    expect(await comment()).not.toHaveProperty("order");
+  });
+
+  it("clears interpretation options while preserving omitted siblings", async () => {
+    const made = await edit("add_claim", {
+      address: "$8250", name: "text", is: "text", encoding: "ascii", view: "char:8", extent: 4,
+    });
+    const id = (made.value as { claims: { claim: string }[] }).claims[0].claim;
+    const claim = async () => (await exported()).claims.find((c: { id: string }) => c.id === id);
+    await edit("edit_claim", { id, view: null });
+    expect(await claim()).toMatchObject({ is: "text", encoding: "ascii" });
+    expect(await claim()).not.toHaveProperty("view");
+    await edit("edit_claim", { id, encoding: null });
+    expect(await claim()).toMatchObject({ is: "text" });
+    expect(await claim()).not.toHaveProperty("encoding");
+    expect(await claim()).toMatchObject({ name: "text", extent: 4 });
+    await edit("edit_claim", { id, is: null });
+    expect(await claim()).not.toHaveProperty("is");
+    // Clearing an already absent option must not create an empty interpretation.
+    await edit("edit_claim", { id, view: null });
+    expect(await claim()).not.toHaveProperty("is");
+    const refused = await callTool("edit_claim", { id, typeId: null });
+    expect(refused.isError).toBe(true);
+  });
+});

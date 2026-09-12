@@ -392,19 +392,19 @@ Say several things at once, as one action. Undo takes the whole batch back. Use 
 
 #### `edit_claim`
 
-Correct a claim, by its id. The way to change what you said rather than say something else: adding is never keyed by an address, because several claims cover any interesting one and so an address cannot say which you meant. `claims_at` reports the ids covering an address; an invented `dat_`/`loc_`/`sub_` name has none, because nothing stored it, and naming that address is an ordinary `add_claim`. Every field is optional and **omitting one leaves it alone**; passing `null` clears it — which is how a root is taken off, an extent removed, or an interpretation un-said.
+Correct a claim, by its id. The way to change what you said rather than say something else: adding is never keyed by an address, because several claims cover any interesting one and so an address cannot say which you meant. `claims_at` reports the ids covering an address; an invented `dat_`/`loc_`/`sub_` name has none, because nothing stored it, and naming that address is an ordinary `add_claim`. Every edit field is optional and **omitting one leaves it alone**; passing `null` clears it — which is how a root is taken off, an extent removed, or an interpretation un-said. Address and record typeId cannot be cleared; use is: null to withdraw the whole record interpretation.
 
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** | Claim id, from claims_at or add_claim |
 | `address` | `string,number` | optional | Move it. Absolute, like every address here — a claim is stored relative to the layer holding its bytes, and this is converted |
-| `name` | `any` | optional |  |
-| `is` | `any` | optional |  |
-| `typeId` | `string,null` | optional | With is:"record", the layout |
-| `extent` | `any` | optional |  |
-| `root` | `any` | optional |  |
-| `encoding` | `any` | optional |  |
-| `view` | `string,null` | optional |  |
+| `name` | `any` | optional | Null clears; omit to leave unchanged |
+| `is` | `any` | optional | Null clears; omit to leave unchanged |
+| `typeId` | `string` | optional | With is:"record", the required layout; cannot be cleared |
+| `extent` | `any` | optional | Null clears; omit to leave unchanged |
+| `root` | `any` | optional | Null clears; omit to leave unchanged |
+| `encoding` | `any` | optional | Null clears; omit to leave unchanged |
+| `view` | `string,null` | optional | Null clears; omit to leave unchanged |
 | `method` | `any` | optional | How you know, revised: a guess you have since run is no longer a guess |
 
 #### `remove_claim`
@@ -501,12 +501,13 @@ Add several comments in one call, as one action. Undo takes the batch back whole
 
 #### `edit_comment`
 
-Revise a comment by id: its text, its placement, or where it sits among the comments at its address. The half add_comment deliberately does not do — an address does not identify a comment, so revising by address is how one writer silently destroys another's.
+Revise a comment by id: its text, its placement, or where it sits among the comments at its address. The half add_comment deliberately does not do — an address does not identify a comment, so revising by address is how one writer silently destroys another's. Omitted fields stay unchanged; `order: null` clears explicit ordering.
 
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** | From list_comments or add_comment |
 | `text` | `string` | optional |  |
+| `order` | `any` | optional | Null restores default ordering by id |
 | `placement` | `before` \| `inline` \| `after` | optional |  |
 
 #### `reorder_comments`
@@ -644,7 +645,7 @@ Revise one field by its id: rename it, retype it, or **move it**. A field carrie
 | `id` | `string` | **required** | Field id, from list_types |
 | `name` | `string` | optional |  |
 | `type` | `string` | optional |  |
-| `description` | `string,null` | optional |  |
+| `description` | `string,null` | optional | Null clears the description; omit to leave it alone |
 | `offset` | `integer` | optional | Move it here |
 
 #### `remove_field`
@@ -711,7 +712,7 @@ Revise a workflow by id. Omitted fields are left alone; `steps` is written whole
 |---|---|---|---|
 | `id` | `string` | **required** | From add_scenario or list_scenarios |
 | `name` | `string` | optional |  |
-| `description` | `string,null` | optional |  |
+| `description` | `string,null` | optional | Null clears the description; omit to leave it alone |
 | `steps` | `array` | optional |  |
 
 #### `remove_scenario`
@@ -792,17 +793,17 @@ Say something about a **claim** rather than about an address. `supports` backs i
 
 #### `edit_evidence`
 
-Revise a piece of evidence by id. Omitted fields are left alone; `null` clears one. An id nothing holds is an error. Revising `method` keeps the author and the time the record already carries.
+Revise a piece of evidence by id. Omitted fields are left alone; `null` clears method, scenario, capture, other, or note; kind cannot be cleared. An id nothing holds is an error. Revising `method` keeps the author and the time the record already carries.
 
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** |  |
 | `kind` | `supports` \| `refutes` \| `retires` | optional |  |
 | `method` | `any` | optional | How you know this. The author and time on the record are kept, and `null` clears the method while keeping them — somebody vouched for this even where how they knew is no longer worth stating. |
-| `scenario` | `string,null` | optional |  |
-| `capture` | `string,null` | optional |  |
-| `other` | `string,null` | optional |  |
-| `note` | `string,null` | optional |  |
+| `scenario` | `string,null` | optional | Null clears; omit to leave unchanged |
+| `capture` | `string,null` | optional | Null clears; omit to leave unchanged |
+| `other` | `string,null` | optional | Null clears; omit to leave unchanged |
+| `note` | `string,null` | optional | Null clears; omit to leave unchanged |
 
 #### `remove_evidence`
 
@@ -941,16 +942,16 @@ Declare a view over the layer stack. **Always adds**, and returns the id — `ed
 
 #### `edit_target`
 
-Revise a view by id. Omitted fields are left alone, so describing a target does not restate its layers and two people revising one do not revert each other. An id nothing holds is an error — this never creates.
+Revise a view by id. Omitted fields are left alone, so describing a target does not restate its layers and two people revising one do not revert each other. An id nothing holds is an error — this never creates. `entryPoints`, `order`, and `description` accept null to clear.
 
 | argument | type | | |
 |---|---|---|---|
 | `id` | `string` | **required** | From add_target or list_targets |
 | `name` | `string` | optional |  |
 | `layers` | `array` | optional | Bottom-up, so the last shadows the rest; omit to leave the links alone |
-| `entryPoints` | `array` | optional |  |
-| `order` | `integer` | optional |  |
-| `description` | `string` | optional |  |
+| `entryPoints` | `any` | optional | Null clears explicit entry points |
+| `order` | `any` | optional | Null clears ordering |
+| `description` | `string,null` | optional | Null clears the description |
 
 #### `remove_target`
 

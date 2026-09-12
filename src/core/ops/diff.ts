@@ -112,7 +112,8 @@ const sameConstant = (a: ProjectConstant, b: ProjectConstant) =>
 const sameComment = (a: ProjectComment, b: ProjectComment) =>
   parseProjectAddress(a.address) === parseProjectAddress(b.address) &&
   (a.placement ?? "before") === (b.placement ?? "before") &&
-  a.text === b.text;
+  a.text === b.text &&
+  a.order === b.order;
 
 const sameRegion = (a: ProjectRegion, b: ProjectRegion) =>
   parseProjectAddress(a.start) === parseProjectAddress(b.start) &&
