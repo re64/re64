@@ -1367,15 +1367,24 @@ export function resolvedUses<T extends { at: number | string; layer?: string; ta
     .map(({ entry }) => entry);
 }
 
-export function parseProject(json: string): Project {
-  const project = entryPointsIntoTarget(JSON.parse(json) as Project);
 
-  // **A record's fields used to be an object keyed by offset.** Every file
-  // written before they were keyed by id says so, and they stay loadable: the
-  // key becomes the `offset` property it always described, and the next write
-  // persists a list. The same latitude ids get everywhere here.
-  for (const type of project.types ?? []) type.fields = fieldsOfType(type);
-
+/**
+ * What makes a project unreadable, as opposed to untidy.
+ *
+ * The line a file is held to on the way in, and the same line a peer's update
+ * is held to on the way in: a layer of a type nothing knows, a `bytes` layer
+ * with no bytes, a record claim with no layout, an enum spelled wrong. These
+ * are the things the loader refuses and the row builder would otherwise
+ * render as confident nonsense — and a single accepted write that leaves the
+ * document in one of these states makes it unopenable through every surface at
+ * once, with no way back.
+ *
+ * **Structure, never semantics.** A dangling reference, two claims that
+ * contradict, a refutation that names nothing after a merge — those are the
+ * expected untidy outcome of several writers, reported by hygiene and settled
+ * by somebody. Nothing here resolves anything.
+ */
+export function checkProjectShape(project: Project): void {
   // Validate required fields
   if (!project.layers || !Array.isArray(project.layers)) {
     throw new Error("Project must have a 'layers' array");
@@ -1498,6 +1507,18 @@ export function parseProject(json: string): Project {
       );
     }
   }
+}
+
+export function parseProject(json: string): Project {
+  const project = entryPointsIntoTarget(JSON.parse(json) as Project);
+
+  // **A record's fields used to be an object keyed by offset.** Every file
+  // written before they were keyed by id says so, and they stay loadable: the
+  // key becomes the `offset` property it always described, and the next write
+  // persists a list. The same latitude ids get everywhere here.
+  for (const type of project.types ?? []) type.fields = fieldsOfType(type);
+
+  checkProjectShape(project);
 
   return filesWithIds(project);
 }

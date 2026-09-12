@@ -104,6 +104,24 @@ recorded hash's ETag.
 `core/crdt/file-identity.test.ts`, `store/file-reconciliation.test.ts`,
 `core/machine/scenario.test.ts`.
 
+**S7 · What a peer sends is checked before it becomes the document, and a
+refusal is said.** Who may connect is deliberately unsettled; what a connected
+peer may send is a different question. A message that cannot be decoded, and a
+well-formed update that would leave the projection in a shape the loader
+refuses, are both refused before the shared document moves: the update is
+applied to a staged copy and its projection held to the same line a file is
+held to on the way in (`checkProjectShape`). The sender is told — the socket is
+closed with a reason — and the server logs it; nothing is relayed, so no other
+peer is affected. **Structure only.** A dangling reference, two contradicting
+claims, a refutation two edits merged into pointing at nothing — those are the
+expected untidy outcome of several writers, reported by hygiene, never refused
+here. This is not a schema validator and must not become one.
+*Origin:* #32: the decode ran with no boundary, so a truncated frame threw out
+of the socket's listener, and an update went into the document unread, so one
+peer could leave the project unopenable for every other.
+*Verification:* `server/sync.test.ts` ("what a peer sends is checked before it
+becomes the document"), `store/project-store.test.ts` (`receive`).
+
 ## P. Editorial and publication contracts
 
 These obligations guide the planned editorial workflow. The HTML experiments

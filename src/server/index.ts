@@ -184,6 +184,10 @@ export function startServer(options: ServerOptions): RunningServer {
           : undefined,
       onFlatten: (summary) =>
         console.log(`${projectId}: recorded ${summary.length} change${summary.length === 1 ? "" : "s"}`),
+      onRefused: ({ user, session, reason }) =>
+        console.error(
+          `${projectId}: refused a message from ${user}${session ? ` (${session})` : ""} and closed the socket: ${reason}`
+        ),
     });
 
     const made = { sync, storage };
