@@ -15,7 +15,7 @@
  */
 
 import { derivedId } from "../project/identity.js";
-import type { TypeAddOp, TypeField, TypeSetOp } from "./types.js";
+import type { Op, TypeAddOp, TypeField, TypeSetOp } from "./types.js";
 import type { Frame } from "../claims/model.js";
 
 /** A child as an old `type.set` patch spelled it: id optional, offset in the key. */
@@ -108,4 +108,40 @@ export function bindSite(op: {
       : { kind: "nested", layerId: op.layerId, address: op.address };
   }
   return undefined;
+}
+
+/**
+ * A binding operation recorded before frames, spelled as it would be today.
+ *
+ * The store replays history — undo, redo — against a document whose nested
+ * bindings have moved to the root, and an operation still saying `layerId` and
+ * `address` would either miss the site it meant or put a binding back nested
+ * where nothing current can reach it. The store is the boundary that knows the
+ * placements, so it is where the spelling is brought forward: the site is the
+ * one `usesToRoot` gave the same record, and the operation keeps its
+ * replacement semantics on it. Where the layer cannot be placed the operation
+ * is returned as it was, and lands nested, which is where the document still
+ * holds that layer's bindings. One carrying only an id is left alone too; it is
+ * found by the id wherever the use is now.
+ */
+export function framedLegacy(
+  op: Op,
+  siteOf: (layerId: string, address: number) => { frame: Frame; at: number } | undefined
+): Op {
+  switch (op.op) {
+    case "constantUse.bind":
+    case "labelUse.bind":
+    case "constantUse.unbind":
+    case "labelUse.unbind": {
+      if (op.layerId === undefined || op.address === undefined) return op;
+      const site = siteOf(op.layerId, op.address);
+      if (!site) return op;
+      const { layerId, address, ...rest } = op;
+      void layerId;
+      void address;
+      return { ...rest, ...site } as Op;
+    }
+    default:
+      return op;
+  }
 }

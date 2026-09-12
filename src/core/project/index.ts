@@ -11,6 +11,7 @@ export {
   projectRegionsToRegions,
   parseProject,
   retiredClaimIds,
+  legacySiteOf,
 } from "./project.js";
 export {
   FileLoader,

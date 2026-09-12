@@ -583,8 +583,10 @@ export function buildMemoryMap(
   // layer is not in this view stays nested and is not in this view either,
   // which is what its owner always meant.
   const framed = usesToRoot(project, placementsOf(migrated, loadFile));
-  constants.bindAll(projectConstantUses(framed, startOf, viewId));
-  for (const use of projectLabelUses(framed, startOf, viewId)) {
+  const layerRank = new Map(layers.map((l, index) => [l.id, index] as const));
+  const rankOf = (id: string): number | undefined => layerRank.get(id);
+  constants.bindAll(projectConstantUses(framed, startOf, viewId, rankOf));
+  for (const use of projectLabelUses(framed, startOf, viewId, rankOf)) {
     userLabels.bindUse(use.address, use.labelId);
     labelUses.push(use);
   }

@@ -1394,15 +1394,35 @@ place a layer do not convert at all: `parseProject`, `formatProject`,
 loader converts against the layer's *declared* placement (an absolute address
 was written looking at the layer where it declared itself), and the store reads
 a `.prg`'s placement from the bytes it holds when it opens a snapshot. A layer
-nobody can place keeps its bindings nested for an open that can. An operation
-recorded before frames is applied to the nested form it was recorded against.
+nobody can place keeps its bindings nested for an open that can.
+
+**History is brought forward at the store, not reinterpreted in the adapters.**
+The first rework applied an operation recorded before frames — `layerId` and
+`address` — to the nested form it was recorded against, and taught the
+adapters that a nested bind whose use already stood at the root was "already
+reflected". The review showed where that leaves things: an inverse carrying the
+address missed the migrated site, and a redone bind landed nested, where the
+loader showed it and no current operation could reach it until a reopen. The
+adapters cannot do better, because the site a nested record became depends on
+a placement the document does not carry. The store can: it reads the
+placements when it opens, and `framedLegacy` rewrites the spelling — not the
+stored row — to the site `usesToRoot` gave the same record, before the
+operation is checked, applied or replayed. The one rule, `legacySiteOf`, is
+shared by the migration and the replay so the two cannot disagree. Where the
+store cannot place the layer the operation lands nested, which is where that
+layer's bindings still are.
 
 **Where two frames resolve to one address, the more specific shows** —
-`address` < `layer` < `target` — and unbinding by address takes away the one
-that shows. `resolvedUses` orders least specific first so an index that keeps
-the last binding at an address keeps the most specific, and the workspace's
-lookup takes the last; the two were briefly first-wins and last-wins, and could
-unbind a use the listing was not showing.
+`address` < `layer` < `target` — and between two layers' bindings, the layer on
+top of the view's stack, which is the rule bytes already follow. The tie
+matters because migration reorders: nested lists came out in the target's layer
+order and the root sorts by site and id, so "whichever the document lists
+last" changed the answer on migration and ignored a relink. Unbinding by
+address takes away the one that shows. `resolvedUses` orders least specific
+first, then lowest layer first, so an index that keeps the last binding at an
+address keeps the one on top, and the workspace's lookup takes the last; the
+two were briefly first-wins and last-wins, and could unbind a use the listing
+was not showing.
 
 **`scope: "target"` on the binding tools** is the escape hatch, honoured on the
 way in and filtered on the way out like a target-framed claim, and refused
