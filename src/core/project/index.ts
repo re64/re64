@@ -12,6 +12,7 @@ export {
   parseProject,
   retiredClaimIds,
   legacySiteOf,
+  checkProjectShape,
 } from "./project.js";
 export {
   FileLoader,

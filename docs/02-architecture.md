@@ -145,7 +145,7 @@ The current ownership relationships are:
 |---|---|---|
 | Browser/client session | Local document replica and synchronization connection | `src/client/session.ts`, `src/client/doc-client.ts` |
 | MCP session, per project | Server-held session replica, shared by its target-specific workspaces | `replicaFor` in `src/server/index.ts` |
-| Project room | Store's shared document and synchronization service | `src/server/index.ts`, `src/server/sync.ts` |
+| Project room | Store's shared document and synchronization service; a peer's update is staged and checked before it is merged ([S7](03-contracts.md)) | `src/server/index.ts`, `src/server/sync.ts` |
 | Workspace | Request context and derived caches; references the room and optional session replica | `src/server/workspace.ts` |
 
 One participant can have several sessions and replicas. A user id does not
