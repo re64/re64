@@ -1410,7 +1410,12 @@ stored row — to the site `usesToRoot` gave the same record, before the
 operation is checked, applied or replayed. The one rule, `legacySiteOf`, is
 shared by the migration and the replay so the two cannot disagree. Where the
 store cannot place the layer the operation lands nested, which is where that
-layer's bindings still are.
+layer's bindings still are. And it is brought forward **against the state each
+operation applies to** — the text the store walks for inverses and
+preconditions — not the room before the action: an action is several
+operations, and a changeset that adds a symbols layer and binds a site in it
+has no such layer in the room until its first operation has applied. Resolved
+against the room, the bind found no layer and landed nested again.
 
 **Where two frames resolve to one address, the more specific shows** —
 `address` < `layer` < `target` — and between two layers' bindings, the layer on
