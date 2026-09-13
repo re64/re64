@@ -338,10 +338,11 @@ somewhere else entirely, with nothing pointing back.
 describes.** A D64 member is the 254 data bytes of every full sector plus, in
 the last sector, bytes 2 through the offset its second link byte names —
 that byte is a position, not a count. Nothing before the first data byte and
-nothing after the last is the file's; a byte from the sector that happens to
-follow on the disk is a stranger's, and appending one is a wrong answer that
-looks like a longer program. The length is asserted exactly, never as a range,
-and against a fixture whose last link byte is chosen.
+nothing after the last is the file's: the unused tail of the last sector is
+not, and neither is the sector that happens to follow on the disk, which a
+full last sector read as a count would reach into. Appending either is a
+wrong answer that looks like a longer program. The length is asserted exactly,
+never as a range, and against a fixture whose last link byte is chosen.
 *Origin:* #59: every D64 member came out one byte long for as long as the
 reader existed, and the test bounded its length within a window the wrong
 answer never left. What the game actually loads from those bytes is a

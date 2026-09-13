@@ -100,9 +100,10 @@ function sectorOffset(track: number, sector: number): number {
 describe("a disk built by hand, so the last sector's link byte is known", () => {
   /**
    * The specification, as a fixture: a file whose first sector is full and
-   * whose last sector's second link byte is chosen, with the sector *after*
-   * it on the disk filled with a sentinel. The old code read one byte past
-   * the last used byte, and that byte was the sentinel.
+   * whose last sector's second link byte is chosen. The old code read one
+   * byte past the last used byte — unused space in the same sector, or, for
+   * a full last sector, the first byte of the sector *after* it on the disk,
+   * which is filled with a sentinel here so that case is told apart.
    */
   const disk = (lastLink: number): { image: Uint8Array; expected: Uint8Array } => {
     const image = new Uint8Array(174848);
@@ -127,7 +128,7 @@ describe("a disk built by hand, so the last sector's link byte is known", () => 
     image[last + 1] = lastLink;
     for (let i = 0; i < 254; i++) image[last + 2 + i] = (0xfe - i) === 0xa5 ? 0x00 : (0xfe - i) & 0xff;
     // The sector after it, which is not part of the file at all. Its first
-    // byte is what the old code appended to every file.
+    // byte is what the old code appended to a file whose last sector was full.
     image.fill(0xa5, sectorOffset(1, 2), sectorOffset(1, 3));
 
     const used = lastLink - 1;
@@ -149,7 +150,9 @@ describe("a disk built by hand, so the last sector's link byte is known", () => 
     const data = extractFile(image, entry);
     expect(data.length).toBe(length);
     expect(data).toEqual(expected);
-    // The byte the old code took was the first of the sector that follows.
+    // The byte the old code took: unused space in the same sector, or the
+    // first of the sector that follows when the last one was full.
     expect(data[data.length - 1]).not.toBe(0xa5);
+    if (link < 0xff) expect(image[sectorOffset(1, 1) + 1 + link]).not.toBe(data[data.length - 1]);
   });
 });
