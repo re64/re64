@@ -137,8 +137,14 @@ export function extractFile(image: Uint8Array, entry: D64Entry): Uint8Array {
     const nextSector = image[offset + 1];
 
     if (nextTrack === 0) {
-      // Last sector - nextSector contains number of bytes used
-      chunks.push(image.slice(offset + 2, offset + 2 + nextSector));
+      // Last sector. The second link byte is not a count: it is the **offset
+      // of the last used byte** in this sector, so the data is bytes 2 through
+      // that offset inclusive — `$FF` for a full 254, `$01` for none. Read as
+      // a count it took one byte too many, and the byte it took was the first
+      // byte of whatever sector followed on the disk: every file came out one
+      // byte long with a stranger's track link on the end, and the range check
+      // that stood in for a length assertion never noticed.
+      chunks.push(image.slice(offset + 2, offset + 1 + nextSector));
     } else {
       // Full sector - 254 bytes of data
       chunks.push(image.slice(offset + 2, offset + 256));
