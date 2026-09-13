@@ -805,3 +805,20 @@ why through `onRefused`. A stock client reconnects and offers the same structs
 again and is refused again — loudly, which is the point; a quiet divergence is
 the one outcome this must not produce. Nobody else is affected: the document
 did not move, so nothing was relayed.
+
+**What the review found the staging did not cover — 2026-09-14.** A peer
+update setting a claim's `at` to `null` passed every enum check and threw in
+the history recorder, inside the document's own `update` observer, *after* the
+structs were in: the live claim kept `at: null`, and because the observer threw
+before the persist and the relay, nothing was appended and nobody was told. Two
+changes. The shape check now covers every coordinate, since a coordinate that
+does not parse is what makes the document unreadable to the loader, the export
+and the recorder alike; and `receive` takes, on the staged copy, the same
+projection diff the recorder will take — the computation that can fail is run
+where failing costs nothing. Separately, the observer no longer lets a
+recorder failure stop the persist and the relay: the document has moved by
+then, and a row missing from the feed is a gap somebody is told about, where an
+update missing from the log is a document that disagrees with itself on
+restart. And a close reason is cut by UTF-8 bytes, on a character boundary:
+`ws` refuses one over 123 bytes *after* moving the socket to CLOSING, so a
+refusal quoting a peer's own multibyte text told the peer nothing at all.

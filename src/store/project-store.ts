@@ -264,7 +264,18 @@ export class ProjectStore {
       // items it created, and a load that cannot find them holds that operation
       // pending for ever — but it is nobody's action, so it is not recorded as
       // one and does not reach the changes feed.
-      if (origin !== "migrate") this.record(update, origin);
+      // **The recorder failing must not stop the persist and the relay.** The
+      // document has already moved when this runs; a row missing from the
+      // changes feed is a gap somebody is told about, while an update missing
+      // from the log is a document that disagrees with itself on restart, and
+      // peers that were never told what everyone else already holds.
+      if (origin !== "migrate") {
+        try {
+          this.record(update, origin);
+        } catch (error) {
+          this.reportPublishError(error, origin);
+        }
+      }
       this.storage.appendUpdate(update);
       this.dirty = true;
 
@@ -546,7 +557,14 @@ export class ProjectStore {
       return { accepted: false, reason: `the update could not be decoded: ${message(error)}` };
     }
     try {
-      checkProjectShape(projectFromDoc(staged));
+      const after = projectFromDoc(staged);
+      checkProjectShape(after);
+      // **And the computation the recorder will make of it.** Once the update
+      // is integrated the recorder diffs projections inside the document's
+      // own observer, and a throw there is too late — the structs are in and
+      // nothing can take them out. So the same diff is taken here first,
+      // against the same before-state, on the copy that can be thrown away.
+      diffProjects(this.lastProjection ?? projectFromDoc(doc), after);
     } catch (error) {
       return { accepted: false, reason: `the update would leave the project unreadable: ${message(error)}` };
     }

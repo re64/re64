@@ -109,10 +109,16 @@ refusal is said.** Who may connect is deliberately unsettled; what a connected
 peer may send is a different question. A message that cannot be decoded, and a
 well-formed update that would leave the projection in a shape the loader
 refuses, are both refused before the shared document moves: the update is
-applied to a staged copy and its projection held to the same line a file is
-held to on the way in (`checkProjectShape`). The sender is told — the socket is
-closed with a reason — and the server logs it; nothing is relayed, so no other
-peer is affected. **Structure only.** A dangling reference, two contradicting
+applied to a staged copy, its projection held to the same line a file is held
+to on the way in (`checkProjectShape`, coordinates included), and the diff the
+recorder will take of it taken there first — because once the structs are in,
+a throw in the document's own observer is too late to say no. The sender is
+told — the socket is closed with a reason, cut by UTF-8 bytes on a character
+boundary — and the server logs it; nothing is relayed, so no other peer is
+affected. And should the recorder still fail on an accepted update, the
+persist and the relay go ahead and the failure is reported: a row missing
+from the feed is a gap, an update missing from the log is a document that
+disagrees with itself. **Structure only.** A dangling reference, two contradicting
 claims, a refutation two edits merged into pointing at nothing — those are the
 expected untidy outcome of several writers, reported by hygiene, never refused
 here. This is not a schema validator and must not become one.

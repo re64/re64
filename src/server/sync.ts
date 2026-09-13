@@ -325,8 +325,7 @@ export class SyncServer {
       ...(this.sessionOf.has(socket) ? { session: this.sessionOf.get(socket) } : {}),
       reason,
     });
-    // A close reason is at most 123 bytes on the wire.
-    if (socket.readyState === WebSocket.OPEN) socket.close(1008, reason.slice(0, 120));
+    if (socket.readyState === WebSocket.OPEN) socket.close(1008, closeReason(reason));
   }
 
   private leave(socket: WebSocket): void {
@@ -468,3 +467,20 @@ function send(socket: WebSocket, encoder: encoding.Encoder): void {
 }
 
 const describe = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/**
+ * A close reason is at most 123 **bytes** of UTF-8 on the wire, and `ws`
+ * throws past that — after moving the socket to CLOSING, so a second attempt
+ * sends nothing and the peer is never told. Cut by bytes and on a character
+ * boundary: a reason that quotes a peer's own text can be all multibyte.
+ */
+export function closeReason(reason: string): string {
+  const encoder = new TextEncoder();
+  if (encoder.encode(reason).length <= 123) return reason;
+  let out = "";
+  for (const char of reason) {
+    if (encoder.encode(out + char + "…").length > 123) break;
+    out += char;
+  }
+  return out + "…";
+}

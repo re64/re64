@@ -8,7 +8,7 @@ import { WebSocket } from "ws";
 import * as encoding from "lib0/encoding";
 import * as syncProtocol from "y-protocols/sync";
 import { FileStorage, ProjectStore, pathsFor } from "../store/index.js";
-import { SyncServer } from "./sync.js";
+import { SyncServer, closeReason } from "./sync.js";
 import {
   CrdtDoc,
   applyOpToDoc,
@@ -364,5 +364,71 @@ describe("what a peer sends is checked before it becomes the document", () => {
     expect(projectFromDoc(alice.doc).layers.map((l) => l.id)).toContain("lay_bad");
     await alice.close();
     await bob.close();
+  });
+
+  it("refuses an update that decodes and projects but that the recorder could not take", async () => {
+    const bob = await Client.connect(url(), "bob");
+    const alice = await Client.connect(url(), "alice");
+    await settle();
+    // No operation produces this — `claim.set` refuses it on the peer — so it
+    // is written the way a foreign or broken peer would: straight into the map.
+    (alice.doc.getMap("claims").get("lbl_1") as { set(key: string, value: unknown): void }).set("at", null);
+    await settle();
+
+    expect(refused.map((r) => r.user)).toEqual(["alice"]);
+    expect(refused[0].reason).toMatch(/Unreadable address null on claim lbl_1/);
+    // Live state, persistence and relay: none of them moved.
+    expect(projectFromDoc(store.document()).claims!.find((c) => c.id === "lbl_1")?.at).toBe("$8000");
+    expect(projectFromDoc(bob.doc).claims!.find((c) => c.id === "lbl_1")?.at).toBe("$8000");
+    await stillServing(bob);
+    await alice.close();
+    await bob.close();
+  });
+
+  it("tells the peer even when the reason is long and multibyte", async () => {
+    const bob = await Client.connect(url(), "bob");
+    const alice = await Client.connect(url(), "alice");
+    await settle();
+    // The refusal quotes the peer's own text, and `ws` refuses a close reason
+    // over 123 bytes after moving the socket to CLOSING — so a second attempt
+    // sent nothing, and the peer was never told.
+    applyOpToDoc(alice.doc, { op: "claim.set", id: "lbl_1", fields: { says: { is: "界".repeat(100) } as never } });
+    await settle();
+
+    expect(refused).toHaveLength(1);
+    expect(refused[0].reason).toMatch(/Unknown interpretation/);
+    expect(new TextEncoder().encode(closeReason(refused[0].reason)).length).toBeLessThanOrEqual(123);
+    expect(closeReason(refused[0].reason)).not.toContain("\uFFFD");
+    expect(projectFromDoc(store.document()).claims!.find((c) => c.id === "lbl_1")?.is).toBeUndefined();
+    await stillServing(bob);
+    await alice.close();
+    await bob.close();
+  });
+
+  it("closes with one 1008 frame carrying a reason cut by bytes on a character boundary", async () => {
+    const mallory = await rawPeer("mallory");
+    // A raw peer sees the close frame itself; a stock client reconnects and hides it.
+    const other = emptyDoc();
+    other.getArray("layers").push([`界`.repeat(100)]);
+    mallory.send(updateFrame(encodeDoc(other)));
+    const closed = await mallory.closed;
+    expect(closed.code).toBe(1008);
+    expect(Buffer.byteLength(closed.reason, "utf8")).toBeLessThanOrEqual(123);
+    expect(closed.reason).not.toContain("\uFFFD");
+    expect(refused).toHaveLength(1);
+  });
+});
+
+describe("a close reason", () => {
+  it("is cut by UTF-8 bytes, never inside a character", () => {
+    expect(closeReason("short")).toBe("short");
+    const long = "界".repeat(100);
+    const cut = closeReason(long);
+    expect(new TextEncoder().encode(cut).length).toBeLessThanOrEqual(123);
+    expect(cut.endsWith("…")).toBe(true);
+    expect([...cut].every((c) => c === "界" || c === "…")).toBe(true);
+    const ascii = closeReason("x".repeat(200));
+    expect(ascii).toHaveLength(121);
+    expect(new TextEncoder().encode(ascii).length).toBe(123);
   });
 });
