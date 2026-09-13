@@ -334,6 +334,23 @@ instructions that matter, because Camels moves its decruncher onto the stack pag
 somewhere else entirely, with nothing pointing back.
 *Pinned:* `core/c64/kernal-effects.test.ts`, `core/c64/basic-effects.test.ts`.
 
+**C11 · A file extracted from a container is exactly the bytes its chain
+describes.** A D64 member is the 254 data bytes of every full sector plus, in
+the last sector, bytes 2 through the offset its second link byte names —
+that byte is a position, not a count. Nothing before the first data byte and
+nothing after the last is the file's; a byte from the sector that happens to
+follow on the disk is a stranger's, and appending one is a wrong answer that
+looks like a longer program. The length is asserted exactly, never as a range,
+and against a fixture whose last link byte is chosen.
+*Origin:* #59: every D64 member came out one byte long for as long as the
+reader existed, and the test bounded its length within a window the wrong
+answer never left. What the game actually loads from those bytes is a
+separate, investigative question (#58, #67) and this contract does not decide
+it.
+*Pinned:* `core/c64/d64.test.ts` — the real image against an independent walk
+of its chain, and a hand-built disk with the last link at one, part, all and
+none.
+
 ---
 
 ## D. Surfaces
