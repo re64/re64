@@ -1385,6 +1385,44 @@ export function resolvedUses<T extends { at: number | string; layer?: string; ta
  * by somebody. Nothing here resolves anything.
  */
 export function checkProjectShape(project: Project): void {
+  // **Every coordinate parses.** A claim whose `at` is null passes every
+  // enum check above and below and then throws in the first thing that reads
+  // it — the history recorder, the loader, the export — which for a peer's
+  // update meant the document had already moved by the time anything said so.
+  const coordinate = (value: unknown, where: string): void => {
+    if (typeof value === "number" && Number.isFinite(value)) return;
+    if (typeof value === "string" && !Number.isNaN(parseProjectAddress(value))) return;
+    throw new Error(`Unreadable address ${JSON.stringify(value)} on ${where}.`);
+  };
+  const each = (values: readonly unknown[] | undefined, where: string): void => {
+    for (const value of values ?? []) coordinate(value, where);
+  };
+  for (const [index, layer] of (project.layers ?? []).entries()) {
+    const where = `layer ${layer.id ?? index}`;
+    if (layer.address !== undefined) coordinate(layer.address, where);
+    for (const label of layer.labels ?? []) coordinate(label.address, `label in ${where}`);
+    for (const region of layer.regions ?? []) {
+      coordinate(region.start, `region in ${where}`);
+      if (region.end !== undefined) coordinate(region.end, `region in ${where}`);
+    }
+    for (const comment of layer.comments ?? []) coordinate(comment.address, `comment ${comment.id ?? ""} in ${where}`);
+    for (const use of layer.constantUses ?? []) coordinate(use.address, `constant use in ${where}`);
+    for (const use of layer.labelUses ?? []) coordinate(use.address, `label use in ${where}`);
+  }
+  for (const claim of project.claims ?? []) coordinate(claim.at, `claim ${claim.id ?? ""}`);
+  for (const use of project.constantUses ?? []) coordinate(use.at, `constant use ${use.id ?? ""}`);
+  for (const use of project.labelUses ?? []) coordinate(use.at, `label use ${use.id ?? ""}`);
+  for (const constant of project.constants ?? []) coordinate(constant.value, `constant ${constant.id ?? ""}`);
+  for (const type of project.types ?? []) coordinate(type.size, `type ${type.id ?? ""}`);
+  for (const target of project.targets ?? []) {
+    each(target.entryPoints, `target ${target.id ?? ""}`);
+    for (const link of target.layers ?? []) {
+      if (typeof link !== "string" && link.at !== undefined) coordinate(link.at, `link in target ${target.id ?? ""}`);
+    }
+  }
+  each(project.entryPoints, "entryPoints");
+  each(Object.keys(project.primaryLabels ?? {}), "primaryLabels");
+
   // Validate required fields
   if (!project.layers || !Array.isArray(project.layers)) {
     throw new Error("Project must have a 'layers' array");

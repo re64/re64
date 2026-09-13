@@ -1623,4 +1623,35 @@ describe("an update from a peer is checked before it becomes the document", () =
       rmSync(f.dir, { recursive: true, force: true });
     }
   });
+
+  it("refuses an update the recorder could not take, before it is integrated", () => {
+    // A claim whose `at` becomes null passes every enum check and throws in
+    // the first thing that reads it — the history recorder, inside the
+    // document's own observer, after the structs were already in. The live
+    // claim kept `at: null`, nothing was persisted and nothing relayed.
+    const f = opened();
+    try {
+      f.store.runOps([{ op: "claim.add", claim: { id: "clm_1", at: 0x8000, name: "Start", origin: "user" } }], "alice", 1);
+      const persisted = () => f.storage.readUpdates().length;
+      const relayed: unknown[] = [];
+      f.store.onUpdate((update) => relayed.push(update));
+      const before = persisted();
+
+      // No operation produces this — `claim.set` refuses it on the peer — so it
+      // is written the way a foreign or broken peer would: straight into the map.
+      const peer = docFromUpdates([encodeDoc(f.store.document())]);
+      (peer.getMap("claims").get("clm_1") as { set(key: string, value: unknown): void }).set("at", null);
+      const refused = f.store.receive(encodeDoc(peer), "peer");
+      expect(refused).toMatchObject({ accepted: false, reason: expect.stringMatching(/unreadable.*Unreadable address null on claim clm_1/) });
+
+      expect(projectFromDoc(f.store.document()).claims).toEqual([expect.objectContaining({ id: "clm_1", at: "$8000" })]);
+      expect(persisted()).toBe(before);
+      expect(relayed).toEqual([]);
+      // And the store still answers, which is the whole point.
+      expect(() => f.store.document()).not.toThrow();
+    } finally {
+      f.storage.close();
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
 });
