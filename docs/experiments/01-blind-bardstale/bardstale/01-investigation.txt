@@ -1,0 +1,1371 @@
+ ▐▛███▛█   Claude Code v2.1.268
+▝▜██████▀  Opus 5 · Claude Max
+  ▝▝ ▝▝    ~/Desktop/Privat/Projects/bardstale
+
+
+❯ /model                                                                        
+  ⎿  Set model to Opus 5 (1M context) (default) and saved as your default for
+     new sessions
+
+❯ in this directory you can find two d64 files with a game. analyze them as one 
+  project as compeltely as practical, writing your own tools. Identify          
+  software, data, loaders, tools, overlays, levels, assets, runtime states,     
+  formats, relationships and other technically meaningful units you discorver.  
+  Record what can be understood independently, what depends on what, what       
+  knowledge appears to be reusable across units, and where the same knowledge   
+  appears in multiple places. Write down major findings with the source,        
+  assertion, location, evidence and description. After you are done, I want you 
+  to answer questions about what tools and data structures would have helped    
+  you organizing that knowledge during the whole project, so keep enough        
+  records so that you can do that without redoing most of the work.             
+
+⏺ I'll start by looking at what's in the directory.
+
+  Listed 1 directory, ran 8 shell commands (ctrl+o to expand)
+
+⏺ The T5/T6 orphans on disk 2 are remnants of deleted files (6502 code and
+  high-bit ASCII text like "There are stairs here…"). I'll now extract all files
+  from both disks and trace the orphan chains. · summarized
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+⏺ Grouping the files by load address reveals distinct clusters (name tables,
+  jump tables, and what looks like 16 dungeon levels at $4000, among others).
+  I'll now compare the two main programs and record this initial inventory. 
+  · summarized
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ The shared files across disks are identical aside from trailing-byte length
+  differences, confirming duplicated assets. I'll now write a 6502 disassembler
+  with code/data tracing, labels, and C64 hardware symbol names. · summarized
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ The main program is packed, copying a decruncher into $00FB–$01FA and running
+  it from the stack page. Instead of manually reversing the packer, I'll write a
+  6502 emulator to execute it and dump the unpacked memory, which will also
+  help later with the graphics decoders. · summarized
+
+  Read 1 file, ran 1 shell command (ctrl+o to expand)
+
+⏺ I found a second stage at $0810 that relocates the image to $7CB0–$FFFF,
+  RLE-decodes it (escape byte $9F) into final locations, and jumps to $C000.
+  I'll extend the emulator run to that final entry point and log every written
+  range. · summarized
+
+  Ran 7 shell commands (ctrl+o to expand)
+
+⏺ I found a 70-entry JMP table at $0800 serving as a resident API for the
+  overlays, plus a bitmap at $2000 that overlaps the overlay load addresses,
+  suggesting a raster split. I'll now check the IRQ handler at $1BC7 and look
+  for the file loader. · summarized
+
+  Ran 6 shell commands (ctrl+o to expand)
+
+⏺ The loader logic is now clear: it derives filenames from file numbers as
+  "NM"+hex(A) and loads them via KERNAL LOAD at explicit page addresses,
+  ignoring the PRG header. Next I'll pull the disk-prompt tables and drive
+  command routines. · summarized
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ The save routine at $7B96 handles saving NM00/NM01 (2048 bytes) and NM0A (256
+  bytes), which are the character roster/party save files. I'll now decode their
+  contents. · summarized
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ I've decoded the roster structure: nm00/nm01 contain 16×128-byte records
+  (characters or parties, with a trailing checksum byte), and nm0a is a 256-byte
+  party/game-state file. I'll jot these findings into notes before digging
+  further. · summarized
+
+  Read 1 file, ran 2 shell commands (ctrl+o to expand)
+
+⏺ I've mapped out the mode system: $19F0 sets mode $D4 and jumps to the $AE00
+  overlay, dungeon entry loads the level map and picks a tileset via byte $FC12,
+  and $1B15 maps special location types to overlays through D_1B28. Now I'll
+  check the special-picture copier at $0D26. · summarized
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ I've mapped out the picture-display routine, party record layout, and text
+  encoding conventions. Next, I'll pull all strings from the resident image to
+  quickly label the routines. · summarized
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+⏺ Found a big set of strings: monster/item/class/race names, spell mnemonics,
+  combat text, and leftover assembler macro symbols hinting at the overlay's
+  scripting style. I'll record these and build a shared module with file→address
+  rules to construct proper memory images for each overlay. · summarized
+
+  Ran 3 shell commands (ctrl+o to expand)
+
+⏺ Found that $0AC6 handles PRINT(X/Y→string) with word-wrap in a text window,
+  managing plural markers via flag $38. Moving on to the other primitives now. 
+  · summarized
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Found that $0B7D prints a centered caption, $1EE5 clears the text window, and
+  $1F20 clears the picture window, all relying on a pixel-line address table at
+  $C900/$CA00. Now I'll verify that table and examine the key-input routine at
+  $1955. · summarized
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ I've identified $1955 as a wait-for-key routine, $19D6 as the party-member
+  selection prompt (pointing to records at $CB00+$80·n), and $19C8 as a stubbed
+  RTS routine used 34 times, likely for copy-protection or sound. Now I'll read
+  the next batch of code. · summarized
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ I've identified $1A7A (timed delay with pause/speed keys), $18CE (16-byte
+  additive RNG), and $191D (SID noise effect). Now I'll create a labels file
+  with these findings and generate a labeled traced disassembly of the resident
+  program. · summarized
+
+  Ran 3 shell commands (ctrl+o to expand)
+
+⏺ Those matches turn out to be false positives from shared junk data in the
+  overlays' final sector slack, not real content—useful since it confirms
+  overlay sizes follow n·256−1 with non-content tails. I'll now build a
+  slack-template detector to pinpoint each overlay's true content end. 
+  · summarized
+  Ran 3 shell commands (ctrl+o to expand)
+
+⏺ I've decoded the picture format: RLE and reposition escape codes, column-major
+  interlaced storage, and a trailing delay byte with delta-encoded animation
+  frames. Now I'll write a decoder and render all pictures to verify it. 
+  · summarized
+
+  Read 1 file, ran 2 shell commands (ctrl+o to expand)
+
+⏺ I've validated the decoder against buildings, monsters, NPCs, and animation
+  frames—colors are still placeholders pending tracing the actual screen RAM
+  palette. I'll note these findings, then move on to the map/data formats. 
+  · summarized
+
+  Read 1 file, ran 5 shell commands (ctrl+o to expand)
+
+⏺ Found that $713F draws the compass/heading indicator, while $71DC–$72F3 runs
+  per-member loops handling HP/SP regen and item checks—though the item offsets
+  are off by $10 from the file dump. I'll check the guild/roster code at $0C0B
+  to see how records get copied into memory. · summarized
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ I've confirmed the roster structure ($0C0B lists records, $0C7B copies by
+  name, $0CEF finds free slots) and corrected the items offset to $50–$5F. Now
+  I'll locate the character-sheet routine to fully decode the record layout. 
+  · summarized
+
+  Searched for 1 pattern, ran 7 shell commands (ctrl+o to expand)
+
+⏺ I've mapped out the format: a 22×22 wall grid, a special flags grid at +$200,
+  a header at +$400, and a message pointer table at +$510, plus leftover
+  Applesoft BASIC junk from the original Apple II. Next I'll trace the zero-page
+  pointers used to walk the map and figure out what the special grid values
+  mean. · summarized
+
+  Searched for 2 patterns, ran 2 shell commands (ctrl+o to expand)
+
+⏺ I've mapped out the dungeon special-square system, including the coordinate
+  lists and flag grid. Next I'll pull the flag-bit masks and NM02's messages to
+  properly name each list. · summarized
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ I've identified the flag grid bit meanings and dungeon chain/exit data
+  addresses. Next, I'll read NM02's view/redraw routine at $B286 to understand
+  the wall-grid conventions. · summarized
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ I've confirmed the map's coordinate, facing, and wall-bit conventions along
+  with the portal flags. Now I'll write a map decoder/renderer covering all 16
+  levels. · summarized
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ The map format checks out with valid in-game inscriptions, but I need to
+  correct my earlier assumption: the $FC20 list is actually special-event
+  squares (byte at $FC30 indicates overlay type NM1F–NM2D), not stairs. I'll fix
+  the string terminator, rename that list accordingly, save the full dump, and
+  view one map. · summarized
+
+  Read 1 file, ran 1 shell command (ctrl+o to expand)
+
+⏺ The Wine Cellar render checks out against the known BT1 layout. I'll document
+  the map format now, then dig into the $E000 data sets (NM04 city data, NM05–08
+  dungeon sets). · summarized
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Both $E000 sets turn out to be 3D-view graphics: NM05–08 are wall-segment
+  tilesets and NM04 holds 20 city facade images, but the 30×30 city map isn't
+  here—I'll check NM04's tail and the NM09 city overlay next. · summarized
+
+  Ran 5 shell commands (ctrl+o to expand)
+
+⏺ City cells encode (special_type << 3) | facade, with the 64-entry special
+  table at $1B28, and the grid is stored north-row-first (my earlier print was
+  upside-down). Now I'll dump the strings of every overlay to determine each
+  one's purpose. · summarized
+
+  Read 1 file, ran 1 shell command (ctrl+o to expand)
+
+⏺ I've identified all the city overlays—Guild, Review Board, taverns, Garth's,
+  temples, Roscoe's, Mad God temple, tower/castle entries, Interplay credits
+  building, city gate, sewer portal, and the "?" street/time marker. Next, I'll
+  work through the dungeon overlays. · summarized
+
+  Searched for 1 pattern, read 1 file, ran 1 shell command (ctrl+o to expand)
+
+⏺ Found that $456E is SET_PIC_COLORS, filling the picture window's colour bytes
+  with A, using the per-picture pair from D_0D99 (default $26 = red/blue). I'll
+  fix the palette in the picture tool and re-render. · summarized
+
+  Read 1 file, ran 2 shell commands (ctrl+o to expand)
+
+⏺ The pictures now render with the correct C64 palette. Next I'll dump the
+  monster names by id and locate their stat records using the pointer tables at
+  $8D0D, $7EA8, and $7F28. · summarized
+
+  Ran 5 shell commands (ctrl+o to expand)
+
+⏺ I've mapped how random encounters select monsters and located the monster stat
+  tables as column arrays in memory. Now I'll read the remaining code that
+  consumes these tables to identify what each column represents. · summarized
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ I've mapped out the memory layout: monster picture index at $7EA8, level at
+  $7E28 & $1F, armour class/HP class at $7DA8, and group-size/HP dice at $7D28.
+  Next I'll search for the character-sheet code by locating the pointer bytes of
+  $A219, then look into the item/spell tables. · summarized
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+⏺ I've identified that "Add member" locates the record, verifies a checksum, and
+  copies it into a free party slot, with party records expanding into 6
+  members. Now I'll examine the checksum and character-creation code to nail
+  down the exact record layout. · summarized
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+⏺ I've mapped out the character record layout from the creation code—fields for
+  level, HP/SP, class, race, spells, and skills—and confirmed the XOR checksum
+  flags tampered records. Now I'll check the sheet printer at $51BA to fill in
+  the remaining fields. · summarized
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ I've identified the combat menu's item-property tables, including the
+  spell-effect index, spell flags, SP cost, and per-class spell level offsets.
+  Next, I'll dump the item tables region to decode the item record. · summarized
+  Ran 2 shell commands (ctrl+o to expand)
+
+⏺ I've identified that record $3E holds condition status and $30–31 holds hit
+  points in the party status line. Now I'll search the disassembly for the $A219
+  load pair to locate the full sheet printer. · summarized
+
+  Searched for 2 patterns, ran 1 shell command (ctrl+o to expand)
+
+⏺ I've traced $4516's experience-for-level logic to per-class tables ($A703
+  base, $A70D thresholds), and noted $A100–$A2FF may be unused leftover data.
+  Now I'll quickly check the headers of the remaining small JT routines. 
+  · summarized
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ I've mapped out how experience and gold are stored as 12-digit
+  unpacked-decimal arrays, along with the related routines for conversion,
+  addition, subtraction, and comparison. Now I'll search for the sheet code
+  using LDA #$A2. · summarized
+
+  Searched for 1 pattern, ran 1 shell command (ctrl+o to expand)
+
+⏺ The Guild's exit confirms the party's position at (ns 15, ew 25) facing east,
+  matching the city grid orientation. Now I'll read J_sub_124F, the character
+  sheet, to finish mapping the record layout. · summarized
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ I've mapped out the character record layout (HP, SP, level, class/race, spell
+  levels). Next I'll examine sub_43A6 and sub_4484 to find the stats and AC
+  fields. · summarized
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ I've mapped out the stat fields at $10–$13 and the item slot flag byte
+  structure. Now I'll write the item table decoder. · summarized
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+⏺ I've catalogued 126 items by type, class mask, effect code, and AC/damage. Now
+  I'll record these formats in the notes before moving on to spells. 
+  · summarized
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+⏺ The spell stream at $971F encodes level, class markers ($F0–$F3), and 4-char
+  mnemonics for the four classes, matching record slots $40–43. Now I'll dump
+  the spell table with cost, flags, and handlers. · summarized
+
+  Ran 3 shell commands (ctrl+o to expand)
+
+⏺ The intro rebuilds the same line-address tables and includes its own SID
+  player. Next I'll identify the orphan file by comparing it against the
+  overlays, then check code references to $C0xx after loading to understand
+  NM0A's meaning. · summarized
+
+  Searched for 1 pattern, ran 3 shell commands (ctrl+o to expand)
+
+⏺ NM0A stores Garth's shop stock as 256 bytes indexed by item id, with $FF
+  meaning unlimited and values adjusted on purchase/sale. I'll now write up the
+  dependency/duplication notes and then run a full emulated playthrough as a
+  cross-check. · summarized
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ I'll validate the game end-to-end by running it headlessly with hooked KERNAL
+  disk calls, a CIA-style IRQ, and an emulated keyboard matrix—starting by
+  reading the keyboard scanner to emulate it accurately. · summarized
+
+  Read 1 file, ran 7 shell commands (ctrl+o to expand)
+
+⏺ The emulated game boots correctly through the disk prompt into Utilities and
+  the Guild with proper visuals. Next, I'll load the saved party "*ATEAM," exit
+  the Guild, and check the city and wine cellar to confirm the 3D rendering and
+  map data work end-to-end. · summarized
+
+  Read 1 file, ran 2 shell commands (ctrl+o to expand)
+
+⏺ The full game loop checks out in emulation — save loading, 3D city rendering,
+  and movement all work, confirming the loader, memory map, record layout, and
+  city grids. Next I'll head into the wine cellar via the tavern to validate the
+  dungeon renderer and map format. · summarized
+
+  Searched for 1 pattern, read 2 files, ran 5 shell commands (ctrl+o to expand)
+
+⏺ Movement matches my wall decoding — hitting the east wall at (0,1) confirms
+  it. The view stays dark since $78 isn't the light flag; NM02 checks $7A
+  instead, so I'll poke that next. · summarized
+
+  Read 2 files, ran 4 shell commands (ctrl+o to expand)
+
+⏺ The static analysis and live run confirm agreement across loader, memory map,
+  text, pictures, city grid, and map walls/flags—including the north wall at
+  (1,0) matching the game's "OUCH!" response. Now I'll render the city map and
+  finish writing up the notes. · summarized
+
+  Read 1 file, ran 3 shell commands (ctrl+o to expand)
+
+⏺ The analysis is complete and recorded. Here's the summary.
+
+  What the two disks are
+
+  The Bard's Tale I (C64), "/3532" crack. Disk 1 = "CITY DISK", disk 2 = "BARDS
+  TALE" (dungeon disk). Everything is in ordinary CBM DOS files, plus one
+  deleted-file chain on disk 2.
+
+  Units identified (full inventory in notes/01_units.md)
+
+  - Two packed programs ("bard's tale", "bard intro"): two-stage packer
+    (bit-stream LZ in the stack page → RLE with escape $9F). I unpacked them by
+    running them in a 6502 emulator I wrote rather than reversing the packer.
+    The intro is a standalone title demo (poem, credits, SID player); the game
+    is a resident kernel $0800–$CAFF with a 70-entry jump-table API at $0800.
+  - Loader ($78B9): file number → "NM"+hex, loaded via KERNAL LOAD to a page 
+    from a table — the PRG headers on disk are systematically wrong ($8000/$D000
+    lower than reality).
+  - ~60 overlays at $AE00 (city main NM09 / dungeon main NM02 / Utilities NM03),
+    $B600 (city buildings: Guild, taverns, Garth's, temples, Review Board,
+    Roscoe's, credits building…) and $BB00 (44 dungeon events: chests, traps,
+    riddles, Kylearan, Mangar…). All purposes established; 64-entry dispatch
+    table at $1B28.
+  - Data: 16 dungeon maps (format fully decoded and rendered), the 30×30 city
+    grids inside NM04, four wall-graphics sets NM05–08, 66 pictures (format
+    decoded from the renderer and rendered with correct palette), roster files
+    (128-byte character record decoded, XOR checksum), Garth's stock (NM0A), and
+    resident tables: 128 monsters, 126 items, 79 spells (costs match the real
+    game).
+  - Residue: developer assembler symbol table in the packed image, Applesoft
+    BASIC in map slack, stale overlay copies in sector slack, an older revision
+    of NM02 as an orphan chain.
+
+  Verification
+
+  tools/run_game.py runs the game headlessly (hooked KERNAL disk I/O, IRQ,
+  injected keys): boot → Utilities → Guild → loads the owner's saved party →
+  city 3D view → wine cellar, with screenshots in extracted/screens/. Loader
+  order, addresses, record fields and wall bits all matched the static analysis.
+
+  Records for your follow-up questions
+
+  - notes/02_findings.md — 23 findings with source / assertion / location /
+    evidence.
+  - notes/03_formats.md, 04_dependencies.md (what depends on what, reusable
+    knowledge, duplication table), 05_worklog.md (including dead ends), and
+    notes/06_retro_notes.md — running notes on the tools/data structures that
+    would have helped (address identity, memory contexts, symbol DB, evidence
+    links, slack annotation, emulator-as-oracle).
+
+  One caveat: the disk image contains the original owner's saved characters
+  (names like "MARKUS"), which I decoded as part of the format work but left
+  untouched on disk.
+
+✻ Baked for 51m 50s · done 0:47
+
+※ recap: Goal: fully analyze the two Bard's Tale D64 images with my own tools and record findings; the analysis, notes, and emulator verification are complete. Next action: answer your questions about which tools and data structures would have helped. (disable recaps in /config)
+
+❯ /export                                                                       
+  ⎿  Conversation exported to: /Users/marcus/Desktop/Privat/Projects/bardstale/2
+     026-09-13-012628-local-command-caveatcaveat-the-messages-below.txt
+
+❯ ok, thank you. here are some follow up questions. the first set:              
+  Looking back over the entire investigation, what distinct kinds of entities   
+  or technical units did you actually encounter and reason about? For each      
+  kind, give concrete examples from this project, what gave an instance its     
+  identity, whether it could be understood independently, and its important     
+  relationships to other entities. Describe what you actually encountered.      
+
+⏺ Here is what I actually dealt with, grouped by kind. I've tried to be honest
+  about which distinctions emerged from the material rather than from a
+  textbook.
+
+  1. Containers (disk images)
+
+  - Examples: bardst-1.d64 ("CITY DISK"), bardst-2.d64 ("BARDS TALE").
+  - Identity: the file itself, plus the BAM name/ID inside. The two are a pair
+    by convention only — nothing in the images links them except the loader's
+    disk prompts ("Insert DUNGEON disk").
+  - Independent? Yes; standard layout, fully understood with d64.py alone.
+  - Relationships: owns sectors → files; the game's file-number ranges map to
+    disks (a fact I had to reconstruct from directories and store in
+    btfiles.py).
+
+  2. Physical storage units (sectors, chains, slack)
+
+  - Examples: track/sector cells; the directory chain; the orphan chain
+    (6,7)→…→(5,18); the 1541 format-fill pattern 4B 01 01…; the final-sector
+    slack shared by ~35 $BB00 overlays; Applesoft BASIC text in map slack.
+  - Identity: (image, track, sector). Slack has no identity of its own — it's
+    "the bytes past the real end", which I had to define (via slack.py's
+    majority template).
+  - Independent? Sectors yes. Slack no: whether bytes are content or junk
+    depended on comparing files with each other and on knowing the overlay
+    format.
+  - Relationships: sectors → files (ownership); slack → "duplicate-of /
+    residue-of" other units. Slack produced false facts (phantom call targets
+    $2004, stale text in NM10/NM16) until modelled.
+
+  3. Files as the game sees them
+
+  - Examples: NM00…NMF0, plus the two packed programs.
+  - Identity: the file number in the name (NM+hex) — that's the key the loader
+    uses, and it's the identity I ended up using everywhere, not the directory
+    entry.
+  - Independent? Only as byte blobs. Their meaning required the loader's address
+    table (PRG headers lie), so a file's "real" identity is (number, real load
+    address, disk).
+  - Relationships: number ranges ↔ load page ($C000, $AE00, $B600, $BB00, $E000,
+    $F800); disk membership; save/load paths (NM00/01/0A are the only writable
+    ones); duplicates across disks (NM5E–82).
+
+  4. Programs and their stages
+
+  - Examples: packer stage 1 (LZ in the stack page), stage 2 (RLE $9F), $C000
+    screen init, GAME_INIT, resident kernel, intro demo, Utilities (NM03).
+  - Identity: entry point + memory range + the moment in the boot sequence.
+    Stage 2 code only exists after stage 1 ran — an entity defined by execution
+    state, not by a file.
+  - Independent? The packer stages yes (self-contained); I understood them by
+    execution, not reading. The intro yes. The resident kernel no — it is
+    meaningless without overlays and data.
+  - Relationships: produces (stage 1 → stage 2 → final image); entry chain $C000
+    → $0800 → $08D2 → SET_MODE → $AE00.
+
+  5. Memory regions / memory configurations
+
+  - Examples: bitmap $2000, text window, party area $CB80+$80·n, PICBUF $C000
+    (shared by pictures and roster and NM0A), $E000 dataset area, $F800 map
+    buffer, RAM under I/O holding six pictures.
+  - Identity: an address range together with what is loaded and the $01 bank
+    bits. "$C000" alone identifies nothing.
+  - Independent? No. This kind exists only relative to a configuration; I built
+    build_mem() late and needed it for every overlay listing and xref.
+  - Relationships: overlaps (NM1B at $B600 reaches $BFBF, over the $BB00 area;
+    pictures overwrite the roster buffer); banking ($D000 I/O vs RAM copies of
+    pictures).
+
+  6. Code units: routines and the API
+
+  - Examples: PRINT $0AC6, GETKEY $1955, LOAD_FILE $78B9, DRAW_PICTURE $4000,
+    SET_MODE, LOAD_SPECIAL, the view builder in NM02, the 24 spell handlers, the
+    bare-RTS stub at $19C8.
+  - Identity: entry address within a memory context; for overlays the same
+    address ($AE00) names different routines per file, so identity is (file,
+    address). Jump-table entries are a second identity for the same routine
+    ($0809 vs $0AC6) — a naming layer I generated automatically.
+  - Independent? Primitives (text, keys, RNG, loader) yes. Game logic no —
+    combat/spell code only made sense together with the tables it indexes.
+  - Relationships: calls (via JT or direct — direct calls into the resident from
+    overlays were an important discovery channel), reads/writes tables, uses
+    zero-page variables, self-modifies operands (LDA #imm patched at $0C1A,
+    $4F3B, $6431), is stubbed/replaced (crack).
+
+  7. Variables and runtime state
+
+  - Examples: $28/$29 position, $24 facing, $D4 mode, $E0 level/special type,
+    $1E chain index, $D8 view depth, $2A key ready, $F8 loaded tileset, $2D
+    loaded file, $0350–$036E view slots, $03B0/$03B8 encounter groups, $0380
+    decimal accumulator.
+  - Identity: address, but meaning drifts: $E0 is "dungeon level" in one path
+    and "special-location type" in another; $78–$7B are a family of status flags
+    I never fully separated.
+  - Independent? No; meaning came only from readers/writers, and the emulator
+    run was what settled some ($D8).
+  - Relationships: shared between resident and overlays (the real "API" beyond
+    the jump table); persisted into files (position, party).
+
+  8. Records and tables (structured data)
+
+  - Examples: 128-byte character record; 22×22 wall grid and flag grid; map
+    header coordinate lists; 30×30 city grids; monster column arrays
+    ($7D28/$7DA8/$7E28/$7EA8); item columns; spell stream + parallel tables;
+    per-depth encounter mask/base; dispatch table $1B28; picture colour table
+    $0D99; experience thresholds.
+  - Identity: base address + element size + index space (monster id, item id,
+    spell number, depth, class). Several tables share one index space — that
+    shared index (e.g. "monster id 0..127") was the more useful identity than
+    any address.
+  - Independent? Partly: grids revealed themselves by histogram; column
+    semantics needed code. The 5-bit packed stats and 12-digit decimal numbers
+    were invisible without the unpack routines.
+  - Relationships: indexed-by (index spaces), parallel-to (spell
+    cost/flags/handler), points-to (name pointer tables, message pointers in
+    maps), consumed-by (which routine).
+
+  9. Formats (reusable encodings)
+
+  - Examples: hi-bit ASCII with $DC and /-plural pairs; picture stream (E1/E2
+    escapes, column-major interlace, animation deltas); map file layout; PRG
+    header offset rule; RLE $9F; XOR checksum.
+  - Identity: the rule itself, not a location; one format explains many
+    instances (66 pictures, 16 maps, all strings).
+  - Independent? Once derived from one reader, yes — and they were the most
+    reusable knowledge in the project.
+  - Relationships: instantiated-by units; derived-from a routine (the format's
+    "authority" is the code that reads it).
+
+  10. Assets (content units)
+
+  - Examples: pictures (buildings day/night, monsters, NPCs, animated frames),
+    wall tilesets, maps as game levels ("Cellars", "Sewers"…), strings/messages,
+    monster/item/spell definitions, roster characters, Garth's stock.
+  - Identity: a game-level id (picture number, level number, monster id) plus a
+    name where one exists; copies are the same asset at different locations
+    (NM8B = slice of NMF0 = RAM at $D000).
+  - Independent? Yes, once the format is known.
+  - Relationships: duplicate-of (many), referenced-by id from tables (monster →
+    picture index, map → tileset), owned-by disk.
+
+  11. Dispatch/mapping tables as "glue"
+
+  - Examples: $1B28 (special type → overlay), $AEEE (city remap), $796C (file →
+    page), mode → overlay $1A5F, map level chain $FC00.
+  - Identity: a small table whose value is entirely relational. I treat these
+    separately because they are the edges of the dependency graph, and finding
+    them unlocked whole groups of units at once.
+
+  12. Residue and provenance artefacts
+
+  - Examples: assembler symbol names (DRAW, PIC, JNE…), Applesoft code, older
+    NM02 revision, stale text copies, the /3532 tag, the stubbed routine, the
+    owner's saved characters.
+  - Identity: "bytes not explained by the game", classified by what they are
+    left over from.
+  - Independent? Yes, but only worth anything as evidence about tooling,
+    history, and the crack — and as noise to exclude.
+
+  13. My own artefacts
+
+  - Examples: tools, memory images (main.mem), listings, findings/assertions,
+    labels, screenshots, tool runs whose results only live in the transcript.
+  - Identity: file paths — and that was the weakness: assertions, labels and
+    listings had no shared keys, so renaming or correcting one thing did not
+    propagate (the N/S bit-order flip, PRINT_MSG_ID → SET_PIC_COLORS).
+  - Relationships: evidence-for, generated-from, depends-on — exactly the
+    relationships I did not have machine-readable, which is the core of the
+    retrospective in notes/06_retro_notes.md.
+
+  One observation across all kinds: the recurring difficulty was that identity
+  was contextual (file + address, or address + memory configuration, or id
+  within an index space), while every tool and note I wrote keyed things by a
+  bare address or filename.
+
+✻ Worked for 58s · done 1:28
+
+※ recap: Reverse-engineering the two Bard's Tale C64 disks is complete, with tools, notes and an emulated run saved in the project folder; I just answered your first follow-up question about the kinds of entities encountered. Next: your next follow-up question. (disable recaps in /config)
+❯ I want to understand the overlay system more precisely. Describe the resident 
+  and replaceable parts of memory throughout normal operation. Which address    
+  ranges remain stable, which are reused, and what kinds of code or data occupy 
+  each reused range at different times? Explain what loading an overlay         
+  actually replaces, what remains available to it, how overlays communicate     
+  with resident code and data, and whether overlays also replace or coexist     
+  with things such as pictures, maps, roster data, or other loaded resources.   
+  Give concrete examples from this investigation and distinguish what you       
+  established from what remains uncertain. If useful, describe a few            
+  representative memory configurations before and after loads.                  
+
+⏺ Stable (resident) memory
+
+  Established from the unpacked image, the $C000 init, the loader table and the
+  emulated run:
+
+  Range: $0000–$00FF
+  Content: zero-page state (position $28/$29, facing $24, mode $D4, level $E0,
+  loader cache $2D, tileset cache $F8, cursor, flags)
+  Stability: permanent, shared by everyone
+  ────────────────────────────────────────
+  Range: $0100–$01FF
+  Content: stack; also where the packer ran once at boot
+  Stability: permanent
+  ────────────────────────────────────────
+  Range: $0334–$03FF
+  Content: input buffer $0334, decimal accumulator $0380, encounter groups
+  $03B0/$03B8, view slots $0350–$036E, keyboard repeat $034D
+  Stability: permanent scratch
+  ────────────────────────────────────────
+  Range: $0400–$07FF
+  Content: screen RAM = colour nibbles for the multicolour bitmap
+  Stability: permanent (only colour bytes change)
+  ────────────────────────────────────────
+  Range: $0800–$08D1
+  Content: 70-entry JMP table
+  Stability: permanent, never rewritten (except the "leave game" reset stub NM1B
+
+  copies to $0800)
+  ────────────────────────────────────────
+  Range: $08D2–$1FAD, $4000–$7CB9
+  Content: resident code (text, keys, IRQ, loader, pictures, combat, spells,
+  disk)
+  Stability: permanent
+  ────────────────────────────────────────
+  Range: $2000–$3FFF
+  Content: bitmap
+  Stability: permanent as a buffer, content constantly redrawn
+  ────────────────────────────────────────
+  Range: $7CBA–$ADFF
+  Content: resident data (monster/item/spell tables, strings)
+  Stability: permanent
+  ────────────────────────────────────────
+  Range: $C900–$CAFF
+  Content: bitmap line-address table
+  Stability: permanent
+  ────────────────────────────────────────
+  Range: $CB00–$CEFF
+  Content: party: slot 0 + members 1–6 (128-byte records)
+  Stability: permanent buffer; content changes only via Guild add/remove and
+  combat
+  ────────────────────────────────────────
+  Range: $CF00–$CF7F
+  Content: scratch character record (find-by-name)
+  Stability: permanent scratch
+
+  Nothing in the game ever loads into these ranges; every LOAD target is one of
+  the reusable areas below. That was established directly from the loader's page
+  table ($796C) and confirmed by logging every LOAD in the emulated run.
+
+  Reusable ranges and what occupies them
+
+  ┌──────────────┬──────────────────────────────────┬───────────────────────┐
+  │    Range     │       Occupants over time        │      Selected by      │
+  ├──────────────┼──────────────────────────────────┼───────────────────────┤
+  │              │ NM09 city main (2047 b), NM02    │ SET_MODE ($19F0),     │
+  │ $AE00–$BAFE  │ dungeon main (3327 b), NM03      │ table $1A5F           │
+  │              │ Utilities (3327 b)               │                       │
+  ├──────────────┼──────────────────────────────────┼───────────────────────┤
+  │              │ city sub-overlays NM0B–NM1B      │ LOAD_SPECIAL via      │
+  │ $B600–$BFBF  │ (255–2496 b)                     │ $1B28 (+ NM09 remap   │
+  │              │                                  │ $AEEE)                │
+  ├──────────────┼──────────────────────────────────┼───────────────────────┤
+  │              │ dungeon sub-overlays NM1C–NM44   │                       │
+  │ $BB00–$BEFE  │ (100–1023 b of real content),    │ LOAD_SPECIAL; NM03    │
+  │              │ and NMF0 (picture container,     │ explicitly            │
+  │              │ $BB00–$C7FF) when NM03 runs      │                       │
+  ├──────────────┼──────────────────────────────────┼───────────────────────┤
+  │              │ pictures NM50–90 (≤1346 b),      │ SHOW_PICTURE, roster  │
+  │ $C000–$C7FF  │ roster halves NM00/NM01 (2048    │ routines              │
+  │              │ b), Garth's stock NM0A (256 b);  │ $0C0B/$0C7B/$0CEF,    │
+  │              │ also the tail of NMF0            │ NM0D                  │
+  ├──────────────┼──────────────────────────────────┼───────────────────────┤
+  │ $C800–$C8FF  │ character creation scratch       │                       │
+  │              │ (NM1B), otherwise unused         │                       │
+  ├──────────────┼──────────────────────────────────┼───────────────────────┤
+  │ $D000–$DCFF  │ six "hot" pictures               │ copied once per       │
+  │ (RAM under   │ ($8B,$8C,$8D,$8E,$57,$53) copied │ session               │
+  │ I/O)         │  there by NM03 from NMF0         │                       │
+  ├──────────────┼──────────────────────────────────┼───────────────────────┤
+  │              │ NM04 city set (8176 b) or one of │ mode 0 loads NM04;    │
+  │ $E000–$FFEF  │  NM05–08 dungeon sets (5632 b);  │ dungeon entry loads   │
+  │              │ $ED00–$F5FF inside each holds    │ the set named by the  │
+  │              │ pictures $5A–$5D                 │ map                   │
+  ├──────────────┼──────────────────────────────────┼───────────────────────┤
+  │ $F800–$FFEF  │ current dungeon map NMA0–AF      │ ENTER_DUNGEON_LVL     │
+  │              │ (2032 b)                         │ ($620E)               │
+  └──────────────┴──────────────────────────────────┴───────────────────────┘
+
+  Two facts about reuse that matter:
+
+  - Overlapping regions are used at different times, not simultaneously. NM1B
+    (Guild) spans $B600–$BFBF, i.e. over the $BB00 dungeon-overlay area —
+    harmless because it only runs in city mode. NMF0 spans $BB00–$C7FF, over
+    both the dungeon-overlay area and the picture buffer — harmless because NM03
+    loads it before the game starts, copies it away, and it is then
+    overwritten. I established the ranges; I infer the "never simultaneously"
+    from the control flow rather than from an exhaustive proof.
+  - Loads clobber silently. LOAD_FILE has a one-entry cache ($2D = last file
+    number) and nothing else. Showing a picture overwrites the roster copy in
+    $C000; loading the roster overwrites the picture. The Guild code shows this:
+    SHOW_PICTURE(0) first, then LOAD NM00/NM01 for a roster search, then the
+    picture is stale (the emulator log shows exactly NM50, NM00, NM01, NM00 in
+    sequence). Callers cope by simply reloading; the cache is what makes
+    repeated SHOW_PICTURE of the same monster cheap.
+
+  What an overlay load replaces and what stays
+
+  Loading an overlay replaces only bytes in its own page range; the KERNAL LOAD
+  is given an explicit address from the table, so the file's own PRG header is
+  ignored. Everything in the "stable" table stays: the jump table, all resident
+  routines, all resident tables, zero page, the party records, the text and
+  picture windows' current contents, and whatever is loaded in the other
+  reusable ranges. For example, loading NM1D (trap handler) into $BB00 does not
+  touch the dungeon main loop at $AE00, the map at $F800, the tileset at $E000,
+  or the party.
+
+  The one real coupling is between the main overlay and its sub-overlays: NM02
+  calls its sub-overlays with JSR $BB00 and expects them to return; NM09 does
+  the same with JMP/JSR $B600. A main-mode switch (SET_MODE) reloads $AE00 and,
+  for the city, $E000; it resets the stack (LDX #$FF; TXS) rather than
+  returning, so the previous main overlay's state is abandoned. Mode 2 → 0
+  (Utilities → city) additionally clears the party area (NM03 zeroes
+  $CB00–$CE7F).
+
+  How overlays communicate with the resident
+
+  Established, from disassembly and usage counts:
+
+  1. Jump table $0800 — the intended API (282 PRINT calls, 141 CLEAR_TEXT, 91
+     GETKEY …). Every overlay of both disks uses the same entries, which is what
+     made one label set serve all 60 listings.
+  2. Direct calls into resident code, bypassing the table: 34 targets such as
+     $0920, $0F91/$0FB1/$0FD1 (number formatting), $4030, $4100, $7CA5. I did
+     not find a rule for which routines get a table entry; this looks like
+     accretion.
+  3. Shared variables: zero page ($28/$29/$24/$E0/$1E/$D8/$42/$F8/$2D, the
+     $78–$7B flag family), page-3 buffers, party records, and data inside loaded
+     resources — NM02 reads the map header at $FC00–$FD1F and the tileset's
+     draw records at $E000; NM09 reads the city grids at $F800/$FC00. So
+     resident code, overlays and data files all address each other by absolute
+     address; there is no relocation or handle mechanism anywhere.
+  4. Convention tables in the resident that name overlays: $1B28 (64 special
+     types → file numbers), $1A5F (mode → file), $796C (file → page). The maps
+     in turn contain special-type numbers (16–31 at $FC30) that index $1B28. So
+     a data file on disk 2 selects code files on disk 2 through a table on disk
+     1's resident program.
+  5. Sub-overlays are also plain callees: they are entered at $B600/$BB00, use
+     the same text window, and return with RTS (or restart the main loop with a
+     JMP $AE00/SET_MODE). NM1B's "(E)xit" sets position (15,25), facing east,
+     resets the light timer and jumps to $AE00 — the party's position is not
+     restored, it is set by the building overlay.
+
+  Coexistence with pictures, maps, roster, stock
+
+  - Pictures coexist with everything except the roster/stock (same $C000
+    buffer). Ten pictures are exempt from loading: four live inside every $E000
+    dataset at $ED00–$F5FF (so NM04 and each NM05–08 carry the same four), six
+    live under the I/O area after NM03 copies them from NMF0. SHOW_PICTURE
+    consults $7962 and copies instead of loading ($0D54).
+  - Maps ($F800) coexist with the tileset ($E000–$F5FF) and both survive
+    sub-overlay loads; a level change reloads the map and, only if the map's
+    byte $412 names a different set than $F8, the tileset.
+  - Roster (NM00/NM01) is only ever a transient copy in $C000 for
+    search/list/save; the party copies in $CB80+ are the long-lived state.
+    Saving writes the whole 2 KB half back from $C000 after patching one record
+    in place.
+  - Garth's stock (NM0A) is likewise loaded into $C000 while inside the shop and
+    saved from there.
+  - City data (NM04) is replaced by a dungeon set on entering a dungeon and
+    reloaded by SET_MODE 0 on exit; the city grids therefore do not coexist with
+    dungeon maps.
+
+  Representative configurations (from the emulated run)
+
+  1. After boot (SET_MODE 2): resident + NM03 at $AE00; NMF0 at $BB00–$C7FF
+     briefly, its six pictures then in $D000–$DCFF; nothing at $E000/$F800;
+     party area zero.
+  2. City, in the Guild: NM09 at $AE00, NM04 at $E000–$FFEF, NM1B at
+     $B600–$BFBF, $C000 alternately NM50 (Guild picture) and NM00/NM01 (roster
+     search); party filled from $CF00 copies.
+  3. Wine cellar, level 0: NM02 at $AE00, NMA0 at $F800, NM06 at $E000–$F5FF
+     (tileset 1); $BB00 empty until an event fires (e.g. NM1C chest); $C000
+     holds the last monster picture; NM09 and NM04 are gone.
+  4. Back to city: SET_MODE 0 reloads NM09 and NM04 (overwriting the tileset and
+     map area), position taken from the map's exit coordinates $FC13/$FC14.
+
+  What remains uncertain
+
+  - Whether any overlay relies on leftover content of a previous occupant of its
+    range (I saw none, but did not test every path; the $BB00 slack junk shows
+    the authors did not zero ranges).
+  - The exact division of $78–$7B, $7C, $CE, $D8 (light, levitation, scry,
+    secret-door sight, view depth): I identified $D8 by experiment and $7A
+    partially; the rest is inferred.
+  - Whether the six under-I/O pictures are ever reloaded if a program path skips
+    NM03 (I only saw them copied at boot).
+  - Why some resident routines are reachable only by direct call and not via the
+    jump table.
+  - The $C800 page: used by character creation; I did not check whether anything
+    else claims it.
+  - Combat overlays: combat itself is resident, but I did not verify whether any
+    combat path loads a sub-overlay into $B600/$BB00 while a building/event
+    overlay is still needed afterwards.
+
+✻ Churned for 1m 2s · done 1:41
+
+❯ what type of logic is embedded in the code overlays, for example at $B600 and 
+  $BB00?                                                                        
+
+⏺ They are almost entirely event/menu scripts: small, linear, text-heavy
+  handlers that glue resident primitives together. None of them contains
+  rendering, disk, combat or parsing machinery — that is all resident. What they
+  contain, by category (with what I actually read):
+
+  1. "Room" scripts: caption + picture + text + keyed menu
+
+  The dominant pattern, visible in nearly every $B600 file and most $BB00 files:
+
+  JSR SHOW_PICTURE(n)          ; $0803
+  PRINT_CAPTION "The Guild"    ; $080C
+  CLEAR_TEXT ; PRINT "Thou art in the Guild..." ; PRINT "(C)heck Roster" ...
+  loop: JSR GETKEY ; JSR STUB_RTS ; CMP #'C' ; BEQ … ; CMP #'A' ; BEQ … ; JMP
+  loop
+  NM1B (Guild), NM0C (tavern), NM0D (Garth's), NM0E (temple), NM17 (Roscoe),
+  NM15/NM18/NM19 (castle/tower entries), NM1A (city gate), NM0F (empty building)
+  are all this shape. The JSR $083F after every GETKEY is the bare-RTS stub —
+  every menu passes its key through a routine the crack emptied.
+
+  2. State transitions (the overlay decides where the party is)
+
+  Overlays set game state directly and re-enter a main loop rather than
+  returning to a caller:
+  - NM1B (E)xit: $28=15, $29=25, $24=1, $EC=$1F, $42=0 then JMP $AE00 —
+    position, facing, light timer and depth are assigned, not restored.
+  - NM0C wine: $E0=0; LDA #1; JMP SET_MODE — enters the cellar.
+  - NM13/NM15/NM18/NM19: "(T)ake stairs" → SET_MODE 1 with the dungeon's level
+    number.
+  - NM03 (S)tart: zeroes the party area, SET_MODE 0.
+  - NM1B "Leave the game": copies a 7-byte reset stub to $0800 and jumps to it.
+
+  3. Bookkeeping over party records
+
+  Using the resident numeric primitives (12-digit decimal routines, 16-bit
+  compares) on the 128-byte records:
+  - NM0D (shop): price lookup via $0DCA, gold compare $0E01, subtract $0E1E, add
+    to item slots via GIVE_ITEM ($43D6), stock count in $C000+id, save NM0A.
+  - NM0E/NM17: cost from HP/SP deficit, "Who will pay?", subtract gold, set
+    current HP = max or SP = max, clear condition byte $3E.
+  - NM0B (Review Board): EXP_FOR_LEVEL ($4516) against $14–$1F, increments
+    $22–$23, rolls "+1 to strength…", spell-level bytes $40–$43, class change
+    with the "3 spell levels" rule and the gold cost.
+  - NM1B creation: builds a record in $C800 (race/class gates from $A1C3,
+    initial gold roll, spell points for casters), XOR checksum, writes it into a
+    free roster slot, SAVE_FILE.
+
+  4. Puzzle logic: string compare and item grants
+
+  - Riddles (NM2A, NM2F, NM30/31, NM36, NM38, NM3B, NM3E): INPUT_LINE ($0F59)
+    into $0334, compared byte-wise against an embedded answer ("SKULL",
+    "SINISTER", "CIRCLE", "THOR", the seven words), then GIVE_ITEM of a specific
+    id (silver square/circle/triangle, figurine, shield) or a "found something"
+    message.
+  - Key/quest checks: NM12 iron gate scans members for item effect $0F via
+    MEMBER_HAS_ITEM_EFF ($72B9); NM2E takes "an Eye" from a member, animates the
+    statue and teleports.
+  - Chest (NM1C): examine/disarm/Trap Zap menu, trap-name input compared against
+    the trap list, TRAP! damage via the resident.
+
+  5. Scripted encounters
+
+  Event overlays that set up a fight instead of drawing one: they write monster
+  ids and counts into $03B0/$03B8 (e.g. NM23 Bashar Kavilor, NM24 Sphynx, NM25
+  Witch King, NM27 Captain, NM28 six robed warriors, NM2D legions, NM37
+  Keymaster "6 friends", NM39 Vampire Lord, NM41 dragons, NM44 Mangar) and call
+  the resident combat entry; on return they branch on the outcome (NM44
+  continues with the ending text, bonus of 300,000, and Kylearan's farewell).
+
+  6. Small resident-like helpers that were pushed out
+
+  - NM10 (? key): street-name lookup from the $FC00 grid and time-of-day text —
+    pure display.
+  - NM1D: trap type text + damage dispatch.
+  - NM1E: wandering monster offering to join (writes a monster into party slot 0
+    via the resident routine at $6135–$61BB).
+  - NM03: the only overlay with real machinery — its own font/key tables and
+    1541 block commands for disk duplication.
+
+  What is not in overlays
+
+  3D drawing, picture decoding, text layout, keyboard, RNG, disk loading, combat
+  resolution, spell effects, encounter generation, map traversal — all resident
+  ($0800–$7CB9). The dungeon main NM02 and city main NM09 are the exception in
+  that they hold the view builder (which walls to draw for five depths) and the
+  special-square dispatcher; even there the pixel work is resident ($4207,
+  $1F60).
+
+  Uncertain
+
+  - NM3C, NM3F, NM43 (100–170 bytes, no strings): I did not read them; they're
+    likely silent effects (teleport/drain/flag set).
+  - How much outcome handling exists after scripted combats (I read NM44's text
+    path, not every "if the party lost" branch).
+  - Whether any overlay writes resident tables (I saw only $0800 patched by the
+    reset stub).
+
+  In short: the overlays are the game's content script — dialogue, menus,
+  prices, riddle answers, quest-item rules and scripted battles — expressed as
+  straight-line 6502 that calls a stable API and pokes shared state, with the
+  numbering table $1B28 in the resident acting as the script index.
+
+✻ Worked for 40s · done 1:45
+
+❯ Looking across the things you have called overlays, are they actually one     
+  uniform kind of unit? Describe what they have in common and where they        
+  differ. In particular, distinguish file format, load address/range,           
+  executable code, embedded data, dependencies on resident state, lifetime, and 
+  what causes one to be loaded or replaced. Are there things you initially      
+  called overlays that you would now classify differently?                      
+
+⏺ No — "overlay" was my working label for anything LOAD_FILE puts into a 
+  reusable range, and that lumps together at least four different kinds. What
+  they genuinely share is narrow; the differences are large.
+
+  What all NMxx files have in common (established)
+
+  - Same naming/loading path: number → "NM"+hex → KERNAL LOAD to a page from
+    $796C; the PRG header is ignored and systematically wrong (-$8000 / -$D000),
+    so the header is a build artefact, not a format field.
+  - Same one-entry cache ($2D) and the same disk-prompt logic.
+  - Size quantised to whole 256-byte pages minus one (n·256−1) for code files,
+    or exact for data files — a first hint that they were produced by two
+    different save procedures.
+  - None is relocatable; all use absolute addresses into the resident and into
+    each other.
+
+  That is where the uniformity ends.
+
+  Kind A — mode kernels: NM09 (city), NM02 (dungeon)
+
+  - Format: raw code at $AE00, entry via JMP at $AE00 plus a tiny local jump
+    table ($AE03…).
+  - Code/data: code dominates; data is small tables tied to the world geometry
+    (row tables 22·ns in NM02, 30·(29−ns) in NM09, view slot layout, the $AEEE
+    remap, message strings for stairs/darkness).
+  - Dependencies: heavy and bidirectional — they read map/city data by absolute
+    address ($FC00…, $F800…), own the zero-page movement state, and host the
+    kind-B/C scripts (JSR $B600/$BB00).
+  - Lifetime: as long as the mode; replaced only by SET_MODE, which resets the
+    stack rather than returning.
+  - Trigger: mode change (boot → Utilities, Utilities → city,
+    tavern/portal/tower → dungeon, stairs out → city).
+    These are closer to "the second half of the kernel, swapped by world type"
+    than to overlays.
+
+  Kind B — location scripts (city buildings): NM0B–NM1B at $B600
+
+  - Format: code + embedded text; no header; size up to 2496 bytes, mostly
+    filling their pages (little detectable slack — each one's tail was
+    different).
+  - Code: menu loops; data: their own dialogue, prices/menus, name lists (8
+    tavern names in NM0C, 8 temple names in NM0E).
+  - Dependencies: party records, gold arithmetic, roster/stock files, SET_MODE;
+    they also write position/facing on exit.
+  - Lifetime: one building visit; return to NM09 or jump to a new mode.
+  - Trigger: the city cell's special_type (cell>>3) through $1B28 (+$AEEE).
+
+  Kind C — event scripts (dungeon squares): NM1C–NM44 at $BB00
+
+  - Format: same as B but much smaller real content (100–470 bytes) with a
+    shared slack template, i.e. saved from one long-lived buffer; several carry
+    stale copies of other scripts' text (NM10↔NM0E, NM16↔NM11, NM13/19/1A share
+    the magic-mouth text). Distinct provenance from kind B.
+  - Code: one event each: text, riddle compare, item grant, scripted encounter
+    setup, flag/position change.
+  - Dependencies: map header flags (they clear one-time bits in the flag grid),
+    encounter groups $03B0/$03B8, resident combat.
+  - Lifetime: one square visit, always returns to NM02.
+  - Trigger: map special-type at $FC30 or flag bit $10 (trap) → $1B28; some
+    share numbers with kind B (types 23, 34–36, 42, 59 map to city files
+    NM15–NM1A), so the same file is a B when reached from the city and a C when
+    reached from a dungeon.
+
+  Kind D — things I called overlays but would now reclassify
+
+  - NM03 "Utilities" → a separate program that happens to be loaded through the
+    same slot: it has its own font, keyboard matrix and 1541 block-command code,
+    and its job (copy/format disks, start game) is outside the game loop. It
+    also acts as the installer for the six under-I/O pictures.
+  - NMF0 → an asset container, not code: 13 pages that are byte-for-byte the six
+    picture files, loaded once at $BB00 and copied to $D000. Its "load address"
+    is incidental.
+  - NM04 and NM05–08 → data sets (facade/wall graphics, city grids, draw
+    records) with four embedded pictures; $E000 is not an overlay slot, it is a
+    data area chosen so it can sit under the KERNAL ROM.
+  - NMA0–NMAF → level data; the map header is the closest thing to a "script"
+    (coordinate lists selecting kind-C files).
+  - NM00/NM01/NM0A → save files. They enter the picture only because $1B28[0] = 
+    NM00 makes the Guild's roster load look like a special-type dispatch, and
+    because they share the $C000 buffer with pictures.
+  - NM50–NM90 → assets, sharing a slot but never executed.
+  - NM10 (? command) → a command handler loaded through the location table with
+    a synthetic type 8 — code, but not tied to a place.
+
+  Consequences for the earlier picture
+
+  - "Load address" is a property of the slot, not the file: $AE00, $B600, $BB00,
+    $C000, $E000, $F800, $D000(copy). Slots host different kinds ($BB00 hosts
+    C-scripts and the NMF0 container; $C000 hosts pictures, roster and stock).
+  - "Replace" means different things per kind: mode kernels replace each other
+    and abandon the stack; scripts are callees and are simply overwritten by the
+    next script; data sets are replaced on world change; save files are
+    replaced by any picture load and must be reloaded before use.
+  - What varies most is provenance (page-quantised code saves with shared slack
+    vs exact data saves vs an Apple-hosted map exporter with Applesoft residue),
+    which turned out to be as useful for classification as the runtime role.
+
+  Uncertain
+
+  - Whether kinds B and C are really the same authoring pipeline with different
+    buffer hygiene, or two pipelines (the slack evidence suggests the $BB00
+    scripts were saved from one editing session; the $B600 ones not).
+  - NM3C/NM3F/NM43 (code-only, unread) might be a fifth kind (silent square
+    effects) or ordinary C-scripts without text.
+  - Whether the $C800 creation scratch is considered part of the Guild "overlay"
+    by the authors or a resident buffer.
+
+✻ Worked for 41s · done 1:48
+
+❯ Looking at all the names and symbols you created during the investigation,    
+  explain when a symbol’s meaning was stable and when it depended on context.   
+  Give examples of symbols that were meaningful across most or all of the       
+  project, symbols shared by several overlays or memory configurations, symbols 
+  meaningful only in one file or loaded unit, and symbols whose meaning         
+  changed at the same address. What information did you actually need in order  
+  to determine which symbol was meant when you saw an address?                  
+
+⏺ Symbols that were stable across the whole project
+
+  These named things that exist in every memory configuration after boot, so one
+  label file (labels_main.txt) served every listing:
+
+  - Jump-table entries and their targets: J_PRINT/$0809→$0AC6,
+    J_GETKEY/$080F→$1955, J_SHOW_PICTURE/$0803→$0D26, J_LOAD_FILE/$08C3→$78B9,
+    J_SET_MODE/$0890→$19F0, J_LOAD_SPECIAL/$0884→$1B15. Two addresses per
+    routine, but one meaning; every one of the ~60 overlay listings and the
+    resident listing used them identically.
+  - Resident tables: tbl_monster_name_ptr $8D0D, tbl_item_effect $A4F7,
+    tbl_spell_cost $95B7, tbl_special_overlay $1B28, tbl_load_page $796C,
+    tbl_line_lo/hi $C900/$CA00.
+  - Resident buffers with fixed roles: PARTY_MEMBER1 $CB80, input_buf $0334,
+    dec_accum $0380, enc_monster_id $03B0.
+  - Most zero-page variables: cur_row $54, cur_col $55, str_ptr $58/59, rnd 
+    $5A/5B, key_ready $2A, cur_file $2D, game_mode $D4, text_speed $88. Their
+    readers and writers are resident routines with one job, so the meaning held
+    everywhere.
+  - Text-encoding facts ($DC newline, $AF plural) — not addresses, but symbols
+    in the sense of conventions; valid in every file including maps and the
+    intro.
+
+  Symbols shared by several units but not universal
+
+  - Slot names: OVERLAY_MAIN $AE00, OVERLAY_CITY $B600, OVERLAY_DUNG $BB00,
+    PICBUF $C000, DATASET $E000, MAPBUF $F800. These name a role of a range,
+    valid in all configurations, while the content behind them is not. I kept
+    them in the shared label file deliberately because callers (JSR $BB00, JMP 
+    $AE00) mean "whatever is loaded there".
+  - Map-header fields: map_tileset_id $FC12, $FC00 level chain, $FC10 depth,
+    $FC16 name, $FC20…$FD1F lists. Meaningful in every dungeon configuration
+    (all 16 maps share the layout) and to both NM02 and the resident ($620E
+    reads $FC12), but meaningless in city mode, where $FC00 is the second city
+    grid.
+  - City-grid symbols ($F800 special grid, $FC00 street grid): shared by NM09
+    and NM10, invalid in dungeon mode.
+  - Character-record offsets ($14 exp, $22 level, $30…$37 HP/SP, $38 class, $50
+    items, $7F checksum): shared by the resident, NM1B, NM0B, NM0D, NM0E, NM17 —
+    but they are offsets, applied through several base addresses ($CB80+,
+    $CF00, $C800, $C000+128·n). The symbol is stable; the address it appears at
+    is not.
+  - Index spaces (monster id, item id, spell number, special type): the most
+    stable identities in the project — an item id means the same thing in a
+    roster file, a shop stock byte, a script's GIVE_ITEM, and the resident
+    tables.
+
+  Symbols meaningful in exactly one file
+
+  - Every sub_Bxxx/L_Bxxx inside an overlay: sub_B19D (coordinate-list search)
+    exists only while NM02 is loaded; sub_BB7C (XOR checksum) only in NM1B;
+    D_B8F3/D_B909 (row tables) only in NM02; D_B13A/D_B158 (city row tables)
+    only in NM09; D_AEEE remap only in NM09; D_B683 tileset colours only in
+    NM02.
+  - Data inside a loaded resource: $FD20 "This is the wine cellar…" only while
+    NMA0 is loaded; the draw records at $E0A0 only for NM05–08; facade pointers
+    $E000–$E027 only for NM04.
+  - The intro's $4000-based names — a different program in a different memory
+    image, sharing addresses with the resident game's $4000 picture renderer.
+
+  Same address, different meanings
+
+  - $AE00: NM09 city loop / NM02 dungeon loop / NM03 utilities entry.
+  - $BB00: the dungeon event script or the start of the NMF0 picture container;
+    $B600: any of 17 building scripts.
+  - $C000: current picture, roster half 0 or 1, Garth's stock, or the tail of
+    NMF0. $C0FF is a stock count in NM0D and a pixel byte otherwise.
+  - $E000–$FFEF: city set vs. one of four dungeon sets; $F800: city grid row 0
+    vs. map wall grid row 0; $FC00: street grid vs. map level chain; $ED00:
+    pictures $5A–$5D in every set (a coincidental stable meaning inside an
+    unstable range).
+  - $D000–$DCFF: I/O registers when $01 has I/O on, six pictures when it is off
+    — same address, same instant, different bank.
+  - $0800–$0806: jump table, except after NM1B copies the reset stub there.
+  - Zero page $E0: "dungeon level to load" in SET_MODE/ENTER_DUNGEON_LVL,
+    "special-location type" in LOAD_SPECIAL; $28/$29: (ns,ew) in 22-wrap dungeon
+    space vs. 30-wide city space; $42: "depth" for encounters vs. copied from
+    $FC10.
+  - Renamed by me as understanding changed: $456E PRINT_MSG_ID → SET_PIC_COLORS,
+    $0D99 caption table → colour table, $FC20 "stairs" → special-event squares.
+    Stale copies of the old names survived in generated files until
+    regenerated.
+
+  What I needed to know to resolve an address
+
+  1. Which program image — game resident vs. intro vs. packer stage (three
+     different $4000s, two different $0100s).
+  2. Which slot occupants are loaded — mode ($D4), current main overlay, current
+     sub-overlay, what is in $C000, $E000, $F800. In practice I resolved this
+     from the file I was reading: a listing of NM02 implies NM02 at $AE00 and a
+     map at $F800; but for the resident code alone this was often undecidable
+     (resident routines that touch $FC12 or $C000 are valid under several
+     occupants).
+  3. The bank bits ($01) for $D000–$DFFF and for whether $E000+ reads are RAM.
+  4. The base register/pointer for offsets — an offset like $38 is only a symbol
+     relative to a record pointer (($0F),Y, ($6E),Y, ($2B),Y, $C800+).
+  5. Which caller/path for polymorphic zero-page cells ($E0) — the meaning is
+     per call site, not per address.
+  6. Time in the boot sequence — $0810 was decruncher-loop code, then a new
+     stage's entry; $C000 was screen init before it became the picture buffer.
+  7. Occasionally execution evidence — $D8 (view depth) and $7A were only pinned
+     down by poking them in the emulator; static reading gave the address but
+     not a name I trusted.
+
+  The practical consequence: my label mechanism (one flat file keyed by address,
+  plus per-overlay files I never fully populated) could express 1 only by
+  choosing which file to load, could express 2 only through slot-role names, and
+  could not express 3–6 at all — which is why several "same address" cases were
+  caught late or by luck.
+
+✻ Brewed for 41s · done 1:49
+
+❯ Were there natural groups of symbols or other technical assertions that you   
+  wanted to treat as applying together? If so, describe those groups using      
+  examples from the investigation: what made something belong to the group,     
+  which memory configurations or files the group was useful in, whether groups  
+  overlapped, and whether membership was intrinsic or depended on how the game  
+  was loaded. Do not propose a database design; describe the organization of    
+  the knowledge as you experienced it.                                          
+
+⏺ Yes — several, and they were of quite different natures. I'll describe them as
+  they actually formed, roughly in the order they appeared.
+
+  1. "The API" — the jump table and its primitives
+
+  Formed on the first day, the moment I counted JSR $08xx across overlays.
+  Membership: a routine belongs if it is reached through $0800–$08D1 or is one
+  of the 34 direct-call targets overlays use. It came with its own sub-facts
+  that travel together: calling conventions (X/Y string pointer, A =
+  key/file/member), the zero-page cells each primitive consumes ($54/$55,
+  $58/$59, $2A, $38), and the text-window geometry. Useful in every
+  configuration; membership is intrinsic to the resident image. I applied the
+  group as a unit by generating J_* labels from it and loading one label file
+  into every listing.
+
+  2. Text engine + encoding
+
+  PRINT, PUTCHAR, NEWLINE, CAPTION, CLEAR_TEXT, the $DC/$AF/$FF rules, the
+  window coordinates, the font, the line-address table. Belonged together
+  because a change in my understanding of one (the /-plural rule) changed how
+  every string dump in every file should be read. Useful everywhere, including
+  maps and the intro, which use the same encoding without the same code.
+  Overlaps with group 1 (the entries) and with the "picture" group (both need
+  $C900).
+
+  3. Loader facts
+
+  LOAD_FILE, the page table, the disk-prompt tables, the $2D cache, the SAVE
+  routine, the PRG-header offset rule, the disk membership of each file number.
+  Intrinsic to the resident, but its consequence — "file N lives at address A" —
+  is what I needed constantly, so the group turned into a module (btfiles.py)
+  and every other tool depended on it. This was the group I most wanted to
+  "apply together": as soon as it was established, every overlay listing had to
+  be redone at the right address.
+
+  4. Slot-occupancy sets (memory configurations)
+
+  Not symbols but sets of loaded files: {NM09, NM04, one of NM0B–1B, something
+  in $C000} for the city; {NM02, NMAx, NM05–08[set], maybe NM1C–44} for a
+  dungeon; {NM03, NMF0} at boot. A symbol group was useful inside exactly one
+  such set: the map-header names only inside the dungeon set, city grids only
+  inside the city set. Membership is entirely load-dependent, and the sets
+  overlap in their stable core (groups 1–3). I never wrote these sets down as
+  first-class things; they lived implicitly in which files I passed to
+  build_mem() and xrefs.py --files.
+
+  5. Per-file symbol sets
+
+  Every overlay's local labels (sub_B19D, D_B8F3, riddle answers, price lists)
+  plus the facts about that file's slack and stale text. Intrinsic to the file,
+  valid only when that file occupies its slot. Naturally disjoint between files
+  that share a slot, but I wanted to keep them apart from the resident labels
+  and largely failed (the shared label file leaked slot-role names into every
+  listing, and overlay-local names never got their own files).
+
+  6. Format groups (a reader routine + a layout + its instances)
+
+  - Picture: $4000 renderer + $C000 stream rules + colour table $0D99 +
+    SET_PIC_COLORS + the list of 66 files + the 10 resident copies. Membership:
+    "explained by the same decoder". The colour facts joined late and forced a
+    re-render of all instances — a group-wide update.
+  - Map: NM02's movement/view/specials code + the $F800 layout + all 16 files +
+    the flag-bit meanings + the coordinate-list idiom. Correcting the N/S bit
+    order affected every member at once.
+  - Character record: the offsets, the 5-bit stat packing, the 12-digit decimal
+    numbers and their arithmetic routines, the checksum, plus four instance
+    bases ($CB80+, $CF00, $C800, roster files). Overlaps heavily with the
+    Guild/shop/temple scripts, which are its main writers.
+  - Spell/item/monster tables: each is "one index space + parallel columns + a
+    name-pointer table + the code that indexes it". The index space is the
+    binding thing; it makes a roster item byte, a shop stock byte and a script's
+    GIVE_ITEM constant members of the same group.
+    These groups are intrinsic (they hold in any configuration where an instance
+    is present) and they are where reuse actually happened.
+
+  7. Dispatch/mapping groups ("glue")
+
+  $1B28 + $AEEE + $1A5F + map special types + city cell types + the two disks'
+  directories. Each row of these tables is an assertion of the form "type t
+  means file f at slot s from disk d". I treated the whole set as one thing
+  because each new row was worthless alone and the completed table explained 60
+  files at once. Membership straddles resident data (the tables), map data (the
+  type numbers), and files (the targets).
+
+  8. Shared runtime-state families
+
+  Position/facing/mode/level ($28/$29/$24/$D4/$E0/$1E), light/visibility
+  ($78–$7B, $7A, $D8, $CD, $CE, $EC/$EB), encounter state ($03B0/$03B8/$8330…,
+  $42), view slots ($0350–$036E). Members belong because the same routines set
+  and test them together and because the scripts hand them across mode changes.
+  Useful across resident + both mode kernels + scripts; membership intrinsic,
+  but meaning per member sometimes path-dependent ($E0). The light family is the
+  one I never finished as a group — I know its members but not its full
+  semantics.
+
+  9. Provenance groups
+
+  "Saved from the same buffer" ($BB00 scripts with shared slack), "stale copy of
+  X" (NM10/NM0E, NM16/NM11, NM13/19/1A), "duplicated asset" (NMF0 ↔ six
+  pictures ↔ $D000; $ED00 pictures in five datasets; monster pictures on both
+  disks), "developer residue" (symbol table, Applesoft), "older revision"
+  (orphan ↔ NM02), "crack artefacts" (stub $19C8, /3532, separator entries).
+  These cut across every other grouping: the $ED00 pictures are simultaneously
+  members of the picture-format group and of each dataset file. Membership is
+  intrinsic to the bytes and independent of loading, and this grouping was what
+  let me discard material rather than analyse it.
+
+  10. My own evidence groups
+
+  Screenshots + emulator log + a script belong to the assertions they confirm
+  ("loader order", "wall bits", "record columns"); the k-gram alignment belongs
+  to the orphan; the histogram belongs to the wall encoding. I experienced these
+  as attached to findings, not to addresses.
+
+  Overlap and dependence, summarised
+
+  - Groups 1–3 and 6 are intrinsic and configuration-independent; 4 and 5 are
+    exactly the load-dependent layer; 7 is the bridge between them; 8 is
+    intrinsic in membership but path-dependent in meaning; 9 is orthogonal to
+    all of them.
+  - Overlaps I kept tripping over: record offsets (6) inside scripts (5);
+    slot-role names (4) inside the universal label file (1); colour facts
+    belonging to pictures (6) but stored in resident code (1); map-type numbers
+    belonging to maps (6) but decoded through resident tables (7).
+  - The groups I most wanted to apply "together" were the ones where a
+    correction propagated: text encoding, load addresses, wall bit order,
+    picture colours, record HP/SP direction. Those are precisely the format and
+    glue groups — and in each case the propagation was manual.
+
+✻ Crunched for 46s · done 1:51
+
+※ recap: Goal: fully reverse-engineer the two Bard's Tale D64 images with my own tools and record findings; that analysis is complete and I'm now answering your retrospective questions about knowledge organization. Next action: await your next question. (disable recaps in /config)
+
+❯ /export                                                                       
+  ⎿  Conversation exported to: /Users/marcus/Desktop/Privat/Projects/bardstale/2
+     026-09-13-015918-local-command-caveatcaveat-the-messages-below.txt
+
+❯ summarize the content of this folder                                          
+
+  Listed 1 directory (ctrl+o to expand)
+
+⏺ /Users/marcus/Desktop/Privat/Projects/bardstale — the two original disk images
+  plus everything produced while reverse-engineering them.
+
+  Inputs
+  - bardst-1.d64, bardst-2.d64 — The Bard's Tale I (C64), city disk and dungeon
+    disk.
+  - Two 2026-09-13-*.txt files — conversation exports you made with /export.
+
+  tools/ (14 Python scripts, all written during the analysis)
+  - d64.py disk image parsing/extraction; dis6502.py disassembler; emu6502.py
+    6502 emulator; unpack_main.py runs the two-stage packer to recover the
+    programs.
+  - btfiles.py the file-number → real-load-address rules shared by all tools;
+    disov.py overlay disassembly; slack.py detects junk at file tails; xrefs.py
+    traced cross-references; asmrange.py, strings_hi.py helpers.
+  - Format decoders/renderers: picture.py, dungeonmap.py, citymap.py.
+  - run_game.py headless emulated run of the game with disk hooks, IRQ, key
+    injection and screenshots.
+
+  extracted/
+  - d1/, d2/ — every file from both disks, the unpacked main program and intro
+    (main.mem, intro.mem, clipped .prgs), the orphan deleted-file chain.
+  - pictures/ — 160 PNGs: all 66 pictures, every animation frame, contact sheet.
+  - maps/ — the 16 dungeon levels and the city map rendered.
+  - screens/ — screenshots from the emulated run (boot → Utilities → Guild →
+    city → wine cellar) and combined sheets.
+
+  disasm/ — labelled listings: resident program (traced and linear), the intro,
+  and all 60 code overlays.
+
+  notes/ — the record of the work: 00_README (layout), 01_units (inventory with
+  status), 02_findings (F-01…F-23 with evidence), 03_formats (memory map, text,
+  picture, map, record, tables), 04_dependencies (what depends on what,
+  reusable/duplicated knowledge), 05_worklog (chronology incl. dead ends),
+  06_retro_notes (tooling reflections), plus data dumps (items.txt, spells.txt,
+  monster_names.txt, maps_dump.txt, overlay_strings.txt, strings_resident.txt)
+  and labels_main.txt (symbol names used by the disassembler).
+
+✻ Baked for 17s · done 2:00

@@ -1,0 +1,2443 @@
+ ▐▛███▛█   Claude Code v2.1.270
+▝▜██████▀  Opus 5 · Claude Max
+  ▝▝ ▝▝    ~/Desktop/Privat/Projects/bardstale/re64
+
+
+❯ There are three directories here. bardstale is the frozen output of a         
+  reverse-engineering investigation performed by another agent that knew        
+  nothing about the other two directories.                                      
+                                                                                
+  First, inspect only bardstale. Do not inspect re64 or re64-redesign yet.      
+                                                                                
+  Reconstruct the information architecture that emerged during the              
+  investigation. Examine the conversation exports, notes, tools, generated      
+  outputs and original inputs rather than relying only on the retrospective.    
+                                                                                
+  Identify what kinds of knowledge and technical entities the investigator      
+  actually needed; how identity and location worked; what was canonical versus  
+  derived; what was duplicated; what became stale; what corrections required    
+  propagation; what context tools needed; how evidence and findings were        
+  represented; which relationships were encoded in tools versus notes; and what 
+  information would be difficult to preserve or integrate across independent    
+  investigators.                                                                
+                                                                                
+  Pay particular attention to abstractions the investigator implemented in      
+  code, because these may be stronger evidence of need than retrospective       
+  suggestions.                                                                  
+                                                                                
+  Do not design a replacement system. Do not use terminology from re64 or       
+  re64-redesign. Produce an evidence-based characterization of the workflow and 
+  its information-management requirements.                                      
+
+⏺ I'll start by mapping the bardstale directory structure before reading
+  anything in depth.
+
+  Searched for 1 pattern, read 1 file, listed 4 directories, ran 16 shell commands (ctrl+o to expand)
+
+⏺ I've now read everything in bardstale/ (notes, all 14 tools, the three
+  transcript exports — which are progressive snapshots of one session, the last
+  a superset — the listings, and the extracted outputs), and cross-checked
+  several tool constants against extracted/d1/main.mem. Here is the
+  characterization.
+
+  The workflow and its information-management requirements — as evidenced in 
+  bardstale/
+
+  0. What the record is, and how reliable each part is
+
+  Source: 2026-09-13-020251-*.txt
+  Nature: Terminal export of the whole session (~52 min of work, 23:57→00:47,
+  then ~50 min of Q&A). Tool I/O is collapsed to "Ran N shell commands"; only
+  the investigator's narration survives.
+  Reliability for this question: Good for sequence, mistakes and reasoning; the
+  raw facts produced by ad-hoc commands are lost — the transcript itself
+  confirms this ("facts that only exist in this transcript").
+  ────────────────────────────────────────
+  Source: tools/*.py (14 scripts, mtimes 23:57–00:45)
+  Nature: The abstractions the investigator was forced to build.
+  Reliability for this question: Strongest evidence of need: every constant and
+  function here was written because a repeated question had to be answered.
+  ────────────────────────────────────────
+  Source: notes/0*.md
+  Nature: Hand-written prose/tables, most written in one burst at 00:36–00:47.
+  Reliability for this question: Reflect final understanding; internal
+  inconsistencies (below) show where propagation failed.
+  ────────────────────────────────────────
+  Source: notes/*.txt, disasm/, extracted/
+  Nature: Generated outputs. Some are reproducible from saved tools
+  (maps_dump.txt, listings, PNGs); some are not (items.txt, spells.txt,
+  monster_names.txt — no producer script exists).
+  Reliability for this question: Show what the investigator considered worth
+  persisting and in what form.
+  ────────────────────────────────────────
+  Source: 06_retro_notes.md
+  Nature: Written while working, explicitly as "raw material" for the user's
+  later questions.
+  Reliability for this question: Useful, but self-reported; I use it only where
+  the code/notes corroborate it.
+
+  Timeline from mtimes: container tool (23:57) → disassembler (00:00) →
+  emulator+unpacker (00:02) → string scanner (00:08) → shared file/address 
+  module (00:10) → slack detector, overlay disassembler, xref tracer
+  (00:13–00:17) → map decoder (00:24) → picture decoder (00:28) → format notes
+  (00:36) → dependency notes (00:38) → game harness (00:42) → city map (00:45) →
+  findings/worklog/retro (00:46) → final regeneration of all listings, labels
+  and the unit inventory at 00:47.
+
+  1. Kinds of knowledge and technical entities the investigator actually needed
+
+  Derived from what the code keys on, not from the retrospective's taxonomy:
+
+  a. Storage containers and physical placement. d64.py models (image, track,
+  sector), the BAM, directory entries (including deleted ones), chains with loop
+  detection, and a usage map classifying every sector as file-owned / free /
+  allocated-but-empty / data-without-owner. The last class was necessary because
+  the investigation's first false alarm came from the 1541 fill pattern (4B 01 
+  01…), which had to be hard-coded into the classifier (d64.py usage branch).
+  The orphan chain T6S7→…→T5S18 is identified purely by its start sector and
+  persisted as extracted/d2/orphan_T6S7.bin — a unit whose identity is a disk
+  coordinate, not a name.
+
+  b. Files as the program sees them. btfiles.py is the central abstraction: file
+  identity is the hex file number (NM+hex), not the directory entry;
+  file_path(n) searches both extracted disk directories, file_body(n) strips the
+  PRG header, load_page(n) reproduces the loader's rule. Two sets DISK1/DISK2
+  record which disk holds which number. Every later tool (disov, slack, xrefs,
+  picture, dungeonmap, citymap, run_game) imports this module — the investigator
+  explicitly did this "so every tool agrees on real addresses" (worklog §10).
+
+  c. Program images and execution stages. unpack_main.py produces three 64 K
+  images per program (main_stage1.mem, main.mem, intro.mem) plus .ranges files
+  recording which addresses each stage wrote. Stage boundaries are detected by
+  execution state (stop1: PC==$0810 and the byte there has changed to SEI), i.e.
+  the entity "stage 2 code" exists only after stage 1 ran. The bug noted in
+  worklog §5 (stop condition fired on the loop head; write attribution needed
+  PC-after-fetch) shows that which instruction produced a byte was a needed
+  fact.
+
+  d. Memory configurations. btfiles.build_mem(files) = resident image + a list
+  of file numbers placed at their real addresses. xrefs.py --files 02,09 and
+  disov.py use it. run_game.py additionally models the $01 banking bits
+  (io_visible()), keeps a separate 4 K I/O image, and logs every KERNAL LOAD
+  with its destination — the configuration is reconstructed from the emulator
+  log rather than stated up front.
+
+  e. Code units and a two-level API. The 70-entry jump table at $0800 is treated
+  as a first-class thing: xrefs.py --resident-entries seeds tracing from $C000,
+  $0800, the IRQ vector, all JT targets and the contents of
+  notes/direct_targets.txt — the 34 addresses overlays call directly, bypassing
+  the table. labels_main.txt carries both names (J_PRINT $0809 and PRINT $0AC6)
+  for one routine.
+
+  f. Runtime variables (zero page, page 3). Needed constantly; encoded as label
+  lines (002A key_ready, 00E0 dungeon_level) and, in run_game.py, as bare
+  literals (mem[0x2A] for key injection, $28/$29/$24/$D4 in the print step,
+  0x1955..0x19C0 for "idle in GETKEY").
+
+  g. Structured data: records, grids, parallel column tables, index spaces.
+  dungeonmap.parse() is a full record decoder (offset→field, coordinate lists
+  terminated by $FF, pointer-relative strings via p-0xF800). The character
+  record, monster/item/spell tables exist only as prose tables in 03_formats.md
+  and as one-off dumps (items.txt etc.). The transcript's own analysis
+  identifies that "the shared index (monster id 0..127) was the more useful
+  identity than any address".
+
+  h. Formats as reusable rules. Picture (picture.decode, whose loops "mirror the
+  6502 code"), map, text encoding (strings_hi.ok() = 0xA0..0xFF, $DC newline),
+  RLE $9F, slack template. Each format tool's docstring is the spec — the format
+  knowledge is authoritative in code, with 03_formats.md pointing back to it
+  ("see tools/picture.py docstring", "see tools/btfiles.py").
+
+  i. Dispatch/glue tables. MODE_OVERLAY, SPECIAL_OVERLAY, RESIDENT_PICS, _D796C
+  in btfiles.py; NAMES (type→building) in citymap.py. These are copies of
+  resident tables lifted into Python so that other tools can use them as edges.
+
+  j. Residue and provenance. slack.py defines slack statistically (majority byte
+  per address across ≥3 files of the same slot, walk back until ≥90 % suffix
+  match) and returns per-file (content_end, file_len); disov.py consumes that to
+  clip the disassembly. Provenance facts (stale copies, Applesoft residue,
+  orphan = older NM02) live only in notes.
+
+  k. The investigator's own evidence artifacts. Screenshots, sheet*.png
+  composites, the LOAD log, memory images, k-gram alignment results. Only the
+  screenshots and images persisted; the alignment and the JT usage counts
+  survive only as numbers quoted in 02_findings.md.
+
+  2. How identity and location worked
+
+  Every entity was keyed by one of the following, and the keys were converted by
+  hand:
+
+  Key used: (image, track, sector)
+  Where: d64.py, orphan name
+  Example: orphan_T6S7.bin, F-01 chain listing
+  ────────────────────────────────────────
+  Key used: file number (hex)
+  Where: btfiles.py, all decoders, run_game LOAD hook (int(name[2:4],16))
+  Example: NM1B, 0x1B
+  ────────────────────────────────────────
+  Key used: file offset
+  Where: citymap.py (0x1800, 0x1C00), dungeonmap.py (0x400, 0x510)
+  Example: docstring gives both: "$420 (FC20)"
+  ────────────────────────────────────────
+  Key used: runtime address
+  Where: labels, listings, findings, xrefs
+  Example: $FC12, $0D99
+  ────────────────────────────────────────
+  Key used: runtime address within a program image
+  Where: separate .mem files; intro.asm vs main_traced.asm both contain a $4000
+  Example: intro renderer vs game picture renderer
+  ────────────────────────────────────────
+  Key used: runtime address within a bank
+  Where: run_game.rd_io
+  Example: $D000 = I/O or picture RAM
+  ────────────────────────────────────────
+  Key used: element index in an index space
+  Where: dump files, tables
+  Example: monster id, item id, spell number, picture index (n-0x50), special
+  type, level
+  ────────────────────────────────────────
+  Key used: offset relative to a base pointer
+  Where: prose only (03_formats.md record table)
+  Example: $38 class applies under ($0F),Y, ($6E),Y, $C800+, $C000+128·n
+  ────────────────────────────────────────
+  Key used: unit / finding ids
+  Where: 01_units.md (U-ORPHAN, U-MAIN-JT), 02_findings.md (F-01…F-23)
+  Example: referenced only from notes to notes
+
+  The single biggest identity problem is visible in the tool code: the PRG 
+  header address is wrong for most files (−$8000 / −$D000), so a file's address
+  is not a property of the file but of the loader table. btfiles.load_addr()
+  exists to override the header, and dis6502.py --prg (which trusts the header)
+  was superseded by disov.py (which does not). Address conversions between file
+  offset and runtime address are done ad hoc (p-0xF800 in dungeonmap, 0x1800 in
+  citymap), and the transcript records slips from exactly this ("map offset $412
+  ↔ $FC12, NM04 tail $F800 ↔ file 0x1800", "misread dump row offsets by $10
+  once").
+
+  Location was never a single object: the listing at disasm/nm02.asm:21 shows
+  LDA $FC10 unlabeled, while labels_main.txt has FC12 map_tileset_id — the label
+  set is one flat address→name map, so map-header fields are named only if
+  someone happened to add that exact address, and the same address in city mode
+  (street grid) cannot be given a different name.
+
+  3. Canonical versus derived
+
+  Canonical (authoritative) sources, as actually used:
+  - The two .d64 images (never modified).
+  - extracted/d1/main.mem — the unpacked resident image, produced by executing
+    the packer rather than reversing it. This is the root of everything:
+    btfiles.resident_mem() reads it, all listings derive from a slice of it
+    (main_0800_CAFF.prg), and tool constants were transcribed from it.
+  - The game's own reader routines: the format tools explicitly claim authority
+    from code ("reverse-engineered from DRAW_PICTURE ($4000)", "derived from
+    NM02 $AF27… $B2A1–$B512"). The dependency note states this rule: "the
+    format's authority is the code that reads it."
+
+  Derived, with a saved producer (reproducible): extracted/d1,d2/*.prg, *.mem,
+  *.ranges, all disasm/*.asm (regenerated together at 00:47),
+  extracted/pictures/, extracted/maps/, notes/maps_dump.txt,
+  notes/overlay_strings.txt (output of strings_hi.py per file with slack-clipped
+  lengths), extracted/screens/.
+
+  Derived without a saved producer (not reproducible): items.txt, spells.txt,
+  monster_names.txt, the JT usage counts quoted in F-05, the k-gram alignment
+  behind F-20, the run_game.py step scripts (passed as a file argument, never
+  saved), the "all MATCH" byte comparison in F-15, the wall-type histogram (that
+  one is reproducible via dungeonmap.py).
+
+  Derived but hand-maintained (drifted): 01_units.md statuses, labels_main.txt,
+  the SPECIAL_OVERLAY constant (see §5).
+
+  4. What was duplicated
+
+  Three layers of duplication exist, and only the first is about the game:
+
+  In the game data itself (04_dependencies.md table): six pictures exist as
+  files, inside NMF0, and in RAM under I/O; pictures $5A–$5D are embedded in
+  five datasets; monster pictures on both disks; fonts/key matrices in resident,
+  NM03, intro; stale text tails in NM10/NM16/NM13/19/1A; the special-type table
+  in $1B28 plus a remap in NM09. The investigator needed these as a class of 
+  fact ("duplicate-of / stale-copy-of") so scans would stop re-surfacing them.
+
+  Between the canonical image and tool code (verified by me against main.mem):
+  - btfiles._D796C = bytes at $796C (identical, 80 bytes).
+  - picture.PIC_COLORS = bytes at $0D99 (identical, 50 bytes).
+  - btfiles.SPECIAL_OVERLAY = first 32 of 60 bytes at $1B28 (stale, see §5).
+  - btfiles.RESIDENT_PICS = $7962/$0D85/$0D8F tables.
+  - citymap.NAMES = the type→building column of 01_units.md §C.
+  - run_game.in_getkey ranges = the GETKEY/KEYSCAN labels as literals.
+  - Overlay slot groups appear twice with different key types (disov.groups
+    keyed by page int, slack.groups keyed by string).
+
+  Between notes: the special-type→file mapping appears in btfiles.py,
+  01_units.md §C/§D (with remap arrows), 03_formats.md and 04_dependencies.md;
+  the load-address rule in btfiles.py docstring, 03_formats.md, F-06; the record
+  layout in 03_formats.md and paraphrased in F-07/F-22 and the transcript
+  answers. The same routine has two names in the label file by construction
+  (J_x/x), and the transcript answer on symbols confirms that the auto-generated
+  J_ layer was regenerated once and not re-derived.
+
+  5. What became stale
+
+  Concrete instances present in the frozen output:
+
+  1. labels_main.txt:08CC J_PRINT_MSG_ID ; JT -> $456E next to 456E 
+     SET_PIC_COLORS. The routine was renamed mid-project; the auto-generated JT
+     alias was not. This stale name is emitted into main_traced.asm:138,
+     nm02.asm, nm09.asm (I grepped: 1 occurrence each).
+  2. btfiles.SPECIAL_OVERLAY has 32 entries with a comment "type (0..31)"; the
+     resident table has 60 ($1B28..$1B63) and 01_units.md §D /
+     04_dependencies.md describe it as 64 entries with a city remap. Tool and
+     notes disagree; the tool reflects F-08's earlier reading.
+  3. 01_units.md says "per-overlay label files (never really created)" is true:
+     disov.py looks for notes/labels_nm{xx}.txt, and none exists. Overlay
+     listings therefore label only resident symbols; every sub_Bxxx is
+     anonymous.
+  4. Worklog §5 vs. code: unpack_main.py's docstring still says stage 2 moves
+     the image "to $7C00+" while findings say "+$7500"; the tool comment was not
+     updated after the finding was refined.
+  5. The main_linear.asm listing (00:05) predates the labels and was never
+     regenerated with them (it has L_08D2 where main_traced.asm has GAME_INIT).
+  6. picture.py's docstring still describes colours as coming from the $C000
+     init ("green/green"), which the renderer corrected via palette_for() — the
+     code moved on, the prose in the same file did not; 03_formats.md "Picture"
+     section likewise still says "Colours from screen RAM $55 (green/green)".
+
+  6. Corrections that required propagation
+
+  The transcript and worklog record five corrections whose consequences spread
+  across artifacts, all propagated by hand:
+
+  ┌────────────────────────────────┬────────────────────────────────────────┐
+  │           Correction           │           What had to change           │
+  ├────────────────────────────────┼────────────────────────────────────────┤
+  │                                │ dungeonmap.py render, all 16 map PNGs, │
+  │ Wall-byte bit order (N/S       │  maps_dump.txt, F-14 text,             │
+  │ swapped) — worklog §12         │ 03_formats.md; the retro says "three   │
+  │                                │ notes were affected"                   │
+  ├────────────────────────────────┼────────────────────────────────────────┤
+  │ $FC20 list is special-event    │ field name in dungeonmap.parse         │
+  │ squares, not stairs —          │ ('specials'), the print line still     │
+  │ transcript ("I need to correct │ says stairs: (dungeonmap.py main loop  │
+  │  my earlier assumption")       │ — a leftover), F-14, 01_units.md §D    │
+  ├────────────────────────────────┼────────────────────────────────────────┤
+  │ Item slots at $50–$5F, not off │ record table, 03_formats.md, regen     │
+  │  by $10 — transcript           │ routine reading                        │
+  ├────────────────────────────────┼────────────────────────────────────────┤
+  │ HP max/cur direction — worklog │ 03_formats.md offsets $30–33, F-22,    │
+  │  §14, resolved by the dead     │ the emulator party-line check          │
+  │ character SAMSON               │                                        │
+  ├────────────────────────────────┼────────────────────────────────────────┤
+  │ Picture colours ($0D99 +       │ picture.py palette, re-render of 160   │
+  │ SET_PIC_COLORS) — worklog §11  │ PNGs, the routine rename (which then   │
+  │                                │ went stale in the JT alias)            │
+  ├────────────────────────────────┼────────────────────────────────────────┤
+  │ Real load addresses ($796C) —  │ every overlay disassembly had to be    │
+  │ worklog §7/§10                 │ redone; this is why btfiles.py was     │
+  │                                │ created                                │
+  └────────────────────────────────┴────────────────────────────────────────┘
+
+  The pattern: a correction to a format or glue fact invalidates every instance
+  and every listing derived through it, and nothing in the workspace records
+  which outputs depend on which fact. The only mechanism that approximated
+  propagation was "regenerate everything at the end" (the 00:47 mtime burst),
+  which is why the stale items in §5 are the ones not produced by a script.
+
+  7. What context tools needed
+
+  Each tool takes its context implicitly through arguments or hard-coding:
+
+  - dis6502.py: --org, --prg, --entry, --data a-b, --labels FILE, --skip — the
+    caller supplies address, entry points, forced data ranges and one label
+    file. No notion of "which image / which bank".
+  - disov.py XX [entries]: context = the file number; it infers slot group →
+    slack analysis → content length → label files.
+  - xrefs.py --files 02,09 --entry AE00 --range F800-FFFF --code-range …:
+    context = a set of loaded files plus entry points plus the address window of
+    interest. This is the most explicit "memory configuration" parameter in the
+    toolkit, and it was needed because "raw byte scanning was useless" (worklog
+    §15).
+  - slack.py: context = the group of files sharing a slot (the template only
+    makes sense per slot).
+  - picture.py: context = the picture number (for the palette) — colour was
+    "state set elsewhere" (worklog §11).
+  - dungeonmap.py, citymap.py: context = file number and the fixed load base
+    (0xF800 hard-coded in pointer resolution).
+  - run_game.py: context = full machine state (bank bits, I/O image, IRQ
+    cadence, loaded files log), plus a script of keys/waits/pokes. Several facts
+    were only obtainable here: $D8 view depth, $7A light flag, loader order.
+  - asmrange.py FILE START END: context = a listing file and an address window —
+    a symptom that listings were being read in slices rather than queried.
+
+  What no tool could be told: which bank $D000 is in for a static listing; which
+  occupant of $C000/$E000/$F800 a resident routine is assuming; which call path
+  gives $E0 its meaning (the listing at main_traced.asm:2298 shows LDX 
+  dungeon_level ; X=$E0 special-location type — label and comment contradict
+  because the context lives in the comment).
+
+  8. How evidence and findings were represented
+
+  - Findings (02_findings.md): numbered F-nn, each with Source (tool/command),
+    Location, Evidence (prose: specific bytes, addresses, counts, strings,
+    emulator log order), Description. Cross-references are textual ("See
+    01_units.md U-ORPHAN", "(notes/items.txt)").
+  - Units (01_units.md): U-* ids, a four-level status letter (D/P/I/?), "Indep."
+    and "Needs" columns — an explicit attempt to record understandability and
+    dependency per unit.
+  - Formats (03_formats.md): offset tables with a "Sources:" line listing the
+    routines each layout was derived from (e.g. character record: $124F, $43A6, 
+    $104E, NM1B $B7A0-$B8B3, $71DC, $5170). Unknown fields are marked ? inline —
+    the open-question queue is embedded in the tables.
+  - Labels (labels_main.txt): ADDR NAME ; comment, with the comment carrying
+    calling convention, side effects, and sometimes the evidence ("verified:
+    26/32 roster records match").
+  - Dependencies (04_dependencies.md): an ASCII arrow graph "A needs B" and a
+    duplication table.
+  - Visual evidence: screenshots composited into sheet*.png; contact sheet of
+    pictures; rendered maps with in-image legends (dungeonmap.render writes
+    name/depth/tileset/chain/exit onto the PNG; citymap.py writes a legend
+    line).
+  - Emulator evidence: F-16's evidence is a sequence (LOAD order, addresses)
+    that came from Game.log, printed to the terminal and not saved.
+  - Confidence is expressed lexically ("?", "probably", "inferred", "established
+    from … confirmed by …", "Uncertain" sections in the transcript answers),
+    never structurally.
+
+  Evidence therefore attaches to findings as prose, with addresses as the only
+  machine-checkable anchors; the transcript answer on groups states this
+  directly ("I experienced these as attached to findings, not to addresses").
+
+  9. Relationships encoded in tools versus in notes
+
+  In code (executable, reused):
+  - file number → disk, real address, body bytes (btfiles)
+  - mode → main overlay; special type → sub-overlay (partial); picture →
+    resident copy address (btfiles)
+  - slot → member files (slack, disov)
+  - file → content end (slack.analyse)
+  - memory configuration → traced code set → references into a range (xrefs)
+  - picture number → colour pair (picture.palette_for)
+  - map file → fields, coordinate lists, pointer-resolved strings
+    (dungeonmap.parse)
+  - notes → tool: xrefs.py reads notes/direct_targets.txt; disov.py reads
+    notes/labels_main.txt (+ optional per-overlay files). These are the only
+    places where a note is machine-consumed.
+  - execution stage → written ranges (unpack_main, .ranges)
+  - KERNAL call → file load → log entry (run_game)
+
+  In notes only (prose/tables):
+  - record and column semantics (character record, monster/item/spell tables)
+  - duplicate-of / stale-copy-of / older-revision-of (04_dependencies.md table,
+    F-20)
+  - unit → status / independence / needs (01_units.md)
+  - finding → evidence → source tool
+  - the "A needs B" derivation graph
+  - open questions (? cells, "Uncertain" lists)
+  - meaning of polymorphic variables per call path ($E0, $28/$29 in two
+    coordinate systems)
+  - the emulator hook list needed to run the game (F-16 prose, though also
+    implicit in run_game.py)
+
+  The asymmetry is telling: relationships that the investigator had to apply 
+  repeatedly migrated into code; relationships that were concluded once stayed
+  in prose — even when they were the ones later corrections invalidated.
+
+  10. What would be difficult to preserve or integrate across independent 
+  investigators
+
+  1. Address keys are ambiguous without the investigator's head. A second
+     investigator receiving labels_main.txt cannot tell that FC12 map_tileset_id
+     is valid only when a map is loaded, that dungeon_level at $E0 is also the
+     special type, or that $C000 PICBUF is sometimes the roster. The notes
+     encode this in comments and the transcript, not in the label set.
+  2. The file→address rule is a precondition for everything, but lives in one 
+     module's constant. Any parallel investigator who trusted PRG headers would
+     produce incompatible listings; merging would require re-basing every
+     symbol.
+  3. Tool constants are silent copies of the image. Three transcribed tables
+     (_D796C, PIC_COLORS, SPECIAL_OVERLAY) carry no pointer back to their source
+     address/version; one is already stale. Two investigators would each
+     transcribe their own and diverge.
+  4. Renames do not propagate. The PRINT_MSG_ID/SET_PIC_COLORS split shows that
+     even a single investigator's own alias layer diverged; with two people,
+     both names would circulate.
+  5. Unreproducible dumps. items.txt, spells.txt, monster_names.txt, the JT
+     usage counts and the k-gram alignment cannot be regenerated or checked by
+     someone else; they would have to be trusted or redone.
+  6. Slack/junk classification is a computed convention. slack.analyse
+     thresholds (≥3 files, 90 % suffix match) define what "content" means for
+     ~35 files; a different investigator's clipping would yield different
+     content lengths and different "false targets" (the $2004/$2032/$1010/$1210
+     entries in direct_targets.txt are exactly such artifacts, and it is not
+     recorded which of the 34 direct targets are junk-derived).
+  7. Evidence is narrative and tied to session state. F-16's confirmation
+     depends on a run_game script that was not saved and on the LOAD log printed
+     to the terminal; the emulator's $D8/$7A discoveries have no recorded
+     probe.
+  8. Provenance classes cut across every other grouping. "Stale copy of NM11
+     inside NM16" is a relation between byte ranges of two files; nothing in the
+     workspace can express "range X of file A is not content, explained by B"
+     except a table row in 04_dependencies.md, so another investigator would
+     rediscover (and re-scare themselves with) the same junk.
+  9. Open questions are scattered as ? in tables, "unk408/unk411" field names in
+     code, "(init 1, probably…)" in prose, and "Uncertain" lists in the
+     transcript — with no shared index, they cannot be handed off or claimed.
+  10. The unit inventory's status column is opinion at a point in time and
+      already lags the tools (e.g. U-MAIN-3D marked P although the view builder
+      was read for the map format).
+
+  11. Abstractions implemented in code — the strongest evidence of need
+
+  Ranked by how much the rest of the toolkit leans on them:
+
+  1. btfiles.load_page/load_addr/file_body/build_mem — a
+     file-number-to-runtime-address resolver and a "compose a memory image from
+     a set of files" constructor. Created at 00:10, imported by seven tools.
+     This is the investigator's answer to "identity is contextual"; note that it
+     models the file set but not the bank bits or the program image (those are
+     separate hacks in run_game.py and separate .mem files).
+  2. slack.analyse — a per-slot statistical template that turns raw file bytes
+     into (content, junk) ranges, consumed by disov.py before disassembly. Need:
+     a range-classification layer that other tools respect.
+  3. xrefs.trace/refs_in with --files and seeded entries from a notes file —
+     traced-only cross-references over a configuration. Need: queries
+     parameterized by configuration and by an entry set that includes non-table
+     call targets.
+  4. dis6502.load_labels + C64_SYMS + auto sub_/L_/D_ naming + refs= annotations
+     — a three-tier symbol scheme (hardware, user, derived) merged into one
+     flat map per run. Need: multiple symbol sources; observed limitation: no
+     per-context sets, no data typing.
+  5. unpack_main written-range attribution and stage detection by memory change
+     — the need to know which execution stage produced which bytes.
+  6. emu6502 hook model (read_hooks, write_hooks, jsr_hooks that also catch JMP
+     tail-calls, watch_writes) and run_game's script steps
+     (key/wait/call/poke/idle/shot/print) — a probe harness: "run to a state,
+     poke, observe". The retro calls the emulator-as-oracle the single most
+     valuable tool; the code shows it was built late (00:41) and by then most
+     static findings existed to be confirmed rather than discovered.
+  7. Format decoders whose loops mirror the 6502 (picture.decode,
+     dungeonmap.parse) with the spec in the docstring — the executable-spec
+     pattern, and the reason format facts were the most reusable and the most
+     propagation-sensitive.
+  8. Rendered outputs with embedded metadata (dungeonmap.render legend, citymap
+     legend, sheet*.png) — evidence artifacts designed to be inspected without
+     the tool.
+  9. asmrange.py — trivially small, but it exists because listings were being
+     consulted as address-window queries, not read linearly.
+
+  Two further things the investigator did not build, though the code shows the
+  need: any writer for labels_nm*.txt (the hook exists, the files never did),
+  and any persistence of the ad-hoc queries that produced the table dumps.
+
+  ---
+
+  If it would help for the next step, I can turn this into a shareable page —
+  but as the direct answer to the question, the above is complete.
+
+✻ Cogitated for 5m 31s · done 2:12
+
+❯ /export                                                                       
+  ⎿  Conversation exported to:
+     /Users/marcus/Desktop/Privat/Projects/bardstale/bardstale/2026-09-13-021446
+     -there-are-three-directories-here-bardstale-is-th.txt
+
+※ recap: Goal: characterize the bardstale reverse-engineering workflow's information architecture from its notes, tools, transcripts and outputs; that characterization is delivered above. Next: your follow-up, or the comparison against re64 and re64-redesign when you say so. (disable recaps in /config)
+
+❯ Now inspect re64 and re64-redesign.                                           
+                                                                                
+  Treat your analysis of bardstale as empirical evidence from a real            
+  reverse-engineering investigation. Treat re64 and re64-redesign as two        
+  systems/designs intended to support work of this kind.                        
+                                                                                
+  Do not propose a redesign yet. First perform a comparative audit.             
+                                                                                
+  Compare by semantics and behavior, not terminology. Do not assume that        
+  similarly named concepts correspond. Conversely, do not call something        
+  missing merely because re64 uses a different abstraction to solve the         
+  observed need.                                                                
+                                                                                
+  For each significant requirement or pain point you identified in bardstale,   
+  determine how re64 and re64-redesign address it. Classify each as:            
+                                                                                
+  * strongly supported — re64 naturally represents/supports what the            
+  investigation actually needed;                                                
+  * partially supported — the underlying capability exists but is awkward,      
+  incomplete, or requires conventions the investigator would have to remember;  
+  * missing — no adequate representation or operation exists;                   
+  * over-modelled — re64 introduces machinery substantially more complex than   
+  the observed requirement;                                                     
+  * unsupported hypothesis — the design contains a concept/mechanism for which  
+  this investigation provides little or no evidence;                            
+  * unresolved — the Bard’s Tale experiment cannot decide it.                   
+                                                                                
+  Pay particular attention to:                                                  
+                                                                                
+  * assets and claims/records on asset ranges;                                  
+  * relocation and conversion between asset-relative and runtime locations;     
+  * images versus the investigator’s memory configurations and composed memory  
+  states;                                                                       
+  * executions, checkpoints, probes and attribution of bytes to execution       
+  stages;                                                                       
+  * types, records, reusable formats, parallel tables and shared index spaces;  
+  * claims/assertions, evidence, provenance, negative assertions, corrections   
+  and dependencies between assertions;                                          
+  * findings and how they differ from atomic technical assertions;              
+  * symbols: resident/global, file-local, configuration-dependent,              
+  format-relative and path-dependent meanings;                                  
+  * stale/junk/slack/duplicate/residue classifications and whether downstream   
+  tools can respect them;                                                       
+  * reproducible tool runs and generated artifacts;                             
+  * visual renderings as analysis/evidence, not only publication output;        
+  * open questions and incomplete knowledge;                                    
+  * generic analysis primitives versus bespoke investigator-written tools;      
+  * canonical state versus generated/derived representations that can become    
+  stale;                                                                        
+  * Project, Program, Target, Image, View, inclusion, platform knowledge,       
+  evidence resolution and shadowing in the redesign.                            
+                                                                                
+  For Program and Target in particular, do not try to justify or reject them    
+  from their definitions alone. Identify concrete problems observed in          
+  bardstale that require the distinction they provide. If the same observed     
+  need is already handled more simply by Assets, Images, Types/Records, Claims, 
+  relationships or Project-level knowledge, say so. If the experiment does not  
+  decide the issue, mark it unresolved.                                         
+                                                                                
+  Be careful about false sharing. The fact that two files, images or versions   
+  currently have the same symbol or assertion does not establish that they      
+  should share one mutable fact. Distinguish:                                   
+                                                                                
+  1. one intrinsic fact reused through relocation or placement;                 
+  2. many instances of one shared Type/Format;                                  
+  3. genuinely common technical knowledge;                                      
+  4. independently true facts that merely agree;                                
+  5. duplicated or stale bytes.                                                 
+                                                                                
+  Also distinguish missing model concepts from missing affordances. If re64 can 
+  already represent something but Agent A would still have written btfiles.py,  
+  slack.py, dungeonmap.py, etc. because the API/tooling makes the operation     
+  cumbersome, classify that as an affordance/tooling problem rather than        
+  inventing another entity.                                                     
+                                                                                
+  Examine implementation and tests where necessary; do not judge only from      
+  documentation. Note contradictions between documentation, implementation and  
+  tests.                                                                        
+                                                                                
+  Produce:                                                                      
+                                                                                
+  1. a concise description of the architectural model you believe each re64     
+  version actually implements;                                                  
+  2. a requirement-by-requirement audit grounded in concrete Bard’s Tale        
+  examples;                                                                     
+  3. a concept-by-concept audit of the major re64 abstractions;                 
+  4. a list of places where re64 would have prevented concrete problems Agent A 
+  experienced;                                                                  
+  5. a list of places where Agent A would still have been fighting re64;        
+  6. unresolved questions for which the evidence is insufficient.               
+                                                                                
+  Stop there. Do not propose a new architecture or implementation plan.         
+
+⏺ I'll start by mapping both directories before reading anything in depth.
+
+  Searched for 1 pattern, read 5 files, ran 21 shell commands (ctrl+o to expand)
+
+⏺ Now the implementation. Starting with the core model types.
+
+  Searched for 10 patterns, read 2 files, listed 1 directory, ran 17 shell commands (ctrl+o to expand)
+
+⏺ I have now read both re64 versions' documentation, the core model, loader,
+  memory map, machine, D64 parser, view, hygiene/review code, the multi-target
+  Camels project, and the experiment reports, and checked two behaviours
+  directly against the Bard's Tale disks. Here is the comparative audit.
+
+  ---
+
+  Comparative audit: Bard's Tale evidence vs. re64 and re64-redesign
+
+  Notation below: BT = the frozen Bard's Tale investigation; re64 = the
+  implemented system in re64/ (docs + src/ + tests at the checked-out commit);
+  RD = the two-document redesign in re64-redesign/docs/. "Agent A" = the BT
+  investigator. Classifications use the six categories requested; where re64 and
+  RD differ they are given separately.
+
+  1. The architectural model each version actually implements
+
+  re64 (as built)
+
+  Read from src/core/project/project.ts, src/core/claims/model.ts,
+  src/core/project/loader.ts, src/core/memory/memory-map.ts, src/core/machine/,
+  and the transport tests rather than from the prose:
+
+  - Files/blobs: immutable content by hash, referenced by id; D64 members
+    selected by directory name (file-source.ts, d64.ts).
+  - Layers: dumb byte sources (prg, raw, bytes, rom) or symbols. A prg layer's
+    address comes from its header; a raw/bytes layer declares one.
+  - Targets: named, id-keyed, ordered lists of links (layer + optional at); the
+    last link shadows; a target is the only thing a memory arrangement can be,
+    and every address-bearing tool must be told which one (selectTarget, D1a). A
+    flat 64 K MemoryMap is built per target; the platform symbol layer sits
+    underneath; no banking model exists anywhere (memory-map.ts, machine/c64.ts:
+    $D000–$DFFF is always the device bus).
+  - Claims: one flat, id-keyed root; each carries at + frame (layer offset /
+    target absolute / address absolute), optional extent, name, says
+    (data/text/bitmap/jumptable/record), root, description, origin. Nothing
+    resolves at rest; disagreements are reported, not resolved. Retirement is
+    derived from evidence records and filtered in one place (loader.ts).
+  - Declarations: constants, types (record layouts with fields, holes, arrays,
+    bit units), decoders (sandboxed bytes → data), plus per-site bindings
+    (labelUse, constantUse, primary).
+  - Evidence: an entity about a claim (supports/refutes/retires, method,
+    scenario, capture, other, note); provenance lives here, not on the claim.
+  - Execution: run_program (flat memory, stop when control leaves
+    supplied+written bytes, optional RAM capture saved as a .prg file with no
+    provenance record), run_block, and scenarios (typed step lists;
+    deterministic; prefix-checkpoint cache in memory only; captures persisted as
+    entities with {scenario, step, kind, file}). No disk drive, no KERNAL call
+    hooks, no $01 banking, no conditional stops beyond breakpoints/watchpoints.
+  - Analysis: claim-independent decode graph, reachability from roots, blocks,
+    effects, known-bits, xrefs, hygiene, disagreements(), findings()
+    (code-in-claim / unreached / unexplained), coverage (find_undecoded).
+  - Collaboration: Yjs document, per-session replicas, operation log, chat, undo
+    — a large fraction of the codebase and of the contracts.
+
+  The document is canonical; every listing, name, path, and report is derived on
+  demand. The .re64 file is an export.
+
+  re64-redesign (as described; no code)
+
+  The RD keeps claims, types/records, bindings, constants, decoders, evidence,
+  chat, CRDT, and the C64 focus, and changes the containment model:
+
+  - Project ⊃ Program ⊃ Assets; an Image is machine state (memory incl. hidden
+    banks, registers, devices, banking controls, cartridge, inserted media)
+    configured from an ordered list of assets, or reached by execution;
+    byte-granular origin tracking; copy-on-write execution overlay; PLA mapping
+    decides what an access reaches.
+  - Inclusion of another program's assets and knowledge as a pinned, read-only
+    revision; internalize to copy; the C64 platform is such a program with
+    retained revisions.
+  - Experiment / scenario / run / checkpoint / trigger / snippet / capture / 
+    access trace.
+  - Claims with a subject that need not be an address (location, function,
+    asset, program, relationship); asset-relative vs absolute coordinates;
+    applicability by image/conditions; shadowing as a presentation choice.
+  - Finds log (findings referencing claims/captures/etc. with per-reference
+    notes) and articles.
+  - Resolved view = an image + the knowledge applicable to it, with origins
+    retained.
+  - Coverage and hygiene reports.
+
+  Note that RD does not use the word "target"; its Image + resolved view
+  replaces re64's Target + Workspace.
+
+  ---
+
+  2. Requirement-by-requirement audit
+
+  Each row names the BT requirement (from my earlier characterization), the
+  concrete BT instance, and how each version fares. "Affordance" marks cases
+  where the model can hold it but Agent A would still have written a tool.
+
+  2.1 Container-level knowledge: BAM, sector ownership, deleted chains, fill 
+  patterns
+
+  BT: d64.py usage map (file/free/allocated-empty/data-without-owner), the 4B 01
+  01… false alarm, the orphan chain T6S7→… extracted by start sector,
+  F-01/F-02/F-20.
+
+  - re64 — partially supported, mostly missing. d64.ts lists directory entries
+    (skipping deleted ones: if (fileTypeByte === 0) continue) and extracts a
+    named entry. No BAM, no usage map, no way to start a chain from an arbitrary
+    track/sector, no loop detection in extractFile. Verified against
+    bardst-2.d64: re64's last-sector rule (slice(offset+2, offset+2+nextSector))
+    returns one byte too many per file (nm02: 3330 vs 3329; nm1c: 1026
+    vs 1025), which would have broken Agent A's "size = n·256−1" observation
+    (F-11) and the slack analysis built on it. The orphan (F-02, F-20) cannot
+    become a layer without external extraction.
+  - RD — unresolved. Assets include "disks", and inserted media are part of an
+    image, but nothing is said about sector-level structure, deleted chains, or
+    fill patterns. Agent A would still write d64.py.
+
+  2.2 File identity as the program sees it, and disk membership
+
+  BT: btfiles.py keys everything by hex file number; DISK1/DISK2 sets; the
+  loader's NM+hex rule.
+
+  - re64 — partially supported (affordance). A layer per file with file id +
+    member name records the disk membership; the file number is a naming
+    convention Agent A would put in the layer name. Nothing computes "file 0x1B"
+    → layer; a project with 60+ layers is navigable only by list_targets. The
+    mapping number→page ($796C) is a table inside the program (see 2.11).
+  - RD — same.
+
+  2.3 Real load addresses vs. lying PRG headers; relocation
+
+  BT: headers are −$8000/−$D000 from reality for most overlays (F-06); every
+  listing had to be redone once btfiles.load_addr() existed.
+
+  - re64 — partially supported, with a defect. The intended mechanism exists:
+    link a layer into a target with at (ProjectLink.at, tested in
+    links.test.ts). But the test covers only bytes layers. For a prg layer,
+    projectForTarget sets address: link.at, buildMemoryMap passes it as
+    explicitStart, and makeFileLoader then returns the file with its two header 
+    bytes unstripped (file-source.ts:69–71, isPrg:false). So relocating a D64
+    PRG member to its real address places the header at the target address and
+    shifts the content by two bytes. The documented capability ("a layer can be
+    linked into two targets at two addresses", 05-model.md §3, machine.md)
+    contradicts the implementation for exactly the layer kind Bard's Tale
+    consists of. Workaround: strip headers outside re64 and upload 60+ raw files
+    — i.e. write d64.py + btfiles.py anyway.
+  - RD — strongly supported in principle ("an image is configured with an
+    ordered list of assets… using each asset according to its type";
+    "asset-relative location follows placement"), but nothing decides whether a
+    PRG header is honoured or overridable per placement.
+
+  2.4 Composed memory configurations (resident + set of loaded files + bank 
+  bits)
+
+  BT: build_mem(files), xrefs.py --files 02,09, disov.py, the four
+  "representative configurations" in the transcript; run_game.py's $01-dependent
+  I/O image.
+
+  - re64 — partially supported. A target is precisely "which layers, in what
+    order, at what address", and layer-framed claims travel with the layer, so
+    NM02's local labels appear in every dungeon target and never in a city
+    target — a genuine fit for Agent A's slot-occupancy sets (transcript
+    group 4), which he "never wrote down as first-class things". Three limits:
+    (a) every configuration must be declared as a document entity before it can
+    be read (add_target is a write); Agent A composed configurations ad hoc per
+    query, dozens of times; (b) no banking: the six pictures copied to
+    $D000–$DCFF under I/O (F-06, F-15) and the $01=$35/$34 alternation cannot be
+    represented — the docs concede this ("Banking is still not solved",
+    redesign-claims.md; platform.md); (c) a target is a flat map, so "$D000 is
+    I/O now and RAM a moment later" has no reading.
+  - RD — strongly supported in design: memory "includes all the underlying
+    banks, including those currently hidden", mapping/PLA state is in the image,
+    and later loads overwrite earlier bytes with byte-granular origin tracking.
+    This is the first thing that answers Agent A's pain point 2 directly.
+    Unimplemented.
+
+  2.5 Executions, stages, and attributing bytes to stages
+
+  BT: main_stage1.mem, main.mem, .ranges files, the stop condition "PC==$0810
+  and the byte there changed", write attribution needing PC-after-fetch,
+  run_program-like decrunch.
+
+  - re64 — partially supported. The Camels build shows the intended path:
+    scenario start → run leaves:true → capture ram → add_byte_layer
+    (build.mjs:154–169). For BT stage 2 (ends in JMP $C000 into code the program
+    wrote, then the first KERNAL call) leaves would stop at the right place.
+    Stage 1's boundary (second visit to $0810) needs two successive run steps
+    with the same breakpoint — expressible. run_program reports wrote ranges
+    (the .ranges equivalent) but only in the tool result; the captured file is a
+    plain file record with no link to the run that produced it
+    (workspace.ts:1371–1505, noteUploadedFile), whereas scenario captures are
+    entities with {scenario, step}. Two capture paths, one with provenance and
+    one without. Per-byte "which instruction wrote this" is not retained.
+  - RD — strongly supported: runs, checkpoints usable as images, access traces
+    ("which instructions read, wrote, or fetched bytes"), captures with context.
+    This maps one-to-one onto what unpack_main.py and the retro asked for.
+
+  2.6 Running the whole game (KERNAL disk hooks, IRQ, key injection, 
+  screenshots)
+
+  BT: F-16 — the single most valuable verification; needed hooks on 17 KERNAL
+  entries, a serial-bus stub, an I/O image, $2A key injection, view-depth pokes.
+
+  - re64 — missing. The machine has CPU, VIC, CIA, SID, interrupts, keyboard
+    matrix, joystick, screen/frames/trace/SID captures, set memory pokes (so $2A
+    injection is expressible). It has no drive/serial emulation and no way to 
+    intercept a routine (no hook or snippet step; scenario.ts has no such
+    vocabulary). With the KERNAL ROM linked, LOAD would spin on the serial bus;
+    without it, the run ends at $FFBA. Bard's Tale's loader is called dozens of
+    times per session. The builder in experiment 5 hit the same wall and wrote a
+    private interpreter, as Agent A did.
+  - RD — partially supported/planned: triggers + snippets ("inspect or modify
+    memory and registers, change device state, supply input"), inserted disks
+    and drive state as image state. Whether a snippet can substitute for a
+    KERNAL routine (return early with a loaded file) is not stated. The BT
+    evidence for this need is strong; the design is not yet specific enough to
+    classify as supported.
+
+  2.7 Symbols: resident/global, file-local, configuration-dependent, 
+  format-relative, path-dependent
+
+  BT: labels_main.txt (global), sub_Bxxx per overlay (never given their own
+  files), $AE00/$C000/$E000 slot roles, record offsets, $E0 = level vs. special
+  type, $28/$29 in two coordinate systems.
+
+  - re64 — strongly supported for four of five, partial for the fifth.
+    - File-local: layer-framed claims (the default via placed()); NM02's
+      sub_B19D lives on the NM02 layer and is invisible in city targets. Exactly
+      what Agent A wanted and never got.
+    - Global (zero page, resident): claims on the resident layer travel with it;
+      byteless addresses get address-space scope and appear in every target.
+      Caveat: the intro is a different program; address-space claims for game
+      zero-page cells would leak into intro targets. Escape: frame them on a
+      whole-image layer (if main.mem is uploaded as a 64 K raw layer, ZP is
+      supplied by it) or target-frame them.
+    - Slot-role: target-framed claims ($C000 PICBUF in city targets; the roster
+      layer's own claims when NM00 is linked there) — supported, but B6 says
+      explicit target framing is "a design question" not exposed to writers
+      except via bind_name scope:target.
+    - Path-dependent ($E0): two claims at $E0 (dungeon_level, special_type) plus
+      bind_name per referring site is precisely the per-site binding the model
+      provides ("stored per site, so a binding travels with its instruction").
+      Agent A's listing shows the contradiction he could not express
+      (main_traced.asm:2298: label says one thing, comment the other).
+    - Format-relative ($38 = class under ($0F),Y): a record type gives the
+      field; where returns paths like party[2].class for addresses inside a 
+      typed claim. The idiom LDY #$38 / LDA ($0F),Y binds a constant per site,
+      not a field reference — field-as-constant is parked (claims.md "Parked").
+  - RD — same, plus "the same numeric value elsewhere can mean something
+    different" is stated for bindings; no change on field references.
+
+  2.8 Types, records, parallel column tables, shared index spaces
+
+  BT: 128-byte character record (5-bit packed stats, 12-digit decimals, BE
+  words, 8×2-byte item slots, XOR checksum); map file (grids, $FF-terminated
+  coordinate lists, pointer table to strings); monster/item/spell tables as
+  struct-of-arrays sharing one index; $1B28 type→file table.
+
+  - re64 — partially supported. Record types with
+    u8/u16be/ptr/char(n,enc)/bytes(n)/bits(n), nested records, arrays with
+    nonzero origin, bit-unit records, holes, extent/size count derivation,
+    preview as:record, where paths — this covers the character record (including
+    bits(5) stats via a nested bit record) and the map header better than Agent
+    A's prose table, and would have made "a record-layout table with per-field
+    evidence" (worklog §14) partly real (per-field evidence still lives on the
+    claim, not the field). What it cannot say: one index space shared by 
+    parallel columns — the decision archive names this as "the one piece that
+    does not land cleanly" (redesign-claims.md, "Split arrays"). Agent A's most
+    reused identity ("monster id 0..127") has no entity; four u8[128] claims
+    plus a ptr[128] name table stay unrelated. "Index-into" field semantics
+    ($1B28[t] is a file number; $7EA8[id] is a picture number) are explicitly
+    parked.
+  - RD — partially supported. Same type system; "relationship" as a claim
+    subject is mentioned, unspecified.
+
+  2.9 Reusable formats (pictures, maps, text encoding, RLE, slack template)
+
+  BT: the format tools' docstrings are the specs; corrections propagated by
+  re-rendering all instances.
+
+  - re64 — partially supported (affordance). Pictures: a stored decoder
+    (snippet:<id>) returning frames reproduces picture.py, and render claim:<id>
+    draws any instance by name; the per-picture palette ($0D99) must be passed
+    as params by hand because a decoder sees only its span. Maps: a decoder
+    returning a bitmap reproduces dungeonmap.render; the structure is a type.
+    Text: hi-bit ASCII is not a built-in encoding — fromAscii renders every byte
+    ≥ $80 as "." (text.ts:132), so preview as:text, find_*, and every listing
+    show BT's strings as dots until a decoder is registered, and no search runs
+    through a decoder. So strings_hi.py gets rewritten. RLE $9F is a run, not a
+    format claim. Slack template: no representation (see 2.13).
+  - RD — same ("custom decoders can express formats beyond built-in types").
+
+  2.10 Assertions, evidence, provenance, corrections, dependencies
+
+  BT: F-01…F-23 with Source/Location/Evidence; "why did I believe the bit
+  order?" re-derived several times; the N/S flip touched three notes;
+  PRINT_MSG_ID→SET_PIC_COLORS left a stale alias.
+
+  - re64 — partially supported.
+    - Atomic assertions with method: add_claim … method: and evidence records
+      with method (guessed/transcribed/read/derived/ran) match Agent A's
+      implicit distinction between static reading and emulator confirmation
+      (F-16 confirms F-06/F-07/F-14). Strongly supported.
+    - Evidence pointing at instruction addresses / tool output: only note
+      (prose), scenario, capture, or other (one claim). "Supported by
+      instructions $B2A1–$B512" is prose again.
+    - Dependencies between assertions: none. other is single-valued and
+      unranked; supersedes was deliberately removed. The N/S correction would
+      still be manual across dependent claims.
+    - Corrections: edit_claim by id propagates the name to every listing
+      (derived rendering), which prevents the stale SET_PIC_COLORS listings —
+      but not the stale J_PRINT_MSG_ID alias, which is a second claim at $08CC.
+      The cure in re64 is not to name JT entries at all (a jumptable
+      interpretation renders JMP SET_PIC_COLORS derived).
+    - Negative assertions: refutes exists; BT contains few (the "false-target
+      scare", "not a stairs list") — mild evidence.
+    - Retire without erasing: evidenced only weakly by BT (Agent A overwrote);
+      the retro's "why I believed" is about evidence links, not retained wrong
+      readings.
+  - RD — partially supported: same evidence model; adds
+    tentative/supported/disputed/withdrawn states and automatic provenance
+    capture. Dependency edges still absent.
+
+  2.11 Glue tables and cross-unit relationships encoded in tools
+
+  BT: btfiles.SPECIAL_OVERLAY (stale, 32 of 60), MODE_OVERLAY, RESIDENT_PICS,
+  _D796C, PIC_COLORS — copies of resident tables lifted into code.
+
+  - re64 — missing (model), partial (data). The tables themselves are u8[n]
+    record claims with where paths (special_overlay[23]). The relation "value →
+    file/layer" is unrepresentable; a decoder could compute it but its output is
+    data, not references ("a decoder never returns addresses the analysis
+    sees", redesign-claims.md Part two). The stale-copy problem is not
+    prevented: Agent A's constants would be replaced by… prose comments.
+  - RD — unresolved: "relationship" subjects are mentioned without semantics.
+
+  2.12 Findings as distinct from atomic claims
+
+  BT: 02_findings.md — 23 composite statements with several evidence items each,
+  referencing units and other findings.
+
+  - re64 — missing. No finding entity. The available homes are chat, comments
+    (address-bound), or the project description. Experiments 9 and 10 report
+    exactly this gap ("nothing to attach an editorial judgement to",
+    08-experiments.md).
+  - RD — strongly supported: the finds log (description + references with
+    per-reference notes) is a direct match for F-nn entries.
+
+  2.13 Slack, junk, duplicate, residue, stale-copy classification respected 
+  downstream
+
+  BT: slack.py (statistical template, consumed by disov.py), 04_dependencies.md
+  duplication table, phantom targets $2004/$2032/$1010/$1210 in
+  direct_targets.txt, NM10/NM16 stale tails, Applesoft residue, symbol-table
+  residue.
+
+  - re64 — missing as a concept; partial as an affordance. A data claim named
+    "slack (template shared by NM1C–NM44)" removes bytes from find_undecoded and
+    from decoding, so downstream tools do respect an interpretation claim. But
+    "not content", "duplicate-of NM11 $B6xx", "older revision of NM02 (+1046,
+    262 bytes differ)" have no representation; find_bytes has no range-vs-range
+    compare (asked for in experiment 9, not built); no k-gram/duplicate
+    detection. The placeholder rule ("a claim should cover exactly what it
+    explains") cuts the other way: slack is bytes one wants covered because they
+    are explained as junk.
+  - RD — unresolved: "unused fragments" and "development traces" are in the
+    purpose statement; no mechanism.
+
+  2.14 Reproducible tool runs and generated artifacts
+
+  BT: items.txt, spells.txt, monster_names.txt, JT usage counts, k-gram
+  alignment — unreproducible; run_game.py scripts lost.
+
+  - re64 — partially supported. Scenarios are stored, deterministic, and produce
+    captures with provenance; stored decoders are re-runnable by id; the
+    operation log (changes_since) records what was written. Ad-hoc queries
+    (usage counts, alignments, table dumps) are not persisted; run_decoder
+    output is not a capture. Counting JSR $0809 across all 60 overlays requires
+    as many targets as overlay slots have occupants, one query each, since
+    layers overlapping at $B600/$BB00 cannot coexist in one target.
+  - RD — partially supported: runs and captures are retained; nothing about
+    persisted analytic queries.
+
+  2.15 Visual renderings as analysis
+
+  BT: rendered maps with legends, contact sheet, screenshots from emulation,
+  sheet*.png.
+
+  - re64 — strongly supported for static data, missing for the running game.
+    render (grid/frames, PNG/APNG), decoders returning bitmaps/frames/text,
+    scenario screen/frames captures with sprites composed, bitmapToText.
+    "Sliding the width until an image snaps" is exactly how Agent A found grids
+    by histogram. Screenshots of this game need 2.6.
+  - RD — same, plus captions/context requirements.
+
+  2.16 Open questions and incomplete knowledge
+
+  BT: ? cells, unk408/unk411, "Uncertain" lists, direct_targets.txt as a work
+  queue.
+
+  - re64 — partially supported. Type holes and unexplainedBytes, find_undecoded,
+    find_unnamed (most-referenced first — the JT work-queue Agent A computed by
+    hand), method: guessed. No open-question entity; a question about a field's
+    meaning has nowhere but a comment.
+  - RD — partially supported: coverage report distinguishes decoded /
+    interpreted / gaps, "holes inside partially understood types"; still no
+    question entity.
+
+  2.17 Generic analysis primitives vs bespoke tools
+
+  Mapping Agent A's 14 tools:
+
+  ┌────────────────────┬──────────────────────────┬────────────────────────┐
+  │      BT tool       │           re64           │        Verdict         │
+  ├────────────────────┼──────────────────────────┼────────────────────────┤
+  │ d64.py             │ list_disk_files, member  │ partial (2.1,          │
+  │                    │ layers                   │ off-by-one)            │
+  ├────────────────────┼──────────────────────────┼────────────────────────┤
+  │ dis6502.py         │ decode graph, claims,    │ strongly supported     │
+  │ (+labels, data     │ read_disassembly,        │ (better: reachability, │
+  │ ranges)            │ export_listing           │  contested bytes,      │
+  │                    │                          │ warnings)              │
+  ├────────────────────┼──────────────────────────┼────────────────────────┤
+  │                    │ export_listing under a   │ supported once targets │
+  │ disov.py           │ target linking that      │  exist (affordance:    │
+  │                    │ overlay                  │ one target per         │
+  │                    │                          │ overlay)               │
+  ├────────────────────┼──────────────────────────┼────────────────────────┤
+  │                    │ find_references,         │ supported;             │
+  │ xrefs.py --files   │ find_instructions,       │ direct-target seeding  │
+  │                    │ call_graph per target    │ = roots                │
+  ├────────────────────┼──────────────────────────┼────────────────────────┤
+  │ asmrange.py        │ read_disassembly         │ supported              │
+  │                    │ start/lines              │                        │
+  ├────────────────────┼──────────────────────────┼────────────────────────┤
+  │ strings_hi.py      │ preview as:text          │ missing for hi-bit     │
+  │                    │                          │ ASCII                  │
+  ├────────────────────┼──────────────────────────┼────────────────────────┤
+  │ slack.py           │ —                        │ missing                │
+  ├────────────────────┼──────────────────────────┼────────────────────────┤
+  │ btfiles.py         │ targets/links            │ partial + defect (2.3) │
+  ├────────────────────┼──────────────────────────┼────────────────────────┤
+  │ unpack_main.py,    │ run_program, scenarios   │ partial (2.5)          │
+  │ emu6502.py         │                          │                        │
+  ├────────────────────┼──────────────────────────┼────────────────────────┤
+  │ picture.py,        │ decoders + types +       │ supported (affordance: │
+  │ dungeonmap.py,     │ render                   │  palette/params by     │
+  │ citymap.py         │                          │ hand)                  │
+  ├────────────────────┼──────────────────────────┼────────────────────────┤
+  │ run_game.py        │ —                        │ missing (2.6)          │
+  ├────────────────────┼──────────────────────────┼────────────────────────┤
+  │ ad-hoc dumps       │ —                        │ missing                │
+  └────────────────────┴──────────────────────────┴────────────────────────┘
+
+  Additionally re64 offers what Agent A lacked: effects, known-bits, run_block
+  (would have caught the three self-modified-operand misreadings if used),
+  disagreements, hygiene, where.
+
+  2.18 Canonical vs derived; staleness
+
+  - re64 — strongly supported. Names, listings, paths, record counts, retirement
+    are derived; the export is not the truth; generated files have regeneration
+    tests (C10). The BT staleness instances (labels vs listings vs notes;
+    SPECIAL_OVERLAY) are the class of problem this design targets.
+  - RD — same ("reconstructing the view or caching it must give the same
+    interpretation").
+
+  2.19 Platform knowledge
+
+  - re64 — strongly supported: C64_SYMBOLS, derived KERNAL/BASIC effects,
+    VIC/SID register bit layouts. Agent A's C64_SYMS and run_game's KERNAL list
+    are subsumed.
+  - RD — unsupported hypothesis for the inclusion/revision machinery: BT needed
+    ~60 fixed names and nothing about versioned platform knowledge.
+
+  2.20 Cross-investigator integration
+
+  - re64 — unresolved by this experiment. BT was single-investigator; its
+    evidence is about what would be hard to hand over (ambiguous address keys,
+    silent tool constants, unreproducible dumps), which re64's ids, frames,
+    derivation, and stored decoders address. Live merging, replicas, chat, undo:
+    no BT evidence either way.
+  - RD — unresolved for the same reason.
+
+  ---
+
+  3. Concept-by-concept audit
+
+  re64 concepts
+
+  Concept: Layer (dumb bytes, id)
+  Verdict against BT: strongly supported
+  Grounding: 60+ NM files, main.mem, orphan, intro image are all "bytes that
+  know
+  nothing about where they sit" — Agent A's file_body(n).
+  ────────────────────────────────────────
+  Concept: Target (ordered links)
+  Verdict against BT: partially supported
+  Grounding: = build_mem(files); overlays as z-ordered links is right. Missing:
+  banking; ad-hoc composition without a write; the PRG-relocation defect. Docs
+  call it "a history of the program's life" — for BT it is a lattice of ~60
+  configurations, not a sequence; order is meaningless there.
+  ────────────────────────────────────────
+  Concept: Link at (relocation)
+  Verdict against BT: partially supported
+  Grounding: Needed for every overlay; implemented correctly only for bytes
+  layers.
+  ────────────────────────────────────────
+  Concept: Frame (layer/target/address)
+  Verdict against BT: strongly supported
+  Grounding: Directly answers "identity was contextual while every tool keyed by
+
+  bare address".
+  ────────────────────────────────────────
+  Concept: Claim (name/is/extent/root)
+  Verdict against BT: strongly supported
+  Grounding: Labels, data ranges (--data a-b), entry points (--entry),
+  direct_targets.txt roots are all claims. Contested bytes ($BB00 junk decoding
+   as code) get both readings shown.
+  ────────────────────────────────────────
+  Concept: Root vs interpretation; no code
+  Verdict against BT: strongly supported
+  Grounding: Agent A's phantom targets from slack would surface as
+  codeInClaim/unreached findings rather than silently seeding traces.
+  ────────────────────────────────────────
+  Concept: Interpretation set (data/text/bitmap/jumptable/record)
+  Verdict against BT: partially supported
+  Grounding: No "slack/junk", no "duplicate-of"; text encodings miss hi-bit
+  ASCII.
+  ────────────────────────────────────────
+  Concept: Types/fields/holes/bits/arrays
+  Verdict against BT: strongly supported for AoS; missing for SoA/shared index
+  Grounding: Character record, map header ✓; monster/item/spell columns ✗.
+  ────────────────────────────────────────
+  Concept: Constants + per-site binding
+  Verdict against BT: partially supported
+  Grounding: Fine for #$37/STA $01, item ids in GIVE_ITEM; field-offset
+  constants
+  (LDY #$38) parked.
+  ────────────────────────────────────────
+  Concept: Comments (layer-owned objects)
+  Verdict against BT: strongly supported
+  Grounding: Calling-convention notes in labels_main.txt comments.
+  Target-filtered via layer linking.
+  ────────────────────────────────────────
+  Concept: Evidence (about a claim; method; scenario/capture/other/note)
+  Verdict against BT: partially supported
+  Grounding: See 2.10.
+  ────────────────────────────────────────
+  Concept: Retire/refute
+  Verdict against BT: unsupported hypothesis (by BT)
+  Grounding: BT shows corrections, not preserved competing readings; the need
+  came from multi-author experiments.
+  ────────────────────────────────────────
+  Concept: Scenario/capture/checkpoint
+  Verdict against BT: partially supported
+  Grounding: Typed steps are a good match for run_game.py's step list
+  (key/wait/poke/shot); missing hooks, conditional stops, disk. Checkpoints are
+   an in-memory cache, not document objects.
+  ────────────────────────────────────────
+  Concept: run_program capture
+  Verdict against BT: partially supported
+  Grounding: Works for decrunch; capture has no provenance record (inconsistent
+  with scenario captures).
+  ────────────────────────────────────────
+  Concept: Decoders (sandboxed)
+  Verdict against BT: strongly supported (affordance caveats)
+  Grounding: Picture/map/text decoders; but no search through decoders and no
+  cross-span inputs.
+  ────────────────────────────────────────
+  Concept: Platform layer / ROM layers
+  Verdict against BT: strongly supported
+  Grounding:
+  ────────────────────────────────────────
+  Concept: Hygiene / disagreements / findings() / coverage
+  Verdict against BT: strongly supported
+  Grounding: Would have flagged J_PRINT_MSG_ID vs SET_PIC_COLORS? No — different
+
+  addresses. Would flag two names at one address, roots in data, slack
+  decoding.
+  ────────────────────────────────────────
+  Concept: Files/blobs by hash
+  Verdict against BT: strongly supported
+  Grounding: BT's "which bytes were the labels made against" (main.mem
+  regenerated at 00:03; listings at 00:47).
+  ────────────────────────────────────────
+  Concept: Chat, replicas, CRDT, undo, sessions
+  Verdict against BT: unresolved (no BT evidence); by code volume, over-modelled
+
+  relative to this experiment
+  Grounding: Roughly half of src/ and most contracts concern collaboration; BT
+  exercised none of it. This is not a finding against the design — the
+  experiment cannot see it.
+  ────────────────────────────────────────
+  Concept: Project
+  Verdict against BT: partially supported
+  Grounding: BT needed a scope between project and target for "all game
+  configurations but not the intro" — see Program below.
+
+  Redesign concepts
+
+  Concept: Image (memory incl. hidden banks, registers, devices, banking, media;
+
+  from assets or execution)
+  Verdict against BT: strongly supported
+  Grounding: The one concept that covers build_mem + $01 + I/O image +
+  main_stage1.mem at once. Every BT memory-context pain point maps to it.
+  ────────────────────────────────────────
+  Concept: Byte-granular origin tracking
+  Verdict against BT: strongly supported
+  Grounding: .ranges, "which unit owns each byte" (retro wish list).
+  ────────────────────────────────────────
+  Concept: PLA mapping / banking
+  Verdict against BT: strongly supported
+  Grounding: $D000 pictures under I/O; $01=$35 reads.
+  ────────────────────────────────────────
+  Concept: Copy-on-write execution overlay
+  Verdict against BT: strongly supported
+  Grounding: Stage images without altering source files.
+  ────────────────────────────────────────
+  Concept: Experiment/scenario/run/checkpoint/trigger/snippet/capture/access 
+  trace
+  Verdict against BT: strongly supported (design); hook-as-substitution
+  unresolved
+  Grounding: run_game.py hooks, IRQ injection, key injection, screenshot steps.
+  ────────────────────────────────────────
+  Concept: Program
+  Verdict against BT: partially supported — see below
+  Grounding:
+  ────────────────────────────────────────
+  Concept: Assets (binaries, disks, extracted data)
+  Verdict against BT: strongly supported
+  Grounding: Files pulled from images, unpacked memory images, orphan chain are
+  all assets.
+  ────────────────────────────────────────
+  Concept: Inclusion / internalize / platform revisions
+  Verdict against BT: unsupported hypothesis
+  Grounding: BT provides no case for including another investigation's knowledge
+
+  as a pinned revision.
+  ────────────────────────────────────────
+  Concept: Claims with non-address subjects; asset-relative vs absolute; 
+  applicability
+  Verdict against BT: strongly supported
+  Grounding: Asset-relative = file offset (0x1800 in citymap.py); absolute =
+  $F800; applicability = "only while a map is loaded".
+  ────────────────────────────────────────
+  Concept: Shadowing as presentation
+  Verdict against BT: partially supported
+  Grounding: $0800 JT vs reset stub; $C000 init vs PICBUF — mild.
+  ────────────────────────────────────────
+  Concept: Finds log
+  Verdict against BT: strongly supported
+  Grounding: 02_findings.md.
+  ────────────────────────────────────────
+  Concept: Articles / editorial
+  Verdict against BT: unsupported hypothesis (by BT)
+  Grounding: Agent A produced a findings list, not an article.
+  ────────────────────────────────────────
+  Concept: Resolved view
+  Verdict against BT: strongly supported
+  Grounding: Agent A's per-file listing with resident labels merged.
+  ────────────────────────────────────────
+  Concept: Coverage/hygiene reports
+  Verdict against BT: strongly supported
+  Grounding: Unit status letters D/P/I/?; ? cells.
+  ────────────────────────────────────────
+  Concept: Chat / replicas / CRDT
+  Verdict against BT: unresolved
+  Grounding:
+
+  Program and Target/Image: the concrete BT problems
+
+  Target (re64). Concrete problems that require a per-configuration memory
+  arrangement, none of which layers alone solve: $AE00 hosting NM09/NM02/NM03;
+  $C000 hosting pictures/roster/stock; $E000 hosting NM04 or NM05–08; xrefs.py
+  needing "which files are loaded" as a parameter; the retro's "what is at $C000
+  depends on which overlay is loaded". These are handled by Target. What Target
+  does not handle from the same evidence: bank alternation within one moment,
+  and the sheer number of arrangements (Agent A composed them per query). RD's
+  Image subsumes Target and adds what BT additionally needed (banking, device
+  state, checkpoints).
+
+  Program (RD). Two observed problems that a Project + Images + claims do not
+  settle cleanly:
+
+  1. Scope for address-space facts narrower than the project. Zero-page and
+     page-3 variables ($28/$29/$24/$D4/$E0/$2A/$0334/$0380) are true for every
+     game configuration and false for the intro, which is a different program in
+     the same project sharing $4000 and $0100. In re64 address-space claims
+     travel to all targets; target-framed claims would need duplicating per
+     target. Approximation: frame them on a 64 K image layer that is linked into
+     every game target — workable but incidental. A Program-level claim set is
+     the direct expression.
+  2. Two revisions of one unit (orphan = older NM02; day/night building
+     pictures; 1984/2021 Camels). Assets + Images already handle this (separate
+     layers, separate claims); Program adds nothing here.
+
+  So BT supports Program as a scope for knowledge shared by a family of images,
+  not as a unit of inclusion/versioning. Whether that scope needs to be an
+  entity or a property of claims ("applies to images whose configuration
+  includes asset X") is unresolved by this experiment.
+
+  False sharing — the five distinctions against BT and re64
+
+  Kind: 1. One intrinsic fact reused through placement
+  BT instance: NM02 $412↔$FC12; overlay code at file offset ↔ $B600; decruncher
+  stages
+  What re64 does: Layer-framed claim, resolved per target
+  Verdict: correct
+  ────────────────────────────────────────
+  Kind: 2. Instances of one Type/Format
+  BT instance: 16 maps, 66 pictures, 4 record bases, 32 roster slots
+  What re64 does: Type per layout, claims per instance; decoder per format
+  Verdict: correct; format-as-type is missing for pictures (decoder only)
+  ────────────────────────────────────────
+  Kind: 3. Common technical knowledge
+  BT instance: text encoding, JT API, KERNAL names, load-address rule
+  What re64 does: platform layer; claims on the resident layer; decoder for
+  text;
+  load rule unrepresentable
+  Verdict: mostly correct
+  ────────────────────────────────────────
+  Kind: 4. Independently true facts that merely agree
+  BT instance: NM8B file = NMF0 slice = RAM $D000; NM5E–82 on both disks; NM15
+  reached from city and dungeon; fonts in resident and NM03
+  What re64 does: Separate layers, separate claims; nothing links them;
+  find_bytes only
+  Verdict: correct not to merge; missing a way to record "same asset content"
+  without sharing a mutable claim
+  ────────────────────────────────────────
+  Kind: 5. Duplicated or stale bytes
+  BT instance: NM10/NM0E tails, slack template, orphan revision, Applesoft,
+  symbol-table residue
+  What re64 does: data claims with prose; no provenance class
+  Verdict: missing
+
+  The single most consequential false-sharing risk re64 avoids is (4)→(1): it
+  never lets two byte-identical files share one claim by accident, because
+  claims are framed on a layer id. The risk it creates is that byte-identical
+  copies must be annotated twice (or by a type/decoder), which is what Agent A's
+  RESIDENT_PICS was trying to avoid.
+
+  ---
+
+  4. Where re64 would have prevented concrete BT problems
+
+  1. Stale rename (SET_PIC_COLORS in three listings vs. the notes): every
+     listing is derived from one claim; editing by id changes all. (The alias
+     claim at $08CC is a separate matter — see 2.10.)
+  2. Overlay-local symbols never getting their own files: placed() frames a
+     claim on the layer supplying its bytes by default, so sub_B19D is
+     NM02-local without any decision by the investigator.
+  3. Unit-inventory drift (01_units.md statuses): find_undecoded,
+     unexplainedBytes, hygiene, describe_project are computed; nothing
+     hand-maintained.
+  4. Phantom call targets from slack ($2004, $2032 in direct_targets.txt): a
+     data claim over the slack cannot stop control flow, but
+     codeInClaim/unreached findings and warnings would surface the contradiction
+     at the write, instead of it silently seeding xrefs.py.
+  5. "Which bytes were these notes made against?": file hashes on layers;
+     main.mem would be a captured file with a hash rather than a regenerated
+     .mem.
+  6. The colour-table / picture-palette regeneration (160 PNGs re-rendered by
+     hand): render claim:<id> with a stored decoder re-renders on demand;
+     nothing is a stale artifact.
+  7. Record-layout back-and-forth (worklog §14): a type with fields, holes and
+     preview as:record on the dead character SAMSON's slot would have shown
+     max/cur HP direction in one call; where answers "which field is $C0B2"
+     instead of counting offsets (the "misread by $10" slip).
+  8. Address ↔ field-path arithmetic ($412↔$FC12, 0x1800↔$F800): where on a
+     typed claim gives the path; the layer frame does the offset arithmetic.
+  9. Self-modified operands misleading static reading three times: run_block
+     with chosen values, and E8's "which values were assumed", give the runtime
+     value channel Agent A wanted.
+  10. Method not recorded: method: read vs ran distinguishes F-06 (read) from
+      its F-16 confirmation (ran) on the same claim.
+  11. Work queue: find_unnamed ranks auto-named targets by references — the
+      JT-usage count Agent A did in a heredoc.
+
+  5. Where Agent A would still have been fighting re64
+
+  1. Getting the files in. No BAM/usage map, no orphan extraction, an off-by-one
+     in extraction, and PRG relocation via link that keeps the header — so
+     d64.py and btfiles.py get written first, and 60+ header-stripped raw
+     uploads follow.
+  2. Configurations as writes. Every build_mem(files) becomes add_target;
+     reading a listing for NM3F means declaring a target containing resident +
+     NM02 + a map + a tileset + NM3F. Dozens of document entities to express
+     what was a function argument.
+  3. Banking. $D000 pictures, $01 toggles: unrepresentable; the machine answers
+     with VIC registers.
+  4. Running the game. No disk, no hooks: run_game.py is written again, outside
+     re64, so F-16 — the confirmation of nearly every static finding — happens
+     where re64 cannot record it.
+  5. Text. Every BT string is dots until a decoder exists; even then search does
+     not see it.
+  6. Parallel tables. Five monster columns and a name-pointer table stay
+     unrelated; "monster id" has no home.
+  7. Glue tables and the loader rule. $1B28, $796C, mode table: bytes can be
+     typed, the mapping cannot be stated; the hand-copied constants return as
+     prose.
+  8. Slack/duplicates/residue. No range comparison, no duplicate detection, no
+     "not content" class; the $BB00 template is rediscovered per file.
+  9. Cross-file queries. Anything over all 60 overlays at once (usage counts,
+     template detection, string dumps) is 60 targets × 1 query; overlapping
+     slots forbid one big target.
+  10. Findings. 02_findings.md has no representation; it goes to chat or the
+      project description.
+  11. Evidence anchors. "Supported by $B2A1–$B512" and "depends on F-14" remain
+      prose.
+  12. Tool ceremony. target on every call; preview/add_claim argument
+      asymmetries the experiments already document; the runtime image's
+      per-picture palette passed as params by hand.
+
+  The redesign would remove items 2–4 (Image with banking and origin tracking;
+  snippets/triggers, if they can substitute routines), 10 (finds log), and part
+  of 11; it does not address 1, 5–9, or dependency edges.
+
+  6. Unresolved by this experiment
+
+  - Whether a Program needs to be an entity, or whether "claims applicable to
+    images containing asset X" (a whole-image layer frame, or an applicability
+    predicate) suffices. BT shows the need for the scope, not its shape.
+  - Whether memory configurations should be first-class declared entities
+    (targets/images) or query parameters. Agent A used both patterns (four
+    "representative configurations" in prose; dozens of ad-hoc compositions in
+    tools). BT does not say which cost dominates over a longer investigation.
+  - Whether shared index spaces need an entity or are adequately expressed by a
+    field-level "index into" reference once that is built. BT shows the need;
+    the experiments' reasoning that "an agent does not invent a category it has
+    never seen" applies here too.
+  - Whether slack/duplicate/residue classes belong in the interpretation
+    vocabulary, in provenance, or in a separate range-annotation layer. BT
+    establishes only that downstream tools must be able to exclude them.
+  - Whether retire/refute preserves anything an investigator like Agent A would
+    consult. BT records corrections but not consulted-later wrong readings.
+  - Whether chat, replicas, CRDT merging, undo, articles, inclusion/platform 
+    revisions carry weight — BT was a single 52-minute session and cannot decide
+    any of it. Their cost in re64 is visible (a large share of code and
+    contracts); their value is not visible here.
+  - Whether RD's snippets can act as routine substitutes (the KERNAL-hook
+    pattern) or only observe/modify state around triggers.
+  - Whether run_program captures and scenario captures should be one provenance
+    model (BT says byte-to-stage attribution matters; it does not say how the
+    two paths should converge).
+
+  Two contradictions between documentation, implementation and tests worth
+  recording explicitly: (a) 05-model.md §3 and machine.md state that a layer can
+  be linked at another address, and links.test.ts pins it — for bytes layers
+  only; file-source.ts makes it wrong for prg layers, the kind every disk-based
+  investigation produces; (b) README.md lists "PRG files and D64 disk images" as
+  read, but d64.ts yields file bodies one byte too long on the last sector,
+  unnoticed because the D64 tests only bound lengths within a range.
+
+✻ Crunched for 11m 25s · done 2:31
+
+❯ /export                                                                       
+  ⎿  Conversation exported to: /Users/marcus/Desktop/Privat/Projects/bardstale/r
+     e64/2026-09-13-023443-there-are-three-directories-here-bardstale-is-th.txt
+
+※ recap: Comparing the Bard's Tale reverse-engineering workspace against re64 and re64-redesign; the requirement-by-requirement and concept-by-concept audit is complete and delivered above. Next action: await your direction on whether to proceed to redesign proposals. (disable recaps in /config)
+
+❯ Based on your audit, produce a prioritized decision register rather than a    
+  redesign.                                                                     
+                                                                                
+  For each architectural decision or implementation issue that should be        
+  addressed, state:                                                             
+                                                                                
+  1. the concrete observed problem;                                             
+  2. strength of evidence (BT, existing re64 experiments, implementation        
+  defect, or design hypothesis);                                                
+  3. whether it is primarily a model problem, API/affordance problem, tooling   
+  gap, implementation bug, or documentation problem;                            
+  4. whether resolving it is prerequisite to other decisions;                   
+  5. what existing re64 concepts should be preserved;                           
+  6. what design alternatives remain genuinely open;                            
+  7. the smallest experiment or test that could discriminate between those      
+  alternatives, if evidence is insufficient.                                    
+                                                                                
+  Rank the decisions by how much downstream architecture they constrain, not by 
+  implementation ease.                                                          
+                                                                                
+  Do not propose a complete architecture and do not resolve questions where the 
+  evidence remains insufficient.                                                
+
+⏺ Decision register — ranked by downstream architectural constraint
+
+  Ordering principle: a decision ranks higher the more other decisions must wait
+  for it or would have to be redone if it changed. Implementation ease is
+  ignored. Evidence labels: BT (Bard's Tale investigation), EXP (re64's own
+  experiments 1–11), DEFECT (verified against code/data in this session), HYP
+  (design hypothesis without direct evidence). Concept names are re64's where
+  re64 has them.
+
+  ---
+
+  D1 — What a memory state is: flat arrangement vs. machine state with hidden 
+  banks
+
+  Observed problem. BT: six pictures live under I/O at $D000–$DCFF (F-06, F-15);
+  the game toggles $01 between $35/$34; run_game.py had to keep a separate 4 K
+  I/O image and an io_visible() rule; "what is at $C000" depended on both the
+  loaded set and the bank bits (retro §2). re64: MemoryMap is a flat 64 K stack;
+  machine/c64.ts routes $D000–$DFFF to devices unconditionally; the docs state
+  "banking is still not solved" (redesign-claims.md, platform.md,
+  devices/index.ts). Experiment 5's builder modelled $01 privately.
+
+  Evidence. BT strong; EXP strong (5, 9); implementation gap acknowledged.
+
+  Kind. Model problem (analysis, machine, claim applicability, captures all read
+  the memory model).
+
+  Prerequisite to. D2, D5, D13; partially D4.
+
+  Preserve. Layer as dumb bytes; the z-ordered link list as the way files
+  compose; "flat memory is right for a decruncher, for a stated reason" (C8) as
+  a documented special case, not a model.
+
+  Open alternatives.
+  (a) Keep Target as the arrangement and add a bank/device-state overlay per
+  target (the "placement with a condition" the archive sketches).
+  (b) RD's Image: full machine state (all banks, $01, device registers) with
+  mapping decided per access — arrangement becomes a derived view of an image.
+  (c) Two objects: an arrangement (files) and a machine state that references
+  it; analyses take either.
+
+  Discriminating experiment. Build the BT resident image plus NM03/NMF0 in re64
+  and ask three questions that only differ under banking: what $D000 reads with
+  $01=$34 vs $35; where copy_resident_pic ($0D54) writes; whether a ram capture
+  of $D000–$DCFF after the NM03 copy contains picture bytes. Count which
+  alternatives answer all three without a per-tool special case.
+
+  ---
+
+  D2 — Memory configurations: declared entities, derived compositions, or query 
+  parameters; and their number/shape
+
+  Observed problem. BT composed configurations per query (build_mem(files),
+  xrefs.py --files, disov.py XX) dozens of times and never wrote them down; the
+  transcript names only four "representative" ones. The configuration space is a
+  lattice (resident × {NM09+NM04, NM02+map+tileset, NM03} × sub-overlay × $C000
+  occupant), not a sequence — re64's Target.order ("a target list is a
+  history") does not describe it. re64: every address-bearing read requires a
+  declared target; a configuration is a write (add_target); experiments 7/8 show
+  agents avoiding target changes and never naming one (724 calls, zero target).
+
+  Evidence. BT strong; EXP medium (avoidance measured; the lattice case not yet
+  run).
+
+  Kind. Model + API/affordance.
+
+  Prerequisite to. D4, D10; interacts with D5 (a checkpoint is a configuration
+  reached by running).
+
+  Preserve. Named, id-keyed targets for the few configurations worth naming; "no
+  default target"; layer-framed claims travelling with links; "every answer
+  reports the view it used".
+
+  Open alternatives.
+  (a) Keep declared targets; add an inline composition parameter to reads
+  (layers:[…]) with no document write.
+  (b) Base target + delta: a configuration is "target T with layer L linked at
+  A" expressed at query time and cached.
+  (c) All configurations derived from execution (checkpoints) — no hand-declared
+  arrangements beyond the boot image.
+  (d) order dropped or replaced by explicit relations ("reached from T by
+  loading X").
+
+  Discriminating experiment. Replay the BT session against re64: count distinct
+  configurations Agent A used for reads (from xrefs/disov/build_mem invocations
+  reconstructable from the transcript), how many were reused ≥2 times, and how
+  many were reachable by execution alone. If the reused set is small and the
+  rest are one-offs, (a)/(b) suffice; if most are execution-reachable, (c)
+  gains.
+
+  ---
+
+  D3 — Placement semantics: what belongs to the asset and what to the link (PRG 
+  headers that lie)
+
+  Observed problem. BT: 55+ files carry headers $8000/$D000 below their real
+  load address (F-06). re64: linking a prg layer at another address passes the
+  address as explicitStart, and makeFileLoader then returns the file with its
+  header, isPrg:false (file-source.ts:69–71); links.test.ts covers relocation
+  for bytes layers only; 05-model.md §3 and machine.md assert the capability
+  generally. The tool schema says address is "ignored for prg". D64 extraction
+  also yields one extra byte per file (d64.ts extractFile, verified: nm02 3330
+  vs 3329).
+
+  Evidence. DEFECT (both, verified by code reading and against the disk); BT
+  strong.
+
+  Kind. Implementation bug with a model question underneath: is the header part
+  of the asset's content or metadata about a default placement?
+
+  Prerequisite to. Any disk-based project; D2 and D10 depend on relocatable file
+  layers working.
+
+  Preserve. Layer = bytes without position; link at as the relocation mechanism;
+  content hashes.
+
+  Open alternatives.
+  (a) Strip headers at import: a prg asset's content is the body and its header
+  is metadata (default placement).
+  (b) Keep the header in the blob; make the link carry honourHeader: false / an
+  offset.
+  (c) Treat "header lies" as a claim about the asset (provenance: build
+  artefact), with placement derived from an explicit rule (BT's $796C table) —
+  overlaps D6.
+
+  Discriminating test. Link a prg layer at at:$B600 in one target and unlinked
+  in another; assert readByte($B600) equals the file's third byte in the first.
+  Add a D64 test asserting last-sector length = byte1 − 1. Both fail today.
+
+  ---
+
+  D4 — Knowledge applicability between "one configuration" and "the whole 
+  project" (the Program question)
+
+  Observed problem. BT: zero-page/page-3 facts ($28/$29/$24/$D4/$E0/$0334/$0380)
+  hold in every game configuration and are wrong in the intro, which shares
+  $4000 and $0100 with the game; labels_main.txt was applied to all game
+  listings and not to intro.asm. re64: address-space claims appear in every
+  target; target-framed claims must be repeated per target; the only
+  approximation is framing on a whole-image layer linked into every game target.
+
+  Evidence. BT medium-strong (one program pair, one mechanism); EXP none (all
+  runs were single-program); RD proposes Program without evidence of this shape.
+
+  Kind. Model.
+
+  Prerequisite to. D7 (what a finding is "about"), and to any inclusion/platform
+  story.
+
+  Preserve. Layer frames; address-space scope for platform facts; target frames
+  as the narrow escape.
+
+  Open alternatives.
+  (a) Program entity owning assets and a claim set (RD).
+  (b) Applicability predicate on claims: "applies to any configuration that
+  places asset X" — a frame kind rather than a container.
+  (c) Whole-image layer as the carrier (no new concept; a convention).
+
+  Discriminating experiment. Build the BT project with game + intro under (b)
+  and (c); count claims that (i) had to be duplicated, (ii) appear in a
+  configuration where they are false, (iii) needed a decision the investigator
+  would not naturally make. If (c) yields zero for all three, Program is not
+  needed for this purpose; the inclusion/revision half of RD's Program stays HYP
+  regardless.
+
+  ---
+
+  D5 — Execution model: routine substitution, media, conditional stops, 
+  checkpoints, byte→stage attribution, capture provenance
+
+  Observed problem. BT's decisive verification (F-16) needed 17 KERNAL hooks
+  serving files from the disk, a serial-bus stub, IRQ injection, key injection
+  via $2A, and pokes; stage boundaries needed "PC==$0810 and the byte changed";
+  .ranges recorded which stage wrote which bytes. re64: scenarios have no
+  hook/substitute step, no drive, no conditional stop; checkpoints are an
+  in-memory cache; run_program captures become plain files with no run
+  provenance while scenario captures are entities (workspace.ts:1371–1505 vs
+  ProjectCapture). Experiment 5: both builders wrote private interpreters;
+  experiment 9: an unusable input step cost "the two most cinematic shots".
+
+  Evidence. BT strong; EXP strong; RD proposes triggers/snippets/media/access
+  traces (HYP as to whether snippets can replace a routine).
+
+  Kind. Tooling gap + model (capture provenance; checkpoint as object).
+
+  Prerequisite to. D13; constrained by D1.
+
+  Preserve. Typed step lists; determinism and prefix caching; captures as
+  entities referencing scenario+step; leaves stop rule; run_block's "which
+  values were assumed".
+
+  Open alternatives.
+  (a) Snippets at triggers that may return early (routine substitution) — the
+  jsr_hooks pattern.
+  (b) Drive/serial emulation with the D64 inserted — no hooks needed, fidelity
+  higher, determinism harder.
+  (c) Both, with substitution recorded as a run condition (RD: "state overrides
+  and scripted interventions belong in the run's record").
+  (d) Checkpoint = document object vs. cache: whether a captured full machine
+  state is an Image/Target other tools can read.
+
+  Discriminating experiment. Script BT boot→Utilities→Guild→city→cellar as a
+  scenario under (a) with a LOAD-substitute step; record step count, whether any
+  step needed a condition the vocabulary lacks, and whether re-running is
+  byte-deterministic. Then attempt the same under (b) if a drive exists. Compare
+  against run_game.py's 19 screenshots.
+
+  ---
+
+  D6 — Relations: shared index spaces, index-into fields, value→asset mappings 
+  (glue tables)
+
+  Observed problem. BT: monster/item/spell knowledge is struct-of-arrays sharing
+  one index ($7D28/$7DA8/$7E28/$7EA8/$8D0D by monster id); $1B28[t] maps a
+  special type to a file; $796C[n] maps a file to a page; $7EA8[id] maps a
+  monster to a picture. Agent A copied these into btfiles.py and one copy went
+  stale (32 of 60 entries). re64: array-of-struct types only;
+  "index-into/bitmask/enum" parked (claims.md); split arrays "do not land
+  cleanly" (redesign-claims.md); experiment 10 manufactured evidence for the
+  same need (hi/lo pairs computed by hand seven times).
+
+  Evidence. BT strong (this is the strongest new evidence BT adds beyond the
+  experiments); EXP medium.
+
+  Kind. Model.
+
+  Prerequisite to. D8 (duplicate-of is a relation); the "relations → behaviour"
+  phase the experiments predict.
+
+  Preserve. Types with declared size and derived count; constants as
+  declarations; "a relation stored beside the bytes that already say it can
+  disagree with them" as the design caution; decoders as pure functions.
+
+  Open alternatives.
+  (a) Field reference types (index(Type), asset-index, bitmask over …, enum) —
+  derived aggregation, no stored edges.
+  (b) An index-space entity that several claims declare membership in (the BT
+  "monster id" as a first-class thing).
+  (c) Relationship claims (RD: subject may be a relationship) — stored edges,
+  hygiene checks them against bytes.
+
+  Discriminating experiment. Encode BT's four monster columns + name table +
+  picture index + $1B28 under (a) and (c); then ask: "which picture does monster
+  12 use", "which overlay files does dungeon special type 23 reach", "which
+  claims share index space with $7DA8". Count answerable queries and the number
+  of places a correction to one column touches.
+
+  ---
+
+  D7 — Findings vs. atomic claims; evidence anchored to locations and runs; 
+  dependencies between assertions
+
+  Observed problem. BT: 23 composite findings, each citing several instruction
+  ranges, tool outputs and other findings; "why did I believe the wall-bit
+  order" re-derived repeatedly; the N/S flip touched three notes by hand. re64:
+  evidence is about one claim, with note (prose), scenario, capture, one other;
+  no location anchor, no dependency edge; no finding entity — experiments 9/10
+  report "nothing to attach an editorial judgement to" and zero add_evidence
+  calls in run 10.
+
+  Evidence. BT strong (findings, anchors); BT medium (dependencies: three
+  concrete propagation cases); EXP strong (findings).
+
+  Kind. Model.
+
+  Prerequisite to. Editorial/article work (HYP); D12.
+
+  Preserve. Evidence as a thing said about a claim; method as the axis; retire
+  vs refute vs remove; "nothing resolves at rest".
+
+  Open alternatives.
+  (a) RD finds log: findings reference claims/captures with per-reference notes;
+  no dependency semantics.
+  (b) Evidence gains typed references (location range in a frame; tool
+  run/capture) — anchors without a new entity.
+  (c) Dependency edges between claims ("derived-from"), with hygiene reporting
+  stale dependents after an edit — the archive removed supersedes for merge
+  reasons; a derived-from edge is not an ordering, but that argument is
+  untested.
+
+  Discriminating experiment. Re-encode F-01…F-23 under (a)+(b); count statements
+  that cannot be attached to anything; then apply the N/S correction (F-14) and
+  count the claims/findings a reader must touch by hand vs. what a dependency
+  report under (c) would list. Separately, check whether CRDT merge of two
+  concurrent "derived-from" edges produces anything an ordering would have.
+
+  ---
+
+  D8 — Byte-range provenance classes: slack, stale copies, duplicates, developer
+  residue, older revisions
+
+  Observed problem. BT: ~35 files share a slack template (slack.py, consumed
+  before disassembly); NM10/NM16/NM13/19/1A carry stale text of other files; the
+  orphan is NM02 −1 revision; Applesoft and symbol-table residue produced false
+  leads ($2004 etc.). re64: only is:data + prose; no range-vs-range compare
+  (asked in experiment 9); the placeholder rule discourages covering bytes one
+  cannot "explain", yet junk is exactly bytes one wants covered.
+
+  Evidence. BT strong; EXP weak-medium.
+
+  Kind. Model (a class of interpretation or relation) + tooling (detection).
+
+  Prerequisite to. Coverage semantics (find_undecoded), D10.
+
+  Preserve. Claims as the mask; "a claim covers what it explains" for content;
+  findings/hygiene as the reporting channel.
+
+  Open alternatives.
+  (a) New interpretation kinds (slack, residue) with an optional "explained-by"
+  reference.
+  (b) A relation duplicate-of(range, range) under D6(c), with coverage treating
+  the duplicate as explained.
+  (c) Provenance on the asset level (RD "development traces"): the file's tail
+  is a build artefact — a claim whose subject is the asset.
+
+  Discriminating experiment. Mark the $BB00 template once and the NM16→NM11
+  stale tail once; then check whether find_undecoded, find_bytes, disassembly of
+  NM3F, and list_claims for NM11 behave as Agent A's disov.py did (clipped
+  content, no phantom code, no re-surfacing of the copied text). Count the
+  writes needed per file.
+
+  ---
+
+  D9 — Text encodings and decoders as first-class formats (readable, searchable,
+  cross-span inputs)
+
+  Observed problem. BT: every string is ASCII|$80 with $DC newline and /-plural
+  pairs; strings_hi.py was the second tool written. re64: ascii renders ≥$80 as
+  "." (text.ts:132); preview as:text, find_*, and listings are blind; a decoder
+  can render a claimed span but nothing searches through a decoder, and a
+  decoder sees only its span (the picture palette lives at $0D99 in another
+  layer).
+
+  Evidence. BT strong; EXP medium (run 10: text decoded by hand a dozen times).
+
+  Kind. API/affordance, with a small model question (is an encoding a
+  registrable declaration like a decoder?).
+
+  Prerequisite to. None architecturally; blocks BT-style work early.
+
+  Preserve. Sandboxed pure decoders; the closed Decoded vocabulary; "a wrong
+  glyph is worse than a gap".
+
+  Open alternatives.
+  (a) Extend the built-in encoding set (ascii-hi, terminator rules as
+  parameters).
+  (b) Promote stored decoders to encodings usable by preview/find/text fields.
+  (c) Give decoders declared inputs beyond the span (named parameter claims),
+  keeping purity.
+
+  Discriminating experiment. Register a hi-bit decoder; attempt "find every
+  string containing stairs across the dungeon configuration"; note which step is
+  impossible under (a) vs (b).
+
+  ---
+
+  D10 — Asset-level (unplaced) and cross-configuration operations
+
+  Observed problem. BT: JT usage counts over all 60 overlays, slack detection,
+  per-file string dumps, k-gram alignment, and the disk-membership sets all ran
+  over files, not memory; overlapping slots make a single all-overlays target
+  impossible. re64: every search/read is per target.
+
+  Evidence. BT strong; EXP none.
+
+  Kind. API/affordance (given D2 and D3).
+
+  Prerequisite to. D8 tooling.
+
+  Preserve. "An address is a fact about a stack" as the rule for address
+  answers; per-target reporting.
+
+  Open alternatives.
+  (a) Asset-scoped reads/searches (offsets, not addresses) beside target-scoped
+  ones.
+  (b) Batch queries over a set of targets with results keyed by target.
+  (c) Nothing new: the investigator scripts 60 targets — measure the cost first.
+
+  Discriminating experiment. Count JSR $0809 across all BT overlays through
+  re64: number of calls and writes required under (c); then estimate (a)/(b).
+
+  ---
+
+  D11 — Container fidelity: BAM, deleted entries, chains by track/sector, usage 
+  maps
+
+  Observed problem. BT: F-01/F-02/F-20 depended on the BAM, a usage map, and
+  following a chain from T6S7 that no directory entry names; the 4B 01 01… fill
+  pattern caused a false alarm. re64 d64.ts: directory-by-name only, deleted
+  entries skipped, no arbitrary-chain extraction, no loop guard, plus the D3
+  off-by-one.
+
+  Evidence. BT strong; DEFECT (off-by-one).
+
+  Kind. Tooling gap + bug; small model question (is a sector chain an asset?).
+
+  Prerequisite to. Orphan/deleted-file work; otherwise low.
+
+  Preserve. File+member identity; hashes.
+
+  Open alternatives. (a) Sector-level tools only (list BAM/usage, extract chain
+  by T/S → file). (b) A chain as an asset kind with sector provenance. RD is
+  silent.
+
+  Discriminating test. List deleted entries and extract T6S7 from bardst-2.d64;
+  compare to orphan_T6S7.bin (2313 bytes).
+
+  ---
+
+  D12 — Open questions and partial knowledge as records
+
+  Observed problem. BT: ? cells, unk408/unk411, "Uncertain" lists, per-unit
+  status letters — scattered and not claimable. re64: type holes,
+  unexplainedBytes, find_undecoded, method: guessed; no question object.
+
+  Evidence. BT medium; EXP weak.
+
+  Kind. Model (small) or tooling.
+
+  Prerequisite to. None; depends on D7 for where a question lives.
+
+  Preserve. Holes as first-class; coverage ≠ hygiene (E5).
+
+  Open alternatives. (a) Question = claim with method: guessed + a
+  hygiene/coverage listing. (b) A question entity referencing
+  claims/fields/ranges (a finding subtype under D7). (c) Comments.
+
+  Discriminating experiment. Record BT's ~12 open questions each way and check
+  whether "questions about a field/unit I am currently in" is answerable from a
+  tool call.
+
+  ---
+
+  D13 — Run-produced observations feeding the static model
+
+  Observed problem. BT: $D8 (view depth) and $7A were established only by poking
+  in the emulator; the retro asks for an "observed at runtime" channel (values
+  seen, dynamic call targets) merged into xrefs. re64: run_block reports assumed
+  values; captures hold bytes; method: ran marks evidence; nothing persists
+  per-address observations or dynamic targets, and the walk refuses indirect
+  jumps (correctly) without an execution feed. Experiment 9's editor had the SID
+  capture and did not use it.
+
+  Evidence. BT medium; EXP medium.
+
+  Kind. Tooling gap, possibly model (observation entity).
+
+  Prerequisite to. None; constrained by D5.
+
+  Preserve. Static/dynamic separation ("statically reachable is strictly smaller
+  than executed"); evidence with scenario/capture.
+
+  Open alternatives. (a) Access traces queried by analysis tools (dynamic
+  targets as a warning remedy). (b) Observation claims minted by runs (origin: 
+  analysis, method: ran). (c) Leave to evidence notes.
+
+  Discriminating experiment. Run the BT dungeon entry with a trace; ask
+  find_references $FC12 and call_graph $620E; see whether the
+  indirect/JT-dispatched paths appear under (a) vs (b).
+
+  ---
+
+  D14 — Documentation/implementation/test contradictions
+
+  Observed problem. 05-model.md §3 and machine.md state PRG relocation via
+  links; tests cover bytes only; code fails for prg (D3). README.md claims D64
+  reading; extraction is off by one and untested for length. Target.order
+  described as "history" contradicts the lattice shape of BT-like programs (D2).
+
+  Evidence. DEFECT (two), BT (one).
+
+  Kind. Documentation + test coverage.
+
+  Prerequisite to. None; should be recorded before D2/D3 change the shapes so
+  the archive's append-only rule is honoured.
+
+  Preserve. The contracts' habit of naming the bug; C10 regenerate-and-compare.
+
+  Open alternatives. None — these are corrections, not designs.
+
+  Test. The two assertions in D3.
+
+  ---
+
+  Deliberately not decided here
+
+  - Collaboration weight (replicas, CRDT, chat, undo, sessions): BT provides no
+    evidence for or against; the register records only that ~half of src/ and
+    most contracts sit on a hypothesis this experiment cannot examine.
+  - Retire/refute/withdraw states: BT shows corrections, not consulted wrong
+    readings; the experiments' evidence stands on its own and is not
+    strengthened or weakened here.
+  - Inclusion / internalize / platform revisions (RD): no BT case; remains HYP.
+  - Articles: BT ended at findings; no evidence about article representation.
+
+  If useful, I can turn this register into a page for sharing; the terminal text
+  above is the complete answer.
+
+✻ Brewed for 2m 53s · done 2:47
+
+❯ /export                                                                       
+  ⎿  Conversation exported to: /Users/marcus/Desktop/Privat/Projects/bardstale/r
+     e64/2026-09-13-024808-there-are-three-directories-here-bardstale-is-th.txt
+
+❯ Using your audit and decision register, produce a concise architecture input  
+  document.                                                                     
+                                                                                
+  Separate:                                                                     
+                                                                                
+  Validated requirements — behavior that the empirical evidence establishes     
+  re64 needs.                                                                   
+                                                                                
+  Validated existing strengths — current re64 mechanisms that directly solved   
+  observed Bard’s Tale problems and should not be accidentally lost in a        
+  redesign.                                                                     
+                                                                                
+  Concrete defects — implementation/test/documentation errors requiring         
+  correction regardless of architecture.                                        
+                                                                                
+  Open design decisions — requirements that are established but whose           
+  representation remains unresolved. State each requirement without embedding   
+  one candidate solution in its wording, then list the alternatives separately. 
+                                                                                
+  Unsupported hypotheses — concepts in the redesign for which this experiment   
+  supplies no evidence. Do not recommend deleting them; simply prevent this     
+  experiment from being cited as justification.                                 
+                                                                                
+  Tooling/affordance requirements — observed needs that do not justify new      
+  persisted domain entities.                                                    
+                                                                                
+  Preserve evidence references to Bard’s Tale artifacts, re64 experiments and   
+  implementation where useful.                                                  
+                                                                                
+  In particular, rewrite requirements such as D4 at the weakest level actually  
+  established by evidence. For example, distinguish “knowledge must apply       
+  across a subset of Images” from the proposed solution “there must be a        
+  Program scope.”                                                               
+                                                                                
+  Do not propose an architecture, migration plan, or new terminology.           
+
+⏺ Architecture input: what the Bard's Tale investigation establishes for re64
+
+  Scope of evidence: one 52-minute single-investigator session on two D64 images
+  (bardstale/), read against re64 at the checked-out commit (docs, src/, tests,
+  assets/mutant-camels) and the eleven prior experiments
+  (docs/08-experiments.md). Citations: F-nn = bardstale/notes/02_findings.md; WL
+  §n = 05_worklog.md; RN §n = 06_retro_notes.md; EXP n = re64 experiment n.
+
+  ---
+
+  1. Validated requirements
+
+  Behaviour the evidence shows re64 needs. Each is stated as an observable
+  capability, not a representation.
+
+  R1. A memory state must be able to hold bytes that are hidden by the current 
+  bank selection, and analysis must be able to ask what an access reaches under 
+  a stated bank state.
+  Evidence: six pictures copied to $D000–$DCFF under I/O and read back with $01
+  changed (F-06, F-15, btfiles.RESIDENT_PICS); run_game.py kept a separate I/O
+  image and an io_visible() rule; RN §2. re64 has no bank model (memory-map.ts;
+  devices/index.ts comment; EXP 5 builder modelled $01 privately).
+
+  R2. The same asset must be placeable at different addresses in different 
+  memory states, and knowledge about the asset must follow the placement without
+  re-entry.
+  Evidence: PRG headers systematically wrong (F-06); every overlay listing
+  redone once real addresses were known (WL §10); NMF0 loaded at $BB00, copied
+  to $D000. re64 layer frames + link at are the right shape (claims/model.ts 
+  scopeFor/resolveAt), defective for prg (see X1).
+
+  R3. Knowledge must be scoped to the asset it describes so that two occupants 
+  of one address range never share or clash on annotations.
+  Evidence: $AE00/$B600/$BB00/$C000/$E000/$F800 each host several files;
+  overlay-local labels were never separated from resident ones (RN §3, disov.py
+  looking for labels_nm*.txt that never existed). re64 layer-framed claims
+  satisfy this (placed(), B6).
+
+  R4. Some knowledge must apply to a subset of memory states — more than one, 
+  fewer than all — without being re-entered per state.
+  Evidence: zero-page and page-3 facts (labels_main.txt) applied to every game
+  configuration and not to the intro, which shares $4000 and $0100; the resident
+  API names applied to ~60 overlay listings. This is the weakest form of what
+  D4 asked; it does not establish that the subset needs a named container.
+  Representation open (O2).
+
+  R5. Execution must be able to produce memory states usable as analysis inputs,
+  with a record of which execution wrote which bytes, and intermediate states 
+  must be capturable at conditions expressed in machine terms.
+  Evidence: main_stage1.mem, main.mem, .ranges (unpack_main.py); stop condition
+  "PC==$0810 and the byte there changed" (WL §5); EXP 5 (run_program origin).
+  re64 covers the final-image case via scenario capture ram
+  (assets/mutant-camels/build.mjs:154–169); provenance of run_program captures
+  is not recorded (X4).
+
+  R6. Execution must be able to run a program that calls routines the project 
+  does not model natively (disk loading via KERNAL), with the substitution or 
+  emulation recorded as a run condition.
+  Evidence: F-16 required 17 KERNAL hooks and a serial-bus stub; without them
+  the game cannot reach the city (WL §17). EXP 5 and EXP 9 reached the same
+  wall. re64 has no hook/substitute step and no drive (machine/scenario.ts step
+  vocabulary).
+
+  R7. A record layout must be applicable to several instance bases (files, RAM 
+  buffers, party area) as one declared layout, with unexplained fields visible.
+  Evidence: the 128-byte character record at $CB80+, $CF00, $C800, and the
+  roster files; ? fields at $3A–$3D, $3F (03_formats.md); WL §14. re64 types
+  satisfy this (memory/type.ts, holes, preview as:record).
+
+  R8. Parallel tables indexed by one entity id must be relatable so that a 
+  correction or a query on one column reaches the others.
+  Evidence: monster columns $7D28/$7DA8/$7E28/$7EA8 + name pointers $8D0D; item
+  columns $A3F7/$A477/$A4F7/$A377 + $AA09; transcript: "the shared index was the
+  more useful identity than any address". re64: parked (decisions/claims.md
+  "Parked"; redesign-claims.md "Split arrays"). Representation open (O4).
+
+  R9. A value in a table must be able to be recorded as referring to an asset, a
+  picture, a file, or an index elsewhere, in a form tools can follow.
+  Evidence: $1B28 (type→file), $796C (file→page), $7EA8 (monster→picture), $1A5F
+  (mode→file); hand-copied into btfiles.py, one copy stale (SPECIAL_OVERLAY, 32
+  of 60 entries). EXP 10: hi/lo pairs resolved by hand seven times.
+  Representation open (O4).
+
+  R10. Byte ranges that are not content (shared slack, stale copies of other 
+  files, developer residue, an older revision) must be classifiable so that 
+  decoding, coverage and search exclude them and the reason survives.
+  Evidence: slack.py consumed by disov.py before disassembly (WL §10); phantom
+  targets $2004/$2032/$1010/$1210 in direct_targets.txt (F-11); stale tails
+  NM10/NM16/NM13/19/1A; orphan = NM02 −1 (F-20); RN §6. re64 has is:data only;
+  range-vs-range compare absent (EXP 9). Representation open (O5).
+
+  R11. Composite findings must be recordable as first-class records referencing 
+  several claims, ranges, runs and other findings.
+  Evidence: 02_findings.md (23 entries, each with several evidence items and
+  cross-references); EXP 9/10 ("nothing to attach an editorial judgement to";
+  zero add_evidence in run 10). re64 has no such record. Representation open
+  (O6).
+
+  R12. Evidence must be able to cite concrete locations (instruction ranges in a
+  stated memory state) and retained tool outputs, not only prose.
+  Evidence: every F-nn cites addresses; "why did I believe the bit order"
+  re-derived repeatedly (RN §4). re64 evidence has note, scenario, capture, one
+  other claim.
+
+  R13. A correction to a format-level or glue-level fact must be able to reach 
+  the assertions that depend on it.
+  Evidence: N/S wall-bit flip touched three notes (WL §12, RN §4);
+  PRINT_MSG_ID→SET_PIC_COLORS left a stale alias (labels_main.txt:08CC); HP
+  max/cur direction (WL §14). Weakest form: the dependents must be discoverable;
+  whether by stored edges or by derivation is open (O6).
+
+  R14. The distinction between statically read and observed-by-execution must be
+  recorded per assertion.
+  Evidence: F-16 confirms F-06/F-07/F-14 end-to-end; $D8/$7A established only by
+  poking. re64 method satisfies this (E10).
+
+  R15. Text in a program-specific encoding must be readable and searchable 
+  without the investigator writing a scanner.
+  Evidence: ASCII|$80 with $DC/$AF rules (F-13) in every file; strings_hi.py was
+  the second tool written. re64 ascii renders ≥$80 as "." (c64/text.ts:132);
+  EXP 10 decoded text by hand.
+
+  R16. Operations over an asset's bytes independent of placement, and over many 
+  memory states at once, must be possible.
+  Evidence: slack.py, JT usage counts (F-05), per-file string dumps, k-gram
+  alignment all ran over files; overlapping slots make a single all-overlays
+  state impossible. Affordance level (T4).
+
+  R17. Container-level structure (allocation map, deleted entries, chains not 
+  named by the directory) must be inspectable and extractable.
+  Evidence: F-01, F-02, F-20; the 4B 01 01… false alarm (WL §3). re64 d64.ts
+  lists named entries only.
+
+  ---
+
+  2. Validated existing strengths
+
+  Mechanisms that directly solved observed BT problems; a redesign should not
+  lose them.
+
+  S1. Layer-framed claims (Frame.layer, offsets stored, resolved per 
+  arrangement). Solves R3 and the address-conversion slips ($412↔$FC12,
+  0x1800↔$F800, WL/RN §1) by arithmetic. claims/model.ts, loader.ts
+  (layerStart).
+
+  S2. Per-site name binding (bind_name, labelUse). Expresses the path-dependent
+  meaning of $E0 (dungeon level vs special type) that BT's flat label file could
+  not (main_traced.asm:2298 label/comment contradiction). 06-algebra.md Shape
+  2.
+
+  S3. Derived rendering — nothing resolves at rest. Every listing/name/path is
+  computed from the document; the stale-listing class (main_linear.asm
+  unlabelled; SET_PIC_COLORS in some listings) cannot occur. B2;
+  claims/listing.ts.
+
+  S4. Claims cannot stop control flow; contested bytes get both readings; 
+  codeInClaim/unreached/unexplained findings. Turns BT's slack-derived phantom
+  targets into reported contradictions instead of silent seeds. B3, B5;
+  claims/review.ts.
+
+  S5. Record types with holes, bit-unit records, arrays with origin, preview 
+  as:record, where paths. Directly the "record-layout table with per-field
+  evidence" BT wished for (WL §14, R7). memory/type.ts.
+
+  S6. Sandboxed stored decoders + render (grid/frames, PNG/APNG). Reproduces
+  picture.py/dungeonmap.render as project-held, re-runnable, attributable
+  objects; "slide the width until it snaps" matches BT's histogram discovery.
+  sandbox/run.ts, view/bitmap-view.ts.
+
+  S7. Evidence about a claim with method; retire vs refute vs remove. Satisfies
+  R14; retirement derived and filtered once (loader.ts).
+
+  S8. Content-hashed files; captures as entities with scenario/step. Answers
+  "which bytes were these notes made against" (BT regenerated main.mem and
+  listings at different times).
+
+  S9. Typed, deterministic scenarios with prefix checkpoints. Matches the shape
+  of run_game.py's step list (key/wait/poke/shot/idle) and its determinism
+  problems (WL §17).
+
+  S10. Platform symbols and derived ROM effects. Subsume dis6502.C64_SYMS and
+  run_game's KERNAL list.
+
+  S11. Roots as a field; find_unnamed ranked by references. The
+  direct_targets.txt seeding and the JT usage work-queue, without a notes file
+  consumed by a tool.
+
+  S12. Hygiene/disagreement reporting at the coarsest unit; coverage separated 
+  from hygiene. BT's hand-maintained status letters (01_units.md) become
+  computed.
+
+  ---
+
+  3. Concrete defects
+
+  Correct regardless of architecture.
+
+  X1. Relocating a prg layer keeps its header. projectForTarget sets address: 
+  link.at; buildMemoryMap passes it as explicitStart; makeFileLoader returns the
+  whole file with isPrg:false (src/core/project/file-source.ts:69–71).
+  links.test.ts covers bytes layers only. Docs (05-model.md §3,
+  decisions/machine.md) assert the general capability. Test to add: link a prg
+  layer at another address and assert byte 0 equals the file's third byte.
+
+  X2. D64 extraction is one byte long per file. extractFile takes nextSector
+  bytes of the last sector instead of nextSector − 1 (src/core/c64/d64.ts).
+  Verified on bardst-2.d64: nm02 3330 vs 3329, nm1c 1026 vs 1025. d64.test.ts
+  bounds lengths within a range and cannot catch it.
+
+  X3. D64 directory hides deleted entries and cannot start a chain from a 
+  track/sector; no loop guard in extractFile. Blocks R17; a cyclic chain would
+  hang.
+
+  X4. Two capture paths with different provenance. Scenario captures are
+  entities {scenario, step, kind, file}; run_program captures are bare file
+  records with the run's wrote ranges only in the tool result
+  (server/workspace.ts:1371–1505). R5 needs one rule.
+
+  X5. Tool schema says address is "ignored for prg" (tools.ts:2662, 07-api.md)
+  while the loader honours it (as a raw override) — inconsistent statements of
+  one behaviour.
+
+  X6. Documentation contradiction on Target.order ("a target list is a 
+  history"). BT's configuration space is a lattice (resident × main overlay ×
+  sub-overlay × buffer occupant), for which order has no meaning. The archive
+  should gain the counter-example per its append-only rule.
+
+  ---
+
+  4. Open design decisions
+
+  Requirements established; representation not. Each requirement is stated
+  neutrally; alternatives follow.
+
+  O1. Requirement (from R1, R5): a memory state must carry bank-selection and 
+  device state alongside bytes, and analyses must take that state as input.
+  Alternatives: (a) per-arrangement bank/device overlay on the existing target;
+  (b) a machine-state object of which the byte arrangement is a derived view;
+  (c) two objects — arrangement and machine state — with analyses accepting
+  either.
+  Discriminator: the three $D000 questions in decision D1.
+
+  O2. Requirement (R4): knowledge must apply to a subset of memory states 
+  without per-state re-entry, and must not appear in states where it is false.
+  Alternatives: (a) a container entity owning assets and their claims; (b) an
+  applicability condition on a claim ("holds wherever asset X is placed"); (c)
+  convention: frame such claims on a whole-image asset linked into every
+  relevant state.
+  Discriminator: build game+intro under (b) and (c); count duplicated claims and
+  claims shown where false.
+
+  O3. Requirement (R2, R5, R16): the set of memory states an investigator reads 
+  is large and mostly one-off; reading one must not require a document write for
+  each.
+  Evidence: dozens of build_mem/xrefs --files compositions vs four named ones;
+  EXP 7/8 (target changes avoided; never named in 724 calls).
+  Alternatives: (a) declared entities plus an inline composition parameter on
+  reads; (b) base state + delta at query time; (c) states derived from execution
+  checkpoints only.
+  Discriminator: count reused vs one-off configurations in the BT transcript.
+
+  O4. Requirement (R8, R9): entity indices shared across tables, and values that
+  refer to assets/pictures/files/indices, must be representable so tools can 
+  follow them and corrections propagate.
+  Alternatives: (a) field reference types (index-into, enum, bitmask) with
+  derived aggregation; (b) an index-space declaration that claims join; (c)
+  stored relationship claims checked by hygiene against the bytes.
+  Discriminator: encode monster columns + $1B28 under (a) and (c); count
+  answerable queries and correction touch-points.
+
+  O5. Requirement (R10): non-content byte ranges must be classifiable with a 
+  reason, and coverage/decoding/search must respect the classification.
+  Alternatives: (a) additional interpretation kinds with an "explained-by"
+  reference; (b) a duplicate-of relation (under O4c); (c) asset-level provenance
+  claims.
+  Discriminator: mark the $BB00 template and one stale tail; check
+  find_undecoded, find_bytes, and NM3F's disassembly.
+
+  O6. Requirement (R11, R12, R13): composite findings, location-anchored 
+  evidence, and discoverability of dependents after a correction.
+  Alternatives: (a) a findings record referencing claims/captures/ranges (RD's
+  proposal is one instance); (b) typed references on evidence (frame + range;
+  tool run) without a new record; (c) derived-from edges between claims with a
+  stale-dependents report — the merge argument that removed supersedes has not
+  been tested for a non-ordering edge.
+  Discriminator: re-encode F-01…F-23; apply the F-14 correction; count untouched
+  dependents.
+
+  O7. Requirement (R6): a run must be able to substitute for or emulate routines
+  the model lacks, with the substitution recorded.
+  Alternatives: (a) early-returning handlers at triggers; (b) drive/serial
+  emulation with inserted media; (c) both, recorded as run conditions.
+  Discriminator: script BT boot→cellar under (a); count steps, missing
+  conditions, determinism.
+
+  O8. Requirement (R15): program-specific text encodings must be usable by 
+  preview, search, and listing.
+  Alternatives: (a) extend the built-in encoding table with parameters; (b) let
+  stored decoders serve as encodings; (c) decoders with declared external
+  inputs.
+  Discriminator: register a hi-bit decoder and attempt a text search.
+
+  O9. Requirement (R5, R13-adjacent): observations produced by execution (values
+  seen at cells, dynamic targets) must be retainable in a form static queries 
+  can consult.
+  Evidence: $D8, $7A (WL §17); RN §8–9; EXP 9 (captured SID data unused).
+  Alternatives: (a) queryable access traces; (b) run-minted observation claims;
+  (c) evidence notes only.
+  Discriminator: trace the dungeon entry; check find_references $FC12 and
+  call_graph $620E.
+
+  O10. Requirement (R17): sector-level structure must be inspectable; whether a 
+  chain is an asset kind is open.
+  Alternatives: (a) tools over the image (BAM, usage map, extract by T/S →
+  file); (b) chain as an asset kind carrying sector provenance.
+
+  ---
+
+  5. Unsupported hypotheses
+
+  Concepts this experiment provides no evidence for or against. They may be
+  justified elsewhere; do not cite Bard's Tale for them.
+
+  H1. Inclusion of another program's knowledge as a pinned revision; 
+  internalize; platform revisions. BT needed a fixed set of KERNAL/VIC names and
+  nothing versioned.
+  H2. Articles, editorial workflow, published editions. BT ended at a findings
+  list.
+  H3. Replicas, CRDT merge semantics, chat, per-session undo. Single
+  investigator; BT shows only what would be hard to hand over (R3, R12, X4),
+  which the id/frame/derivation mechanisms address.
+  H4. Retire/refute preserving consulted-later wrong readings. BT shows
+  corrections, not later consultation of superseded readings.
+  H5. Shadowing as a presentation choice among overlapping knowledge. Mild BT
+  instances ($0800 JT vs reset stub; $C000 init vs buffer); not enough to
+  characterise.
+  H6. Claims with non-address subjects in general. BT evidences specific
+  subjects (asset ranges, indices, findings); not an open-ended subject model.
+
+  ---
+
+  6. Tooling/affordance requirements
+
+  Observed needs that do not justify new persisted entities.
+
+  T1. Header-stripped, correctly-sized extraction of D64 members into placeable 
+  assets (X1–X3) — otherwise d64.py and btfiles.py are rewritten.
+  T2. Composition of a memory state at read time (pending O3) — the
+  build_mem(files) call as a parameter.
+  T3. Range-vs-range and near-duplicate comparison (BT k-gram alignment F-20;
+  slack template F-11; EXP 9 request).
+  T4. Asset-scoped and multi-state searches/counts (R16) — JT usage across 60
+  overlays without 60 declared states.
+  T5. Encoding parameters or decoder-backed text for preview/search (R15, O8).
+  T6. Decoder inputs beyond the span — per-picture palette from $0D99 passed by
+  hand today.
+  T7. Persisted query results (items.txt, spells.txt, monster_names.txt, JT
+  counts have no producer) — a re-runnable query with a retained result,
+  referenceable from evidence (R12); whether this is a capture kind is a small
+  model question, not a new entity.
+  T8. Derived aliasing through jump tables — JSR $0809 should render the
+  target's name without a second claim that goes stale (labels_main.txt:08CC).
+  T9. Conditional stops in scenarios ("second visit to $0810", "byte at PC
+  changed") beyond breakpoints/watchpoints.
+  T10. Sector-level inspection tools (BAM, usage map, chain by T/S) (R17, O10a).
+  T11. A work-queue view of open questions per asset/type (BT's scattered ?),
+  whatever record they live in (O6/D12).
+
+  If you want this as a shareable page alongside the exports, say so; the text
+  above is the complete document.
+
+✻ Cooked for 1m 47s · done 2:52
+
+※ recap: Goal: use the Bard's Tale investigation as evidence to evaluate re64 and its redesign; the audit, decision register, and architecture input document are all delivered. Next action: await your next question or request. (disable recaps in /config)

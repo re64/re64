@@ -1,0 +1,39 @@
+# Local workstation and Python cache files.
+.DS_Store
+__pycache__/
+*.py[cod]
+
+# Experiment comparison checkouts are represented by commit references in README.
+/docs/experiments/01-blind-bardstale/re64/
+/docs/experiments/01-blind-bardstale/re64-redesign/
+
+# Keep game inputs and substantial reproductions local. The experiment README
+# inventories the excluded files; these rules also cover regenerated outputs.
+/docs/experiments/01-blind-bardstale/bardstale/extracted/
+/docs/experiments/01-blind-bardstale/bardstale/disasm/
+/docs/experiments/01-blind-bardstale/**/*.d64
+/docs/experiments/01-blind-bardstale/**/*.d71
+/docs/experiments/01-blind-bardstale/**/*.d81
+/docs/experiments/01-blind-bardstale/**/*.g64
+/docs/experiments/01-blind-bardstale/**/*.tap
+/docs/experiments/01-blind-bardstale/**/*.t64
+/docs/experiments/01-blind-bardstale/**/*.crt
+/docs/experiments/01-blind-bardstale/**/*.rom
+/docs/experiments/01-blind-bardstale/**/*.prg
+/docs/experiments/01-blind-bardstale/**/*.bin
+/docs/experiments/01-blind-bardstale/**/*.mem
+/docs/experiments/01-blind-bardstale/**/*.asm
+/docs/experiments/01-blind-bardstale/**/*.png
+/docs/experiments/01-blind-bardstale/**/*.gif
+/docs/experiments/01-blind-bardstale/**/*.jpg
+/docs/experiments/01-blind-bardstale/**/*.jpeg
+/docs/experiments/01-blind-bardstale/**/*.wav
+/docs/experiments/01-blind-bardstale/**/*.sid
+
+# Bulk decoded game text and tables, rather than the investigator's own notes.
+/docs/experiments/01-blind-bardstale/bardstale/notes/items.txt
+/docs/experiments/01-blind-bardstale/bardstale/notes/maps_dump.txt
+/docs/experiments/01-blind-bardstale/bardstale/notes/monster_names.txt
+/docs/experiments/01-blind-bardstale/bardstale/notes/overlay_strings.txt
+/docs/experiments/01-blind-bardstale/bardstale/notes/spells.txt
+/docs/experiments/01-blind-bardstale/bardstale/notes/strings_resident.txt

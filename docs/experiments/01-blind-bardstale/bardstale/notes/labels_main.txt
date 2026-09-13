@@ -1,0 +1,224 @@
+# Resident program labels (addr name ; comment). Grows as analysis proceeds.
+# --- zero page ---
+0003 zp_tmp03
+0005 zp_tmp05
+002A key_ready         ; set by IRQ keyboard scan when a key is available
+002D cur_file          ; currently loaded overlay/file number (loader cache)
+002F anim_flag         ; picture animation on/off (0=off)
+0038 plural_flag       ; 0=singular, !=0 plural (PRINT '/' handling)
+0054 cur_row           ; text cursor row (3..14)
+0055 cur_col           ; text cursor column (21..39)
+0058 str_ptr_lo        ; string pointer for PRINT
+0059 str_ptr_hi
+005A rnd_lo
+005B rnd_hi
+0060 irq_div           ; IRQ divider counter (8)
+0086 delay_keys_ok     ; 1 = keys accepted during DELAY
+0088 text_speed        ; 0..15
+00D4 game_mode         ; 0=city 1=dungeon 2=guild/mode3
+00E0 dungeon_level     ; dungeon level idx (0..15) -> map NMA0+lvl ; also special type
+00E8 delay_count
+00EB torch_flip
+00F8 loaded_tileset    ; which NM05..08 set is in $E000 ($FF=none)
+# --- resident code ---
+0800 JT_start          ; jump table start (70 entries)
+08D2 GAME_INIT         ; cold start after $C000 screen init
+09E0 PUTCHAR           ; print char A at cursor (X=?,Y=? saved)
+0AC6 PRINT             ; X/Y = string ptr, word-wrapping print into text window
+0ACA PRINT_cont
+0B2E word_fits         ; C=1 if next word crosses col 40
+0B67 NEWLINE           ; col=21,row++ (scroll via $1E60 at row 15)
+0B7D PRINT_CAPTION     ; centered 13-char name under picture (row 14 col 1)
+0C0B guild_view_roster ; loads NM00 ...
+0D26 SHOW_PICTURE      ; X = picture idx: loads NM(50+X) to $C000 (or copies resident pic), caption, JMP $4000
+0D54 copy_resident_pic ; Y = idx in D_7962: copies from under ROM to $C000
+0D85 tbl_respic_srcpage
+0D8F tbl_respic_npages
+0D99 tbl_pic_colors   ; picture idx -> colour byte for SET_PIC_COLORS (hi nibble=%01, lo=%10)
+18CE RANDOM            ; -> $5A/$5B
+18F9 RANDOM_SEED
+191D SOUND_NOISE
+1955 GETKEY            ; wait for key -> A (hi-bit ASCII)
+1992 GETKEY_keysok
+1999 POLLKEY           ; Z=1 none
+19C1 GETKEY_TIMEOUT    ; C=1 on timeout
+19C8 STUB_RTS          ; bare RTS, called 34x from overlays (stubbed routine)
+19D6 ASK_MEMBER        ; key '1'..'6' -> A/Y = hi/lo of party record ($CB00+$80*n); C=1 invalid
+19F0 SET_MODE          ; A = mode -> loads main overlay to $AE00 (+NM04 for city), JMP $AE00
+1A5F tbl_mode_overlay  ; 09 02 03
+1A62 DELAY_XY
+1A7A DELAY             ; A = ticks; handles ESC pause / speed keys
+1AD2 pause_msg
+1AE9 str_pausing
+1B15 LOAD_SPECIAL      ; X=$E0 special-location type -> loads overlay D_1B28[X] (type 6 = enter dungeon)
+1B28 tbl_special_overlay
+1B68 str_insert_disks
+1BC7 IRQ_HANDLER
+1C10 irq_slow          ; every 12 IRQs: torch/light timers etc
+1CC6 KEYSCAN
+1D68 tbl_keymatrix
+1E60 SCROLL_TEXT
+1EE5 CLEAR_TEXT        ; clear text window cols21-38 lines 24-119, cursor home (21,3)
+1F20 CLEAR_PICTURE     ; clear picture window cols0-14 lines5-101, anim off
+4000 DRAW_PICTURE      ; renders picture at $C000 into picture window
+456E SET_PIC_COLORS   ; A = colour byte -> screen RAM of picture window (rows 1-11, cols 1-13)
+620E ENTER_DUNGEON_LVL ; loads NMA0+$E0 to $F800, tileset from map[$412] -> NM05+set to $E000, JMP $AE00
+7330 irq_anim          ; called from IRQ when not printing
+78B9 LOAD_FILE         ; A = file# -> "NMxx", loads to fixed page (see btfiles.py)
+792F build_filename
+7952 hexdigits
+7962 tbl_resident_pics ; 10 picture numbers kept in RAM under ROM
+796C tbl_load_page     ; file# (<$50) -> load page
+79BC open_cmd_channel
+79DE filename_buf      ; "NMxx" 
+79E6 disk_error_prompt
+7A32 tbl_file_disk     ; file# < $1C -> disk id for prompt
+7A4E tbl_disk_msgs
+7B17 read_error_channel
+7B4D io_prepare        ; disable IRQ src, sprites, sound
+7B61 io_restore
+7B80 send_I_cmd        ; "I" initialize
+7B96 SAVE_FILE         ; A = 0/1/2 -> scratch + save NM00/NM01/NM0A from $C000
+7C10 copy_savename
+7C25 tbl_save_endpage
+7C28 tbl_savenames     ; "NM00    NM01    NM0A    "
+7C40 print_disk_msg
+AE00 OVERLAY_MAIN      ; main-mode overlay entry (NM02/NM03/NM09)
+B600 OVERLAY_CITY      ; city special overlays NM0B..NM1B
+BB00 OVERLAY_DUNG      ; dungeon special overlays NM1C..NM44 (+NMF0)
+C000 PICBUF            ; picture buffer / roster buffer (NM00/NM01/NM0A/NM50+)
+C900 tbl_line_lo       ; bitmap pixel-line address table lo (200 entries)
+CA00 tbl_line_hi
+CB00 PARTY_SLOT0       ; party slot 0 record (128 bytes)
+CB80 PARTY_MEMBER1     ; member n at $CB00+$80*n, n=1..6
+E000 DATASET           ; NM04 (city) or NM05..08 (dungeon tileset/text) 
+F800 MAPBUF            ; current dungeon map NMA0..AF (2032 bytes)
+FC12 map_tileset_id    ; byte in map selecting NM05..08
+# --- jump table entries (auto) ---
+0800 J_GAME_INIT   ; JT -> $08D2
+0803 J_SHOW_PICTURE   ; JT -> $0D26
+0806 J_CLEAR_TEXT   ; JT -> $1EE5
+0809 J_PRINT   ; JT -> $0AC6
+080C J_PRINT_CAPTION   ; JT -> $0B7D
+080F J_GETKEY   ; JT -> $1955
+0812 J_sub_124F   ; JT -> $124F
+0815 J_sub_1176   ; JT -> $1176
+0818 J_guild_view_roster   ; JT -> $0C0B
+081B J_sub_0F59   ; JT -> $0F59
+081E J_sub_0C7B   ; JT -> $0C7B
+0821 J_CLEAR_PICTURE   ; JT -> $1F20
+0824 J_sub_0CEF   ; JT -> $0CEF
+0827 J_RANDOM_SEED   ; JT -> $18F9
+082A J_RANDOM   ; JT -> $18CE
+082D J_sub_4484   ; JT -> $4484
+0830 J_sub_713F   ; JT -> $713F
+0833 J_PUTCHAR   ; JT -> $09E0
+0836 J_NEWLINE   ; JT -> $0B67
+0839 J_sub_43A6   ; JT -> $43A6
+083C J_sub_436B   ; JT -> $436B
+083F J_STUB_RTS   ; JT -> $19C8
+0842 J_sub_0FD5   ; JT -> $0FD5
+0845 J_sub_4992   ; JT -> $4992
+0848 J_sub_425E   ; JT -> $425E
+084B J_sub_1040   ; JT -> $1040
+084E J_sub_1020   ; JT -> $1020
+0851 J_sub_0EA6   ; JT -> $0EA6
+0854 J_sub_44C6   ; JT -> $44C6
+0857 J_DELAY   ; JT -> $1A7A
+085A J_sub_0DCA   ; JT -> $0DCA
+085D J_sub_0E1E   ; JT -> $0E1E
+0860 J_sub_0E01   ; JT -> $0E01
+0863 J_DELAY_XY   ; JT -> $1A62
+0866 J_sub_4516   ; JT -> $4516
+0869 J_sub_0B63   ; JT -> $0B63
+086C J_sub_0E7D   ; JT -> $0E7D
+086F J_sub_43E2   ; JT -> $43E2
+0872 J_sub_0E4E   ; JT -> $0E4E
+0875 J_sub_157F   ; JT -> $157F
+0878 J_sub_0ED4   ; JT -> $0ED4
+087B J_sub_0FE2   ; JT -> $0FE2
+087E J_sub_4597   ; JT -> $4597
+0881 J_SOUND_NOISE   ; JT -> $191D
+0884 J_LOAD_SPECIAL   ; JT -> $1B15
+0887 J_sub_4207   ; JT -> $4207
+088A J_sub_0F47   ; JT -> $0F47
+088D J_sub_5BFC   ; JT -> $5BFC
+0890 J_SET_MODE   ; JT -> $19F0
+0893 J_sub_49B9   ; JT -> $49B9
+0896 J_ASK_MEMBER   ; JT -> $19D6
+0899 J_sub_697F   ; JT -> $697F
+089C J_sub_5540   ; JT -> $5540
+089F J_sub_494B   ; JT -> $494B
+08A2 J_sub_482D   ; JT -> $482D
+08A5 J_sub_6B12   ; JT -> $6B12
+08A8 J_sub_5BBC   ; JT -> $5BBC
+08AB J_sub_6D96   ; JT -> $6D96
+08AE J_sub_6135   ; JT -> $6135
+08B1 J_ENTER_DUNGEON_LVL   ; JT -> $620E
+08B4 J_GETKEY_TIMEOUT   ; JT -> $19C1
+08B7 J_sub_43D6   ; JT -> $43D6
+08BA J_PRINT_cont   ; JT -> $0ACA
+08BD J_sub_72A9   ; JT -> $72A9
+08C0 J_sub_60BD   ; JT -> $60BD
+08C3 J_LOAD_FILE   ; JT -> $78B9
+08C6 J_sub_1AF5   ; JT -> $1AF5
+08C9 J_SAVE_FILE   ; JT -> $7B96
+08CC J_PRINT_MSG_ID   ; JT -> $456E
+08CF J_sub_7B95   ; JT -> $7B95
+# --- added later ---
+0C7B FIND_CHAR_BY_NAME  ; name in $0334 -> record copied to $CF00, A=roster half; C=1 not found
+0CEF FIND_FREE_SLOT     ; -> $6E/$6F, A=half; C=1 roster full
+0DCA BIN2DEC            ; X=lo,Y=hi? -> 12 digits at $0380
+0E01 DEC_CMP            ; compare rec[Y..Y+11] with $0380
+0E1E DEC_SUB            ; rec[Y..] -= $0380
+0E4E DEC_SUB2           ; $0380 -= rec[Y..]
+0E7D DEC_PRINT          ; print 12-digit number at ($0F),Y
+0ED4 WORD2DEC           ; $63/$64 -> $0380 digits (table $A23F/$A244)
+0F59 INPUT_LINE         ; text input -> $0334 (max 16), C=1 abort
+0FD5 DEC_ADD_TO         ; ($67) 12 digits += $0380
+1020 DEC_LOAD_GOLD      ; rec[$24..] -> $0380
+1040 DRAW_PARTY_LINES   ; redraw party status area
+1176 NEW_ORDER          ; reorder party
+124F VIEW_CHAR          ; A = member: character sheet + E/T/D/P menu
+157F PRINT_SPELL_LEVELS ; "Sorc: Conj: Magi: Wizd:" from rec[$40..43]
+4207 BLIT_IMAGE         ; draw image ($50/$51) at X,Y size $52
+43A6 UNPACK_STATS       ; rec[$10..13] -> $A249.. (6 x 5-bit)
+43D6 GIVE_ITEM          ; A = member; give item $70 (flags $73); C=1 full
+4484 PRINT_STATS        ; "St: IQ: Dx: Cn: Lk: HP:" columns $A239
+4516 EXP_FOR_LEVEL      ; class rec[$38], level $63/$64 -> $0380 via $A703/$A70D
+49B9 RANDOM_ENCOUNTER   ; JT $0893 (24 uses)
+4F0A PICK_MONSTERS      ; depth $42 -> $03B0/$03B8 groups
+5170 COMBAT_MENU        ; (A)ttack (P)arty (D)efend (C)ast (U)se (H)ide (B)ard
+5540 ITEM_LIGHT_CHECK   ; ? (JT $089C)
+6412 CAST_SPELL         ; $CA = spell# -> handler via $987C (self-modified JMP $6430)
+6D96 MONSTER_HP         ; A = monster id -> HP roll
+71DC PARTY_REGEN        ; per-member HP/SP regen (items eff 1/2)
+72B9 MEMBER_HAS_ITEM_EFF; X = member, A = effect -> C=0 found
+7CBB tbl_enc_mask       ; per depth
+7CC3 tbl_enc_base
+7D28 mon_group_hpclass
+7DA8 mon_ac_hpbase
+7E28 mon_level
+7EA8 mon_picture
+8D0D tbl_monster_name_ptr
+95B7 tbl_spell_cost
+9606 tbl_spell_flags
+971F spell_stream
+987C tbl_spell_handler
+A239 tbl_stat_cols
+A3F7 tbl_item_type
+A477 tbl_item_classmask
+A4F7 tbl_item_effect
+A377 tbl_item_acdmg
+AA09 tbl_item_name_ptr
+A703 tbl_exp_class_base
+A70D tbl_exp_thresholds
+C800 CHAR_SCRATCH_CREATE
+CF00 CHAR_SCRATCH_FIND
+0334 input_buf
+0380 dec_accum
+03B0 enc_monster_id     ; per group 0..3
+03B8 enc_count
+0350 view_left          ; per depth 0..4 (NM02 view builder)
+0355 view_right
+035A view_front

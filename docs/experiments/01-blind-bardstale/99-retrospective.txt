@@ -1,0 +1,283 @@
+Feedback on the re64 redesign
+
+Purpose of this report
+
+This is feedback on the current re64 redesign, informed by a subsequent architecture discussion and by an empirical reverse-engineering experiment.
+
+The redesign effort is worthwhile, but its purpose should be understood correctly. It is not an attempt to replace all of re64 with a new design. The point is to slow development down at the architectural boundaries: deconstruct the existing architecture, deliberately review the model and API decisions that have long-term consequences, establish invariants and tests, and then allow the large amount of established implementation to be ported relatively mechanically.
+
+This matters particularly for agent-driven development. Previous experience showed that an agent can understand architectural rules and nevertheless violate them later while extending the system in a locally reasonable way. Documentation is therefore insufficient for important invariants; the redesign should make the correct path structurally easy and important violations mechanically difficult or detectable.
+
+Initial reaction to the redesign
+
+The redesign is moving in the right direction, but the architecture document currently goes too deep too early.
+
+The high-level ideas are often clearer than the mechanisms introduced to realize them. In particular, concepts such as inclusion, revisions, internalization, shadowing and evidence resolution begin to dominate the explanation before the reader has a sufficiently simple model of what re64 fundamentally represents.
+
+My initial reaction was therefore not that the redesign was misguided, but that it was prematurely resolving questions that should first be stated as requirements.
+
+Several underlying ideas are strong:
+
+* an Image should represent concrete machine state rather than merely a flat arrangement of bytes;
+* Assets, Images, Claims, Types, Records, Evidence, Findings, Runs/Captures and Views represent genuinely different concerns;
+* storage should remain normalized and identity-based rather than reproducing the conceptual hierarchy as nested Yjs state;
+* Views should be derived rather than becoming another source of truth;
+* machine state, including banking and hidden memory, needs to be represented honestly;
+* technical knowledge should retain provenance and disagreement rather than being destructively resolved.
+
+The weakest part was the connective architecture around Program, inclusion and generalized knowledge. Too many responsibilities had become coupled there.
+
+The Bard’s Tale experiment
+
+To get out of abstract ontology discussions, we ran a blind experiment.
+
+Claude was given two Bard’s Tale C64 D64 images and asked to reverse engineer them as completely as practical, writing its own tools. It knew nothing about re64. The intention was to observe what entities, knowledge structures, tools and organizational problems emerged naturally rather than asking an agent to rationalize re64’s existing concepts.
+
+The result was unusually useful. The investigation produced a substantial working corpus: disk tooling, disassembler, emulator, unpackers, xref tooling, slack detection, format decoders, rendered pictures and dungeon maps, screenshots, listings for roughly sixty overlays, symbol tables, findings, dependency notes, a work log, and a retrospective about what information structures and tools had been missing.
+
+Among other things, the investigator independently encountered:
+
+* contextual address identity;
+* composed memory configurations;
+* multi-stage execution/decrunching;
+* relocatable files whose PRG headers do not describe their real placement;
+* stable resident APIs and overlay-local symbols;
+* banking and RAM underneath I/O;
+* reusable record and map formats;
+* parallel tables sharing semantic index spaces;
+* asset-relative structure and claims;
+* duplicate and stale material;
+* deleted/orphaned disk contents;
+* negative conclusions about false matches caused by slack;
+* evidence that later invalidated earlier interpretations;
+* findings distinct from atomic technical assertions;
+* visualizations used as analysis instruments rather than merely publication output.
+
+It also spontaneously produced a retrospective whose central complaint was that knowledge identity was contextual while its improvised tools and notes repeatedly reduced that identity to bare filenames or addresses.
+
+A separate agent then audited the existing re64 implementation and redesign against this frozen corpus. The exported audit can be linked separately and should be treated as empirical input to the redesign, not as an architecture specification. Its purpose is to distinguish requirements independently observed in real work from elegant mechanisms that currently have little evidence behind them.
+
+The most useful result is that a surprisingly large part of re64 was independently validated, while the most uncertain area remained almost exactly the one that motivated the discussion: the abstraction currently represented by Program/Target and the semantics of generalized knowledge.
+
+What the experiment strongly supports
+
+The redesign should preserve rather than casually reinvent the following ideas.
+
+Images are real and important. The blind investigator independently built build_mem() because “what is at $C000?” cannot be answered without a concrete memory configuration. The redesign’s richer Image—machine state including banking, hidden memory, origins and execution-derived states—is much better supported than the existing flat Target memory map.
+
+Assets and relocatable asset knowledge are fundamental. Much of the investigation happened directly against files and ranges within files, before or without constructing Images. Knowledge attached to an Asset must remain meaningful when that Asset is placed at different addresses.
+
+Types and Records are strongly validated. The character records, maps and other structured binary data are almost textbook examples. Reusable structure genuinely generalized across many instances, and corrections to the structure legitimately needed to propagate.
+
+Claims and Evidence are central. The investigator repeatedly had to reconstruct why it believed something and suffered when corrections had to be manually propagated through prose, generated listings and scripts.
+
+Findings deserve to remain distinct from Claims. The investigator independently created an F-01…F-23 findings log containing significant synthesized conclusions backed by more detailed technical observations.
+
+Execution, experiments, captures and runtime observations matter. Static analysis repeatedly became certain only after emulator probes. The desired loop was explicitly described as hypothesis → runtime probe → recorded evidence.
+
+Derived representations matter, including visual ones. Dungeon maps, contact sheets and screenshots participated in reasoning. Multimodal agents make rendering an analysis primitive, not merely a human/article feature.
+
+One canonical representation of knowledge is essential. The blind filesystem-based investigation independently recreated the exact drift problem re64 is intended to prevent: labels, notes, generated listings, Python constants and inventories became inconsistent.
+
+These are good foundations for the redesign.
+
+The important architectural refinement
+
+The subsequent discussion exposed a cross-cutting distinction that is more fundamental than several of the individual model decisions:
+
+Configuration, epistemic knowledge, and derived analysis are different categories of state.
+
+This should become explicit in the architecture. A separate ticket describes this in detail and can be linked rather than duplicated here.
+
+In short:
+
+Configuration defines the analytical world the investigator chooses to construct: Image composition, Asset placement, platform selection, knowledge applicability, Run setup, hooks, pokes and other experimental premises.
+
+Knowledge records what investigators assert about the software or system and why: Claims, Evidence, provenance, Findings, refutations, uncertainty, etc.
+
+Derived analysis is regenerable output from configuration plus knowledge: resolved Views, disassembly, xrefs, coverage, renders and reports.
+
+This distinction resolves several apparent epistemological problems. A supported Claim may state:
+
+NM02 really loads at $AE00.
+
+Separately, an investigator may configure an Image to place NM02 at $AE00.
+
+The latter may be motivated by the former, but they are not the same source of truth. An investigator is also free to configure NM02 incorrectly or hypothetically for an experiment without thereby asserting that the real game behaves that way.
+
+The simple existing idea:
+
+Image + applicable Knowledge → View
+
+should therefore remain, but be placed inside this broader architecture.
+
+Program / Target / generalized knowledge
+
+This remains the most important unresolved conceptual area, but the discussion substantially narrowed it.
+
+The Bard’s Tale evidence establishes a requirement:
+
+Some technical knowledge is usefully asserted more generally than one Image without applying to the entire Project.
+
+The resident game knowledge is a good example: many zero-page meanings and API conventions apply across city/dungeon/overlay configurations but not to the separate intro program.
+
+What the experiment does not establish is that this requires the redesign’s Program entity.
+
+Several things that initially looked like Program/Target sharing already have better-established mechanisms:
+
+* overlay-local knowledge can follow an Asset;
+* reusable structural knowledge belongs to Types/Records;
+* concrete state belongs to Images;
+* platform behavior can be supplied by the platform implementation;
+* repeated equal facts are not necessarily shared knowledge.
+
+This leaves a residual requirement for genuinely general technical assertions.
+
+During the discussion, Domain emerged as a possible name for such a concept: a named and described frame for general technical knowledge. This is not yet a final architectural decision, but it is clearer than Target, which strongly suggests the concrete object being analyzed.
+
+If retained, a Domain should be deliberately small. It should not automatically become a container for Assets, Images, revisions, platform dependencies, publication, or inheritance. A Domain Claim would simply be a Claim deliberately asserted at that general level.
+
+A critical epistemic rule follows:
+
+Applicability is not evidence propagation.
+
+If a general Claim is used while interpreting an Image, re64 must not pretend that the Claim has thereby been independently verified against that Image. Conversely, a user must be able to enter a general Claim directly; they should not have to fabricate an Image-specific Claim and “promote” it first.
+
+The exact representation of applicability remains open. It might ultimately be ordinary project configuration rather than another Claim. That is consistent with the configuration/knowledge distinction above.
+
+Platform inclusion should be removed as a general architectural mechanism
+
+One concrete decision did emerge.
+
+The generalized Program inclusion/internalization/platform-revision mechanism is carrying much more complexity than the demonstrated requirement warrants.
+
+Platform should instead be an explicit special facility, conceptually something like:
+
+platform: none | c64 | vc20
+
+Selecting a platform means that re64 supplies the corresponding machine semantics and standard environment: banking/PLA behavior, devices, platform effects/knowledge, and required platform resources such as ROMs when available.
+
+This is intentionally special. Platform infrastructure also needs policies that ordinary composition does not—for example, ROM routines must affect execution without causing the disassembler to recursively treat the KERNAL as unexplained application code.
+
+Licensing/resource acquisition should not distort the domain architecture. Architecturally, platform ROMs can be treated as platform resources even if the user must provide their bytes separately.
+
+If a genuinely general mechanism emerges from multiple future use cases, it can be exposed later. The redesign should not generalize platform reuse preemptively.
+
+Image composition remains useful, but it is not knowledge inheritance
+
+Bard’s Tale does provide strong evidence for composition.
+
+The game has many overlays, maps, pictures and data sets occupying reusable address ranges. An investigator may need dozens of meaningful Images representing combinations of resident state plus a particular overlay, level and data set.
+
+That is not a problem in itself. Sixty lightweight declarative Images may be entirely reasonable.
+
+Images may be:
+
+* constructed from placed Assets;
+* derived from another Image with changed/overlaid state;
+* captured from Execution;
+* imported from a memory dump.
+
+Whether every exploratory configuration should become a persisted Image or whether ephemeral configurations should exist remains unresolved and need not be decided prematurely.
+
+What should not be reintroduced is general knowledge inclusion merely because Image composition is useful. Asset-relative knowledge naturally follows the Asset placement; Types naturally apply through Records; Image-specific knowledge remains Image-specific.
+
+Sharing and false sharing
+
+The redesign should explicitly resist sharing merely for deduplication.
+
+The Bard’s Tale investigation encountered at least five importantly different situations:
+
+1. one intrinsic fact following the same material through placement;
+2. many instances of one shared Type/Format;
+3. genuinely general technical knowledge;
+4. independently true facts that happen to agree;
+5. duplicated, stale or residual bytes.
+
+These must not collapse into one generic inheritance mechanism.
+
+A particularly useful rule is:
+
+Knowledge should normally attach to the narrowest stable thing that makes it meaningful.
+
+Asset-local symbols should remain Asset knowledge. Character-record structure belongs to the Type. A captured value belongs to an Image. Only genuinely general assertions need a more general frame.
+
+This protects both epistemic integrity and synchronization semantics.
+
+Relationships may be a more fundamental missing capability
+
+The discussion also exposed a risk: some proposed higher-level mechanisms may be compensating for re64’s weak ability to record relationships between things.
+
+The Bard’s Tale investigation naturally produced assertions such as:
+
+* range A is a stale copy of range B;
+* Asset A duplicates part of Asset B;
+* monster ID X uses picture Y;
+* special-location type X selects overlay Y;
+* file number X maps to load page Y;
+* Claim X depends on Claim Y;
+* Image B derives from Image A.
+
+The audit identified shared index spaces and “glue tables” as one of the strongest model gaps.
+
+Before introducing elaborate applicability containers, the redesign should therefore review whether evidence-bearing relational Claims or another controlled relation mechanism are required.
+
+This should not become arbitrary RDF-style predicates. Agents inventing uncontrolled relation vocabulary would create another form of schema drift. It deserves a separate architecture gate.
+
+API and tooling implications
+
+Several principles should guide the MCP/API redesign independently of the final ontology.
+
+Require the least context necessary. Asset operations should not require an Image. Image-address operations require an Image. Runtime observations require a Run. General Claims should not require synthetic Images.
+
+Exploration should normally be non-mutating. Reading ranges, comparing bytes, decoding, rendering and querying should not require creation of durable project entities merely to perform an analysis. Useful results can subsequently be recorded as Claims, Evidence, Captures or Findings.
+
+Provide canonical generic tools. Claude’s ability to write fourteen C64 tools does not imply re64 should leave tooling to agents. It demonstrates that these operations are tractable and can be provided once, tested and integrated with re64’s knowledge model. This is especially important for agents that can use MCP tools but cannot build arbitrary local tooling.
+
+Rendering is analysis. Rendered maps, bitmaps, contact sheets, screenshots and similar artifacts should be reproducible and usable as evidence/input to subsequent multimodal reasoning.
+
+Architecture must be mechanically enforceable
+
+The redesign exists partly because understanding architectural rules was insufficient to keep previous agent-driven development inside them.
+
+Each critical architectural decision should therefore end with:
+
+semantic rule → mechanical gate → adversarial test
+
+Examples include:
+
+* IDs are identity; names are API conveniences only;
+* name resolution happens at the gate and ambiguity is explicit;
+* moves are atomic;
+* there is one canonical source for current state;
+* generated indexes/views are derived rather than parallel truth;
+* platform is a special facility rather than generic inclusion;
+* generalization/cardinality is not broadened without a concrete use case;
+* sync merge must not manufacture semantic states that neither replica intentionally produced.
+
+The reconstruction should deliberately gate these decisions, then allow ordinary implementation to proceed rapidly underneath the approved contracts.
+
+Overall recommendation
+
+Continue with the redesign and allow it to deconstruct the existing architecture substantially. The empirical work does not support a blank-sheet rewrite, however. Much of re64’s underlying knowledge model survived contact with a complicated blind investigation surprisingly well.
+
+The strongest redesign opportunity is therefore in the connective architecture and API:
+
+* replace the flat Target memory model with honest Image/machine-state semantics;
+* keep Assets, relocatable knowledge, Types/Records, Claims/Evidence, Findings, Runs/Captures and derived Views;
+* remove generalized platform inclusion and make platform an explicit special facility;
+* do not yet stabilize Program/Target as a multi-purpose abstraction;
+* explicitly distinguish configuration, knowledge and derivation;
+* treat general knowledge applicability as an unresolved but sharply bounded problem, with Domain as one candidate;
+* review relational knowledge before allowing Domain or another container to compensate for missing relations;
+* preserve false-sharing boundaries;
+* design MCP operations around the least necessary context and a single canonical model;
+* require mechanical gates for architectural invariants.
+
+The Bard’s Tale experiment should be used as a regression corpus for architectural decisions, not as an architecture generator. For each proposed abstraction, the useful question is:
+
+Would this have made the blind Bard’s Tale investigation more coherent, reproducible and maintainable without forcing the investigator to misrepresent what was actually discovered?
+
+Where the experiment supplies no evidence—particularly collaboration/CRDT value, generalized platform inclusion, article representation, and some lifecycle questions—the redesign should say so rather than borrowing certainty from unrelated successes.
+
+The result should be a smaller architectural core whose concepts have clear jobs, with the existing implementation ported aggressively once those jobs and their invariants have been reviewed.
