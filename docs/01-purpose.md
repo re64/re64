@@ -1,4 +1,4 @@
-# The re64 manifest
+# The purpose of re64
 
 re64 helps people and AI agents investigate Commodore 64 programs together,
 preserve what they learn, and tell stories about the software and the people
