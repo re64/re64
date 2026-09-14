@@ -13,12 +13,15 @@ investigation is not evidence that the mechanism has no value elsewhere.
 
 ## Detailed design notes
 
-- [Machine and analysis design](04-machine-design.md): image composition,
+- [Machine and analysis design](04-machine-design.md): machine state composition,
   memory mapping, execution, and analysis mechanisms.
 - [Knowledge design](05-knowledge-design.md): applicability, reuse, platform
   packaging, relationships, and changes to shared definitions.
 - [Collaboration and interface design](06-collaboration-and-interfaces.md):
   replicas, persistence, shared operations, views, and output examples.
+- [Synchronization design](07-synchronization.md): shared entity and field
+  rules using maps, deletion/restoration, derived ordering, and action/undo
+  contracts.
 
 These notes distinguish established directions from proposals and open choices.
 They are not complete specifications. Moving a proposal here does not approve it
@@ -28,7 +31,7 @@ or require a change to an existing implementation.
 
 | Item | Required capability or decision | Issues |
 |---|---|---|
-| D1 | Banked, partly known machine state; Image direction retained | [#60](https://github.com/re64/re64/issues/60) |
+| D1 | Banked, partly known machine state; direction retained | [#60](https://github.com/re64/re64/issues/60) |
 | D2 | Temporary configurations with retainable analytical context | [#61](https://github.com/re64/re64/issues/61) |
 | D3 | Asset payload versus placement; correct PRG and disk extraction | [#58](https://github.com/re64/re64/issues/58), [#59](https://github.com/re64/re64/issues/59) |
 | D4 | Knowledge applicable across subjects and broader contexts | [#51](https://github.com/re64/re64/issues/51), [#50](https://github.com/re64/re64/issues/50) |

@@ -21,7 +21,7 @@ knowledge, articles, and a conversation between people and agents.
 
 **Assets** supply the material: binaries, ROMs, cartridges, disks, and data
 extracted or produced along the way. Each asset is identifiable within the project
-and can be used in multiple images and analyses. Assets can also be investigated
+and can be used in multiple machine states and analyses. Assets can also be investigated
 in their own right.
 Reading a file, comparing ranges, decoding a picture, or inspecting a disk's
 allocation map does not require constructing a running machine. Unnamed or
@@ -39,16 +39,16 @@ material back to its sources.
 > their material distinguishable while comparing what changed.
 > [Build comparison][builds]
 
-## 2. Images and configuration
+## 2. Machine states and configuration
 
-Analysis of program behavior concerns machine state, which may only be partially
-known. An **image** represents that state, whether constructed from assets or
-reached through execution. Each analysis uses the information it needs and makes
-its assumptions explicit.
+Analysis of program behavior concerns **machine state**, which may only be
+partially known. A machine state can be constructed from assets or reached
+through execution. Each analysis uses the information it needs and makes its
+assumptions explicit.
 
-An image can carry everything needed to continue execution: memory, registers,
-device state, banking controls, attached hardware, and inserted media, including
-the state of connected devices. Some state may be unknown or supplied by
+A machine state can carry everything needed to continue execution: memory,
+registers, device state, banking controls, attached hardware, and inserted media,
+including the state of connected devices. Some state may be unknown or supplied by
 defaults. A default provides a concrete value; an unknown leaves a question for
 the analysis. Tools explain when missing state prevents them from continuing.
 
@@ -62,17 +62,17 @@ storage but preserve the source assets. The resulting bytes remain traceable to
 their origins, including later writes. Overlapping material and hidden memory
 must remain distinguishable.
 
-A **configuration** specifies the state and assumptions chosen for an analysis: which material to place, the interpretations to use, and the conditions of an experiment. These choices need not describe a state the original program ever reached or could reach. A useful configuration can be retained; a temporary query need not create a named image merely to examine an alternative.
+A **configuration** specifies the state and assumptions chosen for an analysis: which material to place, the interpretations to use, and the conditions of an experiment. These choices need not describe a state the original program ever reached or could reach. A useful configuration can be retained; a temporary query need not create a named machine state merely to examine an alternative.
 
-When an examination starts from an image and applies configured changes, the
+When an examination starts from a machine state and applies configured changes, the
 resulting machine state must be explicit and interpreted consistently across
 tools. Results identify that state and its assumptions, while the retained
-starting image continues to represent its original state.
+starting machine state remains unchanged.
 
 > **Mutant Camels — getting past the loader.** The disk version is compressed.
-> Running its decruncher prepares the expanded game for investigation. An image
-> captured at that point preserves the resulting memory and machine state as
-> an input to further analysis. [Decrunching recipe][recipe]
+> Running its decruncher prepares the expanded game for investigation. Capturing
+> the machine state at that point preserves it as an input to further analysis.
+> [Decrunching recipe][recipe]
 
 ### C64 support and platform knowledge
 
@@ -87,12 +87,12 @@ Platform knowledge can provide ROM labels and routine descriptions even when the
 > increments a counter and reads from `$A000 + counter`, using BASIC ROM as a
 > lookup table. An experiment supplied substitute bytes and observed the game.
 > Those contents are part of the experiment's conditions and limit what its
-> gameplay images establish. [ROM experiment][relations]
+> gameplay screenshots establish. [ROM experiment][relations]
 
 ## 3. Analysis and execution
 
 **Analysis** examines material and behavior to discover structure, relationships,
-and possible explanations. It can inspect an asset, reason about an image, or
+and possible explanations. It can inspect an asset, reason about a machine state, or
 compare results across several assets and states.
 
 Static analysis follows control flow from **entry points** and code selected for
@@ -119,7 +119,7 @@ or controlling random values. They are useful ways to isolate behavior even
 when faithful platform emulation is available. Their presence and effect belong
 in the run's record, alongside its initial state and inputs.
 
-A **checkpoint** is an image captured during execution, usable for another run
+A **checkpoint** is a machine state captured during execution, usable for another run
 or analysis. A **capture** retains an observation, such as a memory dump,
 screenshot, or recording of device activity. An **access trace** records which
 instructions read, wrote, or fetched bytes and which storage or device they
@@ -143,7 +143,7 @@ required. Claims can be tentative, supported, disputed, or withdrawn.
 
 Claims express the project's knowledge, including tentative and disputed
 interpretations. They can describe one subject or apply across several assets,
-images, and broader contexts without repeated entry. Association with an asset
+machine states, and broader contexts without repeated entry. Association with an asset
 does not confine a claim's subject to that asset's bytes: its code may act
 elsewhere in the machine.
 
@@ -232,7 +232,7 @@ recomputed; other conclusions need renewed judgment. No automatic check can
 promise to discover every semantic dependency.
 
 A **coverage report** shows decoded material, interpretations, and remaining
-gaps across the selected assets, images, or regions. A broad data annotation
+gaps across the selected assets, machine states, or regions. A broad data annotation
 does not explain every byte, and decoding a function does not establish its
 purpose. Holes in a partially understood type remain visible.
 
@@ -297,7 +297,7 @@ agreement about what that data means.
 ## 8. Views and interfaces
 
 A **view** presents material and analysis results in context. What it shows
-depends on the selected assets or image, configuration, definitions, and claims
+depends on the selected assets or machine state, configuration, definitions, and claims
 used for the examination. A view can present an asset directly or show the
 results of machine analysis.
 
@@ -308,7 +308,7 @@ another:
 
 ```mermaid
 flowchart LR
-    M[Assets and images] --> A[Analysis or execution]
+    M[Assets and machine states] --> A[Analysis or execution]
     C[Configuration and definitions] --> A
     K[Selected claims] --> A
     A --> R[Results]
@@ -343,7 +343,7 @@ table interpreted as an array of `ZoneRecord`, a view identifies it as
 [Record analysis][zones]
 
 The formats below are illustrative, not a proposed tool schema. The surrounding
-query identifies the image and interpretation used. A disassembly can show:
+query identifies the machine state and interpretation used. A disassembly can show:
 
 ```asm
 $67A0  zoneTable[0].name:

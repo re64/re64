@@ -10,11 +10,11 @@ Construct a set of difficult but realistic software-archaeology situations and a
 
 Include at least these cases:
 
-* one Asset placed differently in several Images, with Asset-associated Claims both inside and outside its stored byte extent;
-* a project containing a main game, a separate intro, and many game Images, where some address-space knowledge applies to all game Images but not the intro;
-* knowledge that genuinely applies across several Images or Assets without repeated entry;
-* a general Claim entered directly rather than first discovered in one Image;
-* generally applicable knowledge with an Image-specific counterexample;
+* one Asset placed differently in several Machine states, with Asset-associated Claims both inside and outside its stored byte extent;
+* a project containing a main game, a separate intro, and many game Machine states, where some address-space knowledge applies to all game Machine states but not the intro;
+* knowledge that genuinely applies across several Machine states or Assets without repeated entry;
+* a general Claim entered directly rather than first discovered in one Machine state;
+* generally applicable knowledge with a Machine-state-specific counterexample;
 * editing a shared Type after many Records have been interpreted with it, while old Evidence must continue to describe what was originally examined;
 * a packed program whose execution produces several materially different states before reaching the useful resident state;
 * a game with many overlays/levels requiring dozens of useful memory configurations;
@@ -42,7 +42,7 @@ For each case answer:
 
 Classify each case as clean, awkward but sufficient, underspecified, or contradictory.
 
-Be especially adversarial about knowledge applicability across multiple Images or Assets, Asset association, Image versus configuration, platform behavior and platform knowledge, Claims versus configuration, relationships/bindings, Evidence, and View resolution.
+Be especially adversarial about knowledge applicability across multiple Machine states or Assets, Asset association, Machine state versus configuration, platform behavior and platform knowledge, Claims versus configuration, relationships/bindings, Evidence, and View resolution.
 
 In particular, do not invent Program, Target, Domain, Layer, or another grouping concept to solve shared knowledge. If the architecture cannot express the requirement without one, state precisely what semantic capability is missing. Likewise, do not assume that such a concept is needed merely because it would make a case convenient.
 
@@ -158,7 +158,7 @@ I’ll read only the two named documents and test the architecture’s stated se
 
       **Assets** supply the material: binaries, ROMs, cartridges, disks, and data
       extracted or produced along the way. Each asset is identifiable within the project
-      and can be used in multiple images and analyses. Assets can also be investigated
+      and can be used in multiple machine states and analyses. Assets can also be investigated
       in their own right.
       Reading a file, comparing ranges, decoding a picture, or inspecting a disk's
       allocation map does not require constructing a running machine. Unnamed or
@@ -176,16 +176,16 @@ I’ll read only the two named documents and test the architecture’s stated se
       > their material distinguishable while comparing what changed.
       > [Build comparison][builds]
 
-      ## 2. Images and configuration
+      ## 2. Machine states and configuration
 
-      Analysis of program behavior concerns machine state, which may only be partially
-      known. An **image** represents that state, whether constructed from assets or
-      reached through execution. Each analysis uses the information it needs and makes
-      its assumptions explicit.
+      Analysis of program behavior concerns **machine state**, which may only be
+      partially known. A machine state can be constructed from assets or reached
+      through execution. Each analysis uses the information it needs and makes its
+      assumptions explicit.
 
-      An image can carry everything needed to continue execution: memory, registers,
-      device state, banking controls, attached hardware, and inserted media, including
-      the state of connected devices. Some state may be unknown or supplied by
+      A machine state can carry everything needed to continue execution: memory,
+      registers, device state, banking controls, attached hardware, and inserted media,
+      including the state of connected devices. Some state may be unknown or supplied by
       defaults. A default provides a concrete value; an unknown leaves a question for
       the analysis. Tools explain when missing state prevents them from continuing.
 
@@ -199,12 +199,12 @@ I’ll read only the two named documents and test the architecture’s stated se
       their origins, including later writes. Overlapping material and hidden memory
       must remain distinguishable.
 
-      A **configuration** specifies the state and assumptions chosen for an analysis: which material to place, the interpretations to use, and the conditions of an experiment. These choices need not describe a state the original program ever reached or could reach. A useful configuration can be retained; a temporary query need not create a named image merely to examine an alternative.
+      A **configuration** specifies the state and assumptions chosen for an analysis: which material to place, the interpretations to use, and the conditions of an experiment. These choices need not describe a state the original program ever reached or could reach. A useful configuration can be retained; a temporary query need not create a named machine state merely to examine an alternative.
 
       > **Mutant Camels — getting past the loader.** The disk version is compressed.
-      > Running its decruncher prepares the expanded game for investigation. An image
-      > captured at that point preserves the resulting memory and machine state as
-      > an input to further analysis. [Decrunching recipe][recipe]
+      > Running its decruncher prepares the expanded game for investigation. Capturing
+      > the machine state at that point preserves it as an input to further analysis.
+      > [Decrunching recipe][recipe]
 
       ### C64 support and platform knowledge
 
@@ -224,7 +224,7 @@ I’ll read only the two named documents and test the architecture’s stated se
       ## 3. Analysis and execution
 
       **Analysis** examines material and behavior to discover structure, relationships,
-      and possible explanations. It can inspect an asset, reason about an image, or
+      and possible explanations. It can inspect an asset, reason about a machine state, or
       compare results across several assets and states.
 
       Static analysis follows control flow from **entry points** and code selected for
@@ -251,7 +251,7 @@ I’ll read only the two named documents and test the architecture’s stated se
       when faithful platform emulation is available. Their presence and effect belong
       in the run's record, alongside its initial state and inputs.
 
-      A **checkpoint** is an image captured during execution, usable for another run
+      A **checkpoint** is a machine state captured during execution, usable for another run
       or analysis. A **capture** retains an observation, such as a memory dump,
       screenshot, or recording of device activity. An **access trace** records which
       instructions read, wrote, or fetched bytes and which storage or device they
@@ -275,7 +275,7 @@ I’ll read only the two named documents and test the architecture’s stated se
 
       Claims express the project's knowledge, including tentative and disputed
       interpretations. They can describe one subject or apply across several assets,
-      images, and broader contexts without repeated entry. Association with an asset
+      machine states, and broader contexts without repeated entry. Association with an asset
       does not confine a claim's subject to that asset's bytes: its code may act
       elsewhere in the machine.
 
@@ -360,7 +360,7 @@ I’ll read only the two named documents and test the architecture’s stated se
       promise to discover every semantic dependency.
 
       A **coverage report** shows decoded material, interpretations, and remaining
-      gaps across the selected assets, images, or regions. A broad data annotation
+      gaps across the selected assets, machine states, or regions. A broad data annotation
       does not explain every byte, and decoding a function does not establish its
       purpose. Holes in a partially understood type remain visible.
 
@@ -425,7 +425,7 @@ I’ll read only the two named documents and test the architecture’s stated se
       ## 8. Views and interfaces
 
       A **view** presents material and analysis results in context. What it shows
-      depends on the selected assets or image, configuration, definitions, and claims
+      depends on the selected assets or machine state, configuration, definitions, and claims
       used for the examination. A view can present an asset directly or show the
       results of machine analysis.
 
@@ -436,7 +436,7 @@ I’ll read only the two named documents and test the architecture’s stated se
 
       ```mermaid
       flowchart LR
-          M[Assets and images] --> A[Analysis or execution]
+          M[Assets and machine states] --> A[Analysis or execution]
           C[Configuration and definitions] --> A
           K[Selected claims] --> A
           A --> R[Results]
@@ -471,7 +471,7 @@ I’ll read only the two named documents and test the architecture’s stated se
       [Record analysis][zones]
 
       The formats below are illustrative, not a proposed tool schema. The surrounding
-      query identifies the image and interpretation used. A disassembly can show:
+      query identifies the machine state and interpretation used. A disassembly can show:
 
       ```asm
       $67A0  zoneTable[0].name:
@@ -504,15 +504,15 @@ I’ll read only the two named documents and test the architecture’s stated se
 
 ## Assistant
 
-The architecture explicitly covers several hard cases, including counterfactual experiments, claims without initial evidence, retained evidence after Type edits, and unnamed disk material. The main ambiguity I’m testing is how a shared Claim identifies its subjects across relocated Assets and selected Images. The two documents contain no Bard’s Tale investigation details, so those cases will be labeled hypothetical; I won’t follow the external investigation links.
+The architecture explicitly covers several hard cases, including counterfactual experiments, claims without initial evidence, retained evidence after Type edits, and unnamed disk material. The main ambiguity I’m testing is how a shared Claim identifies its subjects across relocated Assets and selected Machine states. The two documents contain no Bard’s Tale investigation details, so those cases will be labeled hypothetical; I won’t follow the external investigation links.
 
 ## Assistant
 
-An explicitly stated set of Images or Assets appears sufficient for shared knowledge; the cases do not by themselves require a new grouping concept. The document also lets general and specific Claims coexist without treating specificity as an override. I’ll distinguish those supported formulations from behavior it does not define, such as automatic scope expansion, subject matching across copies, or precedence when configuration choices conflict with a selected Image.
+An explicitly stated set of Machine states or Assets appears sufficient for shared knowledge; the cases do not by themselves require a new grouping concept. The document also lets general and specific Claims coexist without treating specificity as an override. I’ll distinguish those supported formulations from behavior it does not define, such as automatic scope expansion, subject matching across copies, or precedence when configuration choices conflict with a selected Machine state.
 
 ## Assistant
 
-The requested cases mostly fit the architecture, provided shared knowledge is expressed through explicit subjects and conditions, and analytical choices remain explicit. They do **not** establish a need for an additional grouping concept. The strongest remaining ambiguity is how a configuration and an already selected Image jointly determine the state being examined.
+The requested cases mostly fit the architecture, provided shared knowledge is expressed through explicit subjects and conditions, and analytical choices remain explicit. They do **not** establish a need for an additional grouping concept. The strongest remaining ambiguity is how a configuration and an already selected Machine state jointly determine the state being examined.
 
 I read only [01-purpose.md](../01-purpose.md) and [02-architecture.md](../02-architecture.md). The latter contains Mutant Camels examples but no Bard’s Tale investigation details. Its linked reports, recipes, and source files are external dependencies that I did not inspect. Consequently, the overlay-RPG cases below are hypothetical tests relevant to the requested Bard’s Tale workload, not reported findings from that investigation.
 
@@ -520,7 +520,7 @@ I read only [01-purpose.md](../01-purpose.md) and [02-architecture.md](../02-arc
 
 **1. One Asset, several placements, Claims inside and outside its bytes — awkward but sufficient**
 
-Suppose Asset A is placed at `$4000` in one Image and `$6000` in another. A Claim identifies a table at Asset offset `$80`. Another Asset-associated Claim says its code uses workspace at `$C800`, outside A’s stored extent.
+Suppose Asset A is placed at `$4000` in one Machine state and `$6000` in another. A Claim identifies a table at Asset offset `$80`. Another Asset-associated Claim says its code uses workspace at `$C800`, outside A’s stored extent.
 
 1. **Description:** Asset-relative locations preserve the table’s identity across placements. The workspace Claim has a machine-location subject and conditions identifying the relevant examination. Association with A does not make `$C800` part of A.
 2. **Roles:** Placement and selected interpretations are configuration. The table interpretation and workspace assertion are knowledge. Projected addresses, decoded fields, and discovered accesses are derived analysis.
@@ -532,25 +532,25 @@ Suppose Asset A is placed at `$4000` in one Image and `$6000` in another. A Clai
 
 The difficult distinction survives: “associated with A” does not answer “which location?” or “under what conditions?”
 
-**2. Main game, separate intro, many game Images — awkward but sufficient**
+**2. Main game, separate intro, many game Machine states — awkward but sufficient**
 
-A hypothetical project contains an intro and twenty game Images. A workspace address has the same meaning in all twenty game Images but a different meaning in the intro.
+A hypothetical project contains an intro and twenty game Machine states. A workspace address has the same meaning in all twenty game Machine states but a different meaning in the intro.
 
-1. **Description:** One Claim can state its address-space subject and explicitly restrict applicability to those twenty Images. The intro is outside its stated conditions.
-2. **Roles:** Selecting Images and Claims is configuration. The shared workspace interpretation is knowledge. Listings, reference queries, and decoded presentations are derived.
-3. **Stable identity:** The individual Images and the one shared Claim. No additional identity for “the game” is necessary for this bounded case.
+1. **Description:** One Claim can state its address-space subject and explicitly restrict applicability to those twenty Machine states. The intro is outside its stated conditions.
+2. **Roles:** Selecting Machine states and Claims is configuration. The shared workspace interpretation is knowledge. Listings, reference queries, and decoded presentations are derived.
+3. **Stable identity:** The individual Machine states and the one shared Claim. No additional identity for “the game” is necessary for this bounded case.
 4. **Authority:** The Claim’s recorded subject and conditions determine its asserted reach. Views do not independently enlarge that reach.
-5. **Missing semantics:** No essential capability is missing for an explicit collection. Automatic inclusion of future “game Images” is not defined.
+5. **Missing semantics:** No essential capability is missing for an explicit collection. Automatic inclusion of future “game Machine states” is not defined.
 6. **Incompatible meanings:** None. A project remains the investigation’s home without becoming a single address space.
 7. **Accidental decision risk:** Project membership, a filename, or common ancestry must not silently make the Claim applicable to the intro.
 
 A requirement for automatic future inclusion would need a defined criterion for membership and a rule for evaluating it. That is a missing capability only if that additional behavior is required; it does not prove a new grouping entity is necessary.
 
-**3. Knowledge genuinely shared across Images or Assets — awkward but sufficient**
+**3. Knowledge genuinely shared across Machine states or Assets — awkward but sufficient**
 
-Suppose several Assets contain records using the same format, and several Images contain placements of those Assets. One assertion about a field’s meaning should be entered once.
+Suppose several Assets contain records using the same format, and several Machine states contain placements of those Assets. One assertion about a field’s meaning should be entered once.
 
-1. **Description:** Define the reusable Type once and record a Claim applying the interpretation to the explicitly identified material under stated conditions. Section 4 expressly allows applicability across Assets and Images without repeated entry.
+1. **Description:** Define the reusable Type once and record a Claim applying the interpretation to the explicitly identified material under stated conditions. Section 4 expressly allows applicability across Assets and Machine states without repeated entry.
 2. **Roles:** The Type and its selection are configuration. “These materials use this format” and “this field means duration” are knowledge. Record decoding and field references are derived.
 3. **Stable identity:** The shared definition, Claim, and individual material locations. Sharing an interpretation does not identify the underlying materials with each other.
 4. **Authority:** The definition specifies decoding; the Claim asserts applicability or meaning. Regenerated Records are not independent confirmations of either assertion.
@@ -562,26 +562,26 @@ The boundary is important: reusable interpretation is defined; unrestricted know
 
 **4. A general Claim entered directly — clean**
 
-An investigator begins with the assertion that a particular record format uses a shared character encoding, before examining any particular Image.
+An investigator begins with the assertion that a particular record format uses a shared character encoding, before examining any particular Machine state.
 
 1. **Description:** Enter a Claim with the format or relevant relationship as its subject and state its conditions. Claims need neither an address nor prior Evidence.
 2. **Roles:** The assertion is knowledge. A decoder definition is configuration. Applying that decoder produces derived results.
-3. **Stable identity:** The Claim exists independently of the first Image in which someone later uses it.
+3. **Stable identity:** The Claim exists independently of the first Machine state in which someone later uses it.
 4. **Authority:** The recorded assertion and attribution are authoritative about the contribution. Later checks supply Evidence, not its original identity.
 5. **Missing semantics:** None required.
 6. **Incompatible meanings:** None; provenance need not become scope.
-7. **Accidental decision risk:** Requiring an originating Image, or manufacturing one as a universal subject, would contradict the supported address-free Claim model.
+7. **Accidental decision risk:** Requiring an originating Machine state, or manufacturing one as a universal subject, would contradict the supported address-free Claim model.
 
-**5. General knowledge with an Image-specific counterexample — awkward but sufficient**
+**5. General knowledge with a Machine-state-specific counterexample — awkward but sufficient**
 
-Most examined game Images interpret a byte as a level number; a modified Image uses it as a flag.
+Most examined game Machine states interpret a byte as a level number; a modified Machine state uses it as a flag.
 
-1. **Description:** Preserve the general Claim and record the counterclaim or counterexample under the modified Image’s conditions. Applicability and truth can be disputed separately.
+1. **Description:** Preserve the general Claim and record the counterclaim or counterexample under the modified Machine state’s conditions. Applicability and truth can be disputed separately.
 2. **Roles:** Both assertions are knowledge. Selecting either interpretation under an explicit assumption is configuration. Decoding and contradiction detection are derived.
 3. **Stable identity:** Both Claims and the counterexample’s material and Evidence.
 4. **Authority:** The recorded assertions and retained observation remain available. A current presentation cannot rewrite the original general assertion.
 5. **Missing semantics:** None for coexistence and explicit selection. Automatic exception precedence is not defined.
-6. **Incompatible meanings:** None if “applicable” is not confused with “true.” If the general Claim actually includes the exceptional Image, the counterexample challenges it; it does not automatically narrow its scope.
+6. **Incompatible meanings:** None if “applicable” is not confused with “true.” If the general Claim actually includes the exceptional Machine state, the counterexample challenges it; it does not automatically narrow its scope.
 7. **Accidental decision risk:** A View must not silently adopt “most specific Claim wins,” or silently rewrite a universal assertion as “usually.”
 
 The architecture supports disagreement here, not an implicit override system.
@@ -604,25 +604,25 @@ Version storage and dependency-index mechanisms belong in the design register.
 
 Extend the documented Mutant Camels decrunching example hypothetically: the loader installs a decoder, expands part of the game, changes mappings, and finally reaches the useful resident state.
 
-1. **Description:** A Run traverses these states. Checkpoints preserve selected Images; traces and captures retain observations between them.
+1. **Description:** A Run traverses these states. Checkpoints preserve selected Machine states; traces and captures retain observations between them.
 2. **Roles:** Initial conditions and checkpoint selection are configuration. Assertions about each stage’s role are knowledge. Execution and trace analysis produce derived results.
-3. **Stable identity:** Original Assets, the Run, and retained checkpoints and captures. “The program” need not be represented by one privileged Image.
+3. **Stable identity:** Original Assets, the Run, and retained checkpoints and captures. “The program” need not be represented by one privileged Machine state.
 4. **Authority:** Source Assets remain preserved. A checkpoint records its captured state; reconstructing it by rerunning is a separate result.
 5. **Missing semantics:** None required.
-6. **Incompatible meanings:** None. An Image is a state, not necessarily a release, file, or completed unpacking.
-7. **Accidental decision risk:** Treating earlier useful states as disposable merely because a later “resident Image” exists would lose legitimate investigation material.
+6. **Incompatible meanings:** None. A Machine state is a state, not necessarily a release, file, or completed unpacking.
+7. **Accidental decision risk:** Treating earlier useful states as disposable merely because a later “resident Machine state” exists would lose legitimate investigation material.
 
 **8. Dozens of overlay or level configurations — awkward but sufficient**
 
 In a hypothetical overlay RPG, useful investigations require forty combinations of resident code, overlays, level data, and machine state.
 
-1. **Description:** Retain useful configurations and, where state itself is needed, Images or checkpoints. Temporary examinations need not create named Images.
+1. **Description:** Retain useful configurations and, where state itself is needed, Machine states or checkpoints. Temporary examinations need not create named Machine states.
 2. **Roles:** Overlay selection and state choices are configuration. Assertions about overlay behavior and shared interfaces are knowledge. Reachability and effects are derived.
 3. **Stable identity:** Overlay Assets and retained states or configurations. Shared Claims retain their own identity across uses.
 4. **Authority:** Retained material and explicit setup govern each examination. Listings and ordinary analytical summaries can be regenerated.
 5. **Missing semantics:** None essential for a finite set. Configuration inheritance, compact parameterization, and a configuration-management UI are not promised.
-6. **Incompatible meanings:** None if “level” is not automatically equated with “Image”: one level may have several useful states.
-7. **Accidental decision risk:** Implementations must not assume one Image per Asset, one per level, or one per project.
+6. **Incompatible meanings:** None if “level” is not automatically equated with “Machine state”: one level may have several useful states.
+7. **Accidental decision risk:** Implementations must not assume one Machine state per Asset, one per level, or one per project.
 
 The workload may be cumbersome without reuse conveniences. That is not itself an architectural defect.
 
@@ -725,7 +725,7 @@ A hypothetical experiment forces a predicate and installs a combination of value
 3. **Stable identity:** The Run, retained initial state, interventions, and observations.
 4. **Authority:** The recorded conditions govern what the experiment establishes. Natural attainability is a separate assertion.
 5. **Missing semantics:** None; §2 expressly permits impossible original-program states.
-6. **Incompatible meanings:** None. “Image” does not mean “historically or naturally attained state.”
+6. **Incompatible meanings:** None. “Machine state” does not mean “historically or naturally attained state.”
 7. **Accidental decision risk:** Removing interventions from a demonstration’s context would make the result support a stronger assertion than the experiment warrants.
 
 **17. Substitute a KERNAL routine while retaining platform knowledge and ROM bytes — clean**
@@ -746,7 +746,7 @@ The architecture already recognizes deliberate intervention even when faithful e
 
 The same ROM is examined for overlapping instructions and also supplies behavior in another experiment.
 
-1. **Description:** As investigation material, its contents are an Asset examined directly or through an Image. As infrastructure, the platform supplies machine behavior and associated resources. These are uses, not necessarily mutually exclusive resource categories.
+1. **Description:** As investigation material, its contents are an Asset examined directly or through a Machine state. As infrastructure, the platform supplies machine behavior and associated resources. These are uses, not necessarily mutually exclusive resource categories.
 2. **Roles:** Platform/resource selection is configuration. ROM labels and routine interpretations are knowledge. Disassembly and execution are derived.
 3. **Stable identity:** Retained ROM material and particular examined locations; retained examinations identify the resource and definitions used.
 4. **Authority:** Actual contents govern byte inspection. Platform configuration governs execution. Descriptive knowledge can remain available when bytes are absent.
@@ -770,23 +770,23 @@ Two participants work from the same project state. One corrects a field interpre
 
 This does not require choosing a synchronization algorithm now. It requires whatever algorithm is chosen to preserve the stated semantic contract.
 
-**20. Additional boundary test: a selected Image conflicts with its configuration — underspecified**
+**20. Additional boundary test: a selected Machine state conflicts with its configuration — underspecified**
 
 Select a checkpoint with particular memory and banking state, then choose a configuration that places an overlapping Asset and specifies different banking. An examination needs one effective state.
 
-1. **Description:** Both Image state and configuration state are defined, and temporary alternatives are allowed. The document does not explain their composition when their values conflict.
+1. **Description:** Both Machine state state and configuration state are defined, and temporary alternatives are allowed. The document does not explain their composition when their values conflict.
 2. **Roles:** The checkpoint is retained machine state. Placement and overrides are configuration. Conclusions about the resulting machine are derived; Claims about it remain knowledge.
 3. **Stable identity:** The retained checkpoint must remain distinguishable from the altered examination. Whether the latter receives a named identity is expressly optional.
 4. **Authority:** Both inputs can be retained, but the text does not establish which governs a conflicting location or state component.
 5. **Missing semantics:** A rule requiring the effective state to be unambiguously resolved—including the meaning of conflicting contributions—is missing. The architecture need not choose a particular precedence scheme.
-6. **Incompatible meanings:** Not an existing contradiction. However, “selected Image” could accidentally mean either the captured state or the post-configuration state.
-7. **Accidental decision risk:** Different tools could apply different precedence or mutation rules while claiming to examine the same Image and configuration. That would undermine consistent View answers and experimental context.
+6. **Incompatible meanings:** Not an existing contradiction. However, “selected Machine state” could accidentally mean either the captured state or the post-configuration state.
+7. **Accidental decision risk:** Different tools could apply different precedence or mutation rules while claiming to examine the same Machine state and configuration. That would undermine consistent View answers and experimental context.
 
 This is a semantic issue, not a request for storage or API design.
 
 **The smallest clarifications needed before design proceeds**
 
-1. **Clarify effective state.** State how an examination relates its selected Image to configuration-supplied state, material placement, and interventions. Require conflicts to have an explicit resolution and distinguish the retained input state from the state actually examined. The precise mechanism can remain deferred.
+1. **Clarify effective state.** State how an examination relates its selected Machine state to configuration-supplied state, material placement, and interventions. Require conflicts to have an explicit resolution and distinguish the retained input state from the state actually examined. The precise mechanism can remain deferred.
 
 2. **Consolidate the shared-Claim contract.** Make explicit that Asset association alone neither relocates the subject nor establishes applicability. A shared Claim needs sufficiently identified subjects and conditions; automatic membership expansion or correspondence between materials is not implied. The document already largely supports this reading, but its reuse promise should not acquire stronger semantics through implementation defaults.
 
@@ -798,7 +798,7 @@ A minor wording correction can also make Asset targets explicit in the binding d
 
 - Asset contents versus placement; unnamed material versus directory identity.
 - Machine addresses versus resolved storage and devices, including hidden memory.
-- Images as partial or complete states, including intermediate and counterfactual states.
+- Machine states as partial or complete states, including intermediate and counterfactual states.
 - Claims versus configuration, and applicability versus truth.
 - Directly entered knowledge versus the provenance of its discovery.
 - Reusable definitions versus Claims that their interpretations are correct.
@@ -812,7 +812,7 @@ No requested case forces a contradiction between these boundaries. Several only 
 
 **Questions that should remain in the design register**
 
-- Representations for subjects, conditions, multi-material applicability, and explicit correspondence; query and selection conveniences for large Image collections.
+- Representations for subjects, conditions, multi-material applicability, and explicit correspondence; query and selection conveniences for large Machine state collections.
 - Asset and location identifier formats, historical definition references, provenance representations, and byte-storage deduplication.
 - Configuration retention, parameterization, composition mechanisms, and conflict-reporting interfaces, after the effective-state contract is clarified.
 - Binding representations, decoder interfaces, index correspondence, and reference-query contracts.

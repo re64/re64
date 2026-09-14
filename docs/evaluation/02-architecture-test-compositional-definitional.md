@@ -18,7 +18,7 @@ Starting from the most primitive concepts, take each major architectural concept
 
 Try to build a chain roughly like:
 
-Project → Asset → Image → Configuration → Analysis/Execution → Claim/Knowledge → Type/Record/Binding → Evidence → Finding → View
+Project → Asset → Machine state → Configuration → Analysis/Execution → Claim/Knowledge → Type/Record/Binding → Evidence → Finding → View
 
 but change the ordering if the architecture itself requires a different dependency order.
 
@@ -35,7 +35,7 @@ After constructing the chain, run the reverse test: for each concept, remove it 
 
 Pay particular attention to whether the architecture can explain:
 
-Image + applicable Knowledge → View
+Machine state + applicable Knowledge → View
 
 without relying on an unnamed intermediate concept for shared/general knowledge.
 
@@ -158,7 +158,7 @@ I’ll read only the two named files, build the dependency chain from the archit
 
       **Assets** supply the material: binaries, ROMs, cartridges, disks, and data
       extracted or produced along the way. Each asset is identifiable within the project
-      and can be used in multiple images and analyses. Assets can also be investigated
+      and can be used in multiple machine states and analyses. Assets can also be investigated
       in their own right.
       Reading a file, comparing ranges, decoding a picture, or inspecting a disk's
       allocation map does not require constructing a running machine. Unnamed or
@@ -176,16 +176,16 @@ I’ll read only the two named files, build the dependency chain from the archit
       > their material distinguishable while comparing what changed.
       > [Build comparison][builds]
 
-      ## 2. Images and configuration
+      ## 2. Machine states and configuration
 
-      Analysis of program behavior concerns machine state, which may only be partially
-      known. An **image** represents that state, whether constructed from assets or
-      reached through execution. Each analysis uses the information it needs and makes
-      its assumptions explicit.
+      Analysis of program behavior concerns **machine state**, which may only be
+      partially known. A machine state can be constructed from assets or reached
+      through execution. Each analysis uses the information it needs and makes its
+      assumptions explicit.
 
-      An image can carry everything needed to continue execution: memory, registers,
-      device state, banking controls, attached hardware, and inserted media, including
-      the state of connected devices. Some state may be unknown or supplied by
+      A machine state can carry everything needed to continue execution: memory,
+      registers, device state, banking controls, attached hardware, and inserted media,
+      including the state of connected devices. Some state may be unknown or supplied by
       defaults. A default provides a concrete value; an unknown leaves a question for
       the analysis. Tools explain when missing state prevents them from continuing.
 
@@ -199,12 +199,12 @@ I’ll read only the two named files, build the dependency chain from the archit
       their origins, including later writes. Overlapping material and hidden memory
       must remain distinguishable.
 
-      A **configuration** specifies the state and assumptions chosen for an analysis: which material to place, the interpretations to use, and the conditions of an experiment. These choices need not describe a state the original program ever reached or could reach. A useful configuration can be retained; a temporary query need not create a named image merely to examine an alternative.
+      A **configuration** specifies the state and assumptions chosen for an analysis: which material to place, the interpretations to use, and the conditions of an experiment. These choices need not describe a state the original program ever reached or could reach. A useful configuration can be retained; a temporary query need not create a named machine state merely to examine an alternative.
 
       > **Mutant Camels — getting past the loader.** The disk version is compressed.
-      > Running its decruncher prepares the expanded game for investigation. An image
-      > captured at that point preserves the resulting memory and machine state as
-      > an input to further analysis. [Decrunching recipe][recipe]
+      > Running its decruncher prepares the expanded game for investigation. Capturing
+      > the machine state at that point preserves it as an input to further analysis.
+      > [Decrunching recipe][recipe]
 
       ### C64 support and platform knowledge
 
@@ -224,7 +224,7 @@ I’ll read only the two named files, build the dependency chain from the archit
       ## 3. Analysis and execution
 
       **Analysis** examines material and behavior to discover structure, relationships,
-      and possible explanations. It can inspect an asset, reason about an image, or
+      and possible explanations. It can inspect an asset, reason about a machine state, or
       compare results across several assets and states.
 
       Static analysis follows control flow from **entry points** and code selected for
@@ -251,7 +251,7 @@ I’ll read only the two named files, build the dependency chain from the archit
       when faithful platform emulation is available. Their presence and effect belong
       in the run's record, alongside its initial state and inputs.
 
-      A **checkpoint** is an image captured during execution, usable for another run
+      A **checkpoint** is a machine state captured during execution, usable for another run
       or analysis. A **capture** retains an observation, such as a memory dump,
       screenshot, or recording of device activity. An **access trace** records which
       instructions read, wrote, or fetched bytes and which storage or device they
@@ -273,7 +273,7 @@ I’ll read only the two named files, build the dependency chain from the archit
       include locations, functions, assets, and relationships; an address is not
       required. Claims can be tentative, supported, disputed, or withdrawn.
 
-      Knowledge can describe one subject or apply across several assets, images, and
+      Knowledge can describe one subject or apply across several assets, machine states, and
       broader contexts without repeated entry. Association with an asset does not
       confine a claim's subject to that asset's bytes: its code may act elsewhere in
       the machine. Coordinates, association, and conditions of applicability are
@@ -355,7 +355,7 @@ I’ll read only the two named files, build the dependency chain from the archit
       promise to discover every semantic dependency.
 
       A **coverage report** shows decoded material, interpretations, and remaining
-      gaps across the selected assets, images, or regions. A broad data annotation
+      gaps across the selected assets, machine states, or regions. A broad data annotation
       does not explain every byte, and decoding a function does not establish its
       purpose. Holes in a partially understood type remain visible.
 
@@ -420,7 +420,7 @@ I’ll read only the two named files, build the dependency chain from the archit
       ## 8. Views and interfaces
 
       A **view** presents selected material with the interpretations and context used
-      to examine it. For machine analysis, a **resolved view** combines an image with
+      to examine it. For machine analysis, a **resolved view** combines a machine state with
       the knowledge applicable to that analysis. Asset inspection can instead use the
       asset and its relevant definitions and knowledge directly.
 
@@ -431,7 +431,7 @@ I’ll read only the two named files, build the dependency chain from the archit
 
       ```mermaid
       flowchart LR
-          M[Assets and images] --> A[Analysis or execution]
+          M[Assets and machine states] --> A[Analysis or execution]
           C[Configuration and definitions] --> A
           K[Relevant knowledge] --> A
           A --> R[Results and views]
@@ -465,7 +465,7 @@ I’ll read only the two named files, build the dependency chain from the archit
       [Record analysis][zones]
 
       The formats below are illustrative, not a proposed tool schema. The surrounding
-      query identifies the image and interpretation used. A disassembly can show:
+      query identifies the machine state and interpretation used. A disassembly can show:
 
       ```asm
       $67A0  zoneTable[0].name:
@@ -498,15 +498,15 @@ I’ll read only the two named files, build the dependency chain from the archit
 
 ## Assistant
 
-The main gap is applicability: the document separates a claim’s subject, association, and applicability conditions, but does not explain what makes shared knowledge applicable to a particular image. I’m also checking whether experiment, record, binding, and view have distinct semantics or inherit responsibilities from configuration, claims, or derived results.
+The main gap is applicability: the document separates a claim’s subject, association, and applicability conditions, but does not explain what makes shared knowledge applicable to a particular machine state. I’m also checking whether experiment, record, binding, and view have distinct semantics or inherit responsibilities from configuration, claims, or derived results.
 
 ## Assistant
 
-The architecture supports a mostly coherent dependency chain, but does not yet complete it. Its strongest distinction is between **chosen conditions, assertions, derived results, and evidential support**. Its weakest point is how knowledge becomes applicable to a particular image.
+The architecture supports a mostly coherent dependency chain, but does not yet complete it. Its strongest distinction is between **chosen conditions, assertions, derived results, and evidential support**. Its weakest point is how knowledge becomes applicable to a particular machine state.
 
 I read only [01-purpose.md](../01-purpose.md) and [02-architecture.md](../02-architecture.md). The assessment below treats the latter as the architecture under test.
 
-The chain uses ordinary primitives—participants, bytes, values, machine state, assertions, and conditions—without treating them as additional architectural abstractions. A concept’s possible producer does not have to precede its definition: an image can be defined before execution, even though execution can later produce one.
+The chain uses ordinary primitives—participants, bytes, values, assertions, and conditions—without treating them as additional architectural abstractions. A concept’s possible producer does not have to precede its definition: a machine state can be defined before execution, even though execution can later produce one.
 
 1. **Project**
    **What:** The scope of one investigation and its contributions. **Why needed / capability added:** Establishes what belongs to the investigation and the scope within which assets are identifiable. **Depends on:** Participants and investigation intent. **Not responsible for:** Determining whether contributions are true or mutually consistent.
@@ -514,15 +514,15 @@ The chain uses ordinary primitives—participants, bytes, values, machine state,
 
 2. **Asset**
    **What:** Identifiable material that can be examined independently of its placement in a machine. **Why needed / capability added:** Gives an investigation stable subjects and locations within source material, independent of subsequent loading or execution. **Depends on:** Project and material contents. **Not responsible for:** Determining machine placement, runtime state, or interpretation.
-   This boundary is crisp. The preservation of transformation context is a requirement on relationships between assets, not a reason to merge assets with images.
+   This boundary is crisp. The preservation of transformation context is a requirement on relationships between assets, not a reason to merge assets with machine states.
 
 3. **Platform and mapping**
    **What:** A platform supplies machine behavior and resources; mapping determines where a machine access goes under particular state and access conditions. **Why needed / capability added:** Supplies the behavioral meaning of state and accesses, which asset contents alone cannot express. **Depends on:** Machine-state vocabulary and, for supplied material, assets. **Not responsible for:** Choosing experimental conditions or establishing the truth of ROM descriptions.
-   The behavioral definition can precede images. The platform’s associated knowledge must be described later using the ordinary knowledge concepts. Mapping has a distinct role within machine behavior; it need not be another investigative grouping.
+   The behavioral definition can precede machine states. The platform’s associated knowledge must be described later using the ordinary knowledge concepts. Mapping has a distinct role within machine behavior; it need not be another investigative grouping.
 
-4. **Image**
+4. **Machine state**
    **What:** A representation of a particular, potentially partial machine state, including underlying storage and device state. **Why needed / capability added:** Represents coexistence, placement, hidden storage, and current values beyond the identity of original material. **Depends on:** Machine-state semantics and mapping; assets where material has a source. **Not responsible for:** Choosing assumptions, asserting interpretations, or explaining possible behavior.
-   The image/configuration boundary works provided supplied defaults become concrete state, while unknown state remains unknown.
+   The machine state/configuration boundary works provided supplied defaults become concrete state, while unknown state remains unknown.
 
 5. **Constants, types, record types, and decoders**
    **What:** Definitions of named values and possible readings of material; record types specify field layouts, and decoders express readings requiring custom logic or additional inputs. **Why needed / capability added:** Makes a reading reusable without asserting that it correctly describes any particular material. **Depends on:** Values, material, and other established definitions. **Not responsible for:** Claiming applicability or verifying a reading.
@@ -537,7 +537,7 @@ The chain uses ordinary primitives—participants, bytes, values, machine state,
    This is crisp. Evidence is not a prerequisite for recording a claim.
 
 8. **Knowledge and applicability**
-   **What:** The document uses knowledge for the account that can describe subjects and apply across assets, images, and broader contexts. **Why needed / capability added:** The promised addition is reuse of assertions beyond one local attachment. **Depends on:** Claims, identifiable subjects, and conditions of applicability. **Not responsible for:** Re-verifying assertions at each use or making asset association determine their subjects.
+   **What:** The document uses knowledge for the account that can describe subjects and apply across assets, machine states, and broader contexts. **Why needed / capability added:** The promised addition is reuse of assertions beyond one local attachment. **Depends on:** Claims, identifiable subjects, and conditions of applicability. **Not responsible for:** Re-verifying assertions at each use or making asset association determine their subjects.
    **This step is incomplete.** “Knowledge” has no separate definition from claims, and applicability is distinguished from coordinates and association without being explained positively. As a collective term, knowledge needs no independent semantics. The applicability capability does.
 
 9. **Record**
@@ -553,7 +553,7 @@ The chain uses ordinary primitives—participants, bytes, values, machine state,
     This is coherent once “interpretations” refers to established definitions and assertions rather than introducing another unnamed concept.
 
 12. **Analysis**
-    **What:** An operation examining material or behavior under stated inputs and assumptions. **Why needed / capability added:** Derives consequences that the selected inputs do not themselves enumerate. **Depends on:** Assets or images, configuration, and any relevant knowledge. **Not responsible for:** Turning consequences into participant assertions or evidential support automatically.
+    **What:** An operation examining material or behavior under stated inputs and assumptions. **Why needed / capability added:** Derives consequences that the selected inputs do not themselves enumerate. **Depends on:** Assets or machine states, configuration, and any relevant knowledge. **Not responsible for:** Turning consequences into participant assertions or evidential support automatically.
     Abstract interpretation is a specialized analysis. Discovered function bodies and effects are analytical outputs, distinct from the designations that initiated examination.
 
 13. **Scenario**
@@ -569,8 +569,8 @@ The chain uses ordinary primitives—participants, bytes, values, machine state,
     The distinction is crisp.
 
 16. **Checkpoint, capture, and access trace**
-    **What:** Respectively, resumable captured state, a retained observation, and a record of accesses and their destinations. **Why needed / capability added:** Preserve different aspects of execution: continuation state, observed output, and activity. **Depends on:** Images, runs, and identifiable machine accesses. **Not responsible for:** Establishing relevance to a claim.
-    Checkpoint is explicitly an image in a particular role. Captures and traces specialize observations; neither requires independent foundational status.
+    **What:** Respectively, resumable captured state, a retained observation, and a record of accesses and their destinations. **Why needed / capability added:** Preserve different aspects of execution: continuation state, observed output, and activity. **Depends on:** Machine states, runs, and identifiable machine accesses. **Not responsible for:** Establishing relevance to a claim.
+    Checkpoint is explicitly a machine state in a particular role. Captures and traces specialize observations; neither requires independent foundational status.
 
 17. **Derived and retained results**
     **What:** Outputs of an examination; retention preserves what was examined, how, under which definitions and assumptions, and with what output. **Why needed / capability added:** Separates consequences from inputs and preserves an earlier examination despite later changes. **Depends on:** Analysis or execution and its actual inputs and conditions. **Not responsible for:** Expressing belief or supporting a particular claim without an established connection.
@@ -601,7 +601,7 @@ The chain uses ordinary primitives—participants, bytes, values, machine state,
     Chat has a distinct social purpose. The shared record principally states preservation and collaboration requirements across existing concepts.
 
 24. **View**
-    **What:** A presentation of selected material with the interpretations and context used to examine it; a resolved machine view combines an image with applicable knowledge. **Why needed / capability added:** Makes an examination inspectable through consistent presentations. **Depends on:** Material, selected definitions and knowledge, configuration, and any analysis required to produce the presented information. **Not responsible for:** Becoming an independent assertion or evidential result merely because it is displayed.
+    **What:** A presentation of selected material with the interpretations and context used to examine it; a resolved machine view combines a machine state with applicable knowledge. **Why needed / capability added:** Makes an examination inspectable through consistent presentations. **Depends on:** Material, selected definitions and knowledge, configuration, and any analysis required to produce the presented information. **Not responsible for:** Becoming an independent assertion or evidential result merely because it is displayed.
     The presentation role is clear. Whether “resolved view” denotes that presentation or the inputs prepared for analysis is less clear.
 
 Removing each concept gives the reverse test below. Specialized roles can be useful without requiring independent foundational concepts.
@@ -611,7 +611,7 @@ Removing each concept gives the reverse test below. Specialized roles can be use
 | Project | Expressing investigation membership and project-relative identity. |
 | Asset | Referring to source material independently of machine placement and later writes. |
 | Platform / mapping | Giving state and accesses their machine-specific behavioral meaning. |
-| Image | Expressing a particular partial machine state beyond source contents. |
+| Machine state | Expressing a particular partial machine state beyond source contents. |
 | Constants / types / decoders | Reusing named values and readings independently of assertions about particular material. Record types specifically add structured field layouts. |
 | Entry point / function | Entry points provide analysis roots. The additional loss from removing *function* is less exact: the document promises a designated behavioral subject but underdefines its distinction from a root and discovered body. |
 | Claim | Recording an assertion separately from observations, definitions, and chosen conditions. |
@@ -623,7 +623,7 @@ Removing each concept gives the reverse test below. Specialized roles can be use
 | Scenario | Expressing conditional inputs and interventions over time. |
 | Experiment | No unique loss is established beyond configuration and scenario. |
 | Execution / run | Observing machine behavior and identifying one occurrence under recorded conditions. |
-| Checkpoint / capture / trace | Their contents remain expressible as images and observations, but continuation state, observed output, and access history lose explicit roles. |
+| Checkpoint / capture / trace | Their contents remain expressible as machine states and observations, but continuation state, observed output, and access history lose explicit roles. |
 | Derived / retained result | Distinguishing outputs from inputs and preserving exactly what an earlier examination established. |
 | Provenance | Tracing contribution authorship and origin independently of justification. |
 | Evidence | Expressing why particular grounds bear on an assertion. |
@@ -635,12 +635,12 @@ Removing each concept gives the reverse test below. Specialized roles can be use
 
 The final assessment is:
 
-- **Concepts with a crisp independent reason to exist:** Project as investigation scope; asset as identifiable material; platform behavior and mapping; image as represented state; reusable definitions; claim as assertion; configuration as chosen setup; analysis as derivation; scenario as reactive execution specification; run as recorded occurrence; retained result as a fixed earlier examination; provenance as origin; evidence as justification; finding as investigative significance; article as authored account; chat as coordination; view as contextual presentation. Several other named concepts are coherent specializations of these, rather than additional foundations.
+- **Concepts with a crisp independent reason to exist:** Project as investigation scope; asset as identifiable material; platform behavior and mapping; machine state as represented state; reusable definitions; claim as assertion; configuration as chosen setup; analysis as derivation; scenario as reactive execution specification; run as recorded occurrence; retained result as a fixed earlier examination; provenance as origin; evidence as justification; finding as investigative significance; article as authored account; chat as coordination; view as contextual presentation. Several other named concepts are coherent specializations of these, rather than additional foundations.
 
 - **Concepts whose boundaries overlap:** Experiment duplicates configuration’s stated responsibility for conditions. Record sits between type application, asserted interpretation, and derived decoding. Binding has distinct relational meaning but an unspecified status among configuration, claim, and result. Function designation is insufficiently distinguished from an entry point and its discovered body. Knowledge largely collects claims while also carrying the unexplained promise of applicability. Platform bundles behavior with resources and descriptive knowledge. Resolved view risks combining prepared analytical inputs with presented outputs.
 
-- **Circular or hidden dependencies:** There is no unavoidable cycle between images and execution: a producer is not part of an image’s essential definition. Nor does evidence arriving after claims create a cycle. The genuine hidden dependency is selecting applicable knowledge before analysis without defining what establishes that applicability. Configuration also selects “interpretations” before the document clarifies their constituent roles. Inferred bindings and discovered function bodies must remain outputs of an examination until explicitly used as inputs to another; otherwise their use can conceal a dependency on the result being computed. The prose describes resolved views as image-plus-knowledge, while the diagram places views after analysis; the direction needs clarification. The design register is an explicit external dependency for representation and operational decisions. The linked examples provide external substantiation, but cannot supply missing semantic definitions within this test.
+- **Circular or hidden dependencies:** There is no unavoidable cycle between machine states and execution: a producer is not part of a machine state’s essential definition. Nor does evidence arriving after claims create a cycle. The genuine hidden dependency is selecting applicable knowledge before analysis without defining what establishes that applicability. Configuration also selects “interpretations” before the document clarifies their constituent roles. Inferred bindings and discovered function bodies must remain outputs of an examination until explicitly used as inputs to another; otherwise their use can conceal a dependency on the result being computed. The prose describes resolved views as machine-state-plus-knowledge, while the diagram places views after analysis; the direction needs clarification. The design register is an explicit external dependency for representation and operational decisions. The linked examples provide external substantiation, but cannot supply missing semantic definitions within this test.
 
-- **Semantic capabilities promised but not yet grounded:** **`Image + applicable Knowledge → View` works only if “applicable” has already been established and the analytical setup is understood.** Claims can already express general assertions; the missing capability is not a container for shared knowledge. It is establishing when an assertion’s subject and conditions correspond to a selected examination, across differences in material identity, placement, state, and available contents. The architecture distinguishes coordinates, association, and applicability but does not supply that correspondence. It also leaves unclear how unknown applicability differs from selected applicability, and how selecting disputed knowledge affects an examination without implying acceptance. Platform knowledge without ROM contents sharpens this gap: the description promises meaningful subjects despite absent material, but does not explain their identification and applicability. Finally, image plus knowledge does not alone determine readings or derived values unless configuration, definitions, platform behavior, and relevant analytical choices are implicit.
+- **Semantic capabilities promised but not yet grounded:** **`Machine state + applicable Knowledge → View` works only if “applicable” has already been established and the analytical setup is understood.** Claims can already express general assertions; the missing capability is not a container for shared knowledge. It is establishing when an assertion’s subject and conditions correspond to a selected examination, across differences in material identity, placement, state, and available contents. The architecture distinguishes coordinates, association, and applicability but does not supply that correspondence. It also leaves unclear how unknown applicability differs from selected applicability, and how selecting disputed knowledge affects an examination without implying acceptance. Platform knowledge without ROM contents sharpens this gap: the description promises meaningful subjects despite absent material, but does not explain their identification and applicability. Finally, machine state plus knowledge does not alone determine readings or derived values unless configuration, definitions, platform behavior, and relevant analytical choices are implicit.
 
-- **Smallest wording clarifications needed in 02-architecture.md:** State whether *knowledge* is the collective term for claims or includes other contributions. Define applicability positively, including its relationship to a claim’s subject, association, stated conditions, and the selected examination; explicitly preserve unresolved applicability. Clarify that selecting an assertion for analysis does not verify or endorse it. State whether a record exists during exploratory type application and distinguish its identity from decoded output. State how supplied and inferred bindings occupy the already-established roles of choice, assertion, and result. Clarify what a function designation asserts or selects before its body is discovered. Either identify experiment’s distinct meaning or describe it explicitly as a use of configuration and scenarios. State whether a resolved view is a presentation or an analytical input, and make the surrounding prose and diagram agree. Qualify the image-plus-knowledge formulation with its assumed configuration and definitions. These clarifications require no additional grouping abstraction.
+- **Smallest wording clarifications needed in 02-architecture.md:** State whether *knowledge* is the collective term for claims or includes other contributions. Define applicability positively, including its relationship to a claim’s subject, association, stated conditions, and the selected examination; explicitly preserve unresolved applicability. Clarify that selecting an assertion for analysis does not verify or endorse it. State whether a record exists during exploratory type application and distinguish its identity from decoded output. State how supplied and inferred bindings occupy the already-established roles of choice, assertion, and result. Clarify what a function designation asserts or selects before its body is discovered. Either identify experiment’s distinct meaning or describe it explicitly as a use of configuration and scenarios. State whether a resolved view is a presentation or an analytical input, and make the surrounding prose and diagram agree. Qualify the machine-state-plus-knowledge formulation with its assumed configuration and definitions. These clarifications require no additional grouping abstraction.

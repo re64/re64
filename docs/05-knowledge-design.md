@@ -49,7 +49,7 @@ The proposed main application is a supplied C64 platform program containing
 standard assets, symbols, and ROM effects. Hash-identified revisions retained
 by re64 would let projects opt into platform-data updates. Analyzer and emulator
 versions would remain separate from the data revision. A changed program could
-also include material from another version, but ordinary assets and images may
+also include material from another version, but ordinary assets and machine states may
 already serve that case adequately.
 
 This proposal needs comparison with a dedicated platform facility and narrower

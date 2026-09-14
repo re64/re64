@@ -87,8 +87,10 @@ requirement. No analytical tools were changed or rerun during archiving.
 
 The two retained exports preserve all conversation content from five earlier
 exports. The only differing line was a terminal working-directory banner in the
-first audit export. The surviving exports have shorter filenames and unchanged contents; the
-source-directory names inside them describe the original workspace.
+first audit export. The surviving exports have shorter filenames; the
+source-directory names inside them describe the original workspace. Model
+terminology in the comparative audit has since been aligned with the current
+documentation; its substantive discussion is unchanged.
 
 | Removed export | Retained export containing its conversation |
 |---|---|

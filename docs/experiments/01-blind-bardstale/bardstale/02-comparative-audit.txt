@@ -575,7 +575,7 @@
                                                                                 
   * assets and claims/records on asset ranges;                                  
   * relocation and conversion between asset-relative and runtime locations;     
-  * images versus the investigator’s memory configurations and composed memory  
+  * machine states versus the investigator’s memory configurations and composed memory
   states;                                                                       
   * executions, checkpoints, probes and attribution of bytes to execution       
   stages;                                                                       
@@ -593,17 +593,17 @@
   * generic analysis primitives versus bespoke investigator-written tools;      
   * canonical state versus generated/derived representations that can become    
   stale;                                                                        
-  * Project, Program, Target, Image, View, inclusion, platform knowledge,       
+  * Project, Program, Target, Machine state, View, inclusion, platform knowledge,
   evidence resolution and shadowing in the redesign.                            
                                                                                 
   For Program and Target in particular, do not try to justify or reject them    
   from their definitions alone. Identify concrete problems observed in          
   bardstale that require the distinction they provide. If the same observed     
-  need is already handled more simply by Assets, Images, Types/Records, Claims, 
+  need is already handled more simply by Assets, Machine states, Types/Records, Claims,
   relationships or Project-level knowledge, say so. If the experiment does not  
   decide the issue, mark it unresolved.                                         
                                                                                 
-  Be careful about false sharing. The fact that two files, images or versions   
+  Be careful about false sharing. The fact that two files, machine states or versions
   currently have the same symbol or assertion does not establish that they      
   should share one mutable fact. Distinguish:                                   
                                                                                 
@@ -708,7 +708,7 @@
   The RD keeps claims, types/records, bindings, constants, decoders, evidence,
   chat, CRDT, and the C64 focus, and changes the containment model:
 
-  - Project ⊃ Program ⊃ Assets; an Image is machine state (memory incl. hidden
+  - Project ⊃ Program ⊃ Assets; a Machine state is machine state (memory incl. hidden
     banks, registers, devices, banking controls, cartridge, inserted media)
     configured from an ordered list of assets, or reached by execution;
     byte-granular origin tracking; copy-on-write execution overlay; PLA mapping
@@ -720,14 +720,14 @@
     access trace.
   - Claims with a subject that need not be an address (location, function,
     asset, program, relationship); asset-relative vs absolute coordinates;
-    applicability by image/conditions; shadowing as a presentation choice.
+    applicability by machine state/conditions; shadowing as a presentation choice.
   - Finds log (findings referencing claims/captures/etc. with per-reference
     notes) and articles.
-  - Resolved view = an image + the knowledge applicable to it, with origins
+  - Resolved view = a machine state + the knowledge applicable to it, with origins
     retained.
   - Coverage and hygiene reports.
 
-  Note that RD does not use the word "target"; its Image + resolved view
+  Note that RD does not use the word "target"; its Machine state + resolved view
   replaces re64's Target + Workspace.
 
   ---
@@ -787,7 +787,7 @@
     contradicts the implementation for exactly the layer kind Bard's Tale
     consists of. Workaround: strip headers outside re64 and upload 60+ raw files
     — i.e. write d64.py + btfiles.py anyway.
-  - RD — strongly supported in principle ("an image is configured with an
+  - RD — strongly supported in principle ("a machine state is configured with an
     ordered list of assets… using each asset according to its type";
     "asset-relative location follows placement"), but nothing decides whether a
     PRG header is honoured or overridable per placement.
@@ -812,7 +812,7 @@
     redesign-claims.md; platform.md); (c) a target is a flat map, so "$D000 is
     I/O now and RAM a moment later" has no reading.
   - RD — strongly supported in design: memory "includes all the underlying
-    banks, including those currently hidden", mapping/PLA state is in the image,
+    banks, including those currently hidden", mapping/PLA state is in the machine state,
     and later loads overwrite earlier bytes with byte-granular origin tracking.
     This is the first thing that answers Agent A's pain point 2 directly.
     Unimplemented.
@@ -834,7 +834,7 @@
     (workspace.ts:1371–1505, noteUploadedFile), whereas scenario captures are
     entities with {scenario, step}. Two capture paths, one with provenance and
     one without. Per-byte "which instruction wrote this" is not retained.
-  - RD — strongly supported: runs, checkpoints usable as images, access traces
+  - RD — strongly supported: runs, checkpoints usable as machine states, access traces
     ("which instructions read, wrote, or fetched bytes"), captures with context.
     This maps one-to-one onto what unpack_main.py and the retro asked for.
 
@@ -854,7 +854,7 @@
     private interpreter, as Agent A did.
   - RD — partially supported/planned: triggers + snippets ("inspect or modify
     memory and registers, change device state, supply input"), inserted disks
-    and drive state as image state. Whether a snippet can substitute for a
+    and drive state as machine state state. Whether a snippet can substitute for a
     KERNAL routine (return early with a loaded file) is not stated. The BT
     evidence for this need is strong; the design is not yet specific enough to
     classify as supported.
@@ -1242,7 +1242,7 @@
 
   Redesign concepts
 
-  Concept: Image (memory incl. hidden banks, registers, devices, banking, media;
+  Concept: Machine state (memory incl. hidden banks, registers, devices, banking, media;
 
   from assets or execution)
   Verdict against BT: strongly supported
@@ -1312,7 +1312,7 @@
   Verdict against BT: unresolved
   Grounding:
 
-  Program and Target/Image: the concrete BT problems
+  Program and Target/Machine state: the concrete BT problems
 
   Target (re64). Concrete problems that require a per-configuration memory
   arrangement, none of which layers alone solve: $AE00 hosting NM09/NM02/NM03;
@@ -1321,10 +1321,10 @@
   depends on which overlay is loaded". These are handled by Target. What Target
   does not handle from the same evidence: bank alternation within one moment,
   and the sheer number of arrangements (Agent A composed them per query). RD's
-  Image subsumes Target and adds what BT additionally needed (banking, device
+  Machine state subsumes Target and adds what BT additionally needed (banking, device
   state, checkpoints).
 
-  Program (RD). Two observed problems that a Project + Images + claims do not
+  Program (RD). Two observed problems that a Project + Machine states + claims do not
   settle cleanly:
 
   1. Scope for address-space facts narrower than the project. Zero-page and
@@ -1336,12 +1336,12 @@
      every game target — workable but incidental. A Program-level claim set is
      the direct expression.
   2. Two revisions of one unit (orphan = older NM02; day/night building
-     pictures; 1984/2021 Camels). Assets + Images already handle this (separate
+     pictures; 1984/2021 Camels). Assets + Machine states already handle this (separate
      layers, separate claims); Program adds nothing here.
 
-  So BT supports Program as a scope for knowledge shared by a family of images,
+  So BT supports Program as a scope for knowledge shared by a family of machine states,
   not as a unit of inclusion/versioning. Whether that scope needs to be an
-  entity or a property of claims ("applies to images whose configuration
+  entity or a property of claims ("applies to machine states whose configuration
   includes asset X") is unresolved by this experiment.
 
   False sharing — the five distinctions against BT and re64
@@ -1456,17 +1456,17 @@
       asymmetries the experiments already document; the runtime image's
       per-picture palette passed as params by hand.
 
-  The redesign would remove items 2–4 (Image with banking and origin tracking;
+  The redesign would remove items 2–4 (Machine state with banking and origin tracking;
   snippets/triggers, if they can substitute routines), 10 (finds log), and part
   of 11; it does not address 1, 5–9, or dependency edges.
 
   6. Unresolved by this experiment
 
   - Whether a Program needs to be an entity, or whether "claims applicable to
-    images containing asset X" (a whole-image layer frame, or an applicability
+    machine states containing asset X" (a whole-machine state layer frame, or an applicability
     predicate) suffices. BT shows the need for the scope, not its shape.
   - Whether memory configurations should be first-class declared entities
-    (targets/images) or query parameters. Agent A used both patterns (four
+    (targets/machine states) or query parameters. Agent A used both patterns (four
     "representative configurations" in prose; dozens of ad-hoc compositions in
     tools). BT does not say which cost dominates over a longer investigation.
   - Whether shared index spaces need an entity or are adequately expressed by a
@@ -1563,8 +1563,8 @@
   Open alternatives.
   (a) Keep Target as the arrangement and add a bank/device-state overlay per
   target (the "placement with a condition" the archive sketches).
-  (b) RD's Image: full machine state (all banks, $01, device registers) with
-  mapping decided per access — arrangement becomes a derived view of an image.
+  (b) RD's Machine state: full machine state (all banks, $01, device registers) with
+  mapping decided per access — arrangement becomes a derived view of a machine state.
   (c) Two objects: an arrangement (files) and a machine state that references
   it; analyses take either.
 
@@ -1726,7 +1726,7 @@
   (c) Both, with substitution recorded as a run condition (RD: "state overrides
   and scripted interventions belong in the run's record").
   (d) Checkpoint = document object vs. cache: whether a captured full machine
-  state is an Image/Target other tools can read.
+  state is a Machine state/Target other tools can read.
 
   Discriminating experiment. Script BT boot→Utilities→Guild→city→cellar as a
   scenario under (a) with a LOAD-substitute step; record step count, whether any
@@ -2062,7 +2062,7 @@
                                                                                 
   In particular, rewrite requirements such as D4 at the weakest level actually  
   established by evidence. For example, distinguish “knowledge must apply       
-  across a subset of Images” from the proposed solution “there must be a        
+  across a subset of Machine states” from the proposed solution “there must be a
   Program scope.”                                                               
                                                                                 
   Do not propose an architecture, migration plan, or new terminology.           

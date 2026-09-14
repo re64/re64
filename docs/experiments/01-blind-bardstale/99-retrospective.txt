@@ -18,8 +18,8 @@ My initial reaction was therefore not that the redesign was misguided, but that 
 
 Several underlying ideas are strong:
 
-* an Image should represent concrete machine state rather than merely a flat arrangement of bytes;
-* Assets, Images, Claims, Types, Records, Evidence, Findings, Runs/Captures and Views represent genuinely different concerns;
+* a Machine state should capture more than merely a flat arrangement of bytes;
+* Assets, Machine states, Claims, Types, Records, Evidence, Findings, Runs/Captures and Views represent genuinely different concerns;
 * storage should remain normalized and identity-based rather than reproducing the conceptual hierarchy as nested Yjs state;
 * Views should be derived rather than becoming another source of truth;
 * machine state, including banking and hidden memory, needs to be represented honestly;
@@ -63,9 +63,9 @@ What the experiment strongly supports
 
 The redesign should preserve rather than casually reinvent the following ideas.
 
-Images are real and important. The blind investigator independently built build_mem() because “what is at $C000?” cannot be answered without a concrete memory configuration. The redesign’s richer Image—machine state including banking, hidden memory, origins and execution-derived states—is much better supported than the existing flat Target memory map.
+Machine states are real and important. The blind investigator independently built build_mem() because “what is at $C000?” cannot be answered without a concrete memory configuration. The redesign’s richer machine-state model—including banking, hidden memory, origins and execution-derived states—is much better supported than the existing flat Target memory map.
 
-Assets and relocatable asset knowledge are fundamental. Much of the investigation happened directly against files and ranges within files, before or without constructing Images. Knowledge attached to an Asset must remain meaningful when that Asset is placed at different addresses.
+Assets and relocatable asset knowledge are fundamental. Much of the investigation happened directly against files and ranges within files, before or without constructing Machine states. Knowledge attached to an Asset must remain meaningful when that Asset is placed at different addresses.
 
 Types and Records are strongly validated. The character records, maps and other structured binary data are almost textbook examples. Reusable structure genuinely generalized across many instances, and corrections to the structure legitimately needed to propagate.
 
@@ -91,7 +91,7 @@ This should become explicit in the architecture. A separate ticket describes thi
 
 In short:
 
-Configuration defines the analytical world the investigator chooses to construct: Image composition, Asset placement, platform selection, knowledge applicability, Run setup, hooks, pokes and other experimental premises.
+Configuration defines the analytical world the investigator chooses to construct: Machine state composition, Asset placement, platform selection, knowledge applicability, Run setup, hooks, pokes and other experimental premises.
 
 Knowledge records what investigators assert about the software or system and why: Claims, Evidence, provenance, Findings, refutations, uncertainty, etc.
 
@@ -101,13 +101,13 @@ This distinction resolves several apparent epistemological problems. A supported
 
 NM02 really loads at $AE00.
 
-Separately, an investigator may configure an Image to place NM02 at $AE00.
+Separately, an investigator may configure a Machine state to place NM02 at $AE00.
 
 The latter may be motivated by the former, but they are not the same source of truth. An investigator is also free to configure NM02 incorrectly or hypothetically for an experiment without thereby asserting that the real game behaves that way.
 
 The simple existing idea:
 
-Image + applicable Knowledge → View
+Machine state + applicable Knowledge → View
 
 should therefore remain, but be placed inside this broader architecture.
 
@@ -117,7 +117,7 @@ This remains the most important unresolved conceptual area, but the discussion s
 
 The Bard’s Tale evidence establishes a requirement:
 
-Some technical knowledge is usefully asserted more generally than one Image without applying to the entire Project.
+Some technical knowledge is usefully asserted more generally than one Machine state without applying to the entire Project.
 
 The resident game knowledge is a good example: many zero-page meanings and API conventions apply across city/dungeon/overlay configurations but not to the separate intro program.
 
@@ -127,7 +127,7 @@ Several things that initially looked like Program/Target sharing already have be
 
 * overlay-local knowledge can follow an Asset;
 * reusable structural knowledge belongs to Types/Records;
-* concrete state belongs to Images;
+* concrete state belongs to Machine states;
 * platform behavior can be supplied by the platform implementation;
 * repeated equal facts are not necessarily shared knowledge.
 
@@ -135,13 +135,13 @@ This leaves a residual requirement for genuinely general technical assertions.
 
 During the discussion, Domain emerged as a possible name for such a concept: a named and described frame for general technical knowledge. This is not yet a final architectural decision, but it is clearer than Target, which strongly suggests the concrete object being analyzed.
 
-If retained, a Domain should be deliberately small. It should not automatically become a container for Assets, Images, revisions, platform dependencies, publication, or inheritance. A Domain Claim would simply be a Claim deliberately asserted at that general level.
+If retained, a Domain should be deliberately small. It should not automatically become a container for Assets, Machine states, revisions, platform dependencies, publication, or inheritance. A Domain Claim would simply be a Claim deliberately asserted at that general level.
 
 A critical epistemic rule follows:
 
 Applicability is not evidence propagation.
 
-If a general Claim is used while interpreting an Image, re64 must not pretend that the Claim has thereby been independently verified against that Image. Conversely, a user must be able to enter a general Claim directly; they should not have to fabricate an Image-specific Claim and “promote” it first.
+If a general Claim is used while interpreting a Machine state, re64 must not pretend that the Claim has thereby been independently verified against that Machine state. Conversely, a user must be able to enter a general Claim directly; they should not have to fabricate a Machine-state-specific Claim and “promote” it first.
 
 The exact representation of applicability remains open. It might ultimately be ordinary project configuration rather than another Claim. That is consistent with the configuration/knowledge distinction above.
 
@@ -163,24 +163,24 @@ Licensing/resource acquisition should not distort the domain architecture. Archi
 
 If a genuinely general mechanism emerges from multiple future use cases, it can be exposed later. The redesign should not generalize platform reuse preemptively.
 
-Image composition remains useful, but it is not knowledge inheritance
+Machine state composition remains useful, but it is not knowledge inheritance
 
 Bard’s Tale does provide strong evidence for composition.
 
-The game has many overlays, maps, pictures and data sets occupying reusable address ranges. An investigator may need dozens of meaningful Images representing combinations of resident state plus a particular overlay, level and data set.
+The game has many overlays, maps, pictures and data sets occupying reusable address ranges. An investigator may need dozens of meaningful Machine states representing combinations of resident state plus a particular overlay, level and data set.
 
-That is not a problem in itself. Sixty lightweight declarative Images may be entirely reasonable.
+That is not a problem in itself. Sixty lightweight declarative Machine states may be entirely reasonable.
 
-Images may be:
+Machine states may be:
 
 * constructed from placed Assets;
-* derived from another Image with changed/overlaid state;
+* derived from another Machine state with changed/overlaid state;
 * captured from Execution;
 * imported from a memory dump.
 
-Whether every exploratory configuration should become a persisted Image or whether ephemeral configurations should exist remains unresolved and need not be decided prematurely.
+Whether every exploratory configuration should become a persisted Machine state or whether ephemeral configurations should exist remains unresolved and need not be decided prematurely.
 
-What should not be reintroduced is general knowledge inclusion merely because Image composition is useful. Asset-relative knowledge naturally follows the Asset placement; Types naturally apply through Records; Image-specific knowledge remains Image-specific.
+What should not be reintroduced is general knowledge inclusion merely because Machine state composition is useful. Asset-relative knowledge naturally follows the Asset placement; Types naturally apply through Records; Machine-state-specific knowledge remains Machine-state-specific.
 
 Sharing and false sharing
 
@@ -200,7 +200,7 @@ A particularly useful rule is:
 
 Knowledge should normally attach to the narrowest stable thing that makes it meaningful.
 
-Asset-local symbols should remain Asset knowledge. Character-record structure belongs to the Type. A captured value belongs to an Image. Only genuinely general assertions need a more general frame.
+Asset-local symbols should remain Asset knowledge. Character-record structure belongs to the Type. A captured value belongs to a Machine state. Only genuinely general assertions need a more general frame.
 
 This protects both epistemic integrity and synchronization semantics.
 
@@ -216,7 +216,7 @@ The Bard’s Tale investigation naturally produced assertions such as:
 * special-location type X selects overlay Y;
 * file number X maps to load page Y;
 * Claim X depends on Claim Y;
-* Image B derives from Image A.
+* Machine state B derives from Machine state A.
 
 The audit identified shared index spaces and “glue tables” as one of the strongest model gaps.
 
@@ -228,7 +228,7 @@ API and tooling implications
 
 Several principles should guide the MCP/API redesign independently of the final ontology.
 
-Require the least context necessary. Asset operations should not require an Image. Image-address operations require an Image. Runtime observations require a Run. General Claims should not require synthetic Images.
+Require the least context necessary. Asset operations should not require a Machine state. Operations on machine addresses require a Machine state. Runtime observations require a Run. General Claims should not require synthetic Machine states.
 
 Exploration should normally be non-mutating. Reading ranges, comparing bytes, decoding, rendering and querying should not require creation of durable project entities merely to perform an analysis. Useful results can subsequently be recorded as Claims, Evidence, Captures or Findings.
 
@@ -263,7 +263,7 @@ Continue with the redesign and allow it to deconstruct the existing architecture
 
 The strongest redesign opportunity is therefore in the connective architecture and API:
 
-* replace the flat Target memory model with honest Image/machine-state semantics;
+* replace the flat Target memory model with explicit machine-state semantics;
 * keep Assets, relocatable knowledge, Types/Records, Claims/Evidence, Findings, Runs/Captures and derived Views;
 * remove generalized platform inclusion and make platform an explicit special facility;
 * do not yet stabilize Program/Target as a multi-purpose abstraction;
