@@ -1403,7 +1403,9 @@ export function checkProjectShape(project: Project): void {
     for (const label of layer.labels ?? []) coordinate(label.address, `label in ${where}`);
     for (const region of layer.regions ?? []) {
       coordinate(region.start, `region in ${where}`);
-      if (region.end !== undefined) coordinate(region.end, `region in ${where}`);
+      // An end is an address or a `+length`, as `projectRegionsToRegions` reads it.
+      const end = typeof region.end === "string" && region.end.startsWith("+") ? region.end.slice(1) : region.end;
+      if (end !== undefined) coordinate(end, `region in ${where}`);
     }
     for (const comment of layer.comments ?? []) coordinate(comment.address, `comment ${comment.id ?? ""} in ${where}`);
     for (const use of layer.constantUses ?? []) coordinate(use.address, `constant use in ${where}`);
