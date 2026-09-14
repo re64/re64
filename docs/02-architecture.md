@@ -147,10 +147,12 @@ images, and broader contexts without repeated entry. Association with an asset
 does not confine a claim's subject to that asset's bytes: its code may act
 elsewhere in the machine.
 
-**Applicability** concerns whether a claim's subject and stated conditions match
-the material and circumstances of a particular examination. That match may be
-established, assumed, disputed, or unresolved. An analysis can use a claim under
-an explicit assumption even when its applicability or truth remains uncertain;
+Claims may be conditional: an assertion can depend on the material, machine
+state, execution context, or other stated conditions. **Applicability** concerns
+whether its subject and conditions match a particular examination. That match
+may be established by evidence, assumed for the examination, disputed, or
+unresolved. An analysis can use a claim under an explicit assumption even when
+its applicability or truth remains uncertain;
 the results retain that assumption. Selecting a claim for analysis does not
 verify or endorse it, and reuse does not independently verify it at each use.
 
