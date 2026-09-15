@@ -13,6 +13,15 @@ needed, comes from model properties and relationships rather than shared arrays.
 
 ## 1. Merge without a resolution step
 
+**Local means session-local:** one session's replica, whether an MCP session
+hosted on the server or a browser tab. A local command is checked against that
+replica's incorporated state. What holds there need not yet hold in another
+replica, and a successful local change can later compete with concurrent edits.
+
+Merge incorporates CRDT updates produced elsewhere. It does not execute the
+originating commands again or reevaluate their local preconditions. This
+separation applies equally to ordinary edits and the effects of undo/redo.
+
 Replicas that receive the same accepted updates must converge without asking a
 participant to resolve a merge conflict. Independently editable fields preserve
 independent changes. Competing writes to one field resolve to one value through
@@ -28,11 +37,22 @@ to deleted objects can remain in the record. Hygiene makes the relevant problems
 discoverable. Convergence does not make these situations disappear or require
 the participants to agree about them.
 
-Malformed or incompatible input can be rejected at a boundary. Supported edits
-must nevertheless be designed so that merging independently valid changes does
-not require rejecting one because their combination is inconvenient. In
-particular, reference checks and cross-object consistency checks must tolerate
-the states ordinary concurrent editing can produce.
+**Creation, editing, and merging share one admissible set of object states.**
+Every state reachable through supported edits and merges must also be accepted
+at creation under the same object-type rules. Creation imposes no stricter
+conditions on the object state. Admissibility does not depend on whether an
+object was just created, edited, merged, or reconstructed from serialized data.
+
+The representation and supported operations must keep this set closed under
+merge: combining supported concurrent edits yields another admissible state.
+This is a design constraint on re64, not a guarantee supplied by convergence
+alone. Atomic values protect structure that must remain inseparable.
+
+Admissible means supported by the object type, not necessarily usable by an
+analysis or free of hygiene findings. References to missing or tombstoned
+entities and other semantic inconsistencies remain admissible at creation too.
+Malformed or incompatible input can be rejected at a boundary, but the same
+object-state rules apply throughout the object's lifetime.
 
 ## 2. The shared building blocks
 
@@ -85,13 +105,20 @@ merge value. Transaction grouping and merge granularity answer different
 questions. Represent the complete value as one register, or use an equivalent
 representation that enforces that same outcome under concurrency.
 
-Every model field must specify:
+Each object type defines the following rules for its fields:
 
-- its value type and, where relevant, allowed complete forms;
+- its value domain and, where relevant, allowed complete forms;
 - whether it is required, optional, or permits an explicit null value;
 - any initial default, and whether that default has substantive meaning;
-- whether it is independently editable or part of an atomic value;
+- whether it is fixed at creation, independently editable, or part of an
+  atomic value;
 - the meaning of references, including absent and deleted referents.
+
+These rules belong to the individual object-type definitions. For example, an
+object type might specify an integer field with a permitted range. This document
+requires an explicit domain but does not choose integers, ranges, or defaults
+for particular fields. Synchronization applies the common merge rules to the
+complete values admitted by each object type.
 
 Omitting a field from an update means leave it unchanged. Explicitly clearing an
 optional field means make it absent. Setting a meaningful null value must be
@@ -102,6 +129,39 @@ own stated meaning rather than being inferred from every absent or null field.
 Required structure should be protected by these value boundaries. Consistency
 between independent entities, such as whether a record field still fits a
 concurrently shortened record type, normally belongs to checking and hygiene.
+
+### Consequences for object and operation contracts
+
+- Creation and validation of edited or merged objects use the same object-type
+  rules. Creation and update requests may have different forms; they do not
+  define different sets of admissible resulting states.
+- A field that can be cleared later must admit that same absence at creation.
+  Defaults are conveniences for constructing values; they must not prevent
+  supplying another admissible state or overwrite explicit retained state.
+- Edit operations and atomic-value boundaries must preserve admissibility under
+  concurrency. Validating each edit in isolation is insufficient if their
+  combination can violate an object's structural rules.
+- Reference checks and analysis requirements do not become stricter creation
+  gates. Hygiene can report an inconsistency regardless of how it arose.
+- Serialization and reconstruction preserve admitted states, including
+  tombstones and cleared content, without requiring invented initial content.
+
+Reviews of object types, operations, API changes, and extensions must check
+these constraints. Automated tests should cover direct creation of states
+reached by editing, serialization round trips, and concurrent updates applied
+in different orders with duplicate delivery. Check admissibility as well as
+convergence; passing either one alone is insufficient.
+
+These examples test the constraint at the model level; the actual object
+validators and operation adapters must exercise them when implemented.
+
+| Example state | Creation, editing, and merging |
+|---|---|
+| A chat message with cleared author and text, active or tombstoned | Admissible in every case. Its identity and ordering metadata remain. Reconstructing it needs no invented author or placeholder text. |
+| A record field whose type reference is missing or tombstoned | Admissible in every case. Hygiene reports the orphan; creation does not require its type to exist first. |
+| A field at offset 160 in a record type shortened to 100 bytes | The resulting field and type remain admissible, including if created in that state. Layout checking reports the inconsistency. |
+| Two placements with unresolved overlapping priorities | Admissible whether created together or combined by merge. An analysis requiring those bytes must report the ambiguity. |
+| An asset-relative location with both asset ID and offset | A complete supported value at creation or after replacement. A value missing a required component is inadmissible in every case; atomic replacement prevents a merge from producing it. |
 
 ## 4. Identity, deletion, and restoration
 
@@ -118,18 +178,41 @@ happens to exist in the current replica. A reusable type definition can be
 configuration and still require tombstoning. A retained analytical result is
 likewise not disposable merely because it was originally derived.
 
-An entity's ID is stable and never reused for a different entity. Adding creates
-its identity and initial required fields. Retrying an add must not replace an
-existing entity or reset fields another participant has edited. Replaying a
-Yjs update and retrying an application command are different operations; both
-need to avoid accidental duplication.
+An entity's ID is stable and never reused for a different entity. Creation
+happens once in the local document and establishes its identity and required
+fields. Synchronization transmits the resulting CRDT updates; receiving the
+same update again does not create another entity or reset its fields.
 
-For entities protected by the first rule, deletion sets a model-visible marker,
-the tombstone. It does not erase the entity, remove references to it, or
-recursively delete its dependents. Normal views omit deleted entities;
-inspection and hygiene can still resolve their
-identity, describe them as deleted, and find the references that need attention.
-Deleting a parent does not erase its children.
+A creation command rejects an ID already present in the initiating session's
+replica, including a tombstoned entity. Updating or restoring that entity is a
+different operation. This checks a local transition, not the admissibility of
+the proposed object state, and is not reevaluated when incorporating updates.
+It cannot detect a fresh creation that the replica has not yet incorporated.
+
+Distinct fresh creations must use distinct IDs. If two creations generate the
+same ID, replicas receiving the same updates still converge. The model does not
+guarantee preservation of both creations or that references resolve to the
+intended entity.
+
+For entities protected by the first rule, `tombstoned` is an ordinary LWW boolean.
+Delete changes `false` to `true`; restore changes `true` to `false`. Deleting an
+already-tombstoned entity or restoring an already-active entity is a local no-op:
+it emits no CRDT write and adds no undo step. Meaningful concurrent changes
+still follow ordinary LWW semantics. Deletion does not erase the entity, remove
+references to it, or recursively delete its dependents.
+Normal views omit deleted entities; inspection and hygiene can still resolve
+their identity and describe them as deleted.
+
+Parent/child relationships, such as a record field's reference to its record
+type, are ordinary references by entity ID. They add no cascading lifecycle or
+visibility rule to synchronization. Tombstoning the referenced entity preserves
+both the reference and the referencing entity. By convention, a participant
+deleting a parent should explicitly tombstone its children too when that is
+the intended operation. Batch and group operations express this as one
+participant action for history and undo. Hygiene identifies dangling references
+and orphaned entities. Any participant can correct references or tombstone
+orphaned entities, including through automated tooling. Restoring a
+referenced entity does not restore separately tombstoned referencing entities.
 
 Updating ordinary fields does not implicitly restore an entity. An update
 concurrent with deletion can survive in the retained entity while the deletion
@@ -143,22 +226,27 @@ deterministic field rule. An unseen concurrent deletion can therefore still
 win. Restoration of an entity is separate from adopting it as valid evidence or
 endorsing its claims.
 
-Undo and redo of these lifecycle operations change the deletion marker:
+Undo and redo of effective lifecycle changes use the deletion marker. The table
+describes their intended values, subject to local no-op suppression and
+selective-undo eligibility:
 
 | Original action | Undo | Redo |
 |---|---|---|
-| Create an entity | Mark it deleted | Clear the tombstone, restoring the same entity |
+| Create an entity | Mark it deleted | Restore the creation's intended tombstone value on the same entity |
 | Delete an entity | Clear the tombstone, restoring the same entity | Mark it deleted again |
 | Restore an entity | Mark it deleted again | Clear the tombstone again |
 
 These reversals preserve the identity and retained fields, including subsequent
 edits by other participants. Redo of creation does not replay initialization or
-reset the entity's content. The lifecycle writes follow the concurrent-edit and
-undo rules in this document.
+reset the entity's content. For ordinary active creation, redo clears the
+tombstone; creation of an already-tombstoned entity remains admissible and redo
+preserves that intended value. The lifecycle writes follow the concurrent-edit
+and undo rules in this document.
 
-A permanent purge of tombstoned entities is outside ordinary editing and needs
-a separate retention design; removal permitted by the second rule does not
-require such a purge.
+Garbage collection, meaning physical removal of tombstoned durable entities,
+is disabled and deferred. Cleaning up orphaned entities means correcting
+references or tombstoning entities, not physically removing them. The second
+rule still permits removal of disposable configuration and derived/cache state.
 
 Yjs's internal deletion bookkeeping is not this model-visible marker. Keeping
 internal history does not by itself make a deleted entity available to normal
@@ -172,6 +260,9 @@ order comes from explicit properties, relationships, or an atomic sequence value
 A numerical list index is a position in a particular view, not a durable identity.
 The current design needs no generic insert-between or move-in-sequence primitive,
 fractional positions, or sequence rebalancing.
+
+Tombstoned entities may participate in ordering. Whether they do, and which
+metadata must be retained for that purpose, is defined by the object type.
 
 For asset placements, changing priority is an ordinary field update. Two writers
 adding different placements preserve both, even if their overlapping contents
@@ -188,8 +279,10 @@ whose purpose is membership, such as a set of entry points, do not acquire
 sequence semantics merely because their API returns an array.
 
 For chat, [collaboration design](06-collaboration-and-interfaces.md#chat-arrival-and-history)
-distinguishes live local arrival order from a stable reconstructed history based
-on timestamps and predecessor relationships. Neither requires a shared array.
+defines message metadata and view policies for live arrival and reconstructed
+history. Views may use timestamps, predecessor relationships, or a graph
+presentation; synchronization does not impose one chat order or require a shared
+array.
 
 Scenarios have triggers, conditions, dependencies, and actions, potentially with
 small sequential action bodies. Their execution order is not necessarily one
@@ -199,6 +292,40 @@ sequence is intentionally replaced as one atomic value, its edits compete as a
 whole; the model must make that granularity explicit.
 
 ## 6. Actions, history, and undo
+
+**Undo and redo are session-local. There is no shared undo/redo stack.** Each
+session records its own effective undoable actions and evaluates reversal against
+its own replica. Another session's edits, including its undo/redo effects, do
+not become entries in this record. Receiving them may change which effects of
+an earlier local action remain reversible, but does not execute an undo command
+or advance the receiving session's undo/redo position.
+
+A local command that leaves the requested state unchanged emits no CRDT write
+and adds no undo step. A batch records its effective changes; unchanged fields
+do not become new contributions. This is an operation rule, not a restriction
+on the common admissible set of object states. In particular, creating a new
+identity is a change even if the entity starts tombstoned or has empty content.
+
+Incoming CRDT updates must still be incorporated when their visible values
+match the replica's current values: they carry shared causal history. Local
+no-op suppression is not a filter on merging. Undo and redo also emit only
+effective local changes and report when there is nothing to reverse.
+
+Without intervening remote changes, undoing the most recent effective undoable
+action restores the preceding undoable values. Retained identities and history
+remain, and non-undoable contributions such as chat are preserved. Undo of
+creation therefore leaves a tombstoned entity rather than removing its identity.
+Redo restores that action's effects on the same entities without replaying
+initialization. This is an observable invariant, independent of how reversal is
+implemented; it does not require the whole stored document to equal an earlier
+snapshot.
+
+An implementation may optimize undo/redo of private, unpublished work by
+rewinding it, provided the observable result respects retained identities and
+leaves non-undoable actions such as chat intact. Once effects have been published,
+a reversal must be communicated through new CRDT updates. The most recent
+incoming merge does not itself establish that publication boundary. Online or
+offline describes connectivity, not whether an edit has already been published.
 
 An action groups operations performed for one participant intention. Record
 its identity, contributor/session, operations, and relationship to an undo or
@@ -215,16 +342,21 @@ transaction is not a database rollback boundary: throwing partway through does
 not undo writes already made. The adapter must avoid reporting a rejected
 action after leaving some of its edits behind.
 
-Undo affects the selected participant action's contribution. It must not restore
-a whole project snapshot over independent work. Where another writer has
-superseded an affected value, undo may have nothing to reverse there; the
-participant needs an accurate result. Redo is subject to the same principle.
+Undo affects a selected action from that session's own record. It must not
+restore a whole project snapshot over independent work. Where the incorporated
+state shows another writer has superseded an affected value, undo may have
+nothing to reverse there; the participant needs an accurate local result.
+Redo is subject to the same principle. Later incorporation of previously unseen
+edits still follows the merge rules; a local undo result does not establish the
+final value across all replicas.
 An action can remain one undo step even if only some independent effects can
 still be reversed. Truly coupled fields remain whole atomic values.
 
-Undo and redo are new recorded actions referencing earlier work, not removal of
-history. Attribution, durable logging, and participation in the undo stack are
-separate policies. Chat participates in the shared record and attribution but
+Except for the private rewind optimization, effective undo or redo produces
+new shared edits in the initiating replica. Those CRDT updates synchronize normally. Shared action history may record their
+attribution and relationship to earlier work; this history is distinct from the
+session-local undo/redo record. Undo does not remove history. Attribution,
+durable logging, and participation in the undo stack are separate policies. Chat participates in the shared record and attribution but
 ordinary project undo must not take back messages. If message editing or
 deletion is exposed, it is an explicit operation with its own policy.
 
@@ -235,7 +367,7 @@ lifecycle changes need an adapter that makes undo obey the model. UI and MCP
 must share the same observable undo semantics rather than inheriting whichever
 mechanism happens to serve each interface.
 
-Exact undo-stack persistence across sessions, reporting of partial reversals,
+Undo-record persistence when resuming a session, reporting of partial reversals,
 and the lifecycle adapter remain implementation design. The shared rules above
 are the requirements those choices must satisfy.
 
@@ -334,14 +466,23 @@ delivery; check retained state and projected behavior, not just convergence.
 | Clear an optional field / change an unrelated field | Explicit absence and the independent edit survive. |
 | Delete an entity / edit it / restore after observing both | Same identity, retained updated content, explicit lifecycle state. |
 | Refer to an entity / concurrently delete that entity | Reference retained; deleted referent discoverable through hygiene. |
+| Delete an already-deleted entity / restore an already-active entity | Session-local no-op: no CRDT write and no undo step. |
+| Tombstone a record type while its fields remain | Fields and their ID references remain; hygiene identifies orphans; cleanup can tombstone them without physical removal. |
 | Change one placement's priority twice / change priority and description / delete and change priority | One occurrence; independent edits survive; priority changes do not restore it. |
 | Add overlapping placements with unresolved priorities | Both survive; affected analysis reports the ambiguity until an explicit priority resolves it. |
 | Add placements in opposite delivery orders with a resolved priority relationship | The same backing bytes are selected; delivery order does not establish precedence. |
-| Receive an earlier-timestamped chat message during a session / reopen the project | Live arrival appends without reshuffling; reopening reconstructs a stable history respecting recorded predecessors. |
+| Receive an earlier-timestamped chat message / adopt reconstructed history | The arrival initially appends; the same incorporated records and chosen reconstruction policy yield the same reconstructed order. The view controls when it adopts that order. |
+| Create using an ID already present locally, active or tombstoned | Reject the creation without changing the entity or recording an undo step; incorporation of shared updates does not rerun this check. |
+| Edit, undo, and redo without intervening remote changes | Undo restores preceding undoable values; redo restores the action effects. Retained identities, history, and intervening chat survive. Exercise absent/null/value fields, atomic locations, grouped edits, creation, deletion, and restoration. |
+| Publish a local edit, then undo before receiving any remote changes | The same local undo invariant holds, and the reversal synchronizes to a replica that already received the edit. The last incoming merge is not the publication boundary. |
 | Undo creation after a peer adds a reference or edits the entity | Identity and contributions remain inspectable; undo cannot erase them. |
 | Undo a grouped action after an overlapping peer edit | Independent peer work survives; reversed and unreversed effects are reported. |
+| Incorporate a concurrent update whose visible value already matches | Incorporate its CRDT history; local no-op suppression must not discard incoming updates. |
+| Receive another session's edit or undo/redo effects | Merge the CRDT updates without executing the originating command or adding entries to the receiving session's undo/redo record. |
 | Post chat between two undoable edits | Chat remains recorded; undo steps follow actions, not elapsed time. |
-| Retry add, reconnect, or replay updates | No new duplicate identities, reset properties, or false attribution. |
+| Reconnect or receive the same CRDT update again | No new duplicate identities, reset properties, or false attribution. |
+| Construct directly a state reached by supported edits or merges | The same object-type rules accept it, including tombstones, cleared content, and unresolved references. |
+| Serialize and reconstruct such a state | Identity, field values, explicit absence, and tombstones are preserved; creation adds no stronger object-state requirements. |
 
 [doc]: https://github.com/re64/re64/blob/f5b2720b38075edc96d851d42d73ae7afc277a13/src/core/crdt/doc.ts
 [ops]: https://github.com/re64/re64/blob/f5b2720b38075edc96d851d42d73ae7afc277a13/src/core/crdt/ops.ts
