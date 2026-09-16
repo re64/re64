@@ -690,6 +690,34 @@ describe("a socket update is one action, and each inverse undoes its own op", ()
     }
   });
 
+  it("records an update whose origin the relay cannot attribute", () => {
+    // `record` asked the relay for an author and returned when it had none —
+    // and the relay knows sockets only, so a `PUT /api/project` moved the
+    // document and left no row. An unattributed change is still a change: the
+    // origin stands in as the author where it is a name, and "unknown" where
+    // it is not even that.
+    const f = open();
+    try {
+      f.store.attributeWith(
+        (origin) => (origin === "socket" ? "alice" : undefined),
+        (origin) => (origin === "socket" ? "ses_socket" : undefined)
+      );
+      const peer = docFromProject(parseProject(project));
+      applyOpToDoc(peer, { op: "claim.set", id: "clm_a", fields: { name: "Renamed" } });
+      f.store.merge(encodeDoc(peer), "http");
+
+      const log = f.storage.readOps();
+      expect(log).toHaveLength(1);
+      expect(log[0]).toMatchObject({
+        author: "http",
+        op: { op: "claim.set", id: "clm_a", fields: { name: "Renamed" } },
+      });
+      expect(log[0].session).toBeUndefined();
+    } finally {
+      f.close();
+    }
+  });
+
   it("records the session and groups the update as one changeset", () => {
     const f = open();
     try {
