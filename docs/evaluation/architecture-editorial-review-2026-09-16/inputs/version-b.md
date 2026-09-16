@@ -4,8 +4,8 @@ An investigation moves between reading software, running it, and making sense of
 what happened. re64 keeps the material and the growing account together, so a
 finding can lead to another experiment or become part of an article.
 
-The [purpose document](01-purpose.md) explains why. This document introduces the
-main concepts, their relationships, and the behavior they must support. The
+The [manifest](01-purpose.md) explains why. This document introduces the main
+concepts, their relationships, and the behavior they must support. The
 [design register](03-design-register.md) leads to separate documents and issues
 for choosing representations, storage, synchronization, and tool interfaces.
 The immediate subject is the C64; other machines can test a design choice without
@@ -21,10 +21,11 @@ knowledge, articles, and a conversation between people and agents.
 
 **Assets** supply the material: binaries, ROMs, cartridges, disks, and data
 extracted or produced along the way. Each asset is identifiable within the project
-and can be used in multiple machine states and analyses. Examining an asset does
-not require constructing a running machine. This includes reading a file,
-comparing ranges, decoding a picture, or inspecting a disk's allocation map.
-Unnamed or deleted material is as legitimate a subject as a directory file.
+and can be used in multiple machine states and analyses. Assets can also be investigated
+in their own right.
+Reading a file, comparing ranges, decoding a picture, or inspecting a disk's
+allocation map does not require constructing a running machine. Unnamed or
+deleted material is as legitimate a subject as a directory file.
 
 An asset's contents and its placement in memory are distinct. A file can suggest
 a load address without determining where a program actually loads it. Locations
@@ -77,13 +78,12 @@ starting machine state remains unchanged.
 > the machine state at that point preserves it as an input to further analysis.
 > [Decrunching recipe][recipe]
 
-### Platforms and platform knowledge
+### C64 support and platform knowledge
 
 A **platform** supplies the machine behavior and associated resources used by an
-analysis or execution. Selecting it is part of configuration. The hardware and
-ROM knowledge it supplies uses the same descriptive facilities as project
-knowledge, introduced in sections [4](#4-knowledge-and-interpretations) and
-[5](#5-evidence-correction-and-investigative-progress).
+analysis or execution. Selecting it is part of configuration. Its hardware and
+ROM knowledge uses the same descriptive facilities as knowledge developed within
+a project.
 
 Platform knowledge can provide ROM labels and routine descriptions even when
 the ROM bytes are unavailable. Inspecting or executing the ROM itself requires
@@ -109,10 +109,10 @@ boundaries, and overlapping instruction readings remain inspectable.
 
 **Abstract interpretation** reasons about possible behavior with partly known
 values, following registers, memory, flags, the stack, and control-flow paths.
-**Effects** summarize what a block or function may read or write, including
-reads and writes performed by code it reaches. Reference queries and stack
-analysis help explain how data and control move through the program. Unsupported
-instructions and unresolved accesses remain visible as limits of the result.
+**Effects** summarize what a block or function may read or write, including the
+behavior it reaches. Reference queries and stack analysis help explain how data
+and control move through the program. Unsupported instructions and unresolved
+accesses remain visible as limits of the result.
 
 An experiment examines a question about behavior under chosen conditions.
 A **scenario** describes inputs, checks, and actions as execution proceeds;
@@ -129,7 +129,7 @@ A **checkpoint** is a machine state captured during execution, usable for anothe
 or analysis. A **capture** retains an observation, such as a memory dump,
 screenshot, or recording of device activity. An **access trace** records instruction
 fetches, data reads and writes. It identifies the storage or device each access
-reached.
+reached. A trace explains activity; a checkpoint preserves state.
 
 Runtime observations can inform subsequent analysis. They remain linked to the
 run and the conditions under which they were observed.
@@ -145,24 +145,22 @@ A **claim** records something a participant wants the investigation to consider
 true. It has a **subject** and an **assertion** about that subject. Subjects can
 include locations, functions, assets, and relationships; an address is not
 required. Claims express the project's knowledge and may be tentative,
-supported, or disputed. Participants can edit one another's claims. Any
-participant can retire a claim, removing it from the project's current knowledge
-while preserving it in the investigation's history.
+supported, or disputed. Any participant can retire a claim, removing it from the
+project's current knowledge while preserving it in the investigation's history.
 
-A claim about a subject can apply across several assets, machine states, and
-other stated contexts without repeated entry. Associating a claim with an asset
-does not confine its subject to that asset's bytes. For example, a claim
-associated with code in one asset may describe its effects elsewhere in the
-machine.
+A claim can describe one subject or apply across several assets,
+machine states, and broader contexts without repeated entry. Association with an asset
+does not confine a claim's subject to that asset's bytes: its code may act
+elsewhere in the machine.
 
 Claims may be conditional: an assertion can depend on the material, machine
 state, execution context, or other stated conditions. **Applicability** concerns
 whether its subject and conditions match a particular examination. That match
 may be established by evidence, assumed for the examination, disputed, or
 unresolved. An analysis can use a claim under an explicit assumption even when
-its applicability or truth remains uncertain. The results retain that assumption.
-Using a claim, including reusing it in another examination, does not verify or
-endorse it.
+its applicability or truth remains uncertain;
+the results retain that assumption. Selecting a claim for analysis does not
+verify or endorse it, and reuse does not independently verify it at each use.
 
 ### Constants, types, records, and bindings
 
@@ -243,11 +241,11 @@ annotations can leave individual contents unexplained, and decoded functions can
 still lack an interpretation of their purpose. These gaps remain visible, including
 holes in partially understood types.
 
-A **hygiene report** brings matters such as contradictions under the same
+A **hygiene report** identifies problems such as contradictions under the same
 conditions, competing interpretations, broken references, and questionable
-applicability to participants' attention. Participants can record disagreements
-that mechanical checks cannot discover. Open questions remain discoverable with
-the material they concern, providing leads for further work.
+applicability. Participants can record disagreements that mechanical checks
+cannot discover. Open questions remain discoverable with the material they
+concern, providing leads for further work.
 
 These reports direct investigation. They do not certify truth or require
 unfinished knowledge to be resolved before it can be shared.
@@ -294,7 +292,7 @@ A participant must know which project state they are examining and when other
 contributions become part of it. Announcing an update does not itself incorporate
 that update into the project state other participants are examining. Participants
 can incorporate updates explicitly or through a chosen policy. Concurrent editing
-must preserve the specified behavior of individual operations and make unresolved
+must preserve the agreed semantics of individual operations and make unresolved
 disagreements inspectable.
 
 The shared record retains project state, changes, attribution, discussion,
@@ -354,10 +352,10 @@ saved or referenced independently of the query.
 
 ## 9. Summary
 
-Participants choose the analytical setup through configuration. Claims express
-assertions. Analysis and execution produce results. Participants use results as
-evidence by explaining how they support or challenge a claim. A retained result
-records an earlier examination; a current view reflects its current inputs.
+Configuration chooses the analytical setup. Claims express assertions. Analysis
+and execution produce results. Participants use results as evidence by explaining
+how they support or challenge a claim. A retained result records an earlier
+examination; a current view reflects its current inputs.
 
 ```mermaid
 flowchart LR
@@ -366,10 +364,7 @@ flowchart LR
     K[Selected claims] --> A
     A --> R[Results]
     R --> V[Views]
-    M -->|direct asset inspection| V
-    C --> V
-    K --> V
-    R -->|participants retain and interpret with context| E[Evidence for or against claims]
+    R -->|retain and interpret with context| E[Evidence for or against claims]
     E -->|informs investigation| K
 ```
 

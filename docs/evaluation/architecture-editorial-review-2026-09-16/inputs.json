@@ -1,0 +1,11 @@
+{
+  "baseline_commit": "d537cc51526595e643b10315f3745f195dc0888e",
+  "version_a": "Committed architecture before local changes",
+  "version_b": "Working architecture at start of review",
+  "sha256": {
+    "editorial-prompt.md": "4973e51ba539575125817fc48e77dfc901a9a0a7e09ce510efb8dbd42a86185b",
+    "purpose.md": "81d7394e8c7cee6662db2a51041992fd4dc59d82d95c083f0ac84561d9e1aa3a",
+    "version-a.md": "b2f81503101029cf128841736f725c7069bbb0c3a673c84a15e58276eceee50a",
+    "version-b.md": "6ebb480b9ca2403341626238513ca39508c49183bf7e8d0fdfef82572fccde9f"
+  }
+}

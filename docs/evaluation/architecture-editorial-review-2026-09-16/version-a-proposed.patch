@@ -1,0 +1,226 @@
+--- a/docs/02-architecture.md
++++ b/docs/02-architecture.md
+@@ -4,7 +4,7 @@
+ what happened. re64 keeps the material and the growing account together, so a
+ finding can lead to another experiment or become part of an article.
+ 
+-The [manifest](01-purpose.md) explains why. This document introduces the main
++The [purpose document](01-purpose.md) explains why. This document introduces the main
+ concepts, their relationships, and the behavior they must support. The
+ [design register](03-design-register.md) leads to separate documents and issues
+ for choosing representations, storage, synchronization, and tool interfaces.
+@@ -21,11 +21,11 @@
+ 
+ **Assets** supply the material: binaries, ROMs, cartridges, disks, and data
+ extracted or produced along the way. Each asset is identifiable within the project
+-and can be used in multiple machine states and analyses. Assets can also be investigated
+-in their own right.
+-Reading a file, comparing ranges, decoding a picture, or inspecting a disk's
+-allocation map does not require constructing a running machine. Unnamed or
+-deleted material is as legitimate a subject as a directory file.
++and can be used in multiple machine states and analyses. Assets can also be
++investigated directly, without constructing a running machine: for example, by
++reading a file, comparing ranges, decoding a picture, or inspecting a disk's
++allocation map. Investigation does not require material to have a name or an
++active directory entry; unnamed and deleted material can also be examined.
+ 
+ An asset's contents and its placement in memory are distinct. A file can suggest
+ a load address without determining where a program actually loads it. Locations
+@@ -62,16 +62,22 @@
+ their origins, including later writes. Overlapping material and hidden memory
+ must remain distinguishable.
+ 
+-A **configuration** specifies the state and assumptions chosen for an analysis: which material to place, the interpretations to use, and the conditions of an experiment. These choices need not describe a state the original program ever reached or could reach. A useful configuration can be retained; a temporary query need not create a named machine state merely to examine an alternative.
+-
+-When an examination starts from a machine state and applies configured changes, the
+-resulting machine state must be explicit and interpreted consistently across
+-tools. Results identify that state and its assumptions, while the retained
+-starting machine state remains unchanged.
++A **configuration** specifies the state and assumptions chosen for analysis or
++execution: which material to place, the interpretations to use, and the
++conditions of an experiment. These choices need not describe a state the
++original program ever reached or could reach. A useful configuration can be
++retained; a temporary query need not create a named machine state merely to
++examine an alternative.
++
++When tools apply configured changes to a starting machine state, they must make
++the resulting machine state explicit and interpret it consistently. Results
++identify that state and its assumptions, while the retained starting machine
++state remains unchanged.
+ 
+ > **Mutant Camels — getting past the loader.** The disk version is compressed.
+-> Running its decruncher prepares the expanded game for investigation. Capturing
+-> the machine state at that point preserves it as an input to further analysis.
++> Running its decompression routine (the decruncher) prepares the expanded game
++> for investigation. Capturing the machine state at that point preserves it as
++> an input to further analysis.
+ > [Decrunching recipe][recipe]
+ 
+ ### C64 support and platform knowledge
+@@ -103,16 +109,17 @@
+ 
+ **Abstract interpretation** reasons about possible behavior with partly known
+ values, following registers, memory, flags, the stack, and control-flow paths.
+-**Effects** summarize what a block or function may read or write, including the
+-behavior it reaches. Reference queries and stack analysis help explain how data
+-and control move through the program. Unsupported instructions and unresolved
++**Effects** summarize what a block or function may read or write, including
++reads and writes in code it can reach. Reference queries and stack analysis
++help explain how data and control move through the program. Unsupported instructions and unresolved
+ accesses remain visible as limits of the result.
+ 
+ An experiment examines a question about behavior under chosen conditions.
+-A **scenario** describes inputs, checks, and actions as execution proceeds;
+-a **run** records one execution under those conditions. Scenarios can react to time, an instruction
+-being reached, an access, or a condition on machine state. Actions can provide
+-input, change media, modify state, and retain observations.
++A **run** records one execution under the experiment's chosen conditions.
++A **scenario** describes inputs, checks, and actions as execution proceeds.
++Scenarios can react to time, an instruction being reached, an access, or a
++condition on machine state. Actions can provide input, change media, modify
++state, and retain observations.
+ 
+ Deliberate interventions include substituting a routine, forcing a predicate,
+ or controlling random values. They are useful ways to isolate behavior even
+@@ -123,11 +130,12 @@
+ or analysis. A **capture** retains an observation, such as a memory dump,
+ screenshot, or recording of device activity. An **access trace** records which
+ instructions read, wrote, or fetched bytes and which storage or device they
+-reached. A trace explains activity; a checkpoint preserves state.
+-
+-Runtime observations can inform subsequent analysis. They retain the conditions
+-under which they were observed: an executed target is evidence of that execution,
+-and an unobserved target is not thereby impossible.
++reached.
++
++Runtime observations can inform subsequent analysis and retain the conditions
++under which they were made. Observing execution reach a location establishes
++that it was reached under those conditions. Failing to observe execution reach
++a location does not establish that reaching it is impossible.
+ 
+ > **KERNAL ROM — overlapping instructions.** In its error handling, the bytes
+ > `2C A9 02` read as `BIT $02A9`. Enter one byte later and `A9 02` reads as
+@@ -136,25 +144,26 @@
+ 
+ ## 4. Knowledge and interpretations
+ 
+-A **claim** records something a participant wants the investigation to consider
+-true. It has a **subject** and an **assertion** about that subject. Subjects can
+-include locations, functions, assets, and relationships; an address is not
+-required. Claims can be tentative, supported, disputed, or withdrawn.
++A **claim** records an **assertion** about a **subject** for participants to
++examine. Subjects can include locations, functions, assets, and relationships;
++an address is not required. Claims can be tentative, supported, disputed, or
++retired. Participants can edit and retire one another's claims. Retirement
++preserves the claim and its investigation history.
+ 
+ Claims express the project's knowledge, including tentative and disputed
+ interpretations. They can describe one subject or apply across several assets,
+-machine states, and broader contexts without repeated entry. Association with an asset
+-does not confine a claim's subject to that asset's bytes: its code may act
+-elsewhere in the machine.
++machine states, and broader contexts without repeated entry. A claim's
++association with an asset does not restrict its subject to locations within
++that asset. For example, code in an asset may act elsewhere in the machine.
+ 
+ Claims may be conditional: an assertion can depend on the material, machine
+ state, execution context, or other stated conditions. **Applicability** concerns
+ whether its subject and conditions match a particular examination. That match
+ may be established by evidence, assumed for the examination, disputed, or
+ unresolved. An analysis can use a claim under an explicit assumption even when
+-its applicability or truth remains uncertain;
+-the results retain that assumption. Selecting a claim for analysis does not
+-verify or endorse it, and reuse does not independently verify it at each use.
++its applicability or truth remains uncertain. The results retain that
++assumption. Selecting or reusing a claim for analysis does not verify or
++endorse it.
+ 
+ ### Constants, types, records, and bindings
+ 
+@@ -182,10 +191,11 @@
+ and typed regions. Tools distinguish these choices, assertions, and inferred
+ results.
+ 
+-Bindings can also connect data across separate tables. Several arrays may
+-describe different properties of the same object using a shared index,
+-while a value in a table may identify a picture or file asset through the
+-program's file-selection rules. Such an identifier need not be a memory address.
++Bindings can express relationships that do not use memory addresses. For
++example, they can connect data across separate tables: several arrays may
++describe different properties of the same object using a shared index. A value
++in a table may also identify a picture or file asset through the program's
++file-selection rules.
+ These connections let tools follow and annotate references while preserving the
+ encoded values. Identifying an asset does not specify where or when it is loaded.
+ 
+@@ -236,9 +246,9 @@
+ does not explain every byte, and decoding a function does not establish its
+ purpose. Holes in a partially understood type remain visible.
+ 
+-A **hygiene report** identifies problems such as contradictions under the same
+-conditions, competing interpretations, broken references, and questionable
+-applicability. Participants can record disagreements that mechanical checks
++A **hygiene report** identifies matters for review, such as contradictions under
++the same conditions, competing interpretations, broken references, and
++questionable applicability. Participants can record disagreements that mechanical checks
+ cannot discover. Open questions remain discoverable with the material they
+ concern, providing leads for further work.
+ 
+@@ -286,8 +296,8 @@
+ A participant must know which project state they are examining and when other
+ contributions become part of it. Announcing an update does not itself change
+ the state being analyzed. Participants can incorporate updates explicitly or
+-through a chosen policy. Concurrent editing must preserve the agreed semantics
+-of individual operations and make unresolved disagreements inspectable.
++through a chosen policy. Concurrent editing must preserve the specified
++behavior of individual operations and make unresolved disagreements inspectable.
+ 
+ The shared record retains project state, changes, attribution, discussion,
+ source material, and evidence. Retained results remain available without
+@@ -301,18 +311,23 @@
+ used for the examination. A view can present an asset directly or show the
+ results of machine analysis.
+ 
+-Configuration chooses the analytical setup. Claims express assertions; evidence
+-supports or challenges them. **Derived results** follow from applying an
+-analysis to its inputs. These roles connect, but one does not silently become
+-another:
++### Recap: inputs, results, and evidence
++
++Participants choose the analytical setup through configuration, including
++definitions. Claims express assertions; evidence supports or challenges them.
++Results follow from applying analysis or execution to inputs. These roles
++connect, but one does not silently become another. The diagram summarizes
++analysis and execution, direct asset viewing, and the use of retained results
++as evidence:
+ 
+ ```mermaid
+ flowchart LR
+     M[Assets and machine states] --> A[Analysis or execution]
+-    C[Configuration and definitions] --> A
++    C["Configuration (including definitions)"] --> A
+     K[Selected claims] --> A
+     A --> R[Results]
+     R --> V[Views]
++    M -->|inspect an asset directly| V
+     R -->|retain and interpret with context| E[Evidence for or against claims]
+     E -->|informs investigation| K
+ ```
+@@ -321,6 +336,8 @@
+ established. A retained result records an earlier examination; a current view
+ reflects its current inputs. Regenerated views must not become competing sources
+ for the same project state.
++
++### MCP and the web UI
+ 
+ Agents use **MCP**, the Model Context Protocol, to inspect and edit projects,
+ query analysis, run scenarios, and record findings. People use the **web UI** to
+@@ -335,7 +352,7 @@
+ visual views. Formats differ to serve their readers, while the interpretation
+ remains consistent.
+ 
+-## One field, two presentations
++### One field, two presentations
+ 
+ The first Mutant Camels zone name occupies 40 bytes at `$67A0`. With the zone
+ table interpreted as an array of `ZoneRecord`, a view identifies it as
