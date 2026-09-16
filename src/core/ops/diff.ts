@@ -285,6 +285,14 @@ export function diffProjects(
     }
     // Only what differs, so replaying a diff does not reassert a field the two
     // states agree on.
+    //
+    // **A field that went absent is cleared, not emptied.** This wrote `order:
+    // 0` and `description: ""` for a field the after-state no longer had, and
+    // dropped a removed `entryPoints` from the diff altogether — so a PUT or a
+    // socket update that took a description off landed as an empty string, a
+    // value nobody set, and explicit entry points that were removed stayed on
+    // the other side. `null` is what `target.set` says for "gone", and it is
+    // what every other producer of the operation already sends.
     const beforePoints = before.entryPoints?.map((a) => parseProjectAddress(a));
     ops.push({
       op: "target.set",
@@ -294,13 +302,17 @@ export function diffProjects(
         ...(JSON.stringify(targetLinks(before)) === JSON.stringify(targetLinks(target))
           ? {}
           : { layers: targetLinks(target) }),
-        ...(JSON.stringify(beforePoints) === JSON.stringify(points) || points === undefined
+        ...(JSON.stringify(beforePoints) === JSON.stringify(points)
           ? {}
-          : { entryPoints: points }),
-        ...(before.order === target.order ? {} : { order: target.order ?? 0 }),
+          : points?.length
+            ? { entryPoints: points }
+            : beforePoints?.length
+              ? { entryPoints: null }
+              : {}),
+        ...(before.order === target.order ? {} : { order: target.order ?? null }),
         ...(before.description === target.description
           ? {}
-          : { description: target.description ?? "" }),
+          : { description: target.description ?? null }),
       },
     });
   }
