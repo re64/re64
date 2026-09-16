@@ -208,6 +208,28 @@ describe("an HTTP write racing a live session", () => {
     expect(body).toMatchObject({ applied: 0 });
     expect(currentText()).toBe(PROJECT);
   });
+
+  it("reaches the ops table, attributed to http", async () => {
+    // The store asked the relay who an origin belonged to and dropped the
+    // change when it did not know — and the relay knows sockets. So a PUT
+    // reached the document, moved the export, returned `applied: 1` and added
+    // no rows; an agent holding a cursor across it was told nothing had
+    // happened. The fix carries a comment; this is the assertion, because the
+    // next refactor of `record()` that reintroduces "drop what the relay
+    // cannot attribute" compiles and passes everything else here.
+    const storage = new FileStorage(pathsFor(projectPath));
+    const cursor = storage.opsCursor();
+
+    const { body } = await putProject(PROJECT.replace(`"name": "Loop"`, `"name": "One"`));
+    expect(body).toMatchObject({ applied: 1 });
+
+    const rows = storage.readOps(cursor);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      author: "http",
+      op: { op: "claim.set", id: "lbl_2", fields: { name: "One" } },
+    });
+  });
 });
 
 describe("three clients over sockets", () => {
