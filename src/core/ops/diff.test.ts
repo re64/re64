@@ -90,4 +90,62 @@ describe("diffProjects", () => {
     expect(byId.get("clm_1")).toMatchObject({ name: "Begin", root: "location" });
     expect(byId.get("clm_2")).toMatchObject({ extent: 128 });
   });
+
+  describe("a target field that went absent", () => {
+    // The diff used to write `description: ""` and `order: 0` for a field the
+    // after-state no longer had, and dropped a removed `entryPoints` entirely.
+    // A PUT that took a description off then landed as an empty string — a
+    // value nobody set — and removed entry points survived on the other side.
+    // `null` is the clear `target.set` already accepts from every other
+    // producer.
+    const WITH_TARGET = `{
+  "layers": [
+    { "id": "lay_a", "type": "prg", "path": "game.prg" }
+  ],
+  "targets": [
+    {
+      "id": "tgt_1",
+      "name": "Game",
+      "layers": [{ "id": "lnk_1", "layer": "lay_a", "at": "$0801" }],
+      "entryPoints": ["$0810"],
+      "order": 3,
+      "description": "The game itself"
+    }
+  ]
+}
+`;
+    const without = (field: "description" | "order" | "entryPoints") => {
+      const project = parseProject(WITH_TARGET);
+      delete project.targets![0][field];
+      return project;
+    };
+
+    it("emits null for a removed description, not an empty string", () => {
+      expect(diffProjects(parseProject(WITH_TARGET), without("description"))).toEqual([
+        { op: "target.set", id: "tgt_1", fields: { description: null } },
+      ]);
+    });
+
+    it("emits null for a removed order, not zero", () => {
+      expect(diffProjects(parseProject(WITH_TARGET), without("order"))).toEqual([
+        { op: "target.set", id: "tgt_1", fields: { order: null } },
+      ]);
+    });
+
+    it("emits null for removed entry points, rather than nothing", () => {
+      expect(diffProjects(parseProject(WITH_TARGET), without("entryPoints"))).toEqual([
+        { op: "target.set", id: "tgt_1", fields: { entryPoints: null } },
+      ]);
+    });
+
+    it("round-trips: applying the diff leaves the field absent", () => {
+      const out = applyOps(
+        WITH_TARGET,
+        diffProjects(parseProject(WITH_TARGET), without("description"))
+      );
+      const target = parseProject(out).targets![0];
+      expect("description" in target).toBe(false);
+      expect(target).toMatchObject({ order: 3, entryPoints: ["$0810"] });
+    });
+  });
 });
