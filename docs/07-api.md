@@ -752,7 +752,7 @@ Run the program from an address until it leaves the bytes this project holds —
 | `address` | `string,number` | **required** | An address, as $8100, 0x8100, decimal text, or a number — or a place: screen[row,column], screen[cell] and sprite[pointer]. They are array references, so they index with brackets; the array's own base goes in parentheses before them — screen($8400)[10,2], sprite($4000)[13] — since where the screen and the sprite blocks sit is runtime state |
 | `stopAt` | `string,number` | optional | Stop here instead of running on |
 | `maxInstructions` | `integer` | optional | Default 20 million, about ten seconds |
-| `capture` | `object` | optional |  |
+| `capture` | `object` | optional | The memory to keep, `from` to `to` inclusive, as a .prg loading at `from` |
 
 #### `run_block`
 

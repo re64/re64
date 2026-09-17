@@ -2126,9 +2126,10 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
         .object({
           name: z.string().min(1).describe('What to call the file, e.g. "decrunched.prg"'),
           from: address,
-          to: address.describe("Exclusive"),
+          to: address.describe("The last byte kept, inclusive like every range here"),
         })
-        .optional(),
+        .optional()
+        .describe("The memory to keep, `from` to `to` inclusive, as a .prg loading at `from`"),
     },
     (args: {
       project?: string;
