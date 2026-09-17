@@ -571,7 +571,7 @@ Forget a declared constant, by id. Operands bound to it go back to showing the l
 
 #### `bind_constant`
 
-Say that the immediate operand at an address means a named constant, so it renders as #ORANGE rather than #$08. Refused if the instruction takes no immediate or loads a different value. Takes a name or an id; where a name reaches two constants the operand's own value picks between them, since two constants sharing a name must differ in value to be worth telling apart.
+Say that the immediate operand at an address means a named constant, so it renders as #ORANGE rather than #$08. Refused if the instruction takes no immediate or loads a different value. Takes the constant's id: which constants a name reaches depends on what you have synced, so a write names the thing it changes.
 
 | argument | type | | |
 |---|---|---|---|
@@ -756,7 +756,7 @@ Run the program from an address until it leaves the bytes this project holds —
 
 #### `run_block`
 
-Execute the block at an address with values you choose, and see what comes out. The complement of block_effects: that says which slots the block touches for any input, this says what happens for one. Often the fastest route to what a routine is for — pick values, look at the exit and the bytes written, and the intent shows. One block only, deliberately: a block has no branch inside it, so the instructions that run are known before it starts and no path is chosen on your behalf. Unset registers start at zero and unset memory comes from the program as loaded; every result reports which values it actually read and where each came from, so you can see what an answer rests on. Decimal mode is not modelled and says so.
+Execute the block at an address with values you choose, and see what comes out. The complement of effects: that says which slots the block touches for any input, this says what happens for one. Often the fastest route to what a routine is for — pick values, look at the exit and the bytes written, and the intent shows. One block only, deliberately: a block has no branch inside it, so the instructions that run are known before it starts and no path is chosen on your behalf. Unset registers start at zero and unset memory comes from the program as loaded; every result reports which values it actually read and where each came from, so you can see what an answer rests on. Decimal mode is not modelled and says so.
 
 | argument | type | | |
 |---|---|---|---|
@@ -895,7 +895,7 @@ The directory of a .d64 disk image this project holds — what is on the disk, w
 
 #### `add_byte_layer`
 
-Add a layer over bytes — which is what turns an uploaded binary into something to disassemble. `path` accepts a file id or locally unique name; `member` selects a D64 entry. Legacy image.d64:FILE is also accepted. A .prg carries its load address in its first two bytes; a raw layer needs one given. Type "bytes" takes the bytes inline instead of a file, at an address you give: a patch, a poked value, a hand-assembled shim. Link the layer into a target with set_target, or nothing reads it.
+Add a layer over bytes — which is what turns an uploaded binary into something to disassemble. `path` accepts a file id or locally unique name; `member` selects a D64 entry. Legacy image.d64:FILE is also accepted. A .prg carries its load address in its first two bytes; a raw layer needs one given. Type "bytes" takes the bytes inline instead of a file, at an address you give: a patch, a poked value, a hand-assembled shim. Link the layer into a target with edit_target, or nothing reads it.
 
 | argument | type | | |
 |---|---|---|---|

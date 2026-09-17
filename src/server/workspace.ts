@@ -1303,7 +1303,7 @@ export class Workspace {
             romNote:
               "This project declares ROM layers that this view does not link. A " +
               "machine started here reads its reset and interrupt vectors as zero " +
-              "and boots into $0000. Link them with set_target if this view is for " +
+              "and boots into $0000. Link them with edit_target if this view is for " +
               "running rather than for reading.",
           }),
     };
@@ -5565,7 +5565,7 @@ export class Workspace {
       linkedInto: [],
       note:
         `Declared, and linked into no target — so nothing reads it yet. A target's ` +
-        `layer list is an allowlist: add it with set_target on one of ` +
+        `layer list is an allowlist: add it with edit_target on one of ` +
         `${targets.map((t) => `"${t.name}"`).join(", ")}, or add_target for a new view.`,
     };
   }

@@ -952,7 +952,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
   tool(
     "run_block",
     "Execute the block at an address with values you choose, and see what " +
-      "comes out. The complement of block_effects: that says which slots the " +
+      "comes out. The complement of effects: that says which slots the " +
       "block touches for any input, this says what happens for one. Often the " +
       "fastest route to what a routine is for — pick values, look at the exit " +
       "and the bytes written, and the intent shows. " +
@@ -2047,10 +2047,9 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
     "bind_constant",
     "Say that the immediate operand at an address means a named constant, so " +
       "it renders as #ORANGE rather than #$08. Refused if the instruction " +
-      "takes no immediate or loads a different value. " +
-      "Takes a name or an id; where a name reaches two constants the operand's " +
-      "own value picks between them, since two constants sharing a name must " +
-      "differ in value to be worth telling apart.",
+      "takes no immediate or loads a different value. Takes the constant's id: " +
+      "which constants a name reaches depends on what you have synced, so a " +
+      "write names the thing it changes.",
     {
       project,
       address,
@@ -2648,7 +2647,7 @@ export function registerTools(rawServer: unknown, context: () => McpContext): vo
       "address in its first two bytes; a raw layer needs one given. Type " +
       '"bytes" takes the bytes inline instead of a file, at an address you ' +
       "give: a patch, a poked value, a hand-assembled shim. Link the layer " +
-      "into a target with set_target, or nothing reads it.",
+      "into a target with edit_target, or nothing reads it.",
     {
       project,
       type: z.enum(["prg", "raw", "bytes"]),
