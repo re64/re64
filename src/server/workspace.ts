@@ -1303,7 +1303,7 @@ export class Workspace {
             romNote:
               "This project declares ROM layers that this view does not link. A " +
               "machine started here reads its reset and interrupt vectors as zero " +
-              "and boots into $0000. Link them with set_target if this view is for " +
+              "and boots into $0000. Link them with edit_target if this view is for " +
               "running rather than for reading.",
           }),
     };
@@ -1444,15 +1444,24 @@ export class Workspace {
     }
 
     const { name, from: start, to } = options.capture;
-    if (to <= start) throw new Error(`A capture needs at least one byte; ${hex4(start)}-${hex4(to)} has none.`);
+    // Inclusive at both ends, like every other range this API takes. It was
+    // the one exclusive end — `to` the byte after the last kept, as the KERNAL
+    // SAVE takes it — and the document's own sentence about ranges said
+    // otherwise, so a caller reading the convention captured one byte short.
+    if (to < start) {
+      throw new Error(
+        `A capture needs at least one byte; ${hex4(start)}-${hex4(to)} ends before it starts.`
+      );
+    }
+    const length = to - start + 1;
 
     // Stored as a .prg — load address first — so the captured image is an
     // ordinary file the project can lay a layer over, rather than a new kind of
     // thing that only this tool understands.
-    const bytes = new Uint8Array(2 + (to - start));
+    const bytes = new Uint8Array(2 + length);
     bytes[0] = start & 0xff;
     bytes[1] = (start >> 8) & 0xff;
-    bytes.set(memory.slice(start, to), 2);
+    bytes.set(memory.slice(start, to + 1), 2);
 
     // How much of what is being captured the run actually produced.
     //
@@ -1462,18 +1471,18 @@ export class Workspace {
     // wrong; saying so is not.
     const wroteWithin = run.wrote.reduce((total, range) => {
       const low = Math.max(start, parseInt(range.start.slice(1), 16));
-      const high = Math.min(to - 1, parseInt(range.end.slice(1), 16));
+      const high = Math.min(to, parseInt(range.end.slice(1), 16));
       return total + Math.max(0, high - low + 1);
     }, 0);
     if (wroteWithin === 0) {
       notes.push(
-        `The run wrote nothing in ${hex4(start)}-${hex4(to - 1)}, so this capture is ` +
+        `The run wrote nothing in ${hex4(start)}-${hex4(to)}, so this capture is ` +
           `the memory as it already stood rather than anything the run produced. ` +
           `\`wrote\` says where it did write.`
       );
-    } else if (wroteWithin < (to - start) / 2) {
+    } else if (wroteWithin < length / 2) {
       notes.push(
-        `The run wrote ${wroteWithin} of the ${to - start} bytes captured; the rest is ` +
+        `The run wrote ${wroteWithin} of the ${length} bytes captured; the rest is ` +
           `memory as it already stood.`
       );
     }
@@ -1492,7 +1501,7 @@ export class Workspace {
         file: noted.file,
         name,
         start: hex4(start),
-        end: hex4(to - 1),
+        end: hex4(to),
         bytes: bytes.length,
         hash,
         version: noted.version,
@@ -5565,7 +5574,7 @@ export class Workspace {
       linkedInto: [],
       note:
         `Declared, and linked into no target — so nothing reads it yet. A target's ` +
-        `layer list is an allowlist: add it with set_target on one of ` +
+        `layer list is an allowlist: add it with edit_target on one of ` +
         `${targets.map((t) => `"${t.name}"`).join(", ")}, or add_target for a new view.`,
     };
   }

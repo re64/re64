@@ -134,7 +134,7 @@ describe("Revenge of the Mutant Camels, patched", () => {
     // The disk holds the patched build, crunched. Running the loader is the only
     // way to see it: static analysis of the disk stops at 141 instructions.
     ws.addByteLayer(builder, { type: "prg", path: "revenge.d64:revenge fixed", name: "packed" });
-    ws.runProgram(builder, 0x080d, { capture: { name: "shipped.prg", from: 0x0800, to: 0xc11f } });
+    ws.runProgram(builder, 0x080d, { capture: { name: "shipped.prg", from: 0x0800, to: ADDED_TO } });
     ws.addByteLayer(builder, { type: "prg", path: "shipped.prg", name: "shipped" });
 
     // And the .prg is the 1984 build, which needs no running at all.
@@ -214,7 +214,7 @@ describe("Revenge of the Mutant Camels, patched", () => {
       new Uint8Array(readFileSync("assets/mutant-camels/revenge-of-the-mutant-camels.prg"))
     );
     ws.addByteLayer(builder, { type: "prg", path: "revenge.d64:revenge fixed", name: "packed" });
-    ws.runProgram(builder, 0x080d, { capture: { name: "shipped.prg", from: 0x0800, to: 0xc11f } });
+    ws.runProgram(builder, 0x080d, { capture: { name: "shipped.prg", from: 0x0800, to: ADDED_TO } });
     ws.addByteLayer(builder, { type: "prg", path: "shipped.prg", name: "shipped" });
     ws.addByteLayer(builder, { type: "prg", path: "standalone.prg", name: "original" });
     const id = Object.fromEntries(ws.targets().layers.map((l) => [l.name, l.id]));

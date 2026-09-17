@@ -668,7 +668,7 @@ describe("building a project from a disk image", () => {
     camels.addByteLayer(builder, { type: "prg", path: "revenge.d64:revenge fixed" });
 
     const run = camels.runProgram(builder, 0x080d, {
-      capture: { name: "decrunched.prg", from: 0x0800, to: 0xc11f },
+      capture: { name: "decrunched.prg", from: 0x0800, to: 0xc11e },
     }) as {
       instructions: number;
       reason: string;
@@ -690,7 +690,7 @@ describe("building a project from a disk image", () => {
     expect(run.reason).toBe("left the program");
     // A KERNAL call, which is how this loader signals it has finished.
     expect(run.stoppedAt).toBe("$FFBA");
-    expect(run.captured.bytes).toBe(2 + (0xc11f - 0x0800));
+    expect(run.captured.bytes).toBe(2 + (0xc11e - 0x0800 + 1));
 
     // And the capture is an ordinary file, so the rest of the flow is unchanged.
     camels.addByteLayer(builder, { type: "prg", path: "decrunched.prg", name: "runtime" });

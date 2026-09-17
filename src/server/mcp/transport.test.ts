@@ -1946,11 +1946,12 @@ describe("editing as an agent", () => {
     expect(stoppedAt).toMatch(/^\$[0-9A-F]{4}$/);
   });
 
-  it("refuses a capture of no bytes", async () => {
+  it("refuses a capture that ends before it starts", async () => {
+    // `to` is inclusive, so from == to is one byte and not nothing.
     const refused = await callTool("run_program", {
       address: "$8100",
       maxInstructions: 100,
-      capture: { name: "nothing.prg", from: "$8000", to: "$8000" },
+      capture: { name: "nothing.prg", from: "$8001", to: "$8000" },
     });
     expect(refused.isError).toBe(true);
     expect(refused.text).toMatch(/at least one byte/i);
